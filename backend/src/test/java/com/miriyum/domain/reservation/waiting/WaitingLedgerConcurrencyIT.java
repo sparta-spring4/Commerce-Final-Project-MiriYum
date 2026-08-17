@@ -120,7 +120,7 @@ class WaitingLedgerConcurrencyIT {
 
     @BeforeEach
     void clean() {
-        when(intervalPort.lockCurrent(anyLong(), any(LocalDate.class)))
+        when(intervalPort.lockCurrent(anyLong(), any(LocalDate.class), any(Instant.class)))
                 .thenAnswer(invocation -> List.of(openInterval(
                         invocation.getArgument(0), invocation.getArgument(1))));
         for (String table : new String[]{"waiting_conversion_compensations",

@@ -35,21 +35,23 @@ public class WaitingAutoOpenJobRunner {
             fixedDelayString = "${miriyum.waiting.auto-open.poll-delay}",
             initialDelayString = "${miriyum.waiting.auto-open.initial-delay}")
     public void poll() {
-        Instant now = clock.instant();
-        service.invalidateStale(now, properties.invalidationBatchSize());
-        planner.plan(now, properties.planningHorizon(), properties.planningBatchSize());
+        Instant planningNow = clock.instant();
+        service.invalidateStale(planningNow, properties.invalidationBatchSize());
+        planner.plan(planningNow, properties.planningHorizon(), properties.planningBatchSize());
+        Instant claimNow = clock.instant();
         for (WaitingAutoOpenClaim claim : service.claimDue(
                 properties.workerId(),
-                now,
+                claimNow,
                 properties.leaseDuration(),
                 properties.claimBatchSize())) {
-            executeSafely(claim, now);
+            executeSafely(claim);
         }
     }
 
-    private void executeSafely(WaitingAutoOpenClaim claim, Instant now) {
+    private void executeSafely(WaitingAutoOpenClaim claim) {
+        Instant executionNow = clock.instant();
         try {
-            WaitingAutoOpenService.ExecutionResult result = service.execute(claim, now);
+            WaitingAutoOpenService.ExecutionResult result = service.execute(claim, executionNow);
             metrics.execution(result);
             log.info(
                     "event=waiting_auto_open_execution outcome={} job_id={} store_id={} "
@@ -60,9 +62,10 @@ public class WaitingAutoOpenJobRunner {
         } catch (RuntimeException failure) {
             boolean recorded = false;
             try {
+                Instant failureNow = clock.instant();
                 recorded = service.recordFailure(
                         claim,
-                        now,
+                        failureNow,
                         failure,
                         properties.maxAttempts(),
                         properties.initialRetryDelay(),

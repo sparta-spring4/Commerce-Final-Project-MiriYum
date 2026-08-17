@@ -180,7 +180,8 @@ public class WaitingCreationService {
     ) {
         return transactionExecutor.execute(() -> {
             IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
-                    receptionCheck.requireOpen(storeId, businessDate, occurredAt);
+                    Instant eligibilityAt = clock.instant();
+                    receptionCheck.requireOpen(storeId, businessDate, eligibilityAt);
                     if (membershipRepository.findByConsumerAccountId(consumerAccountId).isPresent()) {
                         throw membershipConflict();
                     }

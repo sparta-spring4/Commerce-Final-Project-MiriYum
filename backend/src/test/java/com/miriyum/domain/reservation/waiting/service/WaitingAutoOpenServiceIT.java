@@ -20,6 +20,7 @@ import com.miriyum.domain.schedule.repository.OperatingScheduleVersionRepository
 import com.miriyum.domain.schedule.repository.StoreScheduleStateRepository;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
+import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -185,6 +186,48 @@ class WaitingAutoOpenServiceIT {
                     assertThat(claim.businessIntervalKey())
                             .isEqualTo(fixture.interval().businessIntervalKey());
                 });
+    }
+
+    @Test
+    void staleIntervalJobRearmsWithNewFenceAfterStoreReopens() {
+        Fixture fixture = fixture();
+        WaitingAutoOpenClaim staleClaim = service.claimDue(
+                "worker-a", OPEN_AT, Duration.ofSeconds(30), 10).getFirst();
+        Store store = storeRepository.findById(fixture.storeId()).orElseThrow();
+        store.update(
+                null, null, null, null, null, null, null, null, null,
+                OperationStatus.TEMPORARILY_CLOSED);
+        storeRepository.saveAndFlush(store);
+
+        assertThat(service.execute(staleClaim, OPEN_AT.plusSeconds(1)))
+                .isEqualTo(WaitingAutoOpenService.ExecutionResult.INVALIDATED);
+        WaitingAutoOpenJob invalidated = jobRepository.findById(fixture.jobId()).orElseThrow();
+        assertThat(invalidated.getFailureCode()).isEqualTo("STALE_INTERVAL");
+
+        store.update(
+                null, null, null, null, null, null, null, null, null,
+                OperationStatus.OPEN);
+        storeRepository.saveAndFlush(store);
+        Instant recoveredAt = OPEN_AT.plusSeconds(2);
+
+        assertThat(planner.plan(recoveredAt, Duration.ofHours(1), 10)).isEqualTo(1);
+        WaitingAutoOpenClaim recoveredClaim = service.claimDue(
+                "worker-b", recoveredAt, Duration.ofSeconds(30), 10).getFirst();
+        assertThat(recoveredClaim.jobId()).isEqualTo(fixture.jobId());
+        assertThat(recoveredClaim.fencingToken()).isGreaterThan(staleClaim.fencingToken());
+        assertThat(service.execute(recoveredClaim, recoveredAt))
+                .isEqualTo(WaitingAutoOpenService.ExecutionResult.COMPLETED);
+
+        assertThat(windowRepository.count()).isEqualTo(1L);
+        assertThat(service.recordFailure(
+                staleClaim,
+                recoveredAt.plusSeconds(1),
+                new org.springframework.dao.CannotAcquireLockException("late"),
+                4,
+                Duration.ofSeconds(2),
+                Duration.ofMinutes(1))).isFalse();
+        assertThat(jobRepository.findById(fixture.jobId()).orElseThrow().getStatus())
+                .isEqualTo(WaitingAutoOpenJobStatus.COMPLETED);
     }
 
     private Fixture fixture() {

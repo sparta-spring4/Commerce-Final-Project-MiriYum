@@ -52,6 +52,36 @@ public interface WaitingAutoOpenJobRepository extends JpaRepository<WaitingAutoO
             """, nativeQuery = true)
     int insertPending(@Param("job") WaitingAutoOpenJob job);
 
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+            UPDATE waiting_auto_open_jobs job
+            SET job.status = 'PENDING',
+                job.attempt_count = 0,
+                job.next_attempt_at = GREATEST(job.scheduled_at, :now),
+                job.lease_owner = NULL,
+                job.lease_until = NULL,
+                job.fencing_token = job.fencing_token + 1,
+                job.failure_code = NULL,
+                job.last_attempted_at = NULL,
+                job.completed_at = NULL,
+                job.updated_at = :now
+            WHERE job.store_id = :#{#job.storeId}
+              AND job.business_interval_key = :#{#job.businessIntervalKey}
+              AND job.business_date = :#{#job.businessDate}
+              AND job.interval_starts_at = :#{#job.intervalStartsAt}
+              AND job.interval_ends_at = :#{#job.intervalEndsAt}
+              AND job.scheduled_at = :#{#job.scheduledAt}
+              AND job.expected_settings_version = :#{#job.expectedSettingsVersion}
+              AND job.expected_advance_open_minutes = :#{#job.expectedAdvanceOpenMinutes}
+              AND job.idempotency_key = :#{#job.idempotencyKey}
+              AND job.status = 'INVALIDATED'
+              AND job.failure_code = 'STALE_INTERVAL'
+              AND job.interval_ends_at > :now
+            """, nativeQuery = true)
+    int rearmInvalidated(
+            @Param("job") WaitingAutoOpenJob job,
+            @Param("now") Instant now);
+
     @Query(value = """
             SELECT job.waiting_auto_open_job_id
             FROM waiting_auto_open_jobs job

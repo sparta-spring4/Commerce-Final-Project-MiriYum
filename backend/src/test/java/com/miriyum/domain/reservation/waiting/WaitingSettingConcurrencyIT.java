@@ -65,7 +65,7 @@ class WaitingSettingConcurrencyIT {
 
     @BeforeEach
     void fixture() {
-        given(intervalPort.lockCurrent(anyLong(), any(LocalDate.class)))
+        given(intervalPort.lockCurrent(anyLong(), any(LocalDate.class), any(Instant.class)))
                 .willAnswer(invocation -> List.of(openInterval(
                         invocation.getArgument(0), invocation.getArgument(1))));
         jdbc.execute("DELETE FROM waiting_status_events");

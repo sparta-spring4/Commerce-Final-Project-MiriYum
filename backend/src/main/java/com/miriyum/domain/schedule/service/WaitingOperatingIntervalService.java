@@ -2,6 +2,7 @@ package com.miriyum.domain.schedule.service;
 
 import com.miriyum.domain.schedule.closure.entity.RegularClosureVersion;
 import com.miriyum.domain.schedule.closure.entity.TemporaryClosure;
+import com.miriyum.domain.schedule.closure.model.TemporaryClosureStatus;
 import com.miriyum.domain.schedule.closure.repository.RegularClosureVersionRepository;
 import com.miriyum.domain.schedule.closure.repository.TemporaryClosureRepository;
 import com.miriyum.domain.schedule.dto.contract.WaitingOperatingIntervalSnapshot;
@@ -87,9 +88,11 @@ public class WaitingOperatingIntervalService {
                 eligibleStoreIds,
                 fromInclusive,
                 toExclusive);
-
         List<WaitingOperatingIntervalSnapshot> result = new ArrayList<>();
         for (long storeId : eligibleStoreIds.stream().sorted().toList()) {
+            if (hasActiveTemporaryClosure(temporaryClosures, storeId, fromInclusive)) {
+                continue;
+            }
             StoreWaitingReceptionProfile profile = profiles.get(storeId);
             StoreScheduleState state = states.get(storeId);
             if (state == null) {
@@ -108,7 +111,6 @@ public class WaitingOperatingIntervalService {
                     profile,
                     version,
                     regularClosure,
-                    temporaryClosures,
                     fromInclusive,
                     toExclusive));
         }
@@ -124,10 +126,11 @@ public class WaitingOperatingIntervalService {
             long storeId,
             String businessIntervalKey,
             Instant expectedStartsAt,
-            Instant expectedEndsAt
+            Instant expectedEndsAt,
+            Instant now
     ) {
         if (businessIntervalKey == null || businessIntervalKey.isBlank()
-                || expectedStartsAt == null || expectedEndsAt == null
+                || expectedStartsAt == null || expectedEndsAt == null || now == null
                 || !expectedStartsAt.isBefore(expectedEndsAt)) {
             return Optional.empty();
         }
@@ -137,13 +140,15 @@ public class WaitingOperatingIntervalService {
         }
         List<TemporaryClosure> temporaryClosures = temporaryClosureRepository.findOverlapping(
                 Set.of(storeId),
-                expectedStartsAt,
-                expectedEndsAt);
+                expectedStartsAt.minusSeconds(86_400),
+                expectedEndsAt.plusSeconds(86_400));
+        if (hasActiveTemporaryClosure(temporaryClosures, storeId, now)) {
+            return Optional.empty();
+        }
         return projectRange(
                 sources.profile(),
                 sources.operating(),
                 sources.regularClosure(),
-                temporaryClosures,
                 expectedStartsAt.minusSeconds(86_400),
                 expectedEndsAt.plusSeconds(86_400))
                 .stream()
@@ -156,9 +161,10 @@ public class WaitingOperatingIntervalService {
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public List<WaitingOperatingIntervalSnapshot> lockCurrentWaitingOperatingIntervals(
             long storeId,
-            LocalDate businessDate
+            LocalDate businessDate,
+            Instant now
     ) {
-        if (businessDate == null) {
+        if (businessDate == null || now == null) {
             return List.of();
         }
         LockedSources sources = loadLockedSources(storeId);
@@ -178,11 +184,13 @@ public class WaitingOperatingIntervalService {
                 Set.of(storeId),
                 localDayStart,
                 localSearchEnd);
+        if (hasActiveTemporaryClosure(temporaryClosures, storeId, now)) {
+            return List.of();
+        }
         return projectBusinessDate(
                 sources.profile(),
                 sources.operating(),
                 sources.regularClosure(),
-                temporaryClosures,
                 businessDate);
     }
 
@@ -256,7 +264,6 @@ public class WaitingOperatingIntervalService {
             StoreWaitingReceptionProfile profile,
             OperatingScheduleVersion version,
             RegularClosureVersion regularClosure,
-            List<TemporaryClosure> temporaryClosures,
             Instant fromInclusive,
             Instant toExclusive
     ) {
@@ -274,7 +281,6 @@ public class WaitingOperatingIntervalService {
                     profile,
                     version,
                     regularClosure,
-                    temporaryClosures,
                     date)) {
                 if (interval.startsAt().isBefore(toExclusive)
                         && fromInclusive.isBefore(interval.endsAt())) {
@@ -289,7 +295,6 @@ public class WaitingOperatingIntervalService {
             StoreWaitingReceptionProfile profile,
             OperatingScheduleVersion version,
             RegularClosureVersion regularClosure,
-            List<TemporaryClosure> temporaryClosures,
             LocalDate businessDate
     ) {
         if (regularClosure != null && regularClosure.isClosedOn(businessDate)) {
@@ -318,13 +323,6 @@ public class WaitingOperatingIntervalService {
             if (startsAt == null || endsAt == null || !startsAt.isBefore(endsAt)) {
                 continue;
             }
-            boolean temporarilyClosed = temporaryClosures.stream()
-                    .filter(closure -> closure.getCancelledAt() == null)
-                    .filter(closure -> closure.getStoreId() == profile.storeId())
-                    .anyMatch(closure -> closure.overlaps(startsAt, endsAt));
-            if (temporarilyClosed) {
-                continue;
-            }
             result.add(new WaitingOperatingIntervalSnapshot(
                     profile.storeId(),
                     intervalKey(profile.storeId(), version, businessDate, entry, ordinal),
@@ -335,6 +333,16 @@ public class WaitingOperatingIntervalService {
                     profile.timeZoneId()));
         }
         return result;
+    }
+
+    private static boolean hasActiveTemporaryClosure(
+            List<TemporaryClosure> closures,
+            long storeId,
+            Instant now
+    ) {
+        return closures.stream()
+                .filter(closure -> closure.getStoreId() == storeId)
+                .anyMatch(closure -> closure.statusAt(now) == TemporaryClosureStatus.ACTIVE);
     }
 
     private static boolean matchesProfile(

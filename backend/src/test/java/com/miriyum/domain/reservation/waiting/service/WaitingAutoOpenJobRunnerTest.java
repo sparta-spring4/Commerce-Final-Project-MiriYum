@@ -75,6 +75,47 @@ class WaitingAutoOpenJobRunnerTest {
         order.verify(metrics).execution(WaitingAutoOpenService.ExecutionResult.COMPLETED);
     }
 
+    @Test
+    void pollRefreshesTimeAtEachClaimExecutionAndFailureBoundary() {
+        Instant claimAt = NOW.plusSeconds(1);
+        Instant firstExecutionAt = NOW.plusSeconds(2);
+        Instant failureAt = NOW.plusSeconds(3);
+        Instant laterExecutionAt = NOW.plusSeconds(31);
+        WaitingAutoOpenPlanner planner = mock(WaitingAutoOpenPlanner.class);
+        WaitingAutoOpenService service = mock(WaitingAutoOpenService.class);
+        WaitingAutoOpenMetrics metrics = mock(WaitingAutoOpenMetrics.class);
+        Clock clock = mock(Clock.class);
+        WaitingAutoOpenClaim failed = claim();
+        WaitingAutoOpenClaim later = new WaitingAutoOpenClaim(
+                12L, 8L, "other-key", LocalDate.of(2026, 8, 17),
+                NOW.plusSeconds(3600), NOW.plusSeconds(7200), 1L, 60,
+                "worker-a", 1L, 1, NOW.plusSeconds(30));
+        RuntimeException failure = new RuntimeException("boom");
+        given(clock.instant()).willReturn(
+                NOW, claimAt, firstExecutionAt, failureAt, laterExecutionAt);
+        given(service.claimDue("worker-a", claimAt, Duration.ofSeconds(30), 5))
+                .willReturn(List.of(failed, later));
+        given(service.execute(failed, firstExecutionAt)).willThrow(failure);
+        given(service.execute(later, laterExecutionAt))
+                .willReturn(WaitingAutoOpenService.ExecutionResult.STALE_CLAIM);
+        WaitingAutoOpenJobRunner runner = new WaitingAutoOpenJobRunner(
+                planner, service, metrics, properties(), clock);
+
+        runner.poll();
+
+        var order = inOrder(service, planner, metrics);
+        order.verify(service).invalidateStale(NOW, 10);
+        order.verify(planner).plan(NOW, Duration.ofHours(12), 20);
+        order.verify(service).claimDue("worker-a", claimAt, Duration.ofSeconds(30), 5);
+        order.verify(service).execute(failed, firstExecutionAt);
+        order.verify(service).recordFailure(
+                failed, failureAt, failure, 4, Duration.ofSeconds(2), Duration.ofMinutes(1));
+        order.verify(metrics).failure(failure);
+        order.verify(service).execute(later, laterExecutionAt);
+        order.verify(metrics).execution(WaitingAutoOpenService.ExecutionResult.STALE_CLAIM);
+        order.verifyNoMoreInteractions();
+    }
+
     private static WaitingAutoOpenProperties properties() {
         return new WaitingAutoOpenProperties(
                 "worker-a",

@@ -18,9 +18,11 @@ public interface WaitingOperatingIntervalPort {
             long storeId,
             String businessIntervalKey,
             Instant expectedStartsAt,
-            Instant expectedEndsAt);
+            Instant expectedEndsAt,
+            Instant now);
 
     List<WaitingOperatingInterval> lockCurrent(
             long storeId,
-            LocalDate businessDate);
+            LocalDate businessDate,
+            Instant now);
 }

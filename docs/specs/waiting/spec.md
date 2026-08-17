@@ -57,6 +57,9 @@ worker는 기본적으로 꺼져 있다. `MIRIYUM_WAITING_AUTO_OPEN_ENABLED=true
 여러 worker는 MySQL `FOR UPDATE SKIP LOCKED`로 due 작업을 claim한다. claim마다 attempt와
 단조 증가 fencing token을 올리고 lease owner/만료를 기록한다. 만료된 lease는 다른 worker가
 더 높은 token으로 회수할 수 있고, 이전 owner/token은 완료·실패 기록을 쓰지 못한다.
+각 poll은 planning 직전과 claim 직전에 현재 시각을 별도로 읽고, batch 안의 각 작업도 execute
+직전과 failure 기록 직전에 현재 시각을 다시 읽는다. 따라서 앞 작업이 오래 걸려도 뒤 작업은
+과거 lease·영업 구간 시각으로 실행되지 않는다.
 
 실제 OPEN 효과의 직렬화 순서는 하나의 짧은 `READ_COMMITTED` 트랜잭션 안에서 다음과 같다.
 
@@ -75,8 +78,13 @@ CAS는 내부 JPA `lock_version`만 증가시키고 공개 settings `version`은
 
 설정 비활성화, `MANUAL`/`PAUSED` 전환, settings version 또는 `advanceOpenMinutes` 변경은
 미claim 이전 작업을 제한 batch로 선제 무효화한다. 이미 claim된 작업도 실행 CAS가 같은
-조건을 다시 검사해 실패 폐쇄한다. Store 부적격, schedule 교체, 정기·임시 휴무, 영업 구간
-key/경계 변경도 현재 구간 재구성 실패로 무효화한다. DB deadlock·lock timeout·일시 연결
+조건을 다시 검사해 실패 폐쇄한다. Store 부적격, schedule 교체, 정기 휴무, 영업 구간
+key/경계 변경도 현재 구간 재구성 실패로 무효화한다. 임시휴점은 영업 구간 identity를
+분할하거나 제거하지 않고 `[startAt, endAt)`에 현재 활성일 때만 잠금 조회를 실패 폐쇄하며,
+정확한 `endAt`부터 같은 구간을 다시 사용할 수 있다. 그 때문에 정확히 같은 snapshot의
+`INVALIDATED/STALE_INTERVAL` 작업만 attempt·lease·failure를 초기화하고 fencing token을
+증가시켜 `PENDING`으로 재활성화한다. `STALE_SETTINGS`, `COMPLETED`,
+`RECONCILIATION_REQUIRED` 작업은 재활성화하지 않는다. DB deadlock·lock timeout·일시 연결
 장애만 bounded exponential retry 대상으로 삼고, 알 수 없는 오류와 무결성 오류는
 `RECONCILIATION_REQUIRED`로 격리한다.
 
@@ -87,6 +95,9 @@ acceptingUntil`인 경우만 허용한다. MANUAL은 `enabled=true`, `MANUAL`이
 PAUSED, Store 부적격, 휴무, stale/missing 구간, 정확한 종료 경계는 모두
 `WAITING_012 WAITING_RECEPTION_CLOSED`로 실패 폐쇄하며 팀·membership·순번·감사·이벤트를
 쓰기 전에 거절한다.
+생성 명령의 최초 `occurredAt`은 팀·membership·감사·이벤트에 유지하지만, retry마다 새
+트랜잭션 안에서 gate 판정 현재 시각을 다시 읽는다. 따라서 첫 check 뒤 접수 종료 경계를
+지난 retry가 최초 시각으로 접수를 확정할 수 없다.
 
 Waiting production 코드는 Store Entity·Repository를 직접 참조하지 않는다. 경계 adapter는
 Store의 `StoreService`/`StoreWaitingReceptionProfile`과 Schedule의

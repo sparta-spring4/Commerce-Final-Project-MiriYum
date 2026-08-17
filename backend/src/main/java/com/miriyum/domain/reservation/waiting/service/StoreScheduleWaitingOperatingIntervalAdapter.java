@@ -38,22 +38,25 @@ public class StoreScheduleWaitingOperatingIntervalAdapter
             long storeId,
             String businessIntervalKey,
             Instant expectedStartsAt,
-            Instant expectedEndsAt
+            Instant expectedEndsAt,
+            Instant now
     ) {
         return intervalService.lockCurrentWaitingOperatingInterval(
                         storeId,
                         businessIntervalKey,
                         expectedStartsAt,
-                        expectedEndsAt)
+                        expectedEndsAt,
+                        now)
                 .map(StoreScheduleWaitingOperatingIntervalAdapter::toWaitingInterval);
     }
 
     @Override
     public List<WaitingOperatingInterval> lockCurrent(
             long storeId,
-            LocalDate businessDate
+            LocalDate businessDate,
+            Instant now
     ) {
-        return intervalService.lockCurrentWaitingOperatingIntervals(storeId, businessDate)
+        return intervalService.lockCurrentWaitingOperatingIntervals(storeId, businessDate, now)
                 .stream()
                 .map(StoreScheduleWaitingOperatingIntervalAdapter::toWaitingInterval)
                 .toList();

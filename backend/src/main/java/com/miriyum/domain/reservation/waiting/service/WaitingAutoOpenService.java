@@ -117,7 +117,8 @@ public class WaitingAutoOpenService {
                         claim.storeId(),
                         claim.businessIntervalKey(),
                         claim.intervalStartsAt(),
-                        claim.intervalEndsAt())
+                        claim.intervalEndsAt(),
+                        now)
                 .orElse(null);
         WaitingAutoOpenJob job = jobRepository.findByIdForUpdate(claim.jobId()).orElse(null);
         if (job == null

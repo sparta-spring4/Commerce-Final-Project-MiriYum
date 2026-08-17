@@ -3,6 +3,9 @@ package com.miriyum.domain.schedule.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.schedule.closure.entity.TemporaryClosure;
+import com.miriyum.domain.schedule.closure.model.TemporaryClosureReason;
+import com.miriyum.domain.schedule.closure.repository.TemporaryClosureRepository;
 import com.miriyum.domain.schedule.dto.contract.WaitingOperatingIntervalSnapshot;
 import com.miriyum.domain.schedule.entity.OperatingScheduleVersion;
 import com.miriyum.domain.schedule.entity.StoreScheduleState;
@@ -74,6 +77,9 @@ class WaitingOperatingIntervalServiceIT {
     private OperatingScheduleVersionRepository operatingRepository;
 
     @Autowired
+    private TemporaryClosureRepository temporaryClosureRepository;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
@@ -121,7 +127,86 @@ class WaitingOperatingIntervalServiceIT {
                 store.getId(),
                 interval.businessIntervalKey(),
                 interval.startsAt(),
-                interval.endsAt())).contains(interval);
+                interval.endsAt(),
+                Instant.parse("2026-08-17T00:30:00Z"))).contains(interval);
+
+        temporaryClosureRepository.saveAndFlush(TemporaryClosure.create(
+                store.getId(),
+                Instant.parse("2026-08-17T03:00:00Z"),
+                Instant.parse("2026-08-17T04:00:00Z"),
+                "Asia/Seoul",
+                TemporaryClosureReason.MAINTENANCE,
+                null));
+
+        assertThat(service.findWaitingOperatingIntervals(
+                Set.of(store.getId()),
+                Instant.parse("2026-08-16T15:00:00Z"),
+                Instant.parse("2026-08-18T15:00:00Z"))).containsExactly(interval);
+        assertThat(service.findWaitingOperatingIntervals(
+                Set.of(store.getId()),
+                Instant.parse("2026-08-17T03:00:00Z"),
+                Instant.parse("2026-08-17T10:00:00Z"))).isEmpty();
+        assertThat(service.findWaitingOperatingIntervals(
+                Set.of(store.getId()),
+                Instant.parse("2026-08-17T04:00:00Z"),
+                Instant.parse("2026-08-17T10:00:00Z"))).containsExactly(interval);
+        assertThat(service.lockCurrentWaitingOperatingInterval(
+                store.getId(), interval.businessIntervalKey(), interval.startsAt(), interval.endsAt(),
+                Instant.parse("2026-08-17T02:59:59Z"))).contains(interval);
+        assertThat(service.lockCurrentWaitingOperatingInterval(
+                store.getId(), interval.businessIntervalKey(), interval.startsAt(), interval.endsAt(),
+                Instant.parse("2026-08-17T03:00:00Z"))).isEmpty();
+        assertThat(service.lockCurrentWaitingOperatingInterval(
+                store.getId(), interval.businessIntervalKey(), interval.startsAt(), interval.endsAt(),
+                Instant.parse("2026-08-17T03:59:59Z"))).isEmpty();
+        assertThat(service.lockCurrentWaitingOperatingInterval(
+                store.getId(), interval.businessIntervalKey(), interval.startsAt(), interval.endsAt(),
+                Instant.parse("2026-08-17T04:00:00Z"))).contains(interval);
+    }
+
+    @Test
+    void persistedOvernightIntervalRecoversAtTemporaryClosureEnd() {
+        Store store = createStore();
+        OperatingScheduleVersion version = OperatingScheduleVersion.createDraft(
+                store.getId(),
+                1L,
+                "Asia/Seoul",
+                List.of(new WeeklyInterval(
+                        DayOfWeek.MONDAY,
+                        LocalTime.of(22, 0),
+                        LocalTime.of(2, 0),
+                        true,
+                        ScheduleIntervalKind.BUSINESS_HOURS,
+                        1320,
+                        1560)));
+        version.activate(Instant.parse("2026-08-16T00:00:00Z"), "test activation");
+        operatingRepository.saveAndFlush(version);
+        StoreScheduleState state = StoreScheduleState.initialize(store.getId());
+        state.activateOperating(version.getId());
+        stateRepository.saveAndFlush(state);
+        WaitingOperatingIntervalSnapshot interval = service.findWaitingOperatingIntervals(
+                        Set.of(store.getId()),
+                        Instant.parse("2026-08-17T12:00:00Z"),
+                        Instant.parse("2026-08-17T18:00:00Z"))
+                .getFirst();
+        temporaryClosureRepository.saveAndFlush(TemporaryClosure.create(
+                store.getId(),
+                Instant.parse("2026-08-17T15:30:00Z"),
+                Instant.parse("2026-08-17T16:30:00Z"),
+                "Asia/Seoul",
+                TemporaryClosureReason.MAINTENANCE,
+                null));
+
+        assertThat(interval.businessDate()).isEqualTo(java.time.LocalDate.of(2026, 8, 17));
+        assertThat(service.lockCurrentWaitingOperatingInterval(
+                store.getId(), interval.businessIntervalKey(), interval.startsAt(), interval.endsAt(),
+                Instant.parse("2026-08-17T15:29:59Z"))).contains(interval);
+        assertThat(service.lockCurrentWaitingOperatingInterval(
+                store.getId(), interval.businessIntervalKey(), interval.startsAt(), interval.endsAt(),
+                Instant.parse("2026-08-17T15:30:00Z"))).isEmpty();
+        assertThat(service.lockCurrentWaitingOperatingInterval(
+                store.getId(), interval.businessIntervalKey(), interval.startsAt(), interval.endsAt(),
+                Instant.parse("2026-08-17T16:30:00Z"))).contains(interval);
     }
 
     @Test

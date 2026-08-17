@@ -99,6 +99,34 @@ class WaitingAutoOpenPlannerTest {
     }
 
     @Test
+    void rearmsExactStaleIntervalSnapshotInsteadOfInsertingDuplicate() {
+        WaitingSetting setting = WaitingSetting.create(
+                7L,
+                true,
+                WaitingReceptionMode.AUTO,
+                60,
+                NOW.minusSeconds(60));
+        WaitingOperatingInterval interval = new WaitingOperatingInterval(
+                7L,
+                "interval-key",
+                4L,
+                LocalDate.of(2026, 8, 17),
+                Instant.parse("2026-08-17T00:00:00Z"),
+                Instant.parse("2026-08-17T09:00:00Z"),
+                "Asia/Seoul");
+        given(settingRepository.findAutoOpenPlanningCandidates(
+                eq(0L), any(Pageable.class))).willReturn(List.of(setting));
+        given(intervalPort.findUpcoming(any(), any(), any())).willReturn(List.of(interval));
+        given(settingRepository.findByStoreId(7L)).willReturn(Optional.of(setting));
+        given(jobRepository.rearmInvalidated(any(WaitingAutoOpenJob.class), eq(NOW)))
+                .willReturn(1);
+
+        assertThat(planner.plan(NOW, Duration.ofMinutes(60), 10)).isEqualTo(1);
+
+        then(jobRepository).should(never()).insertPending(any());
+    }
+
+    @Test
     void changedSettingSnapshotPreventsInsert() {
         WaitingSetting planned = WaitingSetting.create(
                 7L,

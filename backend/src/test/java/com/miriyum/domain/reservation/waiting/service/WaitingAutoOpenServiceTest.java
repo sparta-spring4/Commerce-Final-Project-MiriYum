@@ -170,7 +170,8 @@ class WaitingAutoOpenServiceTest {
                 7L,
                 "interval-key",
                 interval.startsAt(),
-                interval.endsAt())).willReturn(Optional.of(interval));
+                interval.endsAt(),
+                NOW)).willReturn(Optional.of(interval));
         given(jobRepository.findByIdForUpdate(11L)).willReturn(Optional.of(job));
         given(settingRepository.compareAndFenceAutoOpen(7L, 3L, 60, NOW))
                 .willReturn(1);
@@ -186,7 +187,8 @@ class WaitingAutoOpenServiceTest {
                 7L,
                 "interval-key",
                 interval.startsAt(),
-                interval.endsAt());
+                interval.endsAt(),
+                NOW);
         order.verify(jobRepository).findByIdForUpdate(11L);
         order.verify(settingRepository).compareAndFenceAutoOpen(7L, 3L, 60, NOW);
         order.verify(windowRepository).saveAndFlush(any(WaitingReceptionWindow.class));
@@ -201,7 +203,8 @@ class WaitingAutoOpenServiceTest {
                 7L,
                 "interval-key",
                 job.getIntervalStartsAt(),
-                job.getIntervalEndsAt())).willReturn(Optional.of(new WaitingOperatingInterval(
+                job.getIntervalEndsAt(),
+                NOW)).willReturn(Optional.of(new WaitingOperatingInterval(
                         7L,
                         "interval-key",
                         4L,
@@ -229,7 +232,8 @@ class WaitingAutoOpenServiceTest {
                 7L,
                 "interval-key",
                 job.getIntervalStartsAt(),
-                job.getIntervalEndsAt())).willReturn(Optional.empty());
+                job.getIntervalEndsAt(),
+                NOW)).willReturn(Optional.empty());
         given(jobRepository.findByIdForUpdate(11L)).willReturn(Optional.of(job));
 
         assertThat(service.execute(claim, NOW))

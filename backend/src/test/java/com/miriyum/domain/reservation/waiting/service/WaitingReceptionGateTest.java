@@ -45,7 +45,8 @@ class WaitingReceptionGateTest {
         WaitingOperatingInterval interval = interval(
                 Instant.parse("2026-08-17T01:00:00Z"),
                 Instant.parse("2026-08-17T09:00:00Z"));
-        given(intervalPort.lockCurrent(STORE_ID, BUSINESS_DATE)).willReturn(List.of(interval));
+        given(intervalPort.lockCurrent(STORE_ID, BUSINESS_DATE, NOW))
+                .willReturn(List.of(interval));
         given(settingRepository.findByStoreIdForUpdate(STORE_ID))
                 .willReturn(Optional.of(setting(WaitingReceptionMode.AUTO)));
         given(windowRepository.existsAccepting(
@@ -54,7 +55,7 @@ class WaitingReceptionGateTest {
         gate.requireOpen(STORE_ID, BUSINESS_DATE, NOW);
 
         InOrder order = inOrder(intervalPort, settingRepository, windowRepository);
-        order.verify(intervalPort).lockCurrent(STORE_ID, BUSINESS_DATE);
+        order.verify(intervalPort).lockCurrent(STORE_ID, BUSINESS_DATE, NOW);
         order.verify(settingRepository).findByStoreIdForUpdate(STORE_ID);
         order.verify(windowRepository).existsAccepting(
                 STORE_ID, "interval-key", BUSINESS_DATE, 1L, NOW);
@@ -62,7 +63,7 @@ class WaitingReceptionGateTest {
 
     @Test
     void autoRejectsWindowFromOldSettingsVersion() {
-        given(intervalPort.lockCurrent(STORE_ID, BUSINESS_DATE)).willReturn(List.of(interval(
+        given(intervalPort.lockCurrent(STORE_ID, BUSINESS_DATE, NOW)).willReturn(List.of(interval(
                 Instant.parse("2026-08-17T01:00:00Z"),
                 Instant.parse("2026-08-17T09:00:00Z"))));
         given(settingRepository.findByStoreIdForUpdate(STORE_ID))
@@ -75,7 +76,10 @@ class WaitingReceptionGateTest {
 
     @Test
     void manualAcceptsFromStrictStoreLocalMidnightUntilLastIntervalEnd() {
-        given(intervalPort.lockCurrent(STORE_ID, BUSINESS_DATE)).willReturn(List.of(interval(
+        given(intervalPort.lockCurrent(
+                STORE_ID,
+                BUSINESS_DATE,
+                Instant.parse("2026-08-16T15:00:00Z"))).willReturn(List.of(interval(
                 Instant.parse("2026-08-17T01:00:00Z"),
                 Instant.parse("2026-08-17T09:00:00Z"))));
         given(settingRepository.findByStoreIdForUpdate(STORE_ID))
@@ -91,12 +95,15 @@ class WaitingReceptionGateTest {
 
     @Test
     void disabledPausedMissingIntervalAndEndBoundaryFailClosed() {
-        given(intervalPort.lockCurrent(STORE_ID, BUSINESS_DATE)).willReturn(List.of());
+        given(intervalPort.lockCurrent(STORE_ID, BUSINESS_DATE, NOW)).willReturn(List.of());
 
         assertClosed(() -> gate.requireOpen(STORE_ID, BUSINESS_DATE, NOW));
         verifyNoInteractions(settingRepository, windowRepository);
 
-        given(intervalPort.lockCurrent(STORE_ID, BUSINESS_DATE)).willReturn(List.of(interval(
+        given(intervalPort.lockCurrent(
+                STORE_ID,
+                BUSINESS_DATE,
+                Instant.parse("2026-08-17T09:00:00Z"))).willReturn(List.of(interval(
                 Instant.parse("2026-08-17T01:00:00Z"),
                 Instant.parse("2026-08-17T09:00:00Z"))));
         given(settingRepository.findByStoreIdForUpdate(STORE_ID))

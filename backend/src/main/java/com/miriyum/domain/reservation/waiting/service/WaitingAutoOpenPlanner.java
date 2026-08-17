@@ -86,7 +86,11 @@ public class WaitingAutoOpenPlanner {
                             interval.businessIntervalKey(),
                             planned.getVersion()),
                     now);
-            created += jobRepository.insertPending(job);
+            if (jobRepository.rearmInvalidated(job, now) == 1) {
+                created++;
+            } else {
+                created += Math.min(jobRepository.insertPending(job), 1);
+            }
         }
         return created;
     }

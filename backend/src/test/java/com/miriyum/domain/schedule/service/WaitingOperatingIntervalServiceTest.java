@@ -3,6 +3,7 @@ package com.miriyum.domain.schedule.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 
@@ -87,12 +88,6 @@ class WaitingOperatingIntervalServiceTest {
                 List.of(31L),
                 ScheduleVersionStatus.ACTIVE))
                 .willReturn(List.of(version));
-        given(temporaryClosureRepository.findOverlapping(
-                Set.of(STORE_ID),
-                RANGE_START,
-                RANGE_END))
-                .willReturn(List.of());
-
         List<WaitingOperatingIntervalSnapshot> result =
                 service.findWaitingOperatingIntervals(
                         Set.of(STORE_ID),
@@ -137,12 +132,6 @@ class WaitingOperatingIntervalServiceTest {
                 List.of(41L),
                 ScheduleVersionStatus.ACTIVE))
                 .willReturn(List.of(regularClosure));
-        given(temporaryClosureRepository.findOverlapping(
-                Set.of(STORE_ID),
-                RANGE_START,
-                RANGE_END))
-                .willReturn(List.of());
-
         assertThat(service.findWaitingOperatingIntervals(
                 Set.of(STORE_ID),
                 RANGE_START,
@@ -150,7 +139,7 @@ class WaitingOperatingIntervalServiceTest {
     }
 
     @Test
-    void excludesIntervalsOverlappedByTemporaryClosure() {
+    void rangeProjectionBlocksOnlyWhileTemporaryClosureIsActive() {
         StoreScheduleState state = activeState(31L, null);
         OperatingScheduleVersion version = mock(OperatingScheduleVersion.class);
         OperatingScheduleEntry entry =
@@ -166,6 +155,10 @@ class WaitingOperatingIntervalServiceTest {
                 "Asia/Seoul",
                 TemporaryClosureReason.MAINTENANCE,
                 null);
+        given(temporaryClosureRepository.findOverlapping(
+                org.mockito.ArgumentMatchers.eq(Set.of(STORE_ID)),
+                any(Instant.class),
+                any(Instant.class))).willReturn(List.of(temporaryClosure));
         given(storeService.getWaitingReceptionProfiles(Set.of(STORE_ID)))
                 .willReturn(Map.of(STORE_ID, eligibleProfile()));
         given(stateRepository.findAllByStoreIdIn(Set.of(STORE_ID)))
@@ -174,16 +167,96 @@ class WaitingOperatingIntervalServiceTest {
                 List.of(31L),
                 ScheduleVersionStatus.ACTIVE))
                 .willReturn(List.of(version));
-        given(temporaryClosureRepository.findOverlapping(
-                Set.of(STORE_ID),
-                RANGE_START,
-                RANGE_END))
-                .willReturn(List.of(temporaryClosure));
-
         assertThat(service.findWaitingOperatingIntervals(
                 Set.of(STORE_ID),
-                RANGE_START,
-                RANGE_END)).isEmpty();
+                Instant.parse("2026-08-17T02:59:59Z"),
+                Instant.parse("2026-08-17T10:00:00Z"))).singleElement().satisfies(interval -> {
+                    assertThat(interval.startsAt())
+                            .isEqualTo(Instant.parse("2026-08-17T00:00:00Z"));
+                    assertThat(interval.endsAt())
+                            .isEqualTo(Instant.parse("2026-08-17T09:00:00Z"));
+                });
+        assertThat(service.findWaitingOperatingIntervals(
+                Set.of(STORE_ID),
+                Instant.parse("2026-08-17T03:00:00Z"),
+                Instant.parse("2026-08-17T10:00:00Z"))).isEmpty();
+        assertThat(service.findWaitingOperatingIntervals(
+                Set.of(STORE_ID),
+                Instant.parse("2026-08-17T04:00:00Z"),
+                Instant.parse("2026-08-17T10:00:00Z"))).singleElement();
+    }
+
+    @Test
+    void lockedLookupBlocksOnlyWhileTemporaryClosureIsActive() {
+        StoreScheduleState state = activeState(31L, null);
+        OperatingScheduleVersion version = activeVersion(
+                31L,
+                3L,
+                businessHours(DayOfWeek.MONDAY, 9, 0, 18, 0, false));
+        stubLockedSources(state, version);
+        TemporaryClosure closure = TemporaryClosure.create(
+                STORE_ID,
+                Instant.parse("2026-08-17T03:00:00Z"),
+                Instant.parse("2026-08-17T04:00:00Z"),
+                "Asia/Seoul",
+                TemporaryClosureReason.MAINTENANCE,
+                null);
+        given(temporaryClosureRepository.findOverlapping(
+                org.mockito.ArgumentMatchers.eq(Set.of(STORE_ID)),
+                any(Instant.class),
+                any(Instant.class))).willReturn(List.of(closure));
+        String key = intervalKeyFromLockedSources(state, version);
+        Instant startsAt = Instant.parse("2026-08-17T00:00:00Z");
+        Instant endsAt = Instant.parse("2026-08-17T09:00:00Z");
+
+        assertThat(service.lockCurrentWaitingOperatingInterval(
+                STORE_ID, key, startsAt, endsAt,
+                Instant.parse("2026-08-17T02:59:59Z"))).isPresent();
+        assertThat(service.lockCurrentWaitingOperatingInterval(
+                STORE_ID, key, startsAt, endsAt,
+                Instant.parse("2026-08-17T03:00:00Z"))).isEmpty();
+        assertThat(service.lockCurrentWaitingOperatingInterval(
+                STORE_ID, key, startsAt, endsAt,
+                Instant.parse("2026-08-17T03:59:59Z"))).isEmpty();
+        assertThat(service.lockCurrentWaitingOperatingInterval(
+                STORE_ID, key, startsAt, endsAt,
+                Instant.parse("2026-08-17T04:00:00Z"))).isPresent();
+    }
+
+    @Test
+    void overnightIntervalKeepsBusinessDateAndRecoversAtClosureEnd() {
+        StoreScheduleState state = activeState(31L, null);
+        OperatingScheduleVersion version = activeVersion(
+                31L,
+                3L,
+                businessHours(DayOfWeek.MONDAY, 22, 0, 2, 0, true));
+        stubLockedSources(state, version);
+        TemporaryClosure closure = TemporaryClosure.create(
+                STORE_ID,
+                Instant.parse("2026-08-17T15:30:00Z"),
+                Instant.parse("2026-08-17T16:30:00Z"),
+                "Asia/Seoul",
+                TemporaryClosureReason.MAINTENANCE,
+                null);
+        given(temporaryClosureRepository.findOverlapping(
+                org.mockito.ArgumentMatchers.eq(Set.of(STORE_ID)),
+                any(Instant.class),
+                any(Instant.class))).willReturn(List.of(closure));
+        String key = intervalKeyFromLockedSources(state, version);
+        Instant startsAt = Instant.parse("2026-08-17T13:00:00Z");
+        Instant endsAt = Instant.parse("2026-08-17T17:00:00Z");
+
+        assertThat(service.lockCurrentWaitingOperatingInterval(
+                STORE_ID, key, startsAt, endsAt,
+                Instant.parse("2026-08-17T15:29:59Z")))
+                .get().extracting(WaitingOperatingIntervalSnapshot::businessDate)
+                .isEqualTo(LocalDate.of(2026, 8, 17));
+        assertThat(service.lockCurrentWaitingOperatingInterval(
+                STORE_ID, key, startsAt, endsAt,
+                Instant.parse("2026-08-17T15:30:00Z"))).isEmpty();
+        assertThat(service.lockCurrentWaitingOperatingInterval(
+                STORE_ID, key, startsAt, endsAt,
+                Instant.parse("2026-08-17T16:30:00Z"))).isPresent();
     }
 
     @Test
@@ -202,9 +275,9 @@ class WaitingOperatingIntervalServiceTest {
                 ScheduleVersionStatus.ACTIVE))
                 .willReturn(List.of(version));
         given(temporaryClosureRepository.findOverlapping(
-                Set.of(STORE_ID),
-                Instant.parse("2026-08-17T00:00:00Z"),
-                Instant.parse("2026-08-17T08:59:59Z")))
+                org.mockito.ArgumentMatchers.eq(Set.of(STORE_ID)),
+                any(Instant.class),
+                any(Instant.class)))
                 .willReturn(List.of());
         String key = service.findWaitingOperatingIntervals(
                         Set.of(STORE_ID),
@@ -220,7 +293,8 @@ class WaitingOperatingIntervalServiceTest {
                         STORE_ID,
                         key,
                         Instant.parse("2026-08-17T00:00:00Z"),
-                        Instant.parse("2026-08-17T08:59:59Z"));
+                        Instant.parse("2026-08-17T08:59:59Z"),
+                        Instant.parse("2026-08-17T00:30:00Z"));
 
         assertThat(result).isEmpty();
         InOrder order = inOrder(storeService, stateRepository);
@@ -237,7 +311,8 @@ class WaitingOperatingIntervalServiceTest {
                 STORE_ID,
                 "interval-key",
                 Instant.parse("2026-08-17T00:00:00Z"),
-                Instant.parse("2026-08-17T09:00:00Z")))
+                Instant.parse("2026-08-17T09:00:00Z"),
+                Instant.parse("2026-08-17T00:30:00Z")))
                 .isSameAs(failure);
     }
 
@@ -249,14 +324,23 @@ class WaitingOperatingIntervalServiceTest {
                 .willReturn(Map.of(STORE_ID, eligibleProfile()));
         given(stateRepository.findAllByStoreIdIn(Set.of(STORE_ID)))
                 .willReturn(List.of(state));
-        given(temporaryClosureRepository.findOverlapping(
-                Set.of(STORE_ID),
-                RANGE_START,
-                RANGE_END))
-                .willReturn(List.of());
         return service.findWaitingOperatingIntervals(Set.of(STORE_ID), RANGE_START, RANGE_END)
                 .getFirst()
                 .businessIntervalKey();
+    }
+
+    private void stubLockedSources(
+            StoreScheduleState state,
+            OperatingScheduleVersion version
+    ) {
+        given(storeService.inspectWaitingReceptionForUpdate(STORE_ID))
+                .willReturn(eligibleProfile());
+        given(stateRepository.findForUpdateByStoreId(STORE_ID))
+                .willReturn(Optional.of(state));
+        given(operatingRepository.findActiveByIdsWithEntries(
+                List.of(31L),
+                ScheduleVersionStatus.ACTIVE))
+                .willReturn(List.of(version));
     }
 
     private StoreWaitingReceptionProfile eligibleProfile() {

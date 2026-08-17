@@ -39,7 +39,7 @@ public class WaitingReceptionGate {
             throw closed();
         }
         List<WaitingOperatingInterval> intervals =
-                intervalPort.lockCurrent(storeId, businessDate);
+                intervalPort.lockCurrent(storeId, businessDate, now);
         if (intervals.isEmpty()) {
             throw closed();
         }
