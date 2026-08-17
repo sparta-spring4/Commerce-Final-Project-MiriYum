@@ -14,7 +14,6 @@ import com.miriyum.domain.notification.dto.source.NotificationResourceType;
 import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import com.miriyum.domain.notification.port.PickupNotificationSource;
 import com.miriyum.domain.notification.port.WaitingNotificationSource;
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
@@ -237,7 +236,7 @@ class NotificationTaskWorkerIntegrationTest {
         assertThat(taskInt("attempt_count")).isZero();
         assertThat(channelInt("attempt_count")).isZero();
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT next_attempt_at > NOW(6) FROM notification_tasks",
+                "SELECT next_attempt_at > UTC_TIMESTAMP(6) FROM notification_tasks",
                 Boolean.class)).isTrue();
         assertThat(auditReasons()).containsExactly(
                 "SOURCE_EVENT_RECORDED",

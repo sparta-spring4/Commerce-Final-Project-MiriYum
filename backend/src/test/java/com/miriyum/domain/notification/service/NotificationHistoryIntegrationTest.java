@@ -184,9 +184,8 @@ class NotificationHistoryIntegrationTest {
                     payload_fingerprint, status, title, delivered_at
                 ) VALUES (?, 'PICKUP', ?, 'PICKUP_RESERVATION_CONFIRMED',
                           ?, 7, 'PICKUP_RESERVATION', 31, 3, 'CONFIRMED',
-                          FROM_UNIXTIME(?), FROM_UNIXTIME(?),
-                          ?, 'notification-source-event-v1',
-                          ?, ?, '픽업 예약이 확정되었습니다.', FROM_UNIXTIME(?))
+                          ?, ?, ?, 'notification-source-event-v1',
+                          ?, ?, '픽업 예약이 확정되었습니다.', ?)
                 """,
                 notificationId,
                 "history-event-" + notificationId,

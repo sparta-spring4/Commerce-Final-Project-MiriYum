@@ -270,6 +270,8 @@ public class StoreService {
             return Optional.empty();
         }
         return storeRepository.findById(storeId).map(Store::getName);
+    }
+
     /**
      * 웨이팅 일정 해석을 위해 매장 상태를 공개 계약으로 일괄 투영한다.
      */

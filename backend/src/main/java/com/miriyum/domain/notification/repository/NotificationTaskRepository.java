@@ -26,11 +26,7 @@ public class NotificationTaskRepository {
                 occurred_at, scheduled_at, expires_at, timing_policy_version,
                 correlation_id, contract_version, payload_fingerprint,
                 status, next_attempt_at
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                FROM_UNIXTIME(?), FROM_UNIXTIME(?), FROM_UNIXTIME(?),
-                ?, ?, ?, ?, 'PENDING', FROM_UNIXTIME(?)
-            )
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -78,8 +74,7 @@ public class NotificationTaskRepository {
                         SELECT notification_id, source_domain, purpose,
                                recipient_account_id, recipient_relation_version,
                                resource_type, resource_id, resource_version, source_state,
-                               UNIX_TIMESTAMP(expires_at) AS expires_at_epoch,
-                               correlation_id, attempt_count, version,
+                               expires_at, correlation_id, attempt_count, version,
                                lease_token IS NOT NULL AS lease_recovery
                           FROM notification_tasks
                          WHERE status = 'PENDING'
@@ -129,10 +124,7 @@ public class NotificationTaskRepository {
                         SELECT task.notification_id, task.source_domain, task.purpose,
                                task.recipient_relation_version,
                                task.resource_type, task.resource_id, task.resource_version,
-                               task.title,
-                               UNIX_TIMESTAMP(task.occurred_at) AS occurred_at_epoch,
-                               UNIX_TIMESTAMP(task.created_at) AS created_at_epoch,
-                               UNIX_TIMESTAMP(task.delivered_at) AS delivered_at_epoch
+                               task.title, task.occurred_at, task.created_at, task.delivered_at
                           FROM notification_tasks task
                           JOIN notification_channel_attempts attempt
                             ON attempt.notification_id = task.notification_id
@@ -143,9 +135,8 @@ public class NotificationTaskRepository {
                            AND task.delivered_at IS NOT NULL
                            AND task.title IS NOT NULL
                            AND (? IS NULL
-                                OR task.occurred_at < FROM_UNIXTIME(?)
-                                OR (task.occurred_at = FROM_UNIXTIME(?)
-                                    AND task.notification_id < ?))
+                                OR task.occurred_at < ?
+                                OR (task.occurred_at = ? AND task.notification_id < ?))
                          ORDER BY task.occurred_at DESC, task.notification_id DESC
                          LIMIT ?
                         """,
@@ -332,16 +323,16 @@ public class NotificationTaskRepository {
         return jdbcTemplate.update("""
                 UPDATE notification_tasks
                    SET attempt_count = GREATEST(attempt_count - 1, 0),
-                       next_attempt_at = TIMESTAMPADD(MICROSECOND, ?, NOW(6)),
+                       next_attempt_at = TIMESTAMPADD(MICROSECOND, ?, UTC_TIMESTAMP(6)),
                        lease_owner = NULL, lease_token = NULL, lease_until = NULL,
                        last_error_code = ?, version = version + 1
                  WHERE notification_id = ?
                    AND status = 'PENDING'
                    AND lease_token = ?
-                   AND lease_until > NOW(6)
+                   AND lease_until > UTC_TIMESTAMP(6)
                    AND version = ?
                    AND (expires_at IS NULL
-                        OR TIMESTAMPADD(MICROSECOND, ?, NOW(6)) < expires_at)
+                        OR TIMESTAMPADD(MICROSECOND, ?, UTC_TIMESTAMP(6)) < expires_at)
                 """,
                 retryDelayMicros,
                 reason,
@@ -381,7 +372,7 @@ public class NotificationTaskRepository {
         return jdbcTemplate.update("""
                 UPDATE notification_tasks
                    SET attempt_count = GREATEST(attempt_count - ?, 0),
-                       next_attempt_at = NOW(6),
+                       next_attempt_at = UTC_TIMESTAMP(6),
                        lease_owner = NULL, lease_token = NULL, lease_until = NULL,
                        last_error_code = NULL,
                        version = version + 1
