@@ -30,6 +30,8 @@ public class NotificationDeliveryService {
     private static final String SOURCE_RETRY_EXHAUSTED = "SOURCE_RETRY_EXHAUSTED";
     private static final String SOURCE_CONTEXT_INVALID = "SOURCE_CONTEXT_INVALID";
     private static final String TASK_EXPIRED = "TASK_EXPIRED";
+    private static final String WAITING_RESERVATION_CONVERTING =
+            "WAITING_RESERVATION_CONVERTING";
 
     private final NotificationTaskRepository taskRepository;
     private final NotificationChannelAttemptRepository channelAttemptRepository;
@@ -64,10 +66,9 @@ public class NotificationDeliveryService {
      * @return 최종 상태로 수렴한 작업 수
      */
     public int deliverDueBatch(RuntimePolicy policy) {
-        Instant dueAt = databaseClock.now();
         int converged = 0;
         for (int index = 0; index < policy.batchSize(); index++) {
-            Optional<LeasedTask> claimed = claimNext(policy, dueAt);
+            Optional<LeasedTask> claimed = claimNext(policy, databaseClock.now());
             if (claimed.isEmpty()) {
                 break;
             }
@@ -104,16 +105,45 @@ public class NotificationDeliveryService {
     }
 
     private boolean deliver(LeasedTask task, RuntimePolicy policy) {
+        if (task.sourceDomain()
+                != com.miriyum.domain.notification.dto.source.NotificationSourceDomain.WAITING) {
+            return readAndDeliver(task, policy, false);
+        }
+        try {
+            Boolean converged = transactions.execute(
+                    status -> readAndDeliver(task, policy, true));
+            return Boolean.TRUE.equals(converged);
+        } catch (SourceReadFailure unavailable) {
+            return retryOrFail(task, policy);
+        }
+    }
+
+    private boolean readAndDeliver(
+            LeasedTask task,
+            RuntimePolicy policy,
+            boolean lockedWaitingDelivery
+    ) {
         NotificationSourceContextV1 context;
         try {
-            context = sourceRegistry.readContext(
-                    task.sourceDomain(),
-                    task.resourceType(),
-                    task.resourceId(),
-                    task.resourceVersion(),
-                    task.recipientAccountId()
-            );
+            context = lockedWaitingDelivery
+                    ? sourceRegistry.readContextForDelivery(
+                            task.sourceDomain(),
+                            task.purpose(),
+                            task.resourceType(),
+                            task.resourceId(),
+                            task.resourceVersion(),
+                            task.recipientAccountId())
+                    : sourceRegistry.readContext(
+                            task.sourceDomain(),
+                            task.purpose(),
+                            task.resourceType(),
+                            task.resourceId(),
+                            task.resourceVersion(),
+                            task.recipientAccountId());
         } catch (RuntimeException sourceFailure) {
+            if (lockedWaitingDelivery) {
+                throw new SourceReadFailure(sourceFailure);
+            }
             context = unavailable();
         }
         if (context == null) {
@@ -126,8 +156,44 @@ public class NotificationDeliveryService {
             case FOUND -> deliverFound(task, context, policy);
             case SUPERSEDED -> cancel(task, SOURCE_SUPERSEDED, policy);
             case NOT_ELIGIBLE -> cancel(task, RECIPIENT_NOT_ELIGIBLE, policy);
-            case TEMPORARILY_UNAVAILABLE -> retryOrFail(task, policy);
+            case TEMPORARILY_UNAVAILABLE -> isWaitingConversionHold(task, context)
+                    ? holdWaitingConversion(task, policy)
+                    : retryOrFail(task, policy);
         };
+    }
+
+    private static boolean isWaitingConversionHold(
+            LeasedTask task,
+            NotificationSourceContextV1 context
+    ) {
+        return task.sourceDomain()
+                == com.miriyum.domain.notification.dto.source.NotificationSourceDomain.WAITING
+                && task.purpose()
+                == com.miriyum.domain.notification.dto.source.NotificationPurpose.WAITING_ENTRY_IMMINENT
+                && context.resourceVersion() == task.resourceVersion()
+                && context.recipientRelationVersion() == task.recipientRelationVersion()
+                && "RESERVATION_CONVERTING".equals(context.sourceState());
+    }
+
+    private boolean holdWaitingConversion(LeasedTask task, RuntimePolicy policy) {
+        var delay = policy.retryDelay(1);
+        transactions.execute(status -> {
+            if (!taskRepository.scheduleWaitingConversionHold(
+                    task, WAITING_RESERVATION_CONVERTING, delay.toMillis())) {
+                return false;
+            }
+            channelAttemptRepository.markWaitingHoldPending(
+                    task.notificationId(), WAITING_RESERVATION_CONVERTING);
+            transitionAuditRepository.insert(
+                    task.notificationId(),
+                    NotificationTaskStatus.PENDING,
+                    NotificationTaskStatus.PENDING,
+                    auditReason(WAITING_RESERVATION_CONVERTING, policy),
+                    task.correlationId()
+            );
+            return true;
+        });
+        return false;
     }
 
     private boolean deliverFound(
@@ -286,5 +352,12 @@ public class NotificationDeliveryService {
 
     private static boolean isExpired(Instant expiresAt, Instant now) {
         return expiresAt != null && !now.isBefore(expiresAt);
+    }
+
+    private static final class SourceReadFailure extends RuntimeException {
+
+        private SourceReadFailure(RuntimeException cause) {
+            super(cause);
+        }
     }
 }

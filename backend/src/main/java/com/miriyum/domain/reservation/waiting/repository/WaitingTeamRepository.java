@@ -103,6 +103,10 @@ public interface WaitingTeamRepository extends JpaRepository<WaitingTeam, Long> 
             Collection<WaitingTeamStatus> activeStatuses
     );
 
+    @Query("select team.id from WaitingTeam team where team.storeId = :storeId and team.status in :statuses order by team.id")
+    List<Long> findIdsByStoreIdAndStatusIn(@Param("storeId") long storeId,
+            @Param("statuses") Collection<WaitingTeamStatus> statuses);
+
     @Query("""
             select team
             from WaitingTeam team
@@ -111,6 +115,29 @@ public interface WaitingTeamRepository extends JpaRepository<WaitingTeam, Long> 
             order by team.id
             """)
     List<WaitingTeam> findActiveClosureTargets(@Param("storeId") long storeId);
+
+    @Query(value = """
+            SELECT target.*
+              FROM waiting_teams target
+             WHERE target.store_id = :storeId
+               AND target.business_date = :businessDate
+               AND target.status = 'WAITING'
+               AND (
+                    SELECT COUNT(*)
+                      FROM waiting_teams ahead
+                     WHERE ahead.store_id = target.store_id
+                       AND ahead.business_date = target.business_date
+                       AND ahead.queue_sequence < target.queue_sequence
+                       AND ahead.status IN (
+                           'WAITING', 'CALLED', 'ARRIVED', 'RESERVATION_CONVERTING'
+                       )
+               ) <= 2
+             ORDER BY target.queue_sequence, target.waiting_team_id
+            """, nativeQuery = true)
+    List<WaitingTeam> findEntryImminentCandidates(
+            @Param("storeId") long storeId,
+            @Param("businessDate") LocalDate businessDate
+    );
 
     default List<Long> findTerminalCompensationScanIds(
             long beforeExclusiveWaitingTeamId,

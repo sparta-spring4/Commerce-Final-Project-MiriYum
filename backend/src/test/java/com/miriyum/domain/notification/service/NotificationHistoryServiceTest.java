@@ -47,6 +47,7 @@ class NotificationHistoryServiceTest {
                 .willReturn(List.of(first, second, lookahead));
         given(sourceRegistry.readContext(
                 NotificationSourceDomain.PICKUP,
+                NotificationPurpose.PICKUP_RESERVATION_CONFIRMED,
                 NotificationResourceType.PICKUP_RESERVATION,
                 31L,
                 3L,
@@ -76,6 +77,7 @@ class NotificationHistoryServiceTest {
                 .willReturn(List.of(task));
         given(sourceRegistry.readContext(
                 NotificationSourceDomain.PICKUP,
+                NotificationPurpose.PICKUP_RESERVATION_CONFIRMED,
                 NotificationResourceType.PICKUP_RESERVATION,
                 31L,
                 3L,
@@ -99,6 +101,7 @@ class NotificationHistoryServiceTest {
                 .willReturn(List.of(task));
         given(sourceRegistry.readContext(
                 NotificationSourceDomain.PICKUP,
+                NotificationPurpose.PICKUP_RESERVATION_CONFIRMED,
                 NotificationResourceType.PICKUP_RESERVATION,
                 31L,
                 3L,
@@ -118,6 +121,7 @@ class NotificationHistoryServiceTest {
                 .willReturn(List.of(task));
         given(sourceRegistry.readContext(
                 NotificationSourceDomain.PICKUP,
+                NotificationPurpose.PICKUP_RESERVATION_CONFIRMED,
                 NotificationResourceType.PICKUP_RESERVATION,
                 31L,
                 3L,

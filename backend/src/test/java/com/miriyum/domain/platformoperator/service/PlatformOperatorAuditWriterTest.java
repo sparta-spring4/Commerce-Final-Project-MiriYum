@@ -22,6 +22,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Set;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -76,5 +77,33 @@ class PlatformOperatorAuditWriterTest {
         assertThat(event.getValue().getCorrelationId()).isEqualTo("correlation-1");
         assertThat(event.getValue().toString())
                 .doesNotContain("sensitive-approval-digest-must-not-be-persisted");
+    }
+
+    @Test
+    void appendStorePersistsReasonSnapshotsAndAllDomainVersions() {
+        PlatformOperatorAuditEventRepository repository = mock(PlatformOperatorAuditEventRepository.class);
+        when(repository.append(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        PlatformOperatorAuditWriter writer = new PlatformOperatorAuditWriter(
+                repository, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        writer.appendStore(new PlatformOperatorAuditWriter.StoreEvent(7L, 4L,
+                Set.of(PlatformOperatorRole.ENFORCEMENT_OPERATOR),
+                Set.of(PlatformOperatorPermission.STORE_SANCTION),
+                PlatformOperatorAuditAction.STORE_SANCTION_RELEASED,
+                PlatformOperatorAuditOutcome.SUCCESS, PlatformOperatorAuditReason.SECURITY_RESPONSE,
+                "STORE_SANCTION", "91", 10L, "case-10", 3L, 91L, 2L, 8L,
+                "123e4567-e89b-12d3-a456-426614174000",
+                Map.of("status", "ACTIVE"), Map.of("status", "RELEASED"), "correlation-store-91"));
+
+        ArgumentCaptor<PlatformOperatorAuditEvent> event = ArgumentCaptor.forClass(PlatformOperatorAuditEvent.class);
+        verify(repository).append(event.capture());
+        assertThat(event.getValue().getReason()).isEqualTo(PlatformOperatorAuditReason.SECURITY_RESPONSE);
+        assertThat(event.getValue().getStoreId()).isEqualTo(10L);
+        assertThat(event.getValue().getStoreSanctionId()).isEqualTo(91L);
+        assertThat(event.getValue().getCaseVersion()).isEqualTo(3L);
+        assertThat(event.getValue().getStoreSanctionVersion()).isEqualTo(2L);
+        assertThat(event.getValue().getStoreEnforcementVersion()).isEqualTo(8L);
+        assertThat(event.getValue().getBeforeSnapshot()).containsEntry("status", "ACTIVE");
+        assertThat(event.getValue().getAfterSnapshot()).containsEntry("status", "RELEASED");
     }
 }
