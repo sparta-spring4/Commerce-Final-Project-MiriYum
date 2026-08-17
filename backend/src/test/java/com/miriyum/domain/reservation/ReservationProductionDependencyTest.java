@@ -142,6 +142,9 @@ class ReservationProductionDependencyTest {
         assertThat(StoreService.class.getMethod(
                 "getManagedStore", long.class, long.class).getReturnType())
                 .isEqualTo(ManagedStoreResponse.class);
+        assertThat(StoreService.class.getMethod(
+                "findDisplayName", long.class).getReturnType())
+                .isEqualTo(Optional.class);
         assertThat(WaitingStoreAuthorityPort.class.getMethod(
                 "requireRead", long.class, long.class).getReturnType())
                 .isEqualTo(WaitingStoreAuthority.class);

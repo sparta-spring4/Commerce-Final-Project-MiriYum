@@ -31,6 +31,12 @@ public class NotificationTitleRenderer {
             case MENU_SUBSTITUTION_ACCEPTED -> store + " 대체 메뉴가 반영되었습니다.";
             case MENU_SUBSTITUTION_REJECTED -> store + " 대체 메뉴가 거절되었습니다.";
             case MENU_SUBSTITUTION_EXPIRED -> store + " 대체 메뉴 제안이 만료되었습니다.";
+            case WAITING_ENTRY_IMMINENT -> store + " 입장이 가까워졌습니다.";
+            case WAITING_CALLED -> store + " 입장 호출을 확인해 주세요.";
+            case WAITING_CANCELLED -> store + " 웨이팅이 취소되었습니다.";
+            case WAITING_NO_SHOW -> store + " 웨이팅이 미응답 종료되었습니다.";
+            case WAITING_CHECKED_IN -> store + " 입장이 완료되었습니다.";
+            case WAITING_CLOSED_BY_STORE -> store + " 매장 마감으로 웨이팅이 종료되었습니다.";
         };
         return truncate(title, 100);
     }
