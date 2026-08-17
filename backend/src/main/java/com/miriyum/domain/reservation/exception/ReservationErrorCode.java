@@ -54,6 +54,21 @@ public enum ReservationErrorCode implements ErrorCode {
             "RESERVATION_010",
             "현재 시간 정책 상태에서 요청한 작업을 수행할 수 없습니다."
     ),
+    CHECK_IN_QR_UNAVAILABLE(
+            HttpStatus.CONFLICT,
+            "RESERVATION_011",
+            "사용할 수 없는 체크인 QR입니다."
+    ),
+    OUTSIDE_CHECK_IN_WINDOW(
+            HttpStatus.CONFLICT,
+            "RESERVATION_012",
+            "현재는 예약 체크인을 완료할 수 없습니다."
+    ),
+    NO_SHOW_TOO_EARLY(
+            HttpStatus.CONFLICT,
+            "RESERVATION_013",
+            "아직 노쇼를 확정할 수 없습니다."
+    ),
     WAITING_SETTING_VERSION_CONFLICT(
             HttpStatus.CONFLICT,
             "WAITING_001",

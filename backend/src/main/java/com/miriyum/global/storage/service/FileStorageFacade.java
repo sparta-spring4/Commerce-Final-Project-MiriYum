@@ -11,6 +11,7 @@ import com.miriyum.global.storage.entity.FileMetadata;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -72,6 +73,14 @@ public class FileStorageFacade {
             throw new IllegalArgumentException("파일 소유자, 목적, 조회 상태는 필수입니다.");
         }
         return transactionExecutor.findPublicMetadata(owner, purpose, statuses);
+    }
+
+    /** 공개 목록 응답에 필요한 URL만 여러 소유자에 대해 한 번에 조회한다. */
+    public Map<FileStorageOwner, String> findConfirmedPublicUrls(
+            Collection<FileStorageOwner> owners,
+            FileStoragePurpose purpose
+    ) {
+        return transactionExecutor.findConfirmedPublicUrls(owners, purpose);
     }
 
     /**

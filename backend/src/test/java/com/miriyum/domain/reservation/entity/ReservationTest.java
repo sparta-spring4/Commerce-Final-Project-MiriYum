@@ -50,6 +50,7 @@ class ReservationTest {
         assertThat(reservation.getCreatedAt()).isEqualTo(CREATED_AT);
         assertThat(reservation.getCancelledAt()).isNull();
         assertThat(reservation.getFulfilledAt()).isNull();
+        assertThat(reservation.getNoShowAt()).isNull();
     }
 
     @Test
@@ -80,6 +81,23 @@ class ReservationTest {
         assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.FULFILLED);
         assertThat(reservation.getFulfilledAt()).isEqualTo(TERMINATED_AT);
         assertThat(reservation.getCancelledAt()).isNull();
+        assertThat(reservation.getNoShowAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("확정 예약을 노쇼 상태로 종결한다")
+    void marksConfirmedReservationNoShow() {
+        // given
+        Reservation reservation = createConfirmedReservation();
+
+        // when
+        reservation.markNoShow(TERMINATED_AT);
+
+        // then
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.NO_SHOW);
+        assertThat(reservation.getNoShowAt()).isEqualTo(TERMINATED_AT);
+        assertThat(reservation.getCancelledAt()).isNull();
+        assertThat(reservation.getFulfilledAt()).isNull();
     }
 
     @Test
@@ -112,6 +130,42 @@ class ReservationTest {
         assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
         assertThat(reservation.getCancelledAt()).isNull();
         assertThat(reservation.getFulfilledAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("예약 생성 이전 시각으로 노쇼 확정할 수 없다")
+    void rejectsNoShowBeforeCreation() {
+        Reservation reservation = createConfirmedReservation();
+
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                reservation.markNoShow(Instant.parse("2026-08-01T00:59:59Z"))
+        );
+
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        assertThat(reservation.getNoShowAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("노쇼 예약은 다른 종결 상태로 바꿀 수 없다")
+    void rejectsTransitionFromNoShow() {
+        Reservation reservation = createConfirmedReservation();
+        reservation.markNoShow(TERMINATED_AT);
+
+        ServiceException fulfillmentFailure = catchThrowableOfType(
+                ServiceException.class,
+                () -> reservation.fulfill(TERMINATED_AT.plusSeconds(60))
+        );
+        ServiceException cancellationFailure = catchThrowableOfType(
+                ServiceException.class,
+                () -> reservation.cancel(TERMINATED_AT.plusSeconds(60))
+        );
+
+        assertThat(fulfillmentFailure.getErrorCode())
+                .isEqualTo(ReservationErrorCode.INVALID_STATE_TRANSITION);
+        assertThat(cancellationFailure.getErrorCode())
+                .isEqualTo(ReservationErrorCode.INVALID_STATE_TRANSITION);
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.NO_SHOW);
+        assertThat(reservation.getNoShowAt()).isEqualTo(TERMINATED_AT);
     }
 
     @Test

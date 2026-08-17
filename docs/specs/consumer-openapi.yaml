@@ -50,6 +50,8 @@ paths:
     $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations"
   /api/v1/consumers/me/reservations/{reservationId}:
     $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations~1{reservationId}"
+  /api/v1/consumers/me/reservations/{reservationId}/check-in-qr-grants:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations~1{reservationId}~1check-in-qr-grants"
   /api/v1/consumers/me/reservations/{reservationId}/cancellations:
     $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations~1{reservationId}~1cancellations"
   /api/v1/consumers/me/reservation-requests/{reservationRequestId}:

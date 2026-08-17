@@ -155,6 +155,27 @@ class StoreReservationControllerTest {
     }
 
     @Test
+    @DisplayName("운영자 예약 목록은 NO_SHOW 상태를 조회 조건으로 전달한다")
+    void acceptsNoShowStoreReservationStatus() throws Exception {
+        authenticateStoreOperator(33L);
+        given(reservationService.getStoreReservations(
+                eq(33L), eq(22L), any(StoreReservationSearchRequest.class)))
+                .willReturn(emptyStoreReservationPage());
+
+        mockMvc.perform(get(BASE_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .param("status", "NO_SHOW"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<StoreReservationSearchRequest> requestCaptor =
+                ArgumentCaptor.forClass(StoreReservationSearchRequest.class);
+        then(reservationService).should()
+                .getStoreReservations(eq(33L), eq(22L), requestCaptor.capture());
+        assertThat(requestCaptor.getValue().status())
+                .isEqualTo(StoreReservationSearchRequest.Status.NO_SHOW);
+    }
+
+    @Test
     @DisplayName("운영자 예약 목록은 Idempotency-Key 없이 조회한다")
     void doesNotRequireIdempotencyKeyForRead() throws Exception {
         // given
