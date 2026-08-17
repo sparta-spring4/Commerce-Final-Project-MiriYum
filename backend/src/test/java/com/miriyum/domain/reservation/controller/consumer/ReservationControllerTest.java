@@ -195,6 +195,39 @@ class ReservationControllerTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"finalizations", "abandonments"})
+    void rejectsMissingDepositCommandBodyAsCommon002(String command) throws Exception {
+        authenticateConsumer(11L);
+        stubPendingDepositCommand(command);
+
+        mockMvc.perform(post(REQUEST_URL + "/" + command)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_002"));
+
+        then(reservationDepositProcessCommandFacade).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"finalizations", "abandonments"})
+    void rejectsUnknownDepositCommandBodyAsCommon002(String command) throws Exception {
+        authenticateConsumer(11L);
+        stubPendingDepositCommand(command);
+
+        mockMvc.perform(post(REQUEST_URL + "/" + command)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"unexpected\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_002"));
+
+        then(reservationDepositProcessCommandFacade).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"", "/finalizations", "/abandonments"})
     void rejectsMissingAuthenticationForEveryDepositRequestRoute(String suffix)
             throws Exception {
@@ -877,6 +910,20 @@ class ReservationControllerTest {
             boolean abandonmentRequested
     ) {
         return requestResponse(status, abandonmentRequested, null);
+    }
+
+    private void stubPendingDepositCommand(String command) {
+        ReservationDepositCommandResult result = ReservationDepositCommandResult.pending(
+                requestResponse(ReservationDepositProcessStatus.AWAITING_PAYMENT, false));
+        if ("finalizations".equals(command)) {
+            given(reservationDepositProcessCommandFacade.finalizeRequest(
+                    eq(11L), eq(901L), any(IdempotencyKey.class)))
+                    .willReturn(result);
+            return;
+        }
+        given(reservationDepositProcessCommandFacade.abandonRequest(
+                eq(11L), eq(901L), any(IdempotencyKey.class)))
+                .willReturn(result);
     }
 
     private ReservationRequestResponse requestResponse(

@@ -63,7 +63,8 @@ public class ReservationController {
     public ResponseEntity<ApiResponse<Object>> finalizeReservationRequest(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable long reservationRequestId,
-            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody EmptyCommandRequest ignoredRequest
     ) {
         ReservationDepositCommandResult result =
                 reservationDepositProcessCommandFacade.finalizeRequest(
@@ -78,7 +79,8 @@ public class ReservationController {
     public ResponseEntity<ApiResponse<Object>> abandonReservationRequest(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable long reservationRequestId,
-            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody EmptyCommandRequest ignoredRequest
     ) {
         ReservationDepositCommandResult result =
                 reservationDepositProcessCommandFacade.abandonRequest(
@@ -87,6 +89,10 @@ public class ReservationController {
                         IdempotencyKey.parse(rawKey));
         return ResponseEntity.status(result.httpStatus())
                 .body(ApiResponse.success("예약금 요청을 포기했습니다.", result.responseData()));
+    }
+
+    /** Required empty JSON object for reservation deposit commands. */
+    public record EmptyCommandRequest() {
     }
 
     /**

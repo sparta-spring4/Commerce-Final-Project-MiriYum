@@ -61,6 +61,7 @@ import com.miriyum.global.exception.ServiceException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.data.domain.PageRequest;
@@ -957,14 +958,20 @@ class ReservationDepositProcessServiceTest {
         verify(finalizationPrimitive, never()).finalizeResources(any());
     }
 
-    @Test
-    void claimedPaidBeforeExpiryFinalizesAsSystemAndCompletesTheLease() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void claimedPaidBeforeExpiryFinalizesAwaitingAndRecoveredProcesses(
+            boolean recovering
+    ) {
         ReservationDepositProcessRepository processRepository =
                 mock(ReservationDepositProcessRepository.class);
         PaymentService paymentService = mock(PaymentService.class);
         ReservationDepositFinalizationPrimitive finalizationPrimitive =
                 mock(ReservationDepositFinalizationPrimitive.class);
         ReservationDepositProcess process = depositProcess();
+        if (recovering) {
+            process.requireRecovery(NOW.minusSeconds(1));
+        }
         long token = process.claimReconciliation(
                 "worker-a",
                 NOW,
@@ -1071,6 +1078,69 @@ class ReservationDepositProcessServiceTest {
         verify(refundRepository).save(any(ReservationDepositRefundObligation.class));
         verify(processRepository).saveAndFlush(process);
         verify(finalizationPrimitive, never()).finalizeResources(any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = PaymentAttemptStatus.class,
+            names = {"FAILED", "CANCELLED"})
+    void claimedReadyFailureAfterStickyAbandonmentReleasesResourcesAndAbandons(
+            PaymentAttemptStatus lastAttemptStatus
+    ) {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
+        ReservationDepositProcess process = depositProcess();
+        process.requestAbandonment(NOW.minusSeconds(2));
+        process.protectResources(NOW.minusSeconds(1));
+        long token = process.claimReconciliation(
+                "worker-a",
+                NOW,
+                NOW.plusSeconds(30));
+        given(processRepository.findByIdForUpdate(PROCESS_ID))
+                .willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willReturn(paymentResult(
+                        PaymentStatus.READY,
+                        lastAttemptStatus,
+                        null));
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                mock(ReservationDepositCauseAuditRepository.class),
+                mock(ReservationDepositRefundObligationRepository.class),
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                mock(ReservationMenuHoldPort.class),
+                Clock.fixed(NOW, ZoneId.of("UTC")),
+                Duration.ofSeconds(30),
+                Duration.ofSeconds(5));
+
+        boolean processed = service.reconcileClaimed(
+                new ReservationDepositProcessService.Claim(
+                        PROCESS_ID,
+                        "worker-a",
+                        token));
+
+        assertThat(processed).isTrue();
+        assertThat(process.getStatus())
+                .isEqualTo(ReservationDepositProcessStatus.ABANDONED);
+        assertThat(process.getReconciliationLeaseOwner()).isNull();
+        verify(holdTransitionPrimitive).transition(
+                new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.RELEASED,
+                        "reservation-deposit-worker-abandon:99",
+                        "SYSTEM",
+                        null,
+                        NOW,
+                        null));
+        verify(finalizationPrimitive, never()).finalizeResources(any());
+        verify(processRepository).saveAndFlush(process);
     }
 
     @ParameterizedTest

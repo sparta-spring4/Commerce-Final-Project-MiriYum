@@ -258,6 +258,9 @@ public class ReservationDepositProcessService {
             return true;
         }
         requireSamePayment(process, payment);
+        if (process.getStatus() == ReservationDepositProcessStatus.RECOVERY_REQUIRED) {
+            process.resumePaymentReconciliation(now);
+        }
         if (payment.status() == PaymentStatus.PAID
                 && payment.paidAt() != null
                 && payment.paidAt().isBefore(process.getExpiresAt())
@@ -305,6 +308,23 @@ public class ReservationDepositProcessService {
                             : "PAYMENT_PAID_AT_OR_AFTER_EXPIRY";
             requireCompensationRecords(process, payment, now, causeCode);
             process.requireCompensation(now);
+            process.completeReconciliationClaim(
+                    claim.owner(), claim.token(), now);
+            processRepository.saveAndFlush(process);
+            return true;
+        }
+        if (payment.status() == PaymentStatus.READY
+                && process.isAbandonmentRequested()) {
+            holdTransitionPrimitive.transition(
+                    new ReservationHoldContracts.TransitionCommand(
+                            process.getReservationHoldId(),
+                            ReservationHoldStatus.RELEASED,
+                            "reservation-deposit-worker-abandon:" + process.getId(),
+                            "SYSTEM",
+                            null,
+                            now,
+                            null));
+            process.abandon(now);
             process.completeReconciliationClaim(
                     claim.owner(), claim.token(), now);
             processRepository.saveAndFlush(process);

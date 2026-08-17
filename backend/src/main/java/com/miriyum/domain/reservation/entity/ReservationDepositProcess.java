@@ -273,6 +273,15 @@ public class ReservationDepositProcess {
         status = ReservationDepositProcessStatus.RECOVERY_REQUIRED;
     }
 
+    /** Returns a payment-not-found recovery claim to normal payment reconciliation. */
+    public void resumePaymentReconciliation(Instant resumedAt) {
+        requireTime(resumedAt);
+        if (status != ReservationDepositProcessStatus.RECOVERY_REQUIRED) {
+            throw invalidTransition();
+        }
+        status = ReservationDepositProcessStatus.AWAITING_PAYMENT;
+    }
+
     /** Stops payment polling when recovery is owned by a terminal refund reconciliation. */
     public void suspendReconciliation() {
         if (status != ReservationDepositProcessStatus.RECOVERY_REQUIRED) {

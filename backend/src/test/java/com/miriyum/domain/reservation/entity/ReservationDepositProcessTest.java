@@ -62,6 +62,21 @@ class ReservationDepositProcessTest {
     }
 
     @Test
+    void paymentRecoveryResumesAwaitingPaymentWithoutDroppingStickyEvidence() {
+        ReservationDepositProcess process = newProcess();
+        process.requestAbandonment(CREATED_AT.plusSeconds(1));
+        process.protectResources(CREATED_AT.plusSeconds(2));
+        process.requireRecovery(CREATED_AT.plusSeconds(3));
+
+        process.resumePaymentReconciliation(CREATED_AT.plusSeconds(4));
+
+        assertThat(process.getStatus())
+                .isEqualTo(ReservationDepositProcessStatus.AWAITING_PAYMENT);
+        assertThat(process.isAbandonmentRequested()).isTrue();
+        assertThat(process.isResourcesProtected()).isTrue();
+    }
+
+    @Test
     void completedProcessRejectsAbandonment() {
         ReservationDepositProcess process = newProcess();
         process.beginFinalization(CREATED_AT.plusSeconds(1));
