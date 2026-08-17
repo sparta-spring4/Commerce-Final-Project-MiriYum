@@ -218,6 +218,23 @@ describe('예약 처리', () => {
     expect(screen.queryByLabelText('취소 사유')).not.toBeInTheDocument()
   })
 
+  it('노쇼는 서버가 확정하는 상태라 처리 명령을 열지 않는다', async () => {
+    // 계약상 NO_SHOW는 startAt + 5분에 서버가 원자 확정한다. 운영자가 누르는
+    // 상태가 아니므로 버튼을 만들면 눌러도 거절되는 행동을 약속하게 된다.
+    server.use(
+      authenticatedOperator(),
+      http.get(DETAIL_PATH, () => successResponse(detail({ status: 'NO_SHOW' }))),
+    )
+
+    renderPage()
+
+    expect(await screen.findByText('이미 노쇼 상태입니다.')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '방문 완료 처리' }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('취소 사유')).not.toBeInTheDocument()
+  })
+
   it('상태 전이 충돌은 목록을 다시 조회하도록 안내한다', async () => {
     server.use(
       authenticatedOperator(),

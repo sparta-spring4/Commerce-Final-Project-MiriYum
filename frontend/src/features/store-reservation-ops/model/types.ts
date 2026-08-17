@@ -30,16 +30,25 @@ export type ReservationSort =
   | 'createdAt,asc'
   | 'createdAt,desc'
 
+/**
+ * 예약 상태 문구.
+ *
+ * `NO_SHOW`는 운영자가 누르는 상태가 아니다. 서버가 `startAt + 5분`에 미방문을
+ * 원자 확정하며, 이 화면에는 결과만 내려온다. 그래서 처리 패널에 버튼을 만들지
+ * 않고 목록·상세의 표시와 필터에만 넣는다.
+ */
 export const RESERVATION_STATUS_LABEL: Record<ReservationStatus, string> = {
   CONFIRMED: '예약 확정',
   CANCELLED: '취소됨',
   FULFILLED: '방문 완료',
+  NO_SHOW: '노쇼',
 }
 
 export const RESERVATION_STATUSES: readonly ReservationStatus[] = [
   'CONFIRMED',
   'CANCELLED',
   'FULFILLED',
+  'NO_SHOW',
 ]
 
 export const RESERVATION_SORT_LABEL: Record<ReservationSort, string> = {

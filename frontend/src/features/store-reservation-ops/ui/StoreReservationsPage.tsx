@@ -251,11 +251,23 @@ function formatInStoreZone(isoDateTime: string, timeZoneId: string | null): stri
   return formatter.format(instant)
 }
 
-function statusTone(
+/**
+ * 상태 색.
+ *
+ * 취소와 노쇼는 예약이 성사되지 않은 결과라 같은 계열로 묶는다. 방문 완료는
+ * 종결이지만 정상 결과이므로 중립으로 둔다. 색은 보조 신호이고 의미는 항상
+ * 뱃지 안의 문구가 전달한다.
+ */
+export function statusTone(
   status: ReservationStatus,
 ): 'positive' | 'negative' | 'neutral' {
-  if (status === 'CONFIRMED') {
-    return 'positive'
+  switch (status) {
+    case 'CONFIRMED':
+      return 'positive'
+    case 'CANCELLED':
+    case 'NO_SHOW':
+      return 'negative'
+    case 'FULFILLED':
+      return 'neutral'
   }
-  return status === 'CANCELLED' ? 'negative' : 'neutral'
 }

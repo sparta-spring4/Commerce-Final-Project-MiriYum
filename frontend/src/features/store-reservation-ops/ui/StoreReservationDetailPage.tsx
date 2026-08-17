@@ -11,6 +11,7 @@ import {
 import { useStoreReservation } from '../api/queries'
 import { reservationOpsErrorMessage } from '../model/errors'
 import { ReservationCommandPanel } from './ReservationCommandPanel'
+import { statusTone } from './StoreReservationsPage'
 import {
   CANCELLED_BY_LABEL,
   RESERVATION_STATUS_LABEL,
@@ -83,15 +84,9 @@ function ReservationFacts({
     <div className="op-stack">
       <SectionCard title={`예약 ${reservation.reservationId}`}>
         <p className="op-section__hint">
-          <Badge
-            tone={
-              reservation.status === 'CONFIRMED'
-                ? 'positive'
-                : reservation.status === 'CANCELLED'
-                  ? 'negative'
-                  : 'neutral'
-            }
-          >
+          {/* 색 판정은 목록과 같은 함수를 쓴다. 두 화면이 갈라지면 같은 상태가
+              다른 색으로 보인다. */}
+          <Badge tone={statusTone(reservation.status)}>
             {RESERVATION_STATUS_LABEL[reservation.status]}
           </Badge>
         </p>

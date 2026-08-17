@@ -113,6 +113,36 @@ describe('매장 예약 목록 화면', () => {
     })
   })
 
+  it('노쇼도 상태 필터로 조회할 수 있다', async () => {
+    // 서버가 확정하는 상태지만 운영자는 결과를 찾아봐야 한다.
+    const requests: string[] = []
+    server.use(
+      authenticatedOperator(),
+      http.get(RESERVATIONS_PATH, ({ request }) => {
+        requests.push(new URL(request.url).search)
+        return successResponse(page([summary({ status: 'NO_SHOW' })]))
+      }),
+    )
+
+    renderPage()
+    await waitFor(() => expect(requests).toHaveLength(1))
+
+    fireEvent.change(screen.getByLabelText('예약 상태'), {
+      target: { value: 'NO_SHOW' },
+    })
+
+    await waitFor(() =>
+      expect(requests[requests.length - 1]).toContain('status=NO_SHOW'),
+    )
+
+    // 같은 문구가 상태 선택 상자의 option에도 있다. 표의 행에서 찾는다.
+    const row = (await screen.findByRole('rowheader', { name: '901' })).closest(
+      'tr',
+    )
+    expect(row).not.toBeNull()
+    expect(within(row as HTMLElement).getByText('노쇼')).toBeInTheDocument()
+  })
+
   it('페이지를 넘기면 0 기반 page를 보낸다', async () => {
     const requests: string[] = []
     server.use(
