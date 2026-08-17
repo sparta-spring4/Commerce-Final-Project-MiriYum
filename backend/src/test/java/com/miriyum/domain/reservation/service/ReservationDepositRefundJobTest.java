@@ -221,7 +221,7 @@ class ReservationDepositRefundJobTest {
     }
 
     @Test
-    void requeuesExplicitFailedRefundResult() {
+    void isolatesExplicitFailedRefundResultForRecovery() {
         ReservationDepositRefundService refundService =
                 mock(ReservationDepositRefundService.class);
         PaymentService paymentService = mock(PaymentService.class);
@@ -258,13 +258,15 @@ class ReservationDepositRefundJobTest {
                 Instant.parse("2026-08-16T12:00:01Z"));
         given(refundService.claimDue("worker-a", 10)).willReturn(List.of(claim));
         given(paymentService.requestRefund(command)).willReturn(failed);
-        given(refundService.recordRetryableFailure(claim, RETRY_DELAY)).willReturn(true);
+        given(refundService.recordReconciliationRequired(claim, failed)).willReturn(true);
         ReservationDepositRefundJob job = new ReservationDepositRefundJob(
                 refundService, paymentService);
 
         assertThat(job.runOnce("worker-a", 10)).isZero();
 
-        then(refundService).should().recordRetryableFailure(claim, RETRY_DELAY);
+        then(refundService).should().claimDue("worker-a", 10);
+        then(refundService).should().recordReconciliationRequired(claim, failed);
+        then(refundService).shouldHaveNoMoreInteractions();
     }
 
     @ParameterizedTest

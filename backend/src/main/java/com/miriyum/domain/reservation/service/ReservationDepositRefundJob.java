@@ -80,9 +80,9 @@ public class ReservationDepositRefundJob {
                 continue;
             }
             switch (refund.status()) {
-                case REQUESTED, VALIDATING, PROCESSING, FAILED ->
+                case REQUESTED, VALIDATING, PROCESSING ->
                         refundService.recordRetryableFailure(claim, RETRY_DELAY);
-                case RECONCILIATION_REQUIRED ->
+                case FAILED, RECONCILIATION_REQUIRED ->
                         refundService.recordReconciliationRequired(claim, refund);
                 case COMPLETED -> {
                     if (refundService.recordCompleted(claim, refund)) {

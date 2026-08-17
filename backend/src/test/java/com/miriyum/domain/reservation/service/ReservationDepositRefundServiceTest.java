@@ -25,6 +25,8 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -167,8 +169,13 @@ class ReservationDepositRefundServiceTest {
         verify(processRepository, never()).findByIdForUpdate(99L);
     }
 
-    @Test
-    void unknownRefundResultRequiresReconciliationForObligationAndProcess() {
+    @ParameterizedTest
+    @EnumSource(
+            value = RefundStatus.class,
+            names = {"FAILED", "RECONCILIATION_REQUIRED"})
+    void recoveryRequiredRefundResultIsolatesObligationAndProcess(
+            RefundStatus recoveryStatus
+    ) {
         ReservationDepositRefundObligationRepository refundRepository =
                 mock(ReservationDepositRefundObligationRepository.class);
         ReservationDepositProcessRepository processRepository =
@@ -198,7 +205,7 @@ class ReservationDepositRefundServiceTest {
                 0L,
                 4_000L,
                 "KRW",
-                RefundStatus.RECONCILIATION_REQUIRED,
+                recoveryStatus,
                 NOW.minusSeconds(1),
                 null);
         given(refundRepository.findByIdForUpdate(501L))

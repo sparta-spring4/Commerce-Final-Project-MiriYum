@@ -150,11 +150,13 @@ public class ReservationDepositRefundService {
         if (claim == null || refund == null) {
             throw new IllegalArgumentException("claim and refund are required");
         }
-        if (refund.status() != RefundStatus.RECONCILIATION_REQUIRED
+        if ((refund.status() != RefundStatus.FAILED
+                && refund.status() != RefundStatus.RECONCILIATION_REQUIRED)
                 || !claim.paymentId().equals(refund.paymentId())
                 || claim.refundAmountMinor() != refund.requestedAmountMinor()
                 || !claim.currency().equals(refund.currency())) {
-            throw new IllegalStateException("unknown refund does not match obligation");
+            throw new IllegalStateException(
+                    "recovery-required refund does not match obligation");
         }
         Instant now = clock.instant();
         ReservationDepositRefundObligation obligation = refundRepository

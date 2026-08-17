@@ -231,6 +231,26 @@ class ReservationDepositRefundRuntimeIT {
                 fixture.processId())).isEqualTo("COMPENSATED");
     }
 
+    @Test
+    void explicitFailedRefundIsIsolatedAndNotClaimedAgain() {
+        Fixture fixture = createRefundRequiredFixture();
+        when(paymentService.requestRefund(any(RequestRefundCommand.class)))
+                .thenReturn(failedRefund());
+
+        assertThat(refundJob.runOnce("refund-worker-a", 10)).isZero();
+
+        assertThat(statusOf("reservation_deposit_refund_obligations",
+                "reservation_deposit_refund_obligation_id",
+                fixture.obligationId())).isEqualTo("RECONCILIATION_REQUIRED");
+        assertThat(statusOf("reservation_deposit_processes",
+                "reservation_deposit_process_id",
+                fixture.processId())).isEqualTo("RECOVERY_REQUIRED");
+        clock.advance(Duration.ofSeconds(30));
+
+        assertThat(refundJob.runOnce("refund-worker-b", 10)).isZero();
+        verify(paymentService, times(1)).requestRefund(any(RequestRefundCommand.class));
+    }
+
     private Fixture createRefundRequiredFixture() {
         seedHoldOwnerAndStore();
         Instant expiresAt = NOW.plusSeconds(600);
@@ -284,6 +304,20 @@ class ReservationDepositRefundRuntimeIT {
                 0L,
                 "KRW",
                 RefundStatus.COMPLETED,
+                NOW,
+                clock.instant());
+    }
+
+    private RefundResult failedRefund() {
+        return new RefundResult(
+                "refund-7001",
+                PAYMENT_ID,
+                4_000L,
+                0L,
+                0L,
+                4_000L,
+                "KRW",
+                RefundStatus.FAILED,
                 NOW,
                 clock.instant());
     }
