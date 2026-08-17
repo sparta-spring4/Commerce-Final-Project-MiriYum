@@ -133,6 +133,9 @@ public class Store extends BaseEntity {
     @Column(name = "pickup_enabled", nullable = false)
     private boolean pickupEnabled;
 
+    @Column(name = "platform_management_allowed", nullable = false)
+    private boolean platformManagementAllowed;
+
     @Column(name = "applicant_self_attested_at", nullable = false)
     private LocalDateTime applicantSelfAttestedAt;
 
@@ -173,6 +176,7 @@ public class Store extends BaseEntity {
         this.reservationEnabled = reservationEnabled;
         this.menuHoldEnabled = menuHoldEnabled;
         this.pickupEnabled = pickupEnabled;
+        this.platformManagementAllowed = true;
         this.timeZoneId = timeZoneId;
         this.dashboardAuthorityVersion = 1L;
         this.applicantSelfAttestedAt = onboardingAcceptedAt;
@@ -404,6 +408,27 @@ public class Store extends BaseEntity {
      */
     public void close() {
         this.operationStatus = OperationStatus.CLOSED;
+    }
+
+    /** 플랫폼 제재 port가 잠금·version 검증 후 계산한 Store 정본 상태를 반영한다. */
+    public void applyPlatformEnforcement(
+            OperationStatus operationStatus,
+            boolean reservationEnabled,
+            boolean menuHoldEnabled,
+            boolean pickupEnabled,
+            boolean platformManagementAllowed
+    ) {
+        this.operationStatus = Objects.requireNonNull(operationStatus, "operation status is required");
+        this.reservationEnabled = reservationEnabled;
+        this.menuHoldEnabled = menuHoldEnabled;
+        this.pickupEnabled = pickupEnabled;
+        this.platformManagementAllowed = platformManagementAllowed;
+    }
+
+    public void requirePlatformManagementAllowed() {
+        if (!platformManagementAllowed) {
+            throw new ServiceException(StoreErrorCode.STORE_FEATURE_RESTRICTED);
+        }
     }
 
     public void requireManagedBy(long operatorAccountId) {

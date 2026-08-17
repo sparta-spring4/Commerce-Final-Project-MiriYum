@@ -140,7 +140,7 @@ Issue #270은 혼합 방식을 채택한다. 범용 Kafka/Outbox나 새 사용�
 
 ## Migration과 exact allowlist
 
-현재 `dev`의 마지막 migration은 #388로 병합된 V51이다. 가장 나중에 병합할 #270은 사용자 지정 규칙인 최신 `dev` migration 최댓값의 `+1`에 따라 `V52__create_dashboard_analytics_snapshots.sql`을 사용한다. #270 병합 직전에 다시 최신 최댓값의 `+1`인지 확인하고 전체 순서를 검증한다.
+현재 `dev`의 마지막 migration은 #382로 병합된 V53이다. 가장 나중에 병합할 #270은 사용자 지정 규칙인 최신 `dev` migration 최댓값의 `+1`에 따라 `V54__create_dashboard_analytics_snapshots.sql`을 사용한다. #270 병합 직전에 다시 최신 최댓값의 `+1`인지 확인하고 전체 순서를 검증한다.
 
 ### 이번 contract-first 변경 허용 경로
 
@@ -155,7 +155,7 @@ Issue #270은 혼합 방식을 채택한다. 범용 Kafka/Outbox나 새 사용�
 
 ### 향후 runtime production exact allowlist
 
-- Create: `backend/src/main/resources/db/migration/V52__create_dashboard_analytics_snapshots.sql`
+- Create: `backend/src/main/resources/db/migration/V54__create_dashboard_analytics_snapshots.sql`
 - Create: `backend/src/main/java/com/miriyum/domain/store/dto/contract/StoreDashboardAuthority.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/store/entity/Store.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/store/service/StoreService.java`
@@ -217,7 +217,7 @@ Issue #270은 혼합 방식을 채택한다. 범용 Kafka/Outbox나 새 사용�
 | Waiting 통계 source | 구현 완료 | focused asOf 집계/CI 검증 통과 |
 | 예약 확정 노쇼 | #240/PR #394 병합 완료 | Reservation 공개 DTO·asOf 집계와 MySQL consumer 테스트 승인 |
 | 예약 노쇼 후보 | #240 제외 범위 | #240 범위 변경 또는 별도 producer Issue 병합 |
-| V52 | 최신 dev에 Waiting auto-open V51이 병합되어 현재 최댓값 + 1 | Issue #270 병합 직전 다시 재확인 |
+| V54 | 최신 dev에 Store sanctions V53이 병합되어 현재 최댓값 + 1 | Issue #270 병합 직전 다시 재확인 |
 
 노쇼 차단은 나머지 다섯 지표와 Waiting 확정 미응답의 contract/runtime 구현을 막지 않는다. 다만 누락 source를 0 또는 `COMPLETE`로 반환하는 구현은 금지한다.
 

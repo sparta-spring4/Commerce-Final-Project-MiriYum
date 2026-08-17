@@ -6,11 +6,11 @@
 
 **Architecture:** Store authenticates and returns a versioned authority DTO. Reservation and Waiting aggregate only their own tables behind public Service/DTO boundaries. Analytics captures one `asOf`, calls those contracts independently, maps failures per metric, and atomically publishes one snapshot header plus six metric cells; it never imports foreign Entity or Repository types.
 
-**Tech Stack:** Java 21, Spring Boot 4.1, Spring Data JPA, MySQL 8, Flyway V52, JUnit 5, AssertJ, Testcontainers, Spring MVC tests, OpenAPI 3.1, Redocly CLI 2.35.1.
+**Tech Stack:** Java 21, Spring Boot 4.1, Spring Data JPA, MySQL 8, Flyway V54, JUnit 5, AssertJ, Testcontainers, Spring MVC tests, OpenAPI 3.1, Redocly CLI 2.35.1.
 
 ## Global Constraints
 
-- Waiting auto-open V51 is on `dev`. #270 uses V52 under the explicit latest-`dev`-max-plus-one rule; verify it remains latest `dev` max + 1 before the final merge and verify the complete clean and upgrade paths.
+- Store sanctions V53 is on `dev`. #270 uses V54 under the explicit latest-`dev`-max-plus-one rule; verify it remains latest `dev` max + 1 before the final merge and verify the complete clean and upgrade paths.
 - Do not consume Reservation or Waiting Entity/Repository classes from `com.miriyum.domain.analytics`.
 - Capture one `Instant generatedAt`, truncate it to a UTC one-minute `asOf`, and require every source DTO and every output metric to contain that exact `asOf`.
 - `value=0` is a measured zero; missing, delayed, quarantined, or invalid-denominator input uses null with a non-COMPLETE status and reason.
@@ -21,10 +21,10 @@
 
 ---
 
-### Task 1: Reserve V52 and version Store dashboard authority
+### Task 1: Reserve V54 and version Store dashboard authority
 
 **Files:**
-- Create: `backend/src/main/resources/db/migration/V52__create_dashboard_analytics_snapshots.sql`
+- Create: `backend/src/main/resources/db/migration/V54__create_dashboard_analytics_snapshots.sql`
 - Create: `backend/src/main/java/com/miriyum/domain/store/dto/contract/StoreDashboardAuthority.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/store/entity/Store.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/store/service/StoreService.java`
@@ -69,7 +69,7 @@ Expected: compile failure because `StoreDashboardAuthority` and `requireDashboar
 
 ```java
 @Test
-void v52CreatesAuthorityVersionAndAtomicMetricKeys() {
+void v54CreatesAuthorityVersionAndAtomicMetricKeys() {
     assertThat(column("stores", "dashboard_authority_version")).isNotNull();
     assertThat(uniqueColumns("dashboard_analytics_snapshots"))
             .containsExactly("store_id", "business_date", "as_of", "store_authority_version");
@@ -86,9 +86,9 @@ Run:
 .\gradlew.bat integrationTest --tests com.miriyum.domain.analytics.repository.DashboardAnalyticsMigrationTest --console=plain
 ```
 
-Expected: FAIL because V52 and its tables/column do not exist.
+Expected: FAIL because V54 and its tables/column do not exist.
 
-- [ ] **Step 5: Implement V52 and the authority contract**
+- [ ] **Step 5: Implement V54 and the authority contract**
 
 Add `stores.dashboard_authority_version BIGINT NOT NULL DEFAULT 1` with a positive check and `reservation_capacity_buckets.policy_published_at` as the durable capacity-policy effectivity boundary. Create `dashboard_analytics_snapshots` and `dashboard_analytics_metric_snapshots` with the exact unique keys above, FK metric rows to the header with `ON DELETE CASCADE`, CHECK constraints for versions and enum strings, JSON metric payload, nullable source fields, and no consumer/reservation/waiting identifiers.
 
@@ -116,7 +116,7 @@ Run the two commands from Steps 2 and 4. Expected: PASS.
 - [ ] **Step 7: Commit the authority and schema slice**
 
 ```powershell
-git add -- backend/src/main/resources/db/migration/V52__create_dashboard_analytics_snapshots.sql backend/src/main/java/com/miriyum/domain/store backend/src/test/java/com/miriyum/domain/store backend/src/test/java/com/miriyum/domain/analytics/repository/DashboardAnalyticsMigrationTest.java
+git add -- backend/src/main/resources/db/migration/V54__create_dashboard_analytics_snapshots.sql backend/src/main/java/com/miriyum/domain/store backend/src/test/java/com/miriyum/domain/store backend/src/test/java/com/miriyum/domain/analytics/repository/DashboardAnalyticsMigrationTest.java
 git commit -m "feat(analytics): version dashboard authority and snapshot schema"
 ```
 

@@ -17,6 +17,8 @@ apis:
     root: docs/specs/analytics/openapi.yaml
   platform-operator-management-audit:
     root: docs/specs/platform-operator-management-audit/openapi.yaml
+  admin-store:
+    root: docs/specs/admin-store/openapi.yaml
 extends:
   - recommended-strict
 telemetry: off

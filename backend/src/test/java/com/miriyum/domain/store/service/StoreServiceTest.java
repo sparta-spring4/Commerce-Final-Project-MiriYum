@@ -7,6 +7,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 
 import com.miriyum.domain.store.dto.contract.StoreDashboardAuthority;
@@ -98,6 +99,9 @@ class StoreServiceTest {
     private StoreGeocodingPort geocodingPort;
 
     @Mock
+    private StoreAdministrationService storeAdministrationService;
+
+    @Mock
     private StoreCommandTransactionExecutor transactionExecutor;
 
     private ObjectMapper objectMapper;
@@ -126,9 +130,11 @@ class StoreServiceTest {
                 transactionExecutor,
                 idempotencyExecutor,
                 objectMapper,
-                FIXED_CLOCK);
+                FIXED_CLOCK,
+                storeAdministrationService);
         menuTransactionFacade = new MenuTransactionFacade(
-                new StoreTransactionEligibilityService(storeRepository),
+                new StoreTransactionEligibilityService(
+                        storeRepository, mock(StoreAdministrationService.class)),
                 menuRepository);
     }
 
