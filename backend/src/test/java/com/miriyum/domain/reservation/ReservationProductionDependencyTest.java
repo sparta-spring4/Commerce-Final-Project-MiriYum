@@ -106,12 +106,14 @@ class ReservationProductionDependencyTest {
                 long.class,
                 String.class,
                 Instant.class,
+                Instant.class,
                 Instant.class).getReturnType())
                 .isEqualTo(Optional.class);
         assertThat(WaitingOperatingIntervalService.class.getMethod(
                 "lockCurrentWaitingOperatingIntervals",
                 long.class,
-                LocalDate.class).getReturnType())
+                LocalDate.class,
+                Instant.class).getReturnType())
                 .isEqualTo(List.class);
         assertThat(WaitingOperatingIntervalPort.class.getMethod(
                 "findUpcoming", Set.class, Instant.class, Instant.class).getReturnType())
@@ -121,10 +123,11 @@ class ReservationProductionDependencyTest {
                 long.class,
                 String.class,
                 Instant.class,
+                Instant.class,
                 Instant.class).getReturnType())
                 .isEqualTo(Optional.class);
         assertThat(WaitingOperatingIntervalPort.class.getMethod(
-                "lockCurrent", long.class, LocalDate.class).getReturnType())
+                "lockCurrent", long.class, LocalDate.class, Instant.class).getReturnType())
                 .isEqualTo(List.class);
         assertThat(WaitingOperatingIntervalPort.class)
                 .isAssignableFrom(StoreScheduleWaitingOperatingIntervalAdapter.class);
