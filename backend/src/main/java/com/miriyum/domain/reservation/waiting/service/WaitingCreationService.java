@@ -19,8 +19,8 @@ import com.miriyum.domain.reservation.waiting.repository.WaitingSettingRepositor
 import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
-import com.miriyum.global.exception.ServiceException;
 import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
+import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
@@ -51,7 +51,7 @@ public class WaitingCreationService {
     private final WaitingActiveMembershipRepository membershipRepository;
     private final WaitingTransitionAuditRepository auditRepository;
     private final WaitingStatusEventRepository eventRepository;
-    private final WaitingSettingRepository settingRepository;
+    private final ReceptionCheck receptionCheck;
     private final IdempotencyExecutor idempotencyExecutor;
     private final WaitingCreationTransactionExecutor transactionExecutor;
     private final StoreTransactionEligibilityService storeEligibility;
@@ -61,6 +61,9 @@ public class WaitingCreationService {
     private final RetrySleeper retrySleeper;
 
     @FunctionalInterface interface RetrySleeper { void sleep(long millis) throws InterruptedException; }
+    @FunctionalInterface interface ReceptionCheck {
+        void requireOpen(long storeId, LocalDate businessDate, Instant now);
+    }
 
     @Autowired
     public WaitingCreationService(
@@ -69,7 +72,7 @@ public class WaitingCreationService {
             WaitingActiveMembershipRepository membershipRepository,
             WaitingTransitionAuditRepository auditRepository,
             WaitingStatusEventRepository eventRepository,
-            WaitingSettingRepository settingRepository,
+            WaitingReceptionGate receptionGate,
             IdempotencyExecutor idempotencyExecutor,
             WaitingCreationTransactionExecutor transactionExecutor,
             StoreTransactionEligibilityService storeEligibility,
@@ -77,7 +80,7 @@ public class WaitingCreationService {
             Clock clock
     ) {
         this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
-                eventRepository, settingRepository, idempotencyExecutor, transactionExecutor,
+                eventRepository, receptionGate::requireOpen, idempotencyExecutor, transactionExecutor,
                 storeEligibility,
                 objectMapper, clock,
                 WaitingCreationService::defaultDelayMillis, Thread::sleep);
@@ -86,17 +89,44 @@ public class WaitingCreationService {
     WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
             WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
             WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
+            WaitingReceptionGate receptionGate,
+            IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
+            StoreTransactionEligibilityService storeEligibility,
+            ObjectMapper objectMapper, Clock clock, IntToLongFunction retryDelayMillis,
+            RetrySleeper retrySleeper) {
+        this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
+                eventRepository, receptionGate::requireOpen, idempotencyExecutor,
+                transactionExecutor, storeEligibility, objectMapper, clock, retryDelayMillis, retrySleeper);
+    }
+
+    /** 기존 failure-classifier 단위 테스트의 생성자 호환 전용 경로다. */
+    WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
+            WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
             WaitingSettingRepository settingRepository,
             IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
             StoreTransactionEligibilityService storeEligibility, ObjectMapper objectMapper,
             Clock clock, IntToLongFunction retryDelayMillis,
+            RetrySleeper retrySleeper) {
+        this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
+                eventRepository, legacyReceptionCheck(settingRepository), idempotencyExecutor,
+                transactionExecutor, storeEligibility, objectMapper, clock, retryDelayMillis, retrySleeper);
+    }
+
+    private WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
+            WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
+            ReceptionCheck receptionCheck,
+            IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
+            StoreTransactionEligibilityService storeEligibility,
+            ObjectMapper objectMapper, Clock clock, IntToLongFunction retryDelayMillis,
             RetrySleeper retrySleeper) {
         this.sequenceRepository = Objects.requireNonNull(sequenceRepository);
         this.teamRepository = Objects.requireNonNull(teamRepository);
         this.membershipRepository = Objects.requireNonNull(membershipRepository);
         this.auditRepository = Objects.requireNonNull(auditRepository);
         this.eventRepository = Objects.requireNonNull(eventRepository);
-        this.settingRepository = Objects.requireNonNull(settingRepository);
+        this.receptionCheck = Objects.requireNonNull(receptionCheck);
         this.idempotencyExecutor = Objects.requireNonNull(idempotencyExecutor);
         this.transactionExecutor = Objects.requireNonNull(transactionExecutor);
         this.storeEligibility = Objects.requireNonNull(storeEligibility);
@@ -159,12 +189,8 @@ public class WaitingCreationService {
         return transactionExecutor.execute(() -> {
             IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
                     storeEligibility.requireWaitingTransactionEligibility(storeId);
-                    WaitingSetting setting = settingRepository.findByStoreIdForUpdate(storeId)
-                            .orElseThrow(WaitingCreationService::receptionClosed);
-                    if (!setting.isEnabled()
-                            || setting.getReceptionMode() == WaitingReceptionMode.PAUSED) {
-                        throw receptionClosed();
-                    }
+                    Instant eligibilityAt = clock.instant();
+                    receptionCheck.requireOpen(storeId, businessDate, eligibilityAt);
                     if (membershipRepository.findByConsumerAccountId(consumerAccountId).isPresent()) {
                         throw membershipConflict();
                     }
@@ -254,5 +280,17 @@ public class WaitingCreationService {
 
     private static ServiceException receptionClosed() {
         return new ServiceException(ReservationErrorCode.WAITING_RECEPTION_CLOSED);
+    }
+
+    private static ReceptionCheck legacyReceptionCheck(WaitingSettingRepository repository) {
+        Objects.requireNonNull(repository);
+        return (storeId, businessDate, now) -> {
+            WaitingSetting setting = repository.findByStoreIdForUpdate(storeId)
+                    .orElseThrow(WaitingCreationService::receptionClosed);
+            if (!setting.isEnabled()
+                    || setting.getReceptionMode() == WaitingReceptionMode.PAUSED) {
+                throw receptionClosed();
+            }
+        };
     }
 }

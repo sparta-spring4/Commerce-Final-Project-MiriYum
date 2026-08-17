@@ -2,6 +2,8 @@ package com.miriyum.domain.reservation.waiting.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -114,9 +116,13 @@ class WaitingLedgerConcurrencyIT {
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager transactionManager;
     @MockitoBean PaymentProviderClient providerClient;
+    @MockitoBean WaitingOperatingIntervalPort intervalPort;
 
     @BeforeEach
     void clean() {
+        when(intervalPort.lockCurrent(anyLong(), any(LocalDate.class), any(Instant.class)))
+                .thenAnswer(invocation -> List.of(openInterval(
+                        invocation.getArgument(0), invocation.getArgument(1))));
         for (String table : new String[]{"waiting_conversion_compensations",
                 "payment_webhook_receipts", "payment_ledger_entries", "payment_refunds",
                 "payment_attempts", "payments",
@@ -828,6 +834,17 @@ class WaitingLedgerConcurrencyIT {
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();
         insertWaitingSetting(storeId, true, "MANUAL", 1L);
         return storeId;
+    }
+
+    private WaitingOperatingInterval openInterval(long storeId, LocalDate businessDate) {
+        return new WaitingOperatingInterval(
+                storeId,
+                "ledger-concurrency-" + storeId,
+                1L,
+                businessDate,
+                businessDate.atStartOfDay(java.time.ZoneId.of("Asia/Seoul")).toInstant(),
+                Instant.now().plus(Duration.ofHours(1)),
+                "Asia/Seoul");
     }
 
     private void insertWaitingSetting(long storeId, boolean enabled, String mode, long version) {
