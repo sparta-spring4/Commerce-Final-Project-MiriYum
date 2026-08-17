@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.willThrow;
 
 import com.miriyum.domain.store.dto.contract.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.dto.contract.StoreReservationTransactionEligibility;
@@ -33,11 +34,15 @@ class StoreTransactionEligibilityServiceTest {
     @Mock
     private StoreRepository storeRepository;
 
+    @Mock
+    private StoreAdministrationService storeAdministrationService;
+
     private StoreTransactionEligibilityService eligibilityService;
 
     @BeforeEach
     void setUp() {
-        eligibilityService = new StoreTransactionEligibilityService(storeRepository);
+        eligibilityService = new StoreTransactionEligibilityService(
+                storeRepository, storeAdministrationService);
     }
 
     @Test
@@ -94,6 +99,21 @@ class StoreTransactionEligibilityServiceTest {
     }
 
     @Test
+    void reservationEligibilityRejectsActiveReservationRestriction() {
+        given(storeRepository.findByIdForUpdate(STORE_ID))
+                .willReturn(Optional.of(eligibleStore(true, true)));
+        willThrow(new ServiceException(StoreErrorCode.STORE_FEATURE_RESTRICTED))
+                .given(storeAdministrationService)
+                .requireFeatureAllowed(STORE_ID,
+                        com.miriyum.domain.store.dto.administration.StoreAdministrationContracts
+                                .RestrictedFeature.RESERVATION);
+
+        assertStoreError(
+                () -> eligibilityService.requireReservationTransactionEligibility(STORE_ID),
+                StoreErrorCode.STORE_FEATURE_RESTRICTED);
+    }
+
+    @Test
     void pickupEligibilityRejectsMissingStore() {
         given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.empty());
 
@@ -147,6 +167,36 @@ class StoreTransactionEligibilityServiceTest {
     }
 
     @Test
+    void pickupEligibilityRejectsActivePickupRestriction() {
+        given(storeRepository.findByIdForUpdate(STORE_ID))
+                .willReturn(Optional.of(eligibleStore(true, true)));
+        willThrow(new ServiceException(StoreErrorCode.STORE_FEATURE_RESTRICTED))
+                .given(storeAdministrationService)
+                .requireFeatureAllowed(STORE_ID,
+                        com.miriyum.domain.store.dto.administration.StoreAdministrationContracts
+                                .RestrictedFeature.PICKUP);
+
+        assertStoreError(
+                () -> eligibilityService.requirePickupTransactionEligibility(STORE_ID),
+                StoreErrorCode.STORE_FEATURE_RESTRICTED);
+    }
+
+    @Test
+    void menuEligibilityRejectsActiveMenuHoldRestriction() {
+        given(storeRepository.findByIdForUpdate(STORE_ID))
+                .willReturn(Optional.of(eligibleStore(true, true)));
+        willThrow(new ServiceException(StoreErrorCode.STORE_FEATURE_RESTRICTED))
+                .given(storeAdministrationService)
+                .requireFeatureAllowed(STORE_ID,
+                        com.miriyum.domain.store.dto.administration.StoreAdministrationContracts
+                                .RestrictedFeature.MENU_HOLD);
+
+        assertStoreError(
+                () -> eligibilityService.requireMenuTransactionEligibility(STORE_ID),
+                StoreErrorCode.STORE_FEATURE_RESTRICTED);
+    }
+
+    @Test
     void reservationEligibilityReturnsPurposeSpecificProof() {
         given(storeRepository.findByIdForUpdate(STORE_ID))
                 .willReturn(Optional.of(eligibleStore(true, true)));
@@ -174,6 +224,20 @@ class StoreTransactionEligibilityServiceTest {
                         STORE_ID, "미리윰", "Asia/Seoul"));
         then(storeRepository).should().findByIdForUpdate(STORE_ID);
         then(storeRepository).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    void waitingEligibilityChecksStoreAndStoreScopedEnforcement() {
+        given(storeRepository.findByIdForUpdate(STORE_ID))
+                .willReturn(Optional.of(eligibleStore(true, true)));
+
+        eligibilityService.requireWaitingTransactionEligibility(STORE_ID);
+
+        then(storeRepository).should().findByIdForUpdate(STORE_ID);
+        then(storeAdministrationService).should().requireFeatureAllowed(
+                STORE_ID,
+                com.miriyum.domain.store.dto.administration.StoreAdministrationContracts
+                        .RestrictedFeature.WAITING);
     }
 
     private void assertStoreError(ThrowingCallable invocation, StoreErrorCode expected) {

@@ -6,6 +6,7 @@ import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreUpdateRequest;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreBaseSettings;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
@@ -61,6 +62,7 @@ public class StoreService {
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final StoreAdministrationService storeAdministrationService;
 
     public StoreCommandResult create(
             long operatorAccountId,
@@ -162,6 +164,13 @@ public class StoreService {
                             modes == null ? null : modes.pickupEnabled(),
                             request.operationStatus(),
                             verified);
+                    storeAdministrationService.recomposeAfterOperatorUpdate(
+                            storeId,
+                            new StoreBaseSettings(
+                                    request.operationStatus(),
+                                    modes == null ? null : modes.reservationEnabled(),
+                                    modes == null ? null : modes.menuHoldEnabled(),
+                                    modes == null ? null : modes.pickupEnabled()));
                     Store saved = saveStore(store);
                     return success(HttpStatus.OK, saved);
                 }));
@@ -354,6 +363,7 @@ public class StoreService {
         Store store = storeRepository.findById(storeId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
         store.requireManagedBy(operatorAccountId);
+        store.requirePlatformManagementAllowed();
         return store;
     }
 
@@ -369,6 +379,7 @@ public class StoreService {
         Store store = storeRepository.findByIdForUpdate(storeId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
         store.requireManagedBy(operatorAccountId);
+        store.requirePlatformManagementAllowed();
         return store;
     }
 
