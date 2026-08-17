@@ -187,7 +187,8 @@ paths:
     post:
       tags: [Platform Admin Store]
       operationId: releaseStoreSanction
-      summary: 활성 제재 해제
+      summary: 비영구 활성 제재 해제
+      description: PERMANENT_EXIT은 OPER-009 전용 복구 계약 없이 이 endpoint로 해제할 수 없다.
       parameters:
         - $ref: '#/components/parameters/StoreId'
         - $ref: '#/components/parameters/CaseId'

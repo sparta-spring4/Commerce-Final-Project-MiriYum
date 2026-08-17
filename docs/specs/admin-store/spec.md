@@ -84,11 +84,13 @@ AdminCaseAssignmentManager.assign(
 
 기능은 `RESERVATION`, `WAITING`, `MENU_HOLD`, `PICKUP`, `STORE_MANAGEMENT`다. 각 사건은 위반 유형·증거 참조·영향 기능·시작/종료 조건·`policyVersion`을 가진다. `StoreSanctionPolicyCatalog`가 허용 위반 유형, 증거 요건, 기본 단계, 가중·감경 조건과 기간을 version별로 검증하므로 담당자가 임의 기간을 만들 수 없다.
 
-제재 상태는 `PENDING_APPROVAL`, `ACTIVE`, `RELEASED`, `EXPIRED`, `REJECTED`다. 임시 제재는 영구 퇴점으로 자동 승격하지 않는다. 예약 활성화 worker는 제공하지 않으므로 미래 `startsAt`은 거부하고 즉시 시작만 허용하며, `endsAt` 도래 시 잠금·version 경계로 자동 만료한다.
+제재 상태는 `PENDING_APPROVAL`, `ACTIVE`, `RELEASED`, `EXPIRED`, `REJECTED`다. 임시 제재는 영구 퇴점으로 자동 승격하지 않는다. 예약 활성화 worker는 제공하지 않으므로 미래 `startsAt`은 거부하고 즉시 시작만 허용하며, `endsAt` 도래 시 잠금·version 경계로 자동 만료한다. `PERMANENT_EXIT`은 일반 제재 해제로 복구할 수 없으며 OPER-009의 별도 매장 상태 복구 권한·재검증·감사 계약이 활성화되기 전에는 복구 endpoint를 제공하지 않는다.
 
 ### 3.3 Store별 enforcement
 
-`StoreEnforcementState`는 Store당 하나이며 제재 전 운영 상태·mode snapshot, 활성 제재별 projection, 합성된 현재 효과, `enforcementVersion`과 마지막 sanction ID를 보존한다. 모든 적용·복구는 `storeId`만으로 계산한다. 겹친 제재는 제한 기능의 합집합과 `CLOSED > TEMPORARILY_CLOSED > 기본 상태` 우선순위로 합성하고, 어느 순서로 해제해도 남은 활성 projection만 다시 합성한다.
+`StoreEnforcementState`는 Store당 하나이며 매장 운영자가 선택한 최신 base 운영 상태·mode, 활성 제재별 projection, 합성된 effective 효과, `enforcementVersion`과 마지막 sanction ID를 보존한다. 일반 수정은 명시된 base 필드만 병합하고 활성 제한을 다시 합성하므로 제재 중 수정으로 제한을 우회하거나 해제 후 최신 설정을 잃지 않는다. 제재 projection에는 해당 제재가 직접 기여하는 상태만 저장하며 `FEATURE_RESTRICTION`은 당시 effective 운영 상태를 복사하지 않는다. 겹친 제재는 제한 기능의 합집합과 `CLOSED > TEMPORARILY_CLOSED > base` 우선순위로 합성하고, 어느 순서로 해제해도 남은 활성 projection만 다시 합성한다.
+
+`PERMANENT_EXIT`은 일반 projection에서 제외한다. Store 소유 OPER-009 폐점 port가 Store와 enforcement state를 잠근 뒤 sanction ID, 영속화된 승인 ID, `PLATFORM_SANCTION` 원인과 사건 `policyVersion`을 한 번만 결속하고 `Store.close()`를 수행한다. 이 결속은 일반 release port로 제거할 수 없다.
 
 Store 운영자 refresh token은 계정 단위이므로 계정 전체 revoke를 하지 않는다. 모든 Store scoped 관리 권한과 신규 거래는 Store 정본과 중앙 enforcement 상태를 요청마다 검사한다. 현재 Store application cache는 없으므로 새 API도 cache하지 않는다. 향후 cache key는 `storeId + enforcementVersion`이어야 한다.
 
@@ -103,7 +105,7 @@ Store 운영자 refresh token은 계정 단위이므로 계정 전체 revoke를 
 5. 조건부 상태 전이와 Store 정본 변경을 수행한다.
 6. 같은 트랜잭션에서 불변 감사 이벤트를 append한다.
 
-동일 version의 동시 승인·해제·만료 중 하나만 성공하고 패자는 `409 ADMIN_STORE_005`를 받는다. 해제 port는 stale한 호출자 version을 전달받지 않고 Store 잠금 안에서 현재 projection을 제거·재합성하여 새 `enforcementVersion`을 반환한다.
+동일 version의 동시 승인·해제·만료 중 하나만 성공하고 패자는 `409 ADMIN_STORE_005`를 받는다. 비영구 제재 해제 port는 stale한 호출자 version을 전달받지 않고 Store 잠금 안에서 현재 projection을 제거·재합성하여 새 `enforcementVersion`을 반환한다. 영구 퇴점의 일반 release 요청은 정책 위반으로 거부한다.
 
 기간 제재 만료 조회는 최대 100개 ID만 읽고, 각 ID를 별도의 `REQUIRES_NEW` 트랜잭션에서 다시 잠근 뒤 상태를 확인한다. 한 건의 실패는 경고로 남기고 다음 ID를 계속 처리하므로 전체 batch를 rollback하거나 이후 만료를 막지 않는다. 만료 작업은 단일 thread의 전용 `storeSanctionTaskScheduler`를 사용해 공용 scheduler를 점유하지 않는다.
 
@@ -127,7 +129,7 @@ Store 운영자 refresh token은 계정 단위이므로 계정 전체 revoke를 
 ## 5. 권한과 감사
 
 - Store 목록·상세: `STORE_READ_MINIMAL`
-- 사건 생성·배정·미리보기·제재·해제: `STORE_SANCTION`
+- 사건 생성·배정·미리보기·제재·비영구 제재 해제: `STORE_SANCTION`
 - 상세 이후 명령: 유효 `STORE_ENFORCEMENT` assignment 필수
 - 고위험 명령: `HighRiskCommandGuard`와 `STORE_SANCTION` 목적 재인증
 - 영구 퇴점·전체 기능 제한: 제안자와 다른 `SUPER_ADMIN`
@@ -148,13 +150,13 @@ Store 운영자 refresh token은 계정 단위이므로 계정 전체 revoke를 
 | `POST` | `/api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/impact-previews` | 영향 미리보기 |
 | `POST` | `/api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions` | 제재 제안/적용 |
 | `POST` | `/api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions/{sanctionId}/approvals` | 추가 승인/집행 |
-| `POST` | `/api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions/{sanctionId}/releases` | 제재 해제 |
+| `POST` | `/api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions/{sanctionId}/releases` | 비영구 활성 제재 해제 (`PERMANENT_EXIT` 거부) |
 
 wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `ADMIN_STORE_001` Store 없음, `002` 사건/제재/preview 없음, `003` 영향 확인 필요, `004` preview stale, `005` 상태/version 충돌, `006` 다른 승인자 필요, `007` 정책 shape 오류로 고정한다.
 
 ## 7. migration 선택 gate
 
-구현 직전과 각 dev 병합·리뷰 보완 시점에 최신 `origin/dev`와 열린 PR의 migration 파일을 다시 조회했다. V47·V48은 dev에 병합됐고 열린 PR `#394`가 V49, `#388`이 V50, `#389`가 V51, `#393`이 V52를 사용하므로 겹치지 않는 V53을 선택했다. 이후 dev 동기화에서도 번호 충돌이 없음을 다시 확인한다.
+2026-08-17 리뷰 보완 시점의 최신 `origin/dev`에는 V49(`#394`)와 V50(`#393`)이 병합돼 있다. 열린 PR은 `#388`과 `#389`가 각각 V51을 사용해 서로 조정이 필요하고, `#396`은 V52, 이 PR `#382`는 V53, `#399`는 V54를 사용한다. 따라서 #279의 V53은 현재 dev 및 다른 열린 PR과 겹치지 않는다. 이후 dev 동기화에서도 번호 충돌이 없음을 다시 확인한다.
 
 ## 8. 정확한 변경 파일 allowlist
 
