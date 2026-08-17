@@ -8,16 +8,10 @@ import java.time.Duration;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /** Executes Payment refund calls outside Reservation claim/result transactions. */
 @Component
-@ConditionalOnProperty(
-        name = "miriyum.reservation.deposit-worker.enabled",
-        havingValue = "true",
-        matchIfMissing = true)
 public class ReservationDepositRefundJob {
 
     private static final Duration RETRY_DELAY = Duration.ofSeconds(30);
@@ -63,10 +57,6 @@ public class ReservationDepositRefundJob {
         this.batchSize = requireBatchSize(batchSize);
     }
 
-    @Scheduled(
-            scheduler = "reservationDepositRefundScheduler",
-            fixedDelayString = "#{@reservationDepositRefundPollDelayMs}",
-            initialDelayString = "#{@reservationDepositRefundPollDelayMs}")
     public int runScheduled() {
         return runOnce(owner, batchSize);
     }

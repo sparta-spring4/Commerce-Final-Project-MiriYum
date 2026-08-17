@@ -3,16 +3,10 @@ package com.miriyum.domain.reservation.service;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /** Claims due deposit processes, then invokes process-first commands outside claim transactions. */
 @Component
-@ConditionalOnProperty(
-        name = "miriyum.reservation.deposit-worker.enabled",
-        havingValue = "true",
-        matchIfMissing = true)
 public class ReservationDepositProcessJob {
 
     private final ReservationDepositProcessService processService;
@@ -56,10 +50,6 @@ public class ReservationDepositProcessJob {
         this.batchSize = requireBatchSize(batchSize);
     }
 
-    @Scheduled(
-            scheduler = "reservationDepositProcessScheduler",
-            fixedDelayString = "#{@reservationDepositProcessPollDelayMs}",
-            initialDelayString = "#{@reservationDepositProcessPollDelayMs}")
     public int runScheduled() {
         return runOnce(owner, batchSize);
     }

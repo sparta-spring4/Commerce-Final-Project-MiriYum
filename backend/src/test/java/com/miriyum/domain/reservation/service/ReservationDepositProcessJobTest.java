@@ -18,7 +18,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 class ReservationDepositProcessJobTest {
 
     @Test
-    void scheduledPollUsesDedicatedSchedulerAndStableLeaseOwner() throws Exception {
+    void conditionalScheduledWorkerUsesDedicatedSchedulerAndStableLeaseOwner()
+            throws Exception {
         ReservationDepositProcessService processService =
                 mock(ReservationDepositProcessService.class);
         ReservationDepositProcessCommandFacade commandFacade =
@@ -28,12 +29,14 @@ class ReservationDepositProcessJobTest {
         ReservationDepositProcessJob job = new ReservationDepositProcessJob(
                 processService,
                 commandFacade);
-        Method scheduledMethod = ReservationDepositProcessJob.class
+        ReservationDepositProcessConfig.ProcessScheduledWorker worker =
+                new ReservationDepositProcessConfig.ProcessScheduledWorker(job);
+        Method scheduledMethod = ReservationDepositProcessConfig.ProcessScheduledWorker.class
                 .getMethod("runScheduled");
         Scheduled scheduled = scheduledMethod.getAnnotation(Scheduled.class);
 
-        scheduledMethod.invoke(job);
-        scheduledMethod.invoke(job);
+        scheduledMethod.invoke(worker);
+        scheduledMethod.invoke(worker);
 
         assertThat(scheduled).isNotNull();
         assertThat(scheduled.scheduler()).isEqualTo("reservationDepositProcessScheduler");
@@ -45,6 +48,9 @@ class ReservationDepositProcessJobTest {
         String owner = owners.getAllValues().getFirst();
         assertThat(owners.getAllValues()).hasSize(2).allMatch(owner::equals);
         assertThat(owner).startsWith("reservation-deposit-process-");
+        assertThat(ReservationDepositProcessJob.class
+                .getMethod("runScheduled")
+                .getAnnotation(Scheduled.class)).isNull();
         assertSchedulerBean("reservationDepositProcessScheduler");
     }
 

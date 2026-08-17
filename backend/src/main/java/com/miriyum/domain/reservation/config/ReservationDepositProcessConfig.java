@@ -1,11 +1,14 @@
 package com.miriyum.domain.reservation.config;
 
+import com.miriyum.domain.reservation.service.ReservationDepositProcessJob;
+import com.miriyum.domain.reservation.service.ReservationDepositRefundJob;
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /** Reservation-owned operational timing for deposit process workers. */
@@ -56,6 +59,28 @@ public class ReservationDepositProcessConfig {
         return requirePositive(value, "refund-poll-delay-ms");
     }
 
+    @Bean
+    @ConditionalOnProperty(
+            name = "miriyum.reservation.deposit-worker.enabled",
+            havingValue = "true",
+            matchIfMissing = true)
+    ProcessScheduledWorker reservationDepositProcessScheduledWorker(
+            ReservationDepositProcessJob job
+    ) {
+        return new ProcessScheduledWorker(job);
+    }
+
+    @Bean
+    @ConditionalOnProperty(
+            name = "miriyum.reservation.deposit-worker.enabled",
+            havingValue = "true",
+            matchIfMissing = true)
+    RefundScheduledWorker reservationDepositRefundScheduledWorker(
+            ReservationDepositRefundJob job
+    ) {
+        return new RefundScheduledWorker(job);
+    }
+
     @Bean(
             name = "reservationDepositProcessScheduler",
             destroyMethod = "shutdown",
@@ -101,5 +126,41 @@ public class ReservationDepositProcessConfig {
             throw new IllegalArgumentException(property + " must be positive");
         }
         return value;
+    }
+
+    /** Conditional scheduling adapter; the process job remains directly callable. */
+    public static final class ProcessScheduledWorker {
+
+        private final ReservationDepositProcessJob job;
+
+        public ProcessScheduledWorker(ReservationDepositProcessJob job) {
+            this.job = job;
+        }
+
+        @Scheduled(
+                scheduler = "reservationDepositProcessScheduler",
+                fixedDelayString = "#{@reservationDepositProcessPollDelayMs}",
+                initialDelayString = "#{@reservationDepositProcessPollDelayMs}")
+        public void runScheduled() {
+            job.runScheduled();
+        }
+    }
+
+    /** Conditional scheduling adapter; the refund job remains directly callable. */
+    public static final class RefundScheduledWorker {
+
+        private final ReservationDepositRefundJob job;
+
+        public RefundScheduledWorker(ReservationDepositRefundJob job) {
+            this.job = job;
+        }
+
+        @Scheduled(
+                scheduler = "reservationDepositRefundScheduler",
+                fixedDelayString = "#{@reservationDepositRefundPollDelayMs}",
+                initialDelayString = "#{@reservationDepositRefundPollDelayMs}")
+        public void runScheduled() {
+            job.runScheduled();
+        }
     }
 }

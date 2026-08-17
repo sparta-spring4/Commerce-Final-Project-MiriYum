@@ -28,7 +28,8 @@ class ReservationDepositRefundJobTest {
     private static final Duration RETRY_DELAY = Duration.ofSeconds(30);
 
     @Test
-    void scheduledPollUsesDedicatedSchedulerAndStableLeaseOwner() throws Exception {
+    void conditionalScheduledWorkerUsesDedicatedSchedulerAndStableLeaseOwner()
+            throws Exception {
         ReservationDepositRefundService refundService =
                 mock(ReservationDepositRefundService.class);
         PaymentService paymentService = mock(PaymentService.class);
@@ -37,12 +38,14 @@ class ReservationDepositRefundJobTest {
         ReservationDepositRefundJob job = new ReservationDepositRefundJob(
                 refundService,
                 paymentService);
-        Method scheduledMethod = ReservationDepositRefundJob.class
+        ReservationDepositProcessConfig.RefundScheduledWorker worker =
+                new ReservationDepositProcessConfig.RefundScheduledWorker(job);
+        Method scheduledMethod = ReservationDepositProcessConfig.RefundScheduledWorker.class
                 .getMethod("runScheduled");
         Scheduled scheduled = scheduledMethod.getAnnotation(Scheduled.class);
 
-        scheduledMethod.invoke(job);
-        scheduledMethod.invoke(job);
+        scheduledMethod.invoke(worker);
+        scheduledMethod.invoke(worker);
 
         assertThat(scheduled).isNotNull();
         assertThat(scheduled.scheduler()).isEqualTo("reservationDepositRefundScheduler");
@@ -54,6 +57,9 @@ class ReservationDepositRefundJobTest {
         String owner = owners.getAllValues().getFirst();
         assertThat(owners.getAllValues()).hasSize(2).allMatch(owner::equals);
         assertThat(owner).startsWith("reservation-deposit-refund-");
+        assertThat(ReservationDepositRefundJob.class
+                .getMethod("runScheduled")
+                .getAnnotation(Scheduled.class)).isNull();
         assertSchedulerBean("reservationDepositRefundScheduler");
     }
 
