@@ -71,6 +71,11 @@ public class FileMetadata {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+    /** 실제 객체 저장소 삭제까지 끝난 시각이다. 논리 삭제와 물리 삭제 실패를 구분한다. */
+    @Convert(converter = UtcInstantConverter.class)
+    @Column(name = "object_cleanup_completed_at")
+    private Instant objectCleanupCompletedAt;
+
     @Version
     @Column(name = "version", nullable = false)
     private Long version;
@@ -220,6 +225,19 @@ public class FileMetadata {
         }
         storageStatus = FileStorageStatus.DELETED;
         this.deletedAt = deletedAt;
+    }
+
+    /** 객체 저장소의 멱등 삭제가 성공한 뒤에만 물리 정리 완료를 기록한다. */
+    public void completeObjectCleanup(Instant completedAt) {
+        if (storageStatus != FileStorageStatus.DELETED) {
+            throw new IllegalStateException("삭제 상태의 파일 메타데이터만 객체 정리 완료를 기록할 수 있습니다.");
+        }
+        if (completedAt == null) {
+            throw new IllegalArgumentException("객체 정리 완료 시각은 필수입니다.");
+        }
+        if (objectCleanupCompletedAt == null) {
+            objectCleanupCompletedAt = completedAt;
+        }
     }
 
     private void changeStatus(FileStorageStatus nextStatus) {

@@ -96,15 +96,7 @@ public class FileStorageFacade {
         }
         FileStorageMetadata deleted = transactionExecutor.deleteOrGetDeleted(fileId.toString(), deletedAt)
                 .toPublicMetadata();
-        try {
-            fileStoragePort.delete(deleted.objectKey());
-        } catch (RuntimeException exception) {
-            log.warn(
-                    "event=file_storage_object_delete_failed file_id={}",
-                    deleted.fileId(),
-                    exception);
-            throw exception;
-        }
+        deleteObjectAndRecordCompletion(deleted, "file_storage_object_delete_failed");
         return deleted;
     }
 
@@ -115,16 +107,36 @@ public class FileStorageFacade {
         }
         FileStorageMetadata deleted = transactionExecutor.discardPendingOrGetDeleted(fileId.toString(), deletedAt)
                 .toPublicMetadata();
+        deleteObjectAndRecordCompletion(deleted, "file_storage_pending_compensation_failed");
+        return deleted;
+    }
+
+    /**
+     * 물리 삭제와 DB 완료 기록을 각각 실패 원인으로 남긴다.
+     *
+     * <p>완료 기록이 실패해도 DELETED 상태와 객체 키는 남으므로 reconciliation 작업이 멱등 삭제 후 다시
+     * 완료 시각을 기록한다.</p>
+     */
+    private void deleteObjectAndRecordCompletion(FileStorageMetadata deleted, String objectDeletionFailureEvent) {
         try {
             fileStoragePort.delete(deleted.objectKey());
         } catch (RuntimeException exception) {
             log.warn(
-                    "event=file_storage_pending_compensation_failed file_id={}",
+                    "event={} file_id={}",
+                    objectDeletionFailureEvent,
                     deleted.fileId(),
                     exception);
             throw exception;
         }
-        return deleted;
+        try {
+            transactionExecutor.completeObjectCleanup(deleted.fileId().toString(), Instant.now());
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "event=file_storage_object_cleanup_state_record_failed file_id={}",
+                    deleted.fileId(),
+                    exception);
+            throw exception;
+        }
     }
 
     private void validatePendingMetadata(FileStorageMetadata metadata) {

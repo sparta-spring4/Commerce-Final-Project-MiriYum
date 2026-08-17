@@ -136,6 +136,22 @@ class FileMetadataTest {
     }
 
     @Test
+    @DisplayName("객체 저장소 삭제 성공은 논리 삭제 이후에만 완료 시각으로 기록한다")
+    void completesObjectCleanupOnlyAfterLogicalDeletion() {
+        FileMetadata metadata = pendingMetadata();
+        Instant completedAt = Instant.parse("2026-08-15T00:02:00Z");
+
+        assertThatIllegalStateException().isThrownBy(() -> metadata.completeObjectCleanup(completedAt));
+
+        metadata.confirm();
+        metadata.delete(Instant.parse("2026-08-15T00:01:00Z"));
+        metadata.completeObjectCleanup(completedAt);
+        metadata.completeObjectCleanup(Instant.parse("2026-08-15T00:03:00Z"));
+
+        assertThat(metadata.getObjectCleanupCompletedAt()).isEqualTo(completedAt);
+    }
+
+    @Test
     void rejectsPrivateStoreImageMetadata() {
         assertThatIllegalArgumentException().isThrownBy(() -> new FileStorageMetadata(
                 UUID.randomUUID(),

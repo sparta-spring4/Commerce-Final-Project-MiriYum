@@ -187,7 +187,8 @@ class FileStorageFacadeTest {
 
         assertThat(events).containsExactly(
                 "metadata-delete:" + confirmed.fileId(),
-                "storage-delete:public/store/11/store-image/deleted-object");
+                "storage-delete:public/store/11/store-image/deleted-object",
+                "metadata-cleanup-complete:" + confirmed.fileId());
     }
 
     @Test
@@ -208,7 +209,8 @@ class FileStorageFacadeTest {
                 "metadata-delete:" + confirmed.fileId(),
                 "storage-delete:public/store/11/store-image/deleted-object",
                 "metadata-delete:" + confirmed.fileId(),
-                "storage-delete:public/store/11/store-image/deleted-object");
+                "storage-delete:public/store/11/store-image/deleted-object",
+                "metadata-cleanup-complete:" + confirmed.fileId());
     }
 
     @Test
@@ -229,7 +231,8 @@ class FileStorageFacadeTest {
                 "metadata-discard-pending:" + pending.fileId(),
                 "storage-delete:public/store/11/store-image/deleted-object",
                 "metadata-discard-pending:" + pending.fileId(),
-                "storage-delete:public/store/11/store-image/deleted-object");
+                "storage-delete:public/store/11/store-image/deleted-object",
+                "metadata-cleanup-complete:" + pending.fileId());
     }
 
     @Test
@@ -387,6 +390,27 @@ class FileStorageFacadeTest {
                     "STORE_IMAGE_DEFAULT",
                     Instant.parse("2026-08-10T07:00:00Z"));
             metadata.discardPending(deletedAt);
+            return metadata;
+        }
+
+        @Override
+        public FileMetadata completeObjectCleanup(String fileId, Instant completedAt) {
+            events.add("metadata-cleanup-complete:" + fileId);
+            FileMetadata metadata = FileMetadata.createPending(
+                    fileId,
+                    "STORE",
+                    11L,
+                    FileStoragePurpose.STORE_IMAGE,
+                    "public/store/11/store-image/deleted-object",
+                    "image/jpeg",
+                    4L,
+                    FILE_CHECKSUM,
+                    FileStorageVisibility.PUBLIC,
+                    "STORE_IMAGE_DEFAULT",
+                    Instant.parse("2026-08-10T07:00:00Z"));
+            metadata.confirm();
+            metadata.delete(Instant.parse("2026-08-15T00:00:00Z"));
+            metadata.completeObjectCleanup(completedAt);
             return metadata;
         }
 

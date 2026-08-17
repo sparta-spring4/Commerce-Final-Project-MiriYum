@@ -13,6 +13,8 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import org.springframework.data.domain.PageRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
@@ -146,6 +148,52 @@ public class FileMetadataTransactionExecutor {
         }
         metadata.discardPending(deletedAt);
         return saveTerminalState(metadata);
+    }
+
+    /** S3 삭제 성공을 DB에 남긴다. 재시도 중에도 같은 완료 상태로 수렴한다. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public FileMetadata completeObjectCleanup(String fileId, Instant completedAt) {
+        FileMetadata metadata = fileMetadataRepository.findByFileIdForUpdate(fileId)
+                .orElseThrow(() -> new IllegalStateException("파일 메타데이터를 찾을 수 없습니다."));
+        metadata.completeObjectCleanup(completedAt);
+        return saveTerminalState(metadata);
+    }
+
+    /** 논리 삭제됐지만 객체 삭제 완료 기록이 없는 후보만 제한된 수로 조회한다. */
+    @Transactional(readOnly = true)
+    public List<FileMetadata> findObjectCleanupCandidates(int limit) {
+        return fileMetadataRepository.findAllByStorageStatusAndObjectCleanupCompletedAtIsNullOrderByDeletedAtAsc(
+                FileStorageStatus.DELETED, PageRequest.of(0, limit));
+    }
+
+    /** 오래 남은 PENDING 후보를 읽어, 실제 전이는 외부 호출 전 짧은 트랜잭션에서 다시 확인한다. */
+    @Transactional(readOnly = true)
+    public List<FileMetadata> findStalePendingCandidates(Instant createdBefore, int limit) {
+        return fileMetadataRepository.findAllByStorageStatusAndCreatedAtLessThanEqualOrderByCreatedAtAsc(
+                FileStorageStatus.PENDING, createdBefore, PageRequest.of(0, limit));
+    }
+
+    /** 후보 조회와 처리 사이에 완료된 행은 건너뛰어 S3 객체를 잘못 삭제하지 않는다. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Optional<FileMetadata> discardStalePendingForReconciliation(String fileId, Instant deletedAt) {
+        FileMetadata metadata = fileMetadataRepository.findByFileIdForUpdate(fileId)
+                .orElseThrow(() -> new IllegalStateException("파일 메타데이터를 찾을 수 없습니다."));
+        if (metadata.getStorageStatus() == FileStorageStatus.PENDING) {
+            metadata.discardPending(deletedAt);
+            return Optional.of(saveTerminalState(metadata));
+        }
+        if (metadata.getStorageStatus() == FileStorageStatus.DELETED) {
+            return Optional.of(metadata);
+        }
+        return Optional.empty();
+    }
+
+    @Transactional(readOnly = true)
+    public long countLongStayCandidates(Instant pendingCreatedBefore, Instant deletedBefore) {
+        return fileMetadataRepository.countByStorageStatusAndCreatedAtLessThanEqual(
+                        FileStorageStatus.PENDING, pendingCreatedBefore)
+                + fileMetadataRepository.countByStorageStatusAndObjectCleanupCompletedAtIsNullAndDeletedAtLessThanEqual(
+                        FileStorageStatus.DELETED, deletedBefore);
     }
 
     private FileMetadata saveTerminalState(FileMetadata metadata) {
