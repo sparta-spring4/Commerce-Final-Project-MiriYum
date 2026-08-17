@@ -76,7 +76,11 @@ class AudienceOpenApiContractTest {
                             "/api/v1/store-operators/account-recovery-cases",
                             "/api/v1/store-operators/account-recovery-password-reset-credentials",
                             "/api/v1/store-operators/account-recovery-password-resets",
-                            "/api/v1/store-operators/account-sanction-appeals"),
+                            "/api/v1/store-operators/account-sanction-appeals",
+                            "/api/v1/consumers/me/reservations/{reservationId}/check-in-qr-grants",
+                            "/api/v1/store-operators/stores/{storeId}/reservation-check-ins",
+                            "/api/v1/store-operators/stores/{storeId}/reservations/"
+                                    + "{reservationId}/no-shows"),
                     Stream.concat(
                             PAYMENT_PATHS.stream(),
                             Stream.concat(

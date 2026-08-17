@@ -5,8 +5,13 @@ import com.miriyum.global.storage.FileStorageMetadata;
 import com.miriyum.global.storage.FileStorageRequest;
 import com.miriyum.global.storage.FileStorageSaveResult;
 import com.miriyum.global.storage.FileStorageStatus;
+import com.miriyum.global.storage.FileStorageOwner;
+import com.miriyum.global.storage.FileStoragePurpose;
 import com.miriyum.global.storage.entity.FileMetadata;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,6 +52,35 @@ public class FileStorageFacade {
             throw new IllegalArgumentException("파일 식별자는 필수입니다.");
         }
         return transactionExecutor.confirmWithinCurrentTransaction(fileId.toString()).toPublicMetadata();
+    }
+
+    /** 바깥 업무 트랜잭션이 커밋될 때 함께 공개 목록에서 제외한다. */
+    public FileStorageMetadata markDeletedWithinCurrentTransaction(UUID fileId, Instant deletedAt) {
+        if (fileId == null || deletedAt == null) {
+            throw new IllegalArgumentException("파일 식별자와 삭제 시각은 필수입니다.");
+        }
+        return transactionExecutor.markDeletedWithinCurrentTransaction(fileId.toString(), deletedAt)
+                .toPublicMetadata();
+    }
+
+    /** 소유 도메인이 내부 Entity·Repository 없이 공개 파일 상태를 조회하는 계약이다. */
+    public List<FileStorageMetadata> findPublicMetadata(
+            FileStorageOwner owner,
+            FileStoragePurpose purpose,
+            Collection<FileStorageStatus> statuses
+    ) {
+        if (owner == null || purpose == null || statuses == null || statuses.isEmpty()) {
+            throw new IllegalArgumentException("파일 소유자, 목적, 조회 상태는 필수입니다.");
+        }
+        return transactionExecutor.findPublicMetadata(owner, purpose, statuses);
+    }
+
+    /** 공개 목록 응답에 필요한 URL만 여러 소유자에 대해 한 번에 조회한다. */
+    public Map<FileStorageOwner, String> findConfirmedPublicUrls(
+            Collection<FileStorageOwner> owners,
+            FileStoragePurpose purpose
+    ) {
+        return transactionExecutor.findConfirmedPublicUrls(owners, purpose);
     }
 
     /**

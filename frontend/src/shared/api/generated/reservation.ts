@@ -47,6 +47,13 @@ export interface paths {
     /** 본인 예약 상세 조회 */
     get: operations["getReservation"];
   };
+  "/api/v1/consumers/me/reservations/{reservationId}/check-in-qr-grants": {
+    /**
+     * 본인 예약 체크인 QR grant 발급·회전
+     * @description raw QR credential은 이 201 발급 응답 한 번에만 반환하며 서버에는 SHA-256 digest만 저장한다.
+     */
+    post: operations["issueReservationCheckInQrGrant"];
+  };
   "/api/v1/consumers/me/reservations/{reservationId}/cancellations": {
     /** 본인 예약 취소 */
     post: operations["cancelReservationByConsumer"];
@@ -54,6 +61,13 @@ export interface paths {
   "/api/v1/store-operators/stores/{storeId}/reservations": {
     /** 매장 예약 목록 조회 */
     get: operations["getStoreReservations"];
+  };
+  "/api/v1/store-operators/stores/{storeId}/reservation-check-ins": {
+    /**
+     * 회전형 QR 스캔 예약 방문 완료
+     * @description 현재 매장 권한과 잠금 뒤 current QR grant·Auth epoch·scan window를 검증해 기존 FULFILLED 의미로 종결한다.
+     */
+    post: operations["checkInReservationByQr"];
   };
   "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}": {
     /** 매장 예약 상세 조회 */
@@ -66,6 +80,13 @@ export interface paths {
   "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/fulfillments": {
     /** 예약 방문 완료 */
     post: operations["fulfillReservation"];
+  };
+  "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/no-shows": {
+    /**
+     * 운영자 예약 노쇼 확정
+     * @description 정확히 예약 startAt + 5분부터 필수 후보 사유로 NO_SHOW와 MenuHold FORFEITED를 원자 확정한다.
+     */
+    post: operations["markReservationNoShow"];
   };
   "/api/v1/store-operators/stores/{storeId}/reservation-capacities/{serviceDate}": {
     /** 날짜별 예약 수용량 전체 게시 */
@@ -90,7 +111,7 @@ export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
     /** @enum {string} */
-    ReservationHistoryStatus: "CONFIRMED" | "CANCELLED" | "FULFILLED";
+    ReservationHistoryStatus: "CONFIRMED" | "CANCELLED" | "FULFILLED" | "NO_SHOW";
     ReservationHistoryItem: {
       reservationId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
       storeId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
@@ -119,7 +140,7 @@ export interface components {
     /** @description 대상 매장의 IANA 시간대 기준 분 단위 현지 시각 */
     StoreLocalTime: string;
     /** @enum {string} */
-    ReservationStatus: "CONFIRMED" | "CANCELLED" | "FULFILLED";
+    ReservationStatus: "CONFIRMED" | "CANCELLED" | "FULFILLED" | "NO_SHOW";
     /**
      * @description RESOLVED는 실제 Instant·offset 스냅샷을 제공한다. LEGACY_UNRESOLVED는 V15 현지 시각 행을 임의 변환하지 않아 startAt, serviceEndAt, timeZoneId가 null인 상태다.
      * @enum {string}
@@ -190,6 +211,15 @@ export interface components {
     };
     StoreCancellationRequest: {
       reason: string;
+    };
+    ReservationCheckInRequest: {
+      /** @description 발급 응답에서 받은 256-bit base64url opaque QR credential */
+      qrToken: string;
+    };
+    /** @enum {string} */
+    ReservationNoShowReason: "USER_CAUSE_CANDIDATE" | "STORE_CAUSE_CANDIDATE" | "PLATFORM_EXTERNAL_CAUSE_CANDIDATE" | "UNCLEAR";
+    ReservationNoShowRequest: {
+      reason: components["schemas"]["ReservationNoShowReason"];
     };
     EmptyCommandRequest: Record<string, never>;
     /**
@@ -306,6 +336,20 @@ export interface components {
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["ReservationDetail"];
     };
+    ReservationCheckInQrGrantResponse: {
+      reservationId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      /** @description 이 발급 응답에만 존재하는 raw credential. 로그·감사·멱등 결과 저장 금지 */
+      qrToken: string;
+      /** Format: int64 */
+      tokenVersion: number;
+      issuedAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      expiresAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+    };
+    ReservationCheckInQrGrantSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["ReservationCheckInQrGrantResponse"];
+    };
     ReservationRequestResponse: {
       code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
@@ -395,6 +439,18 @@ export interface components {
     };
     /** @description 방문 완료 상태·MenuHold·멱등·동시 요청 충돌 */
     ReservationFulfillmentConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description QR current grant·epoch·scan window·예약/MenuHold 상태·멱등·동시 요청 충돌 */
+    ReservationCheckInConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 노쇼 시간 경계·예약/MenuHold 상태·멱등·동시 요청 충돌 */
+    ReservationNoShowConflict: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -964,6 +1020,31 @@ export interface operations {
       404: components["responses"]["ReservationNotFound"];
     };
   };
+  /**
+   * 본인 예약 체크인 QR grant 발급·회전
+   * @description raw QR credential은 이 201 발급 응답 한 번에만 반환하며 서버에는 SHA-256 digest만 저장한다.
+   */
+  issueReservationCheckInQrGrant: {
+    parameters: {
+      path: {
+        reservationId: components["parameters"]["ReservationId"];
+      };
+    };
+    responses: {
+      /** @description 새로 회전된 30초 QR grant */
+      201: {
+        content: {
+          "application/json": components["schemas"]["ReservationCheckInQrGrantSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["AccountRestricted"];
+      404: components["responses"]["ReservationNotFound"];
+      409: components["responses"]["ReservationStateConflict"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
   /** 본인 예약 취소 */
   cancelReservationByConsumer: {
     parameters: {
@@ -1019,6 +1100,39 @@ export interface operations {
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
       404: components["responses"]["StoreNotFound"];
+    };
+  };
+  /**
+   * 회전형 QR 스캔 예약 방문 완료
+   * @description 현재 매장 권한과 잠금 뒤 current QR grant·Auth epoch·scan window를 검증해 기존 FULFILLED 의미로 종결한다.
+   */
+  checkInReservationByQr: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        storeId: components["parameters"]["StoreId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReservationCheckInRequest"];
+      };
+    };
+    responses: {
+      /** @description QR로 방문 완료된 예약 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ReservationSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["ReservationFulfillmentForbidden"];
+      404: components["responses"]["StoreNotFound"];
+      409: components["responses"]["ReservationCheckInConflict"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 매장 예약 상세 조회 */
@@ -1100,6 +1214,39 @@ export interface operations {
       403: components["responses"]["ReservationFulfillmentForbidden"];
       404: components["responses"]["StoreReservationNotFound"];
       409: components["responses"]["ReservationFulfillmentConflict"];
+    };
+  };
+  /**
+   * 운영자 예약 노쇼 확정
+   * @description 정확히 예약 startAt + 5분부터 필수 후보 사유로 NO_SHOW와 MenuHold FORFEITED를 원자 확정한다.
+   */
+  markReservationNoShow: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        storeId: components["parameters"]["StoreId"];
+        reservationId: components["parameters"]["ReservationId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReservationNoShowRequest"];
+      };
+    };
+    responses: {
+      /** @description 노쇼로 종결된 예약 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ReservationSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["ReservationFulfillmentForbidden"];
+      404: components["responses"]["StoreReservationNotFound"];
+      409: components["responses"]["ReservationNoShowConflict"];
     };
   };
   /** 날짜별 예약 수용량 전체 게시 */
