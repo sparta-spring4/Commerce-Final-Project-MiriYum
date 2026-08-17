@@ -19,6 +19,8 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.ChecksumAlgorithm;
 import software.amazon.awssdk.services.s3.model.ChecksumMode;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetBucketVersioningRequest;
+import software.amazon.awssdk.services.s3.model.GetBucketVersioningResponse;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
@@ -43,6 +45,7 @@ public class S3FileStorageAdapter implements FileStoragePort {
     @Override
     public FileStorageSaveResult save(FileStorageRequest request) {
         validateSizeLimit(request.sizeBytes());
+        requireVersioningDisabled();
         PreparedUpload preparedUpload = prepareUpload(request);
         RuntimeException failure = null;
         boolean uploaded = false;
@@ -56,10 +59,7 @@ public class S3FileStorageAdapter implements FileStoragePort {
                     .checksumAlgorithm(ChecksumAlgorithm.SHA256)
                     .checksumSHA256(preparedUpload.checksumBase64())
                     .build();
-            PutObjectResponse putObjectResponse = s3Client.putObject(
-                    putObjectRequest,
-                    RequestBody.fromFile(preparedUpload.file())
-            );
+            PutObjectResponse putObjectResponse = putObject(putObjectRequest, preparedUpload.file());
             uploaded = true;
             uploadedVersionId = putObjectResponse.versionId();
 
@@ -119,11 +119,30 @@ public class S3FileStorageAdapter implements FileStoragePort {
 
     @Override
     public void delete(String objectKey) {
+        requireVersioningDisabled();
         DeleteObjectRequest request = DeleteObjectRequest.builder()
                 .bucket(bucket)
                 .key(objectKey)
                 .build();
         s3Client.deleteObject(request);
+    }
+
+    private PutObjectResponse putObject(PutObjectRequest request, Path content) {
+        try {
+            return s3Client.putObject(request, RequestBody.fromFile(content));
+        } catch (RuntimeException exception) {
+            // S3 may persist the object even when the response is lost, so reconciliation must retain PENDING.
+            throw new FileStorageOutcomeUnknownException("PutObject outcome cannot be determined safely", exception);
+        }
+    }
+
+    private void requireVersioningDisabled() {
+        GetBucketVersioningResponse response = s3Client.getBucketVersioning(GetBucketVersioningRequest.builder()
+                .bucket(bucket)
+                .build());
+        if (response != null && response.status() != null) {
+            throw new IllegalStateException("S3 bucket Versioning must be disabled for file cleanup");
+        }
     }
 
     private PreparedUpload prepareUpload(FileStorageRequest request) {

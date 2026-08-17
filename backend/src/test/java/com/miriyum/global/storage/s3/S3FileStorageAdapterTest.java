@@ -22,7 +22,10 @@ import org.mockito.ArgumentCaptor;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.BucketVersioningStatus;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetBucketVersioningRequest;
+import software.amazon.awssdk.services.s3.model.GetBucketVersioningResponse;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
@@ -245,6 +248,56 @@ class S3FileStorageAdapterTest {
     }
 
     @Test
+    @DisplayName("S3 어댑터는 PutObject 응답 유실을 결과 불명으로 보존한다")
+    void keepsOutcomeUnknownWhenPutObjectResponseIsLost() {
+        S3Client s3Client = mock(S3Client.class);
+        when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                .thenThrow(new IllegalStateException("S3 response timed out"));
+        S3FileStorageAdapter adapter = new S3FileStorageAdapter(s3Client, "miriyum-test-bucket", 10_485_760L);
+
+        assertThatThrownBy(() -> adapter.save(request("public/store/10/menu-image/sample.jpg")))
+                .isInstanceOf(FileStorageOutcomeUnknownException.class)
+                .hasMessageContaining("PutObject outcome");
+
+        verify(s3Client, never()).headObject(any(HeadObjectRequest.class));
+        verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
+    }
+
+    @Test
+    @DisplayName("S3 어댑터는 Versioning 활성 버킷에서 저장을 거절한다")
+    void rejectsSaveWhenBucketVersioningIsEnabled() {
+        S3Client s3Client = mock(S3Client.class);
+        when(s3Client.getBucketVersioning(any(GetBucketVersioningRequest.class)))
+                .thenReturn(GetBucketVersioningResponse.builder()
+                        .status(BucketVersioningStatus.ENABLED)
+                        .build());
+        S3FileStorageAdapter adapter = new S3FileStorageAdapter(s3Client, "miriyum-test-bucket", 10_485_760L);
+
+        assertThatThrownBy(() -> adapter.save(request("public/store/10/menu-image/sample.jpg")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Versioning must be disabled");
+
+        verify(s3Client, never()).putObject(any(PutObjectRequest.class), any(RequestBody.class));
+    }
+
+    @Test
+    @DisplayName("S3 어댑터는 Versioning 활성 버킷에서 삭제를 거절한다")
+    void rejectsDeleteWhenBucketVersioningIsEnabled() {
+        S3Client s3Client = mock(S3Client.class);
+        when(s3Client.getBucketVersioning(any(GetBucketVersioningRequest.class)))
+                .thenReturn(GetBucketVersioningResponse.builder()
+                        .status(BucketVersioningStatus.SUSPENDED)
+                        .build());
+        S3FileStorageAdapter adapter = new S3FileStorageAdapter(s3Client, "miriyum-test-bucket", 10_485_760L);
+
+        assertThatThrownBy(() -> adapter.delete("public/store/10/menu-image/sample.jpg"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Versioning must be disabled");
+
+        verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
+    }
+
+    @Test
     @DisplayName("S3 어댑터는 객체 키로 삭제를 요청한다")
     void deletesObjectByKey() {
         S3Client s3Client = mock(S3Client.class);
@@ -256,6 +309,15 @@ class S3FileStorageAdapterTest {
         verify(s3Client).deleteObject(requestCaptor.capture());
         assertThat(requestCaptor.getValue().bucket()).isEqualTo("miriyum-test-bucket");
         assertThat(requestCaptor.getValue().key()).isEqualTo("public/store/10/store-image/sample.png");
+    }
+
+    private FileStorageRequest request(String objectKey) {
+        return new FileStorageRequest(
+                objectKey,
+                "image/jpeg",
+                5L,
+                new ByteArrayInputStream("hello".getBytes(StandardCharsets.UTF_8))
+        );
     }
 
     private static final class ReadLengthLimitedInputStream extends InputStream {
