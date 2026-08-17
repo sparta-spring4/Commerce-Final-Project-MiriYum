@@ -8,12 +8,15 @@ import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.FileStorageVisibility;
 import com.miriyum.global.storage.entity.FileMetadata;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,6 +49,9 @@ class FileMetadataRepositoryIntegrationTest {
     @Autowired
     private FileMetadataRepository fileMetadataRepository;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @Test
     @Transactional
     @DisplayName("파일 메타데이터를 저장한 뒤 파일 식별자로 조회한다")
@@ -74,5 +80,58 @@ class FileMetadataRepositoryIntegrationTest {
                 .get()
                 .extracting(FileMetadata::getObjectKey, FileMetadata::getStorageStatus)
                 .containsExactly("public/store/11/store-image/object-3", FileStorageStatus.PENDING);
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("공개 메뉴 이미지 일괄 조회는 전용 복합 인덱스를 사용한다")
+    void publicMenuImageLookupUsesDedicatedCompositeIndex() {
+        // given
+        saveConfirmedMenuImage(101L);
+        saveConfirmedMenuImage(102L);
+        fileMetadataRepository.flush();
+
+        // when
+        List<Map<String, Object>> plan = jdbcTemplate.queryForList("""
+                EXPLAIN
+                SELECT file_id
+                FROM file_metadata
+                WHERE owner_type = ?
+                  AND purpose = ?
+                  AND visibility = ?
+                  AND storage_status = ?
+                  AND owner_id IN (?, ?)
+                ORDER BY created_at ASC
+                """,
+                "MENU",
+                FileStoragePurpose.MENU_IMAGE.name(),
+                FileStorageVisibility.PUBLIC.name(),
+                FileStorageStatus.CONFIRMED.name(),
+                101L,
+                102L);
+
+        // then
+        assertThat(plan)
+                .isNotEmpty();
+        assertThat(plan)
+                .allSatisfy(row -> assertThat(row.get("key"))
+                        .isEqualTo("idx_file_metadata_public_menu_lookup"));
+    }
+
+    private void saveConfirmedMenuImage(long menuId) {
+        FileMetadata metadata = FileMetadata.createPending(
+                UUID.randomUUID().toString(),
+                "MENU",
+                menuId,
+                FileStoragePurpose.MENU_IMAGE,
+                "public/menu/" + menuId + "/menu-image/object-" + menuId,
+                "image/jpeg",
+                512L,
+                "c".repeat(64),
+                FileStorageVisibility.PUBLIC,
+                "MENU_IMAGE_DEFAULT",
+                Instant.parse("2026-08-10T04:00:00Z"));
+        metadata.confirm();
+        fileMetadataRepository.save(metadata);
     }
 }

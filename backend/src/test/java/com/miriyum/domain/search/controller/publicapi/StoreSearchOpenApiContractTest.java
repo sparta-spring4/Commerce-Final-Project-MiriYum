@@ -98,7 +98,9 @@ class StoreSearchOpenApiContractTest {
         assertThat(list(map(schemas.get("PublicMenu")).get("required")))
                 .contains("menuId", "name", "description", "price", "representative",
                         "primaryCategoryCode", "secondaryCategoryCodes", "localTags",
-                        "holdEnabled", "pickupEnabled", "saleStatus");
+                        "holdEnabled", "pickupEnabled", "saleStatus", "imageUrl");
+        assertThat(list(map(map(map(schemas.get("PublicMenu")).get("properties")).get("imageUrl")).get("type")))
+                .containsExactly("string", "null");
         assertThat(list(map(schemas.get("IntegratedStoreSearchData")).get("required")))
                 .containsExactlyInAnyOrder(
                         "items", "normalizedCondition", "warnings", "ruleVersion",

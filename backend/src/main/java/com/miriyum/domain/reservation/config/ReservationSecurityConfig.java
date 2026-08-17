@@ -27,6 +27,8 @@ public class ReservationSecurityConfig {
     private static final String RESERVATION_DETAIL = RESERVATION_ROOT + "/*";
     private static final String RESERVATION_CANCELLATION =
             RESERVATION_ROOT + "/*/cancellations";
+    private static final String RESERVATION_CHECK_IN_QR_GRANT =
+            RESERVATION_ROOT + "/*/check-in-qr-grants";
     private static final String RESERVATION_HISTORY =
             "/api/v1/consumers/me/reservations";
     private static final String STORE_RESERVATION_ROOT =
@@ -37,6 +39,10 @@ public class ReservationSecurityConfig {
             STORE_RESERVATION_ROOT + "/*/cancellations";
     private static final String STORE_RESERVATION_FULFILLMENT =
             STORE_RESERVATION_ROOT + "/*/fulfillments";
+    private static final String STORE_RESERVATION_NO_SHOW =
+            STORE_RESERVATION_ROOT + "/*/no-shows";
+    private static final String STORE_RESERVATION_CHECK_IN =
+            "/api/v1/store-operators/stores/*/reservation-check-ins";
     private static final String WAITING_TEAM_ROOT =
             "/api/v1/store-operators/stores/*/waiting-teams";
     private static final String WAITING_TEAM_FAMILY = WAITING_TEAM_ROOT + "/**";
@@ -66,6 +72,7 @@ public class ReservationSecurityConfig {
                 .securityMatcher(
                         STORE_RESERVATION_ROOT,
                         STORE_RESERVATION_FAMILY,
+                        STORE_RESERVATION_CHECK_IN,
                         WAITING_TEAM_ROOT,
                         WAITING_TEAM_FAMILY,
                         WAITING_CLOSE_JOB_ROOT,
@@ -80,6 +87,8 @@ public class ReservationSecurityConfig {
                         .requestMatchers(HttpMethod.GET, STORE_RESERVATION_DETAIL).authenticated()
                         .requestMatchers(HttpMethod.POST, STORE_RESERVATION_CANCELLATION).authenticated()
                         .requestMatchers(HttpMethod.POST, STORE_RESERVATION_FULFILLMENT).authenticated()
+                        .requestMatchers(HttpMethod.POST, STORE_RESERVATION_NO_SHOW).authenticated()
+                        .requestMatchers(HttpMethod.POST, STORE_RESERVATION_CHECK_IN).authenticated()
                         .requestMatchers(HttpMethod.GET, WAITING_TEAM_ROOT).authenticated()
                         .requestMatchers(HttpMethod.GET, WAITING_TEAM_DETAIL).authenticated()
                         .requestMatchers(HttpMethod.POST, WAITING_TEAM_CALL).authenticated()
@@ -128,6 +137,7 @@ public class ReservationSecurityConfig {
                         .requestMatchers(HttpMethod.GET, RESERVATION_HISTORY).authenticated()
                         .requestMatchers(HttpMethod.GET, RESERVATION_DETAIL).authenticated()
                         .requestMatchers(HttpMethod.POST, RESERVATION_CANCELLATION).authenticated()
+                        .requestMatchers(HttpMethod.POST, RESERVATION_CHECK_IN_QR_GRANT).authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint(new JwtAuthenticationEntryPoint(objectMapper))
