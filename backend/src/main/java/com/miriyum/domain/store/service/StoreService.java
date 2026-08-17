@@ -1,6 +1,7 @@
 package com.miriyum.domain.store.service;
 
 import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
+import com.miriyum.domain.store.dto.contract.StoreWaitingReceptionProfile;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
@@ -269,6 +270,33 @@ public class StoreService {
             return Optional.empty();
         }
         return storeRepository.findById(storeId).map(Store::getName);
+    /**
+     * 웨이팅 일정 해석을 위해 매장 상태를 공개 계약으로 일괄 투영한다.
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, StoreWaitingReceptionProfile> getWaitingReceptionProfiles(
+            Set<Long> storeIds
+    ) {
+        if (storeIds == null || storeIds.isEmpty()) {
+            return Map.of();
+        }
+        return storeRepository.findAllById(storeIds).stream()
+                .map(StoreService::waitingReceptionProfile)
+                .collect(Collectors.toUnmodifiableMap(
+                        StoreWaitingReceptionProfile::storeId,
+                        Function.identity()));
+    }
+
+    /**
+     * 웨이팅 접수 명령을 위해 Store 행을 잠그고 현재 상태를 공개 DTO로 반환한다.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public StoreWaitingReceptionProfile inspectWaitingReceptionForUpdate(
+            long storeId
+    ) {
+        Store store = storeRepository.findByIdForUpdate(storeId)
+                .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+        return waitingReceptionProfile(store);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
@@ -383,6 +411,16 @@ public class StoreService {
                 store.getId(),
                 store.getTimeZoneId(),
                 reservationAccepting);
+    }
+
+    private static StoreWaitingReceptionProfile waitingReceptionProfile(Store store) {
+        boolean waitingReceptionEligible =
+                store.getVerificationStatus() == VerificationStatus.APPROVED
+                && store.getOperationStatus() == OperationStatus.OPEN;
+        return new StoreWaitingReceptionProfile(
+                store.getId(),
+                store.getTimeZoneId(),
+                waitingReceptionEligible);
     }
 
     private static BusinessResult<ManagedStoreResponse> success(
