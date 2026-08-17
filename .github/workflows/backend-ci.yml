@@ -84,9 +84,9 @@ jobs:
   integration-test:
     name: integration-test-${{ matrix.shard }}
     runs-on: ubuntu-24.04
-    # 4-shard 구조는 유지한다. 최근 A shard가 24분 30초까지 소요되어 runner 편차만으로
-    # 25분 상한에 취소될 수 있으므로, 재분배 전까지 30분으로 여유를 둔다.
-    timeout-minutes: 30
+    # B shard는 현재 통합 테스트 수가 많아 30분 제한을 넘길 수 있다.
+    # 재분배 전까지 B만 40분으로 두고, 나머지 shard는 30분 상한을 유지한다.
+    timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
       fail-fast: false
       matrix:
@@ -94,15 +94,19 @@ jobs:
           - shard: a
             task: integrationTestShardA
             report_directory: integrationTestShardA
+            timeout_minutes: 30
           - shard: b
             task: integrationTestShardB
             report_directory: integrationTestShardB
+            timeout_minutes: 40
           - shard: c
             task: integrationTestShardC
             report_directory: integrationTestShardC
+            timeout_minutes: 30
           - shard: d
             task: integrationTestShardD
             report_directory: integrationTestShardD
+            timeout_minutes: 30
     defaults:
       run:
         working-directory: backend
