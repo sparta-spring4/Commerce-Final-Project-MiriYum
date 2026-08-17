@@ -77,6 +77,93 @@ export function rejectedCalls() {
 }
 
 /**
+ * 플랫폼 운영자 고위험 명령과 감사 조회의 헤더 조건.
+ *
+ * 재인증 헤더는 생성 타입에서 파생되지 않는다. `member-support` 문서가 이
+ * parameter를 다른 문서로 가는 `$ref`로 정의해서, openapi-typescript 6.7.6이
+ * 두 단계 참조에서 헤더 이름을 복원하지 못하고 operation에서 빠뜨린다.
+ * `paths.ts`가 경로 목록으로 닫아 두었고, 아래가 그 장치의 회귀 테스트다.
+ *
+ * 이 테스트가 깨지는 경우는 둘이다. 문서가 고쳐져 생성 타입에 헤더가 들어왔거나,
+ * 누군가 목록에서 경로를 지웠거나. 앞이면 `paths.ts`의 목록을 지우면 되고,
+ * 뒤면 제재가 재인증 없이 나가게 된 것이므로 되돌려야 한다.
+ */
+export function platformOperatorCommandHeaders() {
+  // 계약이 요구하는 것을 모두 갖춘 제재 호출
+  void api(
+    '/api/v1/platform-operators/members/{accountType}/{accountId}/sanctions',
+    {
+      method: 'post',
+      pathParams: { accountType: 'CONSUMER', accountId: 'op-1' },
+      body: {
+        level: 'WARNING',
+        reasonCode: 'ABUSE_REPORT',
+        policyVersion: 'SANCTION_POLICY_V1',
+      },
+      idempotencyKey: 'key-1',
+      ifMatch: 3,
+      adminReauthentication: 'approval-1',
+    },
+  )
+
+  void api(
+    '/api/v1/platform-operators/members/{accountType}/{accountId}/sanctions',
+    {
+      method: 'post',
+      pathParams: { accountType: 'CONSUMER', accountId: 'op-1' },
+      body: {
+        level: 'WARNING',
+        reasonCode: 'ABUSE_REPORT',
+        policyVersion: 'SANCTION_POLICY_V1',
+      },
+      idempotencyKey: 'key-1',
+      ifMatch: 3,
+      // @ts-expect-error 제재는 재인증 승인 없이 보낼 수 없다
+      adminReauthentication: undefined,
+    },
+  )
+
+  void api('/api/v1/platform-operators/member-support-cases/{caseId}/decisions', {
+    method: 'post',
+    pathParams: { caseId: 'case-1' },
+    body: { decision: 'APPROVE', reasonCode: 'VERIFIED' },
+    idempotencyKey: 'key-2',
+    ifMatch: 1,
+    // @ts-expect-error 사건 결정도 재인증 승인이 필요하다
+    adminReauthentication: undefined,
+  })
+
+  // 감사 조회는 사건·version·사유 코드를 함께 보내야 한다.
+  void api('/api/v1/platform-operators/audit-events', {
+    method: 'get',
+    adminAuditContext: {
+      caseId: 'audit-case-1',
+      caseVersion: 2,
+      reasonCode: 'AUDIT_REVIEW',
+    },
+  })
+
+  // @ts-expect-error 감사 조회는 사건·사유 맥락 없이 보낼 수 없다
+  void api('/api/v1/platform-operators/audit-events', { method: 'get' })
+
+  // 자기 배정은 version만 요구하고 재인증은 요구하지 않는다.
+  void api(
+    '/api/v1/platform-operators/member-support-cases/{caseId}/assignments',
+    {
+      method: 'post',
+      pathParams: { caseId: 'case-1' },
+      ifMatch: 1,
+    },
+  )
+
+  void api('/api/v1/consumers/auth/csrf-tokens/current', {
+    method: 'get',
+    // @ts-expect-error 일반 사용자 경로에는 운영자 명령 헤더를 붙일 수 없다
+    adminReauthentication: 'approval-1',
+  })
+}
+
+/**
  * 오류 본문 타입이 공통 OpenAPI 생성 타입에서 파생되는지 **컴파일 시점에** 고정한다.
  *
  * 손으로 선언하면 계약과 어긋나도 typecheck가 통과한다. 실제로 필드 이름을

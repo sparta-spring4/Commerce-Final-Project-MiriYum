@@ -1,0 +1,158 @@
+/*
+ * 콘솔 화면 공통 요소. 셸 토큰(`.po-console`)을 상속해 쓴다.
+ * 컨테이너에 단축 padding을 쓰지 않는다.
+ */
+
+.po-page__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.po-page__title {
+  margin-block: 0 0.25rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 2rem;
+  letter-spacing: -0.02em;
+}
+
+.po-page__subtitle {
+  margin-block: 0;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.po-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding-inline: 1rem;
+  padding-block: 1rem;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card, #fff);
+}
+
+.po-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  max-width: 30rem;
+  padding-inline: 1.5rem;
+  padding-block: 1.5rem;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card, #fff);
+}
+
+/*
+ * 표는 자기 컨테이너 안에서만 가로로 스크롤한다.
+ * 페이지 본문이 가로로 밀리면 좌측 내비까지 함께 흔들린다.
+ */
+.po-table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card, #fff);
+}
+
+.po-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.po-table__caption {
+  padding-inline: 1rem;
+  padding-block: 0.75rem;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.75rem;
+  text-align: start;
+}
+
+.po-table th,
+.po-table td {
+  padding-inline: 1rem;
+  padding-block: 0.875rem;
+  text-align: start;
+  white-space: nowrap;
+}
+
+.po-table thead th {
+  border-block-end: 1px solid var(--po-border, #e9ecef);
+  color: var(--po-text-muted, #454652);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.po-table tbody tr + tr th,
+.po-table tbody tr + tr td {
+  border-block-start: 1px solid var(--po-border, #e9ecef);
+}
+
+.po-table tbody tr:hover {
+  background-color: var(--po-tint, #e8eaf6);
+}
+
+.po-table__link {
+  color: var(--po-navy, #1a237e);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.po-table__link:hover {
+  text-decoration: underline;
+}
+
+.po-section__title {
+  margin-block: 0 1rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.75rem;
+}
+
+.po-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card, #fff);
+}
+
+.po-detail__row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 14rem) 1fr;
+  gap: 1rem;
+  padding-inline: 1rem;
+  padding-block: 0.875rem;
+}
+
+.po-detail__row + .po-detail__row {
+  border-block-start: 1px solid var(--po-border, #e9ecef);
+}
+
+.po-detail dt {
+  margin: 0;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.po-detail dd {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+@media (width <= 40rem) {
+  .po-detail__row {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+}

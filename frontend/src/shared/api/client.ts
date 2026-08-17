@@ -2,9 +2,12 @@ import { ApiContractError, ApiError, NetworkError } from './apiError'
 import { IDEMPOTENCY_KEY_HEADER } from './idempotencyKey'
 import { checkSuccessEnvelope, isApiErrorBody, type ApiSuccess } from './envelope'
 import type {
+  AdminAuditContextOf,
+  AdminReauthenticationOf,
   ApiPath,
   CsrfOf,
   IdempotencyOf,
+  IfMatchOf,
   MethodOf,
   OperationOf,
   PathParamsOf,
@@ -44,6 +47,9 @@ export type RequestOptions<P extends ApiPath, M extends MethodOf<P>> = {
   RequestBodyOf<OperationOf<P, M>> &
   IdempotencyOf<OperationOf<P, M>> &
   CsrfOf<OperationOf<P, M>> &
+  IfMatchOf<OperationOf<P, M>> &
+  AdminReauthenticationOf<P, OperationOf<P, M>> &
+  AdminAuditContextOf<OperationOf<P, M>> &
   CommonRequestOptions
 
 /** 성공 응답은 봉투 그대로 노출한다. 화면이 code·message·data를 구분해 쓴다. */
@@ -65,6 +71,18 @@ const JSON_CONTENT_TYPE = 'application/json'
  * 값은 shell이 자기 namespace 쿠키에서 읽어 넘긴다. 이 모듈은 쿠키를 읽지 않는다.
  */
 const CSRF_TOKEN_HEADER = 'X-CSRF-TOKEN'
+
+/**
+ * 플랫폼 운영자 명령·조회가 요구하는 헤더 이름.
+ *
+ * `If-Match`는 대상 version, 재인증은 고위험 명령 승인, 사건·사유는 감사 조회의
+ * 인가 조건이다. 값은 화면이 넘긴다. 이 모듈은 값을 만들거나 기본값을 채우지 않는다.
+ */
+const IF_MATCH_HEADER = 'If-Match'
+const ADMIN_REAUTHENTICATION_HEADER = 'X-Admin-Reauthentication'
+const ADMIN_CASE_ID_HEADER = 'X-Admin-Case-Id'
+const ADMIN_CASE_VERSION_HEADER = 'X-Admin-Case-Version'
+const ADMIN_REASON_CODE_HEADER = 'X-Admin-Reason-Code'
 
 /**
  * 2xx 본문을 JSON으로 읽지 못했을 때 쓰는 표식이다.
@@ -108,6 +126,13 @@ export function createApiClient(
       body?: unknown
       idempotencyKey?: string
       csrfToken?: string
+      ifMatch?: number
+      adminReauthentication?: string
+      adminAuditContext?: {
+        caseId: string
+        caseVersion: number
+        reasonCode: string
+      }
       signal?: AbortSignal
     },
   ): Promise<Response> {
@@ -121,6 +146,20 @@ export function createApiClient(
     }
     if (options.csrfToken) {
       headers[CSRF_TOKEN_HEADER] = options.csrfToken
+    }
+    // version 0이 유효한 값이므로 존재 여부로 판정한다.
+    if (options.ifMatch !== undefined) {
+      headers[IF_MATCH_HEADER] = String(options.ifMatch)
+    }
+    if (options.adminReauthentication) {
+      headers[ADMIN_REAUTHENTICATION_HEADER] = options.adminReauthentication
+    }
+    if (options.adminAuditContext) {
+      headers[ADMIN_CASE_ID_HEADER] = options.adminAuditContext.caseId
+      headers[ADMIN_CASE_VERSION_HEADER] = String(
+        options.adminAuditContext.caseVersion,
+      )
+      headers[ADMIN_REASON_CODE_HEADER] = options.adminAuditContext.reasonCode
     }
     const token = getAccessToken?.()
     if (token) {
@@ -181,6 +220,9 @@ export function createApiClient(
       body,
       idempotencyKey,
       csrfToken,
+      ifMatch,
+      adminReauthentication,
+      adminAuditContext,
       query,
       signal,
     } = options as RequestOptions<P, M> & {
@@ -188,10 +230,26 @@ export function createApiClient(
       body?: unknown
       idempotencyKey?: string
       csrfToken?: string
+      ifMatch?: number
+      adminReauthentication?: string
+      adminAuditContext?: {
+        caseId: string
+        caseVersion: number
+        reasonCode: string
+      }
     }
 
     const url = buildUrl(path, pathParams, query)
-    const sendOptions = { method, body, idempotencyKey, csrfToken, signal }
+    const sendOptions = {
+      method,
+      body,
+      idempotencyKey,
+      csrfToken,
+      ifMatch,
+      adminReauthentication,
+      adminAuditContext,
+      signal,
+    }
 
     let response = await send(url, sendOptions)
 
