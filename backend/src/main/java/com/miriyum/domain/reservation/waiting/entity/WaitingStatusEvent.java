@@ -74,4 +74,36 @@ public class WaitingStatusEvent {
     ) {
         return new WaitingStatusEvent(waitingTeamId, eventSequence, publicStatus, occurredAt);
     }
+
+    /** Notification 기록과 재판정이 끝난 사건을 같은 트랜잭션에서 발행 완료한다. */
+    public void markPublished() {
+        if (publicationState != WaitingStatusEventPublicationState.PENDING) {
+            throw new IllegalStateException("waiting status event is already published");
+        }
+        publicationState = WaitingStatusEventPublicationState.PUBLISHED;
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    public Long getWaitingTeamId() {
+        return waitingTeamId;
+    }
+
+    public long getEventSequence() {
+        return eventSequence;
+    }
+
+    public WaitingTeamStatus getPublicStatus() {
+        return publicStatus;
+    }
+
+    public Instant getOccurredAt() {
+        return occurredAt;
+    }
+
+    public WaitingStatusEventPublicationState getPublicationState() {
+        return publicationState;
+    }
 }

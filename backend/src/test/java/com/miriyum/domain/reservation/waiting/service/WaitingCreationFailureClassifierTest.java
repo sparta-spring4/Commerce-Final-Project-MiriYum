@@ -15,6 +15,7 @@ import com.miriyum.domain.reservation.waiting.repository.*;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.*;
+import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
 import java.time.*;
 import tools.jackson.databind.ObjectMapper;
 
@@ -55,6 +56,7 @@ class WaitingCreationFailureClassifierTest {
                 mock(WaitingActiveMembershipRepository.class), mock(WaitingTransitionAuditRepository.class),
                 mock(WaitingStatusEventRepository.class), mock(WaitingSettingRepository.class),
                 mock(IdempotencyExecutor.class), transactions,
+                mock(StoreTransactionEligibilityService.class),
                 new ObjectMapper(), Clock.fixed(Instant.parse("2026-08-12T00:00:00Z"), ZoneOffset.UTC),
                 attempt -> 0L, millis -> { throw new InterruptedException("stop"); });
 

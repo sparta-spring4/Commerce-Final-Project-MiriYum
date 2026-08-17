@@ -19,6 +19,7 @@ import com.miriyum.domain.reservation.waiting.repository.WaitingSettingRepositor
 import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
+import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -53,6 +54,7 @@ public class WaitingCreationService {
     private final ReceptionCheck receptionCheck;
     private final IdempotencyExecutor idempotencyExecutor;
     private final WaitingCreationTransactionExecutor transactionExecutor;
+    private final StoreTransactionEligibilityService storeEligibility;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final IntToLongFunction retryDelayMillis;
@@ -73,11 +75,13 @@ public class WaitingCreationService {
             WaitingReceptionGate receptionGate,
             IdempotencyExecutor idempotencyExecutor,
             WaitingCreationTransactionExecutor transactionExecutor,
+            StoreTransactionEligibilityService storeEligibility,
             ObjectMapper objectMapper,
             Clock clock
     ) {
         this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
                 eventRepository, receptionGate::requireOpen, idempotencyExecutor, transactionExecutor,
+                storeEligibility,
                 objectMapper, clock,
                 WaitingCreationService::defaultDelayMillis, Thread::sleep);
     }
@@ -87,11 +91,12 @@ public class WaitingCreationService {
             WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
             WaitingReceptionGate receptionGate,
             IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
+            StoreTransactionEligibilityService storeEligibility,
             ObjectMapper objectMapper, Clock clock, IntToLongFunction retryDelayMillis,
             RetrySleeper retrySleeper) {
         this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
                 eventRepository, receptionGate::requireOpen, idempotencyExecutor,
-                transactionExecutor, objectMapper, clock, retryDelayMillis, retrySleeper);
+                transactionExecutor, storeEligibility, objectMapper, clock, retryDelayMillis, retrySleeper);
     }
 
     /** 기존 failure-classifier 단위 테스트의 생성자 호환 전용 경로다. */
@@ -100,11 +105,12 @@ public class WaitingCreationService {
             WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
             WaitingSettingRepository settingRepository,
             IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
-            ObjectMapper objectMapper, Clock clock, IntToLongFunction retryDelayMillis,
+            StoreTransactionEligibilityService storeEligibility, ObjectMapper objectMapper,
+            Clock clock, IntToLongFunction retryDelayMillis,
             RetrySleeper retrySleeper) {
         this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
                 eventRepository, legacyReceptionCheck(settingRepository), idempotencyExecutor,
-                transactionExecutor, objectMapper, clock, retryDelayMillis, retrySleeper);
+                transactionExecutor, storeEligibility, objectMapper, clock, retryDelayMillis, retrySleeper);
     }
 
     private WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
@@ -112,6 +118,7 @@ public class WaitingCreationService {
             WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
             ReceptionCheck receptionCheck,
             IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
+            StoreTransactionEligibilityService storeEligibility,
             ObjectMapper objectMapper, Clock clock, IntToLongFunction retryDelayMillis,
             RetrySleeper retrySleeper) {
         this.sequenceRepository = Objects.requireNonNull(sequenceRepository);
@@ -122,6 +129,7 @@ public class WaitingCreationService {
         this.receptionCheck = Objects.requireNonNull(receptionCheck);
         this.idempotencyExecutor = Objects.requireNonNull(idempotencyExecutor);
         this.transactionExecutor = Objects.requireNonNull(transactionExecutor);
+        this.storeEligibility = Objects.requireNonNull(storeEligibility);
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.clock = Objects.requireNonNull(clock);
         this.retryDelayMillis = Objects.requireNonNull(retryDelayMillis);
@@ -180,6 +188,7 @@ public class WaitingCreationService {
     ) {
         return transactionExecutor.execute(() -> {
             IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+                    storeEligibility.requireWaitingTransactionEligibility(storeId);
                     Instant eligibilityAt = clock.instant();
                     receptionCheck.requireOpen(storeId, businessDate, eligibilityAt);
                     if (membershipRepository.findByConsumerAccountId(consumerAccountId).isPresent()) {

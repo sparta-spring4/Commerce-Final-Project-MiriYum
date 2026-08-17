@@ -4,6 +4,7 @@ import com.miriyum.domain.pickup.entity.PickupReservation;
 import com.miriyum.domain.pickup.entity.PickupStatus;
 import jakarta.persistence.LockModeType;
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -16,6 +17,16 @@ import org.springframework.data.repository.query.Param;
 
 public interface PickupReservationRepository
         extends JpaRepository<PickupReservation, Long> {
+
+    long countByStoreIdAndStatusAndPickupAtGreaterThanEqual(
+            long storeId,
+            PickupStatus status,
+            Instant pickupAt
+    );
+
+    @Query("select pickup.id from PickupReservation pickup where pickup.storeId = :storeId and pickup.status = :status and pickup.pickupAt >= :pickupAt order by pickup.id")
+    List<Long> findIdsByStoreIdAndStatusAndPickupAtGreaterThanEqual(@Param("storeId") long storeId,
+            @Param("status") PickupStatus status, @Param("pickupAt") Instant pickupAt);
 
     @Override
     @EntityGraph(attributePaths = "items")

@@ -6,6 +6,7 @@ import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreUpdateRequest;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreBaseSettings;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
@@ -27,6 +28,7 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -61,6 +63,7 @@ public class StoreService {
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final StoreAdministrationService storeAdministrationService;
 
     public StoreCommandResult create(
             long operatorAccountId,
@@ -162,6 +165,13 @@ public class StoreService {
                             modes == null ? null : modes.pickupEnabled(),
                             request.operationStatus(),
                             verified);
+                    storeAdministrationService.recomposeAfterOperatorUpdate(
+                            storeId,
+                            new StoreBaseSettings(
+                                    request.operationStatus(),
+                                    modes == null ? null : modes.reservationEnabled(),
+                                    modes == null ? null : modes.menuHoldEnabled(),
+                                    modes == null ? null : modes.pickupEnabled()));
                     Store saved = saveStore(store);
                     return success(HttpStatus.OK, saved);
                 }));
@@ -262,6 +272,15 @@ public class StoreService {
                         Function.identity()));
     }
 
+    /** 다른 도메인의 사용자 표시 문구에 필요한 공개 매장명만 조회한다. */
+    @Transactional(readOnly = true)
+    public Optional<String> findDisplayName(long storeId) {
+        if (storeId <= 0) {
+            return Optional.empty();
+        }
+        return storeRepository.findById(storeId).map(Store::getName);
+    }
+
     /**
      * 웨이팅 일정 해석을 위해 매장 상태를 공개 계약으로 일괄 투영한다.
      */
@@ -354,6 +373,7 @@ public class StoreService {
         Store store = storeRepository.findById(storeId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
         store.requireManagedBy(operatorAccountId);
+        store.requirePlatformManagementAllowed();
         return store;
     }
 
@@ -369,6 +389,7 @@ public class StoreService {
         Store store = storeRepository.findByIdForUpdate(storeId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
         store.requireManagedBy(operatorAccountId);
+        store.requirePlatformManagementAllowed();
         return store;
     }
 
