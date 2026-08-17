@@ -149,7 +149,7 @@ public class NotificationTaskRepository {
                         resultSet.getLong("resource_version"),
                         resultSet.getString("title"),
                         utcInstant(resultSet.getObject("occurred_at", LocalDateTime.class)),
-                        utcInstant(resultSet.getObject("created_at", LocalDateTime.class)),
+                        resultSet.getTimestamp("created_at").toInstant(),
                         utcInstant(resultSet.getObject("delivered_at", LocalDateTime.class))
                 ),
                 recipientAccountId,

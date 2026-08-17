@@ -120,14 +120,17 @@ class NotificationHistoryIntegrationTest {
     @Test
     void recordedHistoryRoundTripsUtcAndKeepsCursorBoundaryInAsiaSeoulSession() {
         OffsetDateTime occurredAt = OffsetDateTime.parse("2026-08-17T12:00:00+09:00");
+        Instant beforeRecord = databaseUtcNow();
         long firstId = recordDelivered("history-record-1", occurredAt);
         long secondId = recordDelivered("history-record-2", occurredAt);
+        Instant afterRecord = databaseUtcNow();
 
         var firstPage = repository.findDeliveredInAppHistory(11L, null, 1);
 
         assertThat(firstPage).singleElement().satisfies(task -> {
             assertThat(task.notificationId()).isEqualTo(secondId);
             assertThat(task.occurredAt()).isEqualTo(Instant.parse("2026-08-17T03:00:00Z"));
+            assertThat(task.createdAt()).isBetween(beforeRecord, afterRecord);
             assertThat(task.deliveredAt()).isEqualTo(Instant.parse("2026-08-17T03:00:01Z"));
         });
 
@@ -142,6 +145,14 @@ class NotificationHistoryIntegrationTest {
                     assertThat(task.occurredAt())
                             .isEqualTo(Instant.parse("2026-08-17T03:00:00Z"));
                 });
+    }
+
+    private Instant databaseUtcNow() {
+        LocalDateTime value = jdbcTemplate.queryForObject(
+                "SELECT UTC_TIMESTAMP(6)",
+                LocalDateTime.class
+        );
+        return value.toInstant(ZoneOffset.UTC);
     }
 
     private void insertDelivered(long notificationId, Instant occurredAt) {
