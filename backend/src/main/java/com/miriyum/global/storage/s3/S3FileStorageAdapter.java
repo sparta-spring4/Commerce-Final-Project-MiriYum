@@ -1,6 +1,7 @@
 package com.miriyum.global.storage.s3;
 
 import com.miriyum.global.storage.FileStorageObject;
+import com.miriyum.global.storage.FileStorageOutcomeUnknownException;
 import com.miriyum.global.storage.FileStoragePort;
 import com.miriyum.global.storage.FileStorageRequest;
 import com.miriyum.global.storage.FileStorageSaveResult;
@@ -77,8 +78,9 @@ public class S3FileStorageAdapter implements FileStoragePort {
             );
         } catch (RuntimeException exception) {
             failure = exception;
-            if (uploaded && isCompensatableVersionId(uploadedVersionId)) {
-                deleteUploadedObject(request.objectKey(), uploadedVersionId, exception);
+            if (uploaded && !deleteUploadedObject(request.objectKey(), uploadedVersionId, exception)) {
+                throw new FileStorageOutcomeUnknownException(
+                        "uploaded object outcome cannot be determined safely", exception);
             }
             throw exception;
         } finally {
@@ -199,15 +201,20 @@ public class S3FileStorageAdapter implements FileStoragePort {
         }
     }
 
-    private void deleteUploadedObject(String objectKey, String versionId, RuntimeException failure) {
+    private boolean deleteUploadedObject(String objectKey, String versionId, RuntimeException failure) {
+        if (!isCompensatableVersionId(versionId)) {
+            return false;
+        }
         try {
             s3Client.deleteObject(DeleteObjectRequest.builder()
                     .bucket(bucket)
                     .key(objectKey)
                     .versionId(versionId)
                     .build());
+            return true;
         } catch (RuntimeException cleanupException) {
             failure.addSuppressed(cleanupException);
+            return false;
         }
     }
 

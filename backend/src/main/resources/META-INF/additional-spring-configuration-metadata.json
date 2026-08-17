@@ -79,6 +79,16 @@
       "name": "miriyum.storage.s3.reconciliation.long-stay-threshold-seconds",
       "type": "java.lang.Long",
       "description": "장기 정체 관측 대상으로 간주할 파일의 경과 시간(초)입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.reconciliation.retry-base-delay-seconds",
+      "type": "java.lang.Long",
+      "description": "객체 삭제 실패 후 첫 재시도까지 기다릴 시간(초)입니다. 이후 지수 backoff의 기준값입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.reconciliation.claim-lease-seconds",
+      "type": "java.lang.Long",
+      "description": "동일 객체를 동시에 정리하지 않도록 worker가 보유하는 cleanup lease 시간(초)입니다."
     }
   ]
 }

@@ -51,8 +51,9 @@ public interface FileMetadataRepository extends JpaRepository<FileMetadata, Stri
     @Query("SELECT metadata FROM FileMetadata metadata WHERE metadata.fileId = :fileId")
     Optional<FileMetadata> findByFileIdForUpdate(@Param("fileId") String fileId);
 
-    List<FileMetadata> findAllByStorageStatusAndObjectCleanupCompletedAtIsNullOrderByDeletedAtAsc(
+    List<FileMetadata> findAllByStorageStatusAndObjectCleanupCompletedAtIsNullAndObjectCleanupNextAttemptAtLessThanEqualOrderByDeletedAtAsc(
             FileStorageStatus storageStatus,
+            java.time.Instant nextAttemptAt,
             Pageable pageable);
 
     List<FileMetadata> findAllByStorageStatusAndCreatedAtLessThanEqualOrderByCreatedAtAsc(

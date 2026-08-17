@@ -161,6 +161,8 @@ miriyum:
         batch-size: ${MIRIYUM_STORAGE_S3_RECONCILIATION_BATCH_SIZE:50}
         pending-min-age-seconds: ${MIRIYUM_STORAGE_S3_RECONCILIATION_PENDING_MIN_AGE_SECONDS:600}
         long-stay-threshold-seconds: ${MIRIYUM_STORAGE_S3_RECONCILIATION_LONG_STAY_THRESHOLD_SECONDS:3600}
+        retry-base-delay-seconds: ${MIRIYUM_STORAGE_S3_RECONCILIATION_RETRY_BASE_DELAY_SECONDS:60}
+        claim-lease-seconds: ${MIRIYUM_STORAGE_S3_RECONCILIATION_CLAIM_LEASE_SECONDS:300}
   rate-limit:
     sign-up:
       max-requests: ${MIRIYUM_RATE_LIMIT_SIGN_UP_MAX_REQUESTS:5}

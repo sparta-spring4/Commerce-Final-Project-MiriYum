@@ -9,6 +9,7 @@ import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.FileStorageVisibility;
 import java.sql.SQLIntegrityConstraintViolationException;
 import java.time.Instant;
+import java.util.UUID;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -161,9 +162,43 @@ public class FileMetadataTransactionExecutor {
 
     /** 논리 삭제됐지만 객체 삭제 완료 기록이 없는 후보만 제한된 수로 조회한다. */
     @Transactional(readOnly = true)
-    public List<FileMetadata> findObjectCleanupCandidates(int limit) {
-        return fileMetadataRepository.findAllByStorageStatusAndObjectCleanupCompletedAtIsNullOrderByDeletedAtAsc(
-                FileStorageStatus.DELETED, PageRequest.of(0, limit));
+    public List<FileMetadata> findObjectCleanupCandidates(Instant now, int limit) {
+        return fileMetadataRepository.findAllByStorageStatusAndObjectCleanupCompletedAtIsNullAndObjectCleanupNextAttemptAtLessThanEqualOrderByDeletedAtAsc(
+                FileStorageStatus.DELETED, now, PageRequest.of(0, limit));
+    }
+
+    /** 후보를 다시 잠가 lease를 얻은 worker만 외부 S3 삭제를 수행한다. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Optional<FileMetadata> claimObjectCleanup(String fileId, Instant now, Instant claimedUntil) {
+        FileMetadata metadata = fileMetadataRepository.findByFileIdForUpdate(fileId)
+                .orElseThrow(() -> new IllegalStateException("파일 메타데이터를 찾을 수 없습니다."));
+        if (!metadata.claimObjectCleanup(now, claimedUntil, UUID.randomUUID().toString())) {
+            return Optional.empty();
+        }
+        return Optional.of(saveTerminalState(metadata));
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean completeClaimedObjectCleanup(String fileId, String claimToken, Instant completedAt) {
+        FileMetadata metadata = fileMetadataRepository.findByFileIdForUpdate(fileId)
+                .orElseThrow(() -> new IllegalStateException("파일 메타데이터를 찾을 수 없습니다."));
+        if (!metadata.completeClaimedObjectCleanup(claimToken, completedAt)) {
+            return false;
+        }
+        saveTerminalState(metadata);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean rescheduleClaimedObjectCleanup(
+            String fileId, String claimToken, Instant now, long retryBaseSeconds) {
+        FileMetadata metadata = fileMetadataRepository.findByFileIdForUpdate(fileId)
+                .orElseThrow(() -> new IllegalStateException("파일 메타데이터를 찾을 수 없습니다."));
+        if (!metadata.rescheduleClaimedObjectCleanup(claimToken, now, retryBaseSeconds)) {
+            return false;
+        }
+        saveTerminalState(metadata);
+        return true;
     }
 
     /** 오래 남은 PENDING 후보를 읽어, 실제 전이는 외부 호출 전 짧은 트랜잭션에서 다시 확인한다. */

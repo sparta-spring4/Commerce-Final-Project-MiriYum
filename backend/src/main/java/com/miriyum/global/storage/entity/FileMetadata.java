@@ -76,6 +76,20 @@ public class FileMetadata {
     @Column(name = "object_cleanup_completed_at")
     private Instant objectCleanupCompletedAt;
 
+    @Convert(converter = UtcInstantConverter.class)
+    @Column(name = "object_cleanup_next_attempt_at")
+    private Instant objectCleanupNextAttemptAt;
+
+    @Convert(converter = UtcInstantConverter.class)
+    @Column(name = "object_cleanup_claimed_until")
+    private Instant objectCleanupClaimedUntil;
+
+    @Column(name = "object_cleanup_claim_token", length = 36)
+    private String objectCleanupClaimToken;
+
+    @Column(name = "object_cleanup_failure_count", nullable = false)
+    private int objectCleanupFailureCount;
+
     @Version
     @Column(name = "version", nullable = false)
     private Long version;
@@ -213,6 +227,7 @@ public class FileMetadata {
         }
         storageStatus = FileStorageStatus.DELETED;
         this.deletedAt = deletedAt;
+        objectCleanupNextAttemptAt = deletedAt;
     }
 
     /** 바깥 업무 트랜잭션이 롤백된 대기 파일을 공개 전에 폐기한다. */
@@ -225,6 +240,7 @@ public class FileMetadata {
         }
         storageStatus = FileStorageStatus.DELETED;
         this.deletedAt = deletedAt;
+        objectCleanupNextAttemptAt = deletedAt;
     }
 
     /** 객체 저장소의 멱등 삭제가 성공한 뒤에만 물리 정리 완료를 기록한다. */
@@ -238,6 +254,40 @@ public class FileMetadata {
         if (objectCleanupCompletedAt == null) {
             objectCleanupCompletedAt = completedAt;
         }
+        objectCleanupNextAttemptAt = null;
+        objectCleanupClaimedUntil = null;
+        objectCleanupClaimToken = null;
+    }
+
+    public boolean claimObjectCleanup(Instant now, Instant claimedUntil, String claimToken) {
+        if (storageStatus != FileStorageStatus.DELETED || objectCleanupCompletedAt != null
+                || (objectCleanupNextAttemptAt != null && objectCleanupNextAttemptAt.isAfter(now))
+                || (objectCleanupClaimedUntil != null && objectCleanupClaimedUntil.isAfter(now))) {
+            return false;
+        }
+        objectCleanupClaimedUntil = claimedUntil;
+        objectCleanupClaimToken = claimToken;
+        return true;
+    }
+
+    public boolean completeClaimedObjectCleanup(String claimToken, Instant completedAt) {
+        if (!claimToken.equals(objectCleanupClaimToken)) {
+            return false;
+        }
+        completeObjectCleanup(completedAt);
+        return true;
+    }
+
+    public boolean rescheduleClaimedObjectCleanup(String claimToken, Instant now, long retryBaseSeconds) {
+        if (!claimToken.equals(objectCleanupClaimToken)) {
+            return false;
+        }
+        long multiplier = 1L << Math.min(objectCleanupFailureCount, 6);
+        objectCleanupNextAttemptAt = now.plusSeconds(Math.multiplyExact(retryBaseSeconds, multiplier));
+        objectCleanupFailureCount++;
+        objectCleanupClaimedUntil = null;
+        objectCleanupClaimToken = null;
+        return true;
     }
 
     private void changeStatus(FileStorageStatus nextStatus) {

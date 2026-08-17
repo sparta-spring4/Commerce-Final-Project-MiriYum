@@ -43,27 +43,52 @@ public class FileStorageReconciliationJob {
         int skipped = 0;
         int failed = 0;
 
-        for (FileMetadata metadata : transactionExecutor.findObjectCleanupCandidates(limitPerType)) {
-            attempted++;
+        for (FileMetadata candidate : transactionExecutor.findObjectCleanupCandidates(now, limitPerType)) {
+            var claimed = transactionExecutor.claimObjectCleanup(
+                    candidate.getFileId(), now, now.plusSeconds(properties.claimLeaseSeconds()));
+            if (claimed.isEmpty()) {
+                skipped++;
+                continue;
+            }
+            FileMetadata metadata = claimed.get();
             try {
-                fileStorageFacade.delete(java.util.UUID.fromString(metadata.getFileId()), now);
+                fileStorageFacade.deleteForReconciliation(
+                        metadata.toPublicMetadata(), metadata.getObjectCleanupClaimToken(), now);
                 completed++;
             } catch (RuntimeException exception) {
+                transactionExecutor.rescheduleClaimedObjectCleanup(
+                        metadata.getFileId(), metadata.getObjectCleanupClaimToken(), now,
+                        properties.retryBaseDelaySeconds());
                 failed++;
             }
         }
 
         Instant stalePendingBefore = now.minusSeconds(properties.pendingMinAgeSeconds());
         for (FileMetadata candidate : transactionExecutor.findStalePendingCandidates(stalePendingBefore, limitPerType)) {
-            attempted++;
+            FileMetadata claimedMetadata = null;
             try {
-                if (transactionExecutor.discardStalePendingForReconciliation(candidate.getFileId(), now).isEmpty()) {
+                var deleted = transactionExecutor.discardStalePendingForReconciliation(candidate.getFileId(), now);
+                if (deleted.isEmpty()) {
                     skipped++;
                     continue;
                 }
-                fileStorageFacade.delete(java.util.UUID.fromString(candidate.getFileId()), now);
+                var claimed = transactionExecutor.claimObjectCleanup(
+                        deleted.get().getFileId(), now, now.plusSeconds(properties.claimLeaseSeconds()));
+                if (claimed.isEmpty()) {
+                    skipped++;
+                    continue;
+                }
+                attempted++;
+                claimedMetadata = claimed.get();
+                fileStorageFacade.deleteForReconciliation(
+                        claimedMetadata.toPublicMetadata(), claimedMetadata.getObjectCleanupClaimToken(), now);
                 completed++;
             } catch (RuntimeException exception) {
+                if (claimedMetadata != null) {
+                    transactionExecutor.rescheduleClaimedObjectCleanup(
+                            claimedMetadata.getFileId(), claimedMetadata.getObjectCleanupClaimToken(), now,
+                            properties.retryBaseDelaySeconds());
+                }
                 failed++;
             }
         }
@@ -86,7 +111,9 @@ public class FileStorageReconciliationJob {
         if (properties.delayMs() <= 0
                 || properties.batchSize() < 2
                 || properties.pendingMinAgeSeconds() < 0
-                || properties.longStayThresholdSeconds() <= 0) {
+                || properties.longStayThresholdSeconds() <= 0
+                || properties.retryBaseDelaySeconds() <= 0
+                || properties.claimLeaseSeconds() <= 0) {
             throw new IllegalStateException("파일 저장소 정리 재시도 설정값이 올바르지 않습니다.");
         }
     }

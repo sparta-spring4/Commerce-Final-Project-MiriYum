@@ -9,6 +9,8 @@ public record FileStorageReconciliationProperties(
         long delayMs,
         int batchSize,
         long pendingMinAgeSeconds,
-        long longStayThresholdSeconds
+        long longStayThresholdSeconds,
+        long retryBaseDelaySeconds,
+        long claimLeaseSeconds
 ) {
 }

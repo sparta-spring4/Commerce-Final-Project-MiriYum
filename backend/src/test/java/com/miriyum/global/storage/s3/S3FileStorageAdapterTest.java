@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.miriyum.global.storage.FileStorageObject;
+import com.miriyum.global.storage.FileStorageOutcomeUnknownException;
 import com.miriyum.global.storage.FileStorageRequest;
 import com.miriyum.global.storage.FileStorageSaveResult;
 import java.io.ByteArrayInputStream;
@@ -213,8 +214,7 @@ class S3FileStorageAdapterTest {
                 new ByteArrayInputStream("hello".getBytes(StandardCharsets.UTF_8)));
 
         assertThatThrownBy(() -> adapter.save(request))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("stored file size");
+                .isInstanceOf(FileStorageOutcomeUnknownException.class);
 
         verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
     }
@@ -239,8 +239,7 @@ class S3FileStorageAdapterTest {
                 new ByteArrayInputStream("hello".getBytes(StandardCharsets.UTF_8)));
 
         assertThatThrownBy(() -> adapter.save(request))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("stored file size");
+                .isInstanceOf(FileStorageOutcomeUnknownException.class);
 
         verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
     }

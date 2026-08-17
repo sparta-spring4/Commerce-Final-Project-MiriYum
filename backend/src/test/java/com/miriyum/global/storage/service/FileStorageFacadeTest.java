@@ -7,6 +7,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.miriyum.global.storage.FileStorageObject;
+import com.miriyum.global.storage.FileStorageOutcomeUnknownException;
 import com.miriyum.global.storage.FileStorageMetadata;
 import com.miriyum.global.storage.FileStorageOwner;
 import com.miriyum.global.storage.FileStoragePort;
@@ -77,6 +78,22 @@ class FileStorageFacadeTest {
         assertThatThrownBy(() -> facade.store(metadata, request(metadata.objectKey())))
                 .isSameAs(storageFailure)
                 .satisfies(exception -> assertThat(exception.getSuppressed()).containsExactly(failedStatusFailure));
+    }
+
+    @Test
+    @DisplayName("업로드 결과를 확정할 수 없으면 PENDING을 유지해 reconciliation 대상으로 남긴다")
+    void keepsPendingWhenUploadOutcomeIsUnknown() {
+        FileStorageMetadata metadata = pendingMetadata();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null);
+        FileStorageFacade facade = new FileStorageFacade(
+                new FailingFileStoragePort(new FileStorageOutcomeUnknownException("outcome unknown", null)),
+                transactionExecutor);
+
+        assertThatThrownBy(() -> facade.storePending(metadata, request(metadata.objectKey())))
+                .isInstanceOf(FileStorageOutcomeUnknownException.class);
+
+        assertThat(transactionExecutor.pendingFileIds()).containsExactly(metadata.fileId().toString());
+        assertThat(transactionExecutor.failedFileIds()).isEmpty();
     }
 
     @Test
@@ -256,6 +273,30 @@ class FileStorageFacadeTest {
                     .extracting(ILoggingEvent::getFormattedMessage)
                     .contains("event=file_storage_object_delete_failed file_id=" + confirmed.fileId())
                     .noneMatch(message -> message.contains(confirmed.objectKey()));
+        } finally {
+            logger.detachAppender(logAppender);
+            logAppender.stop();
+        }
+    }
+
+    @Test
+    @DisplayName("reconciliation 삭제 실패는 객체 키가 든 예외여도 개별 로그를 남기지 않는다")
+    void doesNotLogIdentifiersForReconciliationFailure() {
+        FileStorageMetadata deleted = confirmedMetadata();
+        IllegalStateException storageFailure = new IllegalStateException("s3://bucket/" + deleted.objectKey());
+        FileStorageFacade facade = new FileStorageFacade(
+                new FailingOnceDeleteFileStoragePort(new ArrayList<>(), storageFailure),
+                new RecordingTransactionExecutor(null, null));
+        Logger logger = (Logger) LoggerFactory.getLogger(FileStorageFacade.class);
+        ListAppender<ILoggingEvent> logAppender = new ListAppender<>();
+        logAppender.start();
+        logger.addAppender(logAppender);
+
+        try {
+            assertThatThrownBy(() -> facade.deleteForReconciliation(deleted, "claim-token", Instant.now()))
+                    .isSameAs(storageFailure);
+
+            assertThat(logAppender.list).isEmpty();
         } finally {
             logger.detachAppender(logAppender);
             logAppender.stop();

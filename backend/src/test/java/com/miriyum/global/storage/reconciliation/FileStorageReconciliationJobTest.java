@@ -33,21 +33,22 @@ class FileStorageReconciliationJobTest {
         FileStorageFacade facade = mock(FileStorageFacade.class);
         FileMetadata deleted = deletedMetadata();
         FileMetadata pending = pendingMetadata();
-        when(executor.findObjectCleanupCandidates(2)).thenReturn(List.of(deleted));
+        when(executor.findObjectCleanupCandidates(eq(NOW), eq(2))).thenReturn(List.of(deleted));
+        when(executor.claimObjectCleanup(eq(deleted.getFileId()), eq(NOW), any())).thenReturn(Optional.of(deleted));
         when(executor.findStalePendingCandidates(NOW.minusSeconds(600), 2)).thenReturn(List.of(pending));
         when(executor.discardStalePendingForReconciliation(eq(pending.getFileId()), eq(NOW)))
                 .thenReturn(Optional.of(pending));
+        when(executor.claimObjectCleanup(eq(pending.getFileId()), eq(NOW), any())).thenReturn(Optional.of(pending));
         when(executor.countLongStayCandidates(any(), any())).thenReturn(0L);
 
         FileStorageReconciliationJob.ReconciliationResult result = new FileStorageReconciliationJob(
                 executor,
                 facade,
-                new FileStorageReconciliationProperties(true, 60_000, 4, 600, 3_600),
+                new FileStorageReconciliationProperties(true, 60_000, 4, 600, 3_600, 60, 300),
                 Clock.fixed(NOW, ZoneOffset.UTC)).reconcile();
 
         assertThat(result).isEqualTo(new FileStorageReconciliationJob.ReconciliationResult(2, 2, 0, 0, 0));
-        verify(facade).delete(UUID.fromString(deleted.getFileId()), NOW);
-        verify(facade).delete(UUID.fromString(pending.getFileId()), NOW);
+        verify(facade, org.mockito.Mockito.times(2)).deleteForReconciliation(any(), any(), eq(NOW));
     }
 
     @Test
@@ -56,7 +57,7 @@ class FileStorageReconciliationJobTest {
         FileMetadataTransactionExecutor executor = mock(FileMetadataTransactionExecutor.class);
         FileStorageFacade facade = mock(FileStorageFacade.class);
         FileMetadata pending = pendingMetadata();
-        when(executor.findObjectCleanupCandidates(1)).thenReturn(List.of());
+        when(executor.findObjectCleanupCandidates(eq(NOW), eq(1))).thenReturn(List.of());
         when(executor.findStalePendingCandidates(NOW.minusSeconds(600), 1)).thenReturn(List.of(pending));
         when(executor.discardStalePendingForReconciliation(eq(pending.getFileId()), eq(NOW)))
                 .thenReturn(Optional.empty());
@@ -65,10 +66,10 @@ class FileStorageReconciliationJobTest {
         FileStorageReconciliationJob.ReconciliationResult result = new FileStorageReconciliationJob(
                 executor,
                 facade,
-                new FileStorageReconciliationProperties(true, 60_000, 2, 600, 3_600),
+                new FileStorageReconciliationProperties(true, 60_000, 2, 600, 3_600, 60, 300),
                 Clock.fixed(NOW, ZoneOffset.UTC)).reconcile();
 
-        assertThat(result).isEqualTo(new FileStorageReconciliationJob.ReconciliationResult(1, 0, 1, 0, 0));
+        assertThat(result).isEqualTo(new FileStorageReconciliationJob.ReconciliationResult(0, 0, 1, 0, 0));
         org.mockito.Mockito.verifyNoInteractions(facade);
     }
 

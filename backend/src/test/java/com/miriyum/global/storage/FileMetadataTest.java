@@ -152,6 +152,38 @@ class FileMetadataTest {
     }
 
     @Test
+    @DisplayName("객체 정리 lease는 한 worker만 획득하고 stale worker의 완료 기록을 거절한다")
+    void allowsOnlyClaimOwnerToCompleteObjectCleanup() {
+        FileMetadata metadata = pendingMetadata();
+        Instant now = Instant.parse("2026-08-15T00:01:00Z");
+        metadata.confirm();
+        metadata.delete(now);
+
+        assertThat(metadata.claimObjectCleanup(now, now.plusSeconds(300), "worker-a")).isTrue();
+        assertThat(metadata.claimObjectCleanup(now, now.plusSeconds(300), "worker-b")).isFalse();
+        assertThat(metadata.completeClaimedObjectCleanup("worker-b", now.plusSeconds(1))).isFalse();
+        assertThat(metadata.completeClaimedObjectCleanup("worker-a", now.plusSeconds(1))).isTrue();
+        assertThat(metadata.getObjectCleanupCompletedAt()).isEqualTo(now.plusSeconds(1));
+    }
+
+    @Test
+    @DisplayName("정리 실패는 다음 시도 시각을 지수 backoff로 미뤄 다음 후보를 먼저 처리할 수 있게 한다")
+    void reschedulesObjectCleanupWithBackoff() {
+        FileMetadata metadata = pendingMetadata();
+        Instant now = Instant.parse("2026-08-15T00:01:00Z");
+        metadata.confirm();
+        metadata.delete(now);
+        metadata.claimObjectCleanup(now, now.plusSeconds(300), "worker-a");
+
+        assertThat(metadata.rescheduleClaimedObjectCleanup("worker-a", now, 60)).isTrue();
+        assertThat(metadata.getObjectCleanupNextAttemptAt()).isEqualTo(now.plusSeconds(60));
+        assertThat(metadata.getObjectCleanupClaimToken()).isNull();
+        assertThat(metadata.claimObjectCleanup(now.plusSeconds(60), now.plusSeconds(360), "worker-b")).isTrue();
+        assertThat(metadata.rescheduleClaimedObjectCleanup("worker-b", now.plusSeconds(60), 60)).isTrue();
+        assertThat(metadata.getObjectCleanupNextAttemptAt()).isEqualTo(now.plusSeconds(180));
+    }
+
+    @Test
     void rejectsPrivateStoreImageMetadata() {
         assertThatIllegalArgumentException().isThrownBy(() -> new FileStorageMetadata(
                 UUID.randomUUID(),

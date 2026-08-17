@@ -6,6 +6,7 @@ import com.miriyum.global.storage.FileStorageRequest;
 import com.miriyum.global.storage.FileStorageSaveResult;
 import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.FileStorageOwner;
+import com.miriyum.global.storage.FileStorageOutcomeUnknownException;
 import com.miriyum.global.storage.FileStoragePurpose;
 import com.miriyum.global.storage.entity.FileMetadata;
 import java.time.Instant;
@@ -39,6 +40,9 @@ public class FileStorageFacade {
         try {
             FileStorageSaveResult saveResult = fileStoragePort.save(request);
             validateSaveResult(persistedMetadata, saveResult);
+        } catch (FileStorageOutcomeUnknownException exception) {
+            // PENDING을 유지해야 reconciliation이 고아 객체를 안전하게 정리할 수 있다.
+            throw exception;
         } catch (RuntimeException exception) {
             markFailedWithoutHidingStorageFailure(persistedMetadata.getFileId(), exception);
             throw exception;
@@ -109,6 +113,15 @@ public class FileStorageFacade {
                 .toPublicMetadata();
         deleteObjectAndRecordCompletion(deleted, "file_storage_pending_compensation_failed");
         return deleted;
+    }
+
+    /**
+     * reconciliation worker가 이미 claim한 논리 삭제 객체를 재시도한다.
+     * 이 경로는 배치의 식별자 없는 집계 로그만 남기기 위해 개별 실패 로그를 만들지 않는다.
+     */
+    public void deleteForReconciliation(FileStorageMetadata deleted, String claimToken, Instant completedAt) {
+        fileStoragePort.delete(deleted.objectKey());
+        transactionExecutor.completeClaimedObjectCleanup(deleted.fileId().toString(), claimToken, completedAt);
     }
 
     /**
