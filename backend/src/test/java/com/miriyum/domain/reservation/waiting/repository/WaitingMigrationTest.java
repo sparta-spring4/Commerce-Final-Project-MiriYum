@@ -82,8 +82,8 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("Flyway V49가 팀별 1회 입장 임박 사건 원장을 적용한다")
-    void appliesWaitingEntryImminentRuntimeAsFlywayV49() {
+    @DisplayName("Flyway V54가 팀별 1회 입장 임박 사건 원장을 적용한다")
+    void appliesWaitingEntryImminentRuntimeAsFlywayV54() {
         Flyway flyway = Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .load();
@@ -92,13 +92,13 @@ class WaitingMigrationTest {
 
         assertThat(flyway.info().applied())
                 .anyMatch(migration ->
-                        "49".equals(String.valueOf(migration.getVersion()))
-                                && "V49__create_waiting_entry_imminent_events.sql"
+                        "54".equals(String.valueOf(migration.getVersion()))
+                                && "V54__create_waiting_entry_imminent_events.sql"
                                 .equals(migration.getScript()));
     }
 
     @Test
-    @DisplayName("V49까지 적용하면 Waiting 소유 테이블 열한 개만 존재한다")
+    @DisplayName("V54까지 적용하면 Waiting 소유 테이블 열한 개만 존재한다")
     void createsExactWaitingLedgerTableSet() throws SQLException {
         migrate();
 
