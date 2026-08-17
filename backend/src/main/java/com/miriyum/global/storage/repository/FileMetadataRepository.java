@@ -5,6 +5,7 @@ import com.miriyum.global.storage.FileStoragePurpose;
 import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.FileStorageVisibility;
 import java.util.List;
+import java.util.Collection;
 import jakarta.persistence.LockModeType;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -18,6 +19,20 @@ public interface FileMetadataRepository extends JpaRepository<FileMetadata, Stri
     List<FileMetadata> findAllByOwnerTypeAndOwnerIdAndPurposeAndVisibilityAndStorageStatusOrderByCreatedAtAsc(
             String ownerType,
             long ownerId,
+            FileStoragePurpose purpose,
+            FileStorageVisibility visibility,
+            FileStorageStatus storageStatus);
+
+    List<FileMetadata> findAllByOwnerTypeAndOwnerIdAndPurposeAndVisibilityAndStorageStatusInOrderByCreatedAtAsc(
+            String ownerType,
+            long ownerId,
+            FileStoragePurpose purpose,
+            FileStorageVisibility visibility,
+            Collection<FileStorageStatus> storageStatuses);
+
+    List<FileMetadata> findAllByOwnerTypeAndOwnerIdInAndPurposeAndVisibilityAndStorageStatusOrderByCreatedAtAsc(
+            String ownerType,
+            Collection<Long> ownerIds,
             FileStoragePurpose purpose,
             FileStorageVisibility visibility,
             FileStorageStatus storageStatus);
