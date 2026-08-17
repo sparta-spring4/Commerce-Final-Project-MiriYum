@@ -3,10 +3,17 @@ package com.miriyum.domain.notification.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
+import com.miriyum.domain.notification.dto.source.NotificationResourceType;
+import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
+import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
+import com.miriyum.domain.notification.dto.source.NotificationTaskReceipt;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository.HistoryBoundary;
-import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -15,6 +22,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -42,13 +50,17 @@ class NotificationHistoryIntegrationTest {
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.url",
+                () -> MYSQL.getJdbcUrl()
+                        + "?connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true");
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
     }
 
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired NotificationTaskRepository repository;
+    @Autowired NotificationTaskRecorder recorder;
+    @Autowired TransactionTemplate transactions;
 
     @BeforeEach
     void resetDatabase() {
@@ -105,6 +117,44 @@ class NotificationHistoryIntegrationTest {
                 .containsExactly(103L, 102L, 101L);
     }
 
+    @Test
+    void recordedHistoryRoundTripsUtcAndKeepsCursorBoundaryInAsiaSeoulSession() {
+        OffsetDateTime occurredAt = OffsetDateTime.parse("2026-08-17T12:00:00+09:00");
+        Instant beforeRecord = databaseUtcNow();
+        long firstId = recordDelivered("history-record-1", occurredAt);
+        long secondId = recordDelivered("history-record-2", occurredAt);
+        Instant afterRecord = databaseUtcNow();
+
+        var firstPage = repository.findDeliveredInAppHistory(11L, null, 1);
+
+        assertThat(firstPage).singleElement().satisfies(task -> {
+            assertThat(task.notificationId()).isEqualTo(secondId);
+            assertThat(task.occurredAt()).isEqualTo(Instant.parse("2026-08-17T03:00:00Z"));
+            assertThat(task.createdAt()).isBetween(beforeRecord, afterRecord);
+            assertThat(task.deliveredAt()).isEqualTo(Instant.parse("2026-08-17T03:00:01Z"));
+        });
+
+        var boundary = new HistoryBoundary(
+                firstPage.getFirst().occurredAt(),
+                firstPage.getFirst().notificationId()
+        );
+        assertThat(repository.findDeliveredInAppHistory(11L, boundary, 1))
+                .singleElement()
+                .satisfies(task -> {
+                    assertThat(task.notificationId()).isEqualTo(firstId);
+                    assertThat(task.occurredAt())
+                            .isEqualTo(Instant.parse("2026-08-17T03:00:00Z"));
+                });
+    }
+
+    private Instant databaseUtcNow() {
+        LocalDateTime value = jdbcTemplate.queryForObject(
+                "SELECT UTC_TIMESTAMP(6)",
+                LocalDateTime.class
+        );
+        return value.toInstant(ZoneOffset.UTC);
+    }
+
     private void insertDelivered(long notificationId, Instant occurredAt) {
         insertTask(notificationId, 11L, "DELIVERED", occurredAt, occurredAt.plusSeconds(1));
         insertAttempt(notificationId, "DELIVERED");
@@ -140,13 +190,53 @@ class NotificationHistoryIntegrationTest {
                 notificationId,
                 "history-event-" + notificationId,
                 recipientAccountId,
-                Timestamp.from(occurredAt),
-                Timestamp.from(occurredAt),
+                LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC),
+                LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC),
                 "history-correlation-" + notificationId,
                 String.format("%064d", notificationId),
                 status,
-                deliveredAt == null ? null : Timestamp.from(deliveredAt)
+                deliveredAt == null
+                        ? null
+                        : LocalDateTime.ofInstant(deliveredAt, ZoneOffset.UTC)
         );
+    }
+
+    private long recordDelivered(String sourceEventId, OffsetDateTime occurredAt) {
+        NotificationTaskReceipt receipt = transactions.execute(status -> recorder.record(
+                new NotificationSourceEventV1(
+                        sourceEventId,
+                        NotificationSourceDomain.PICKUP,
+                        NotificationPurpose.PICKUP_RESERVATION_CONFIRMED,
+                        "11",
+                        7L,
+                        NotificationResourceType.PICKUP_RESERVATION,
+                        "31",
+                        3L,
+                        "CONFIRMED",
+                        occurredAt,
+                        occurredAt,
+                        null,
+                        null,
+                        "history-correlation-" + sourceEventId
+                )
+        ));
+        LocalDateTime deliveredAt = LocalDateTime.ofInstant(
+                occurredAt.toInstant().plusSeconds(1),
+                ZoneOffset.UTC
+        );
+        jdbcTemplate.update("""
+                UPDATE notification_tasks
+                   SET status = 'DELIVERED',
+                       title = '픽업 예약이 확정되었습니다.',
+                       delivered_at = ?
+                 WHERE notification_id = ?
+                """, deliveredAt, receipt.notificationId());
+        jdbcTemplate.update("""
+                UPDATE notification_channel_attempts
+                   SET status = 'DELIVERED', last_attempted_at = ?
+                 WHERE notification_id = ? AND channel = 'IN_APP'
+                """, deliveredAt, receipt.notificationId());
+        return Long.parseLong(receipt.notificationId());
     }
 
     private void insertAttempt(long notificationId, String status) {

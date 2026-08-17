@@ -12,9 +12,10 @@ import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import com.miriyum.domain.notification.dto.source.NotificationResourceType;
 import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import com.miriyum.domain.notification.port.PickupNotificationSource;
-import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -71,7 +72,9 @@ class NotificationTaskWorkerIntegrationTest {
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.url",
+                () -> MYSQL.getJdbcUrl()
+                        + "?connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true");
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
     }
@@ -115,6 +118,31 @@ class NotificationTaskWorkerIntegrationTest {
                 "SOURCE_EVENT_RECORDED",
                 "IN_APP_DELIVERED@notification-worker-test-v1"
         );
+    }
+
+    @Test
+    void plusNineImmediateNotificationIsDueWhenJdbcAndDatabaseTimeZonesDiffer() {
+        OffsetDateTime occurredAt = OffsetDateTime.now(ZoneOffset.ofHours(9))
+                .minusSeconds(1)
+                .withNano(0);
+        record("plus-nine-immediate-1", occurredAt, null);
+
+        assertThat(worker.deliverDueBatch()).isOne();
+        assertThat(taskString("status")).isEqualTo("DELIVERED");
+    }
+
+    @Test
+    void plusNineFutureNotificationIsNotDeliveredEarlyWhenDatabaseSessionUsesPlusNine() {
+        OffsetDateTime occurredAt = OffsetDateTime.now(ZoneOffset.ofHours(9))
+                .minusSeconds(1)
+                .withNano(0);
+        record("plus-nine-future-1", occurredAt, null);
+        jdbcTemplate.update(
+                "UPDATE notification_tasks SET scheduled_at = ?",
+                LocalDateTime.ofInstant(occurredAt.plusHours(1).toInstant(), ZoneOffset.UTC));
+
+        assertThat(worker.deliverDueBatch()).isZero();
+        assertThat(taskString("status")).isEqualTo("PENDING");
     }
 
     @Test
@@ -169,7 +197,7 @@ class NotificationTaskWorkerIntegrationTest {
         assertThat(taskString("status")).isEqualTo("PENDING");
         assertThat(channelString("status")).isEqualTo("PENDING");
         assertThat(jdbcTemplate.queryForObject("""
-                SELECT next_attempt_at > NOW(6) FROM notification_tasks
+                SELECT next_attempt_at > UTC_TIMESTAMP(6) FROM notification_tasks
                 """, Boolean.class)).isTrue();
 
         makeRetryDue();
@@ -242,12 +270,9 @@ class NotificationTaskWorkerIntegrationTest {
             assertThat(titleRenderer.awaitRender()).isTrue();
             jdbcTemplate.update("""
                     UPDATE notification_tasks
-                       SET expires_at = TIMESTAMPADD(SECOND, 1, NOW(6))
+                       SET expires_at = TIMESTAMPADD(SECOND, 1, UTC_TIMESTAMP(6))
                     """);
-            BigDecimal expiryEpoch = jdbcTemplate.queryForObject(
-                    "SELECT UNIX_TIMESTAMP(expires_at) FROM notification_tasks",
-                    BigDecimal.class);
-            awaitDatabaseTimeAtOrAfter(expiryEpoch);
+            awaitTaskExpiry();
             titleRenderer.releaseRender();
 
             assertThat(delivery.get(10, TimeUnit.SECONDS)).isOne();
@@ -301,7 +326,7 @@ class NotificationTaskWorkerIntegrationTest {
             assertThat(pickupSource.awaitFirstRead()).isTrue();
             jdbcTemplate.update("""
                     UPDATE notification_tasks
-                       SET lease_until = DATE_SUB(NOW(6), INTERVAL 1 SECOND)
+                       SET lease_until = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)
                     """);
 
             var recoveringWorker = executor.submit(worker::deliverDueBatch);
@@ -325,6 +350,14 @@ class NotificationTaskWorkerIntegrationTest {
 
     private void record(String sourceEventId, OffsetDateTime expiresAt) {
         OffsetDateTime occurredAt = OffsetDateTime.parse("2026-08-12T01:02:03Z");
+        record(sourceEventId, occurredAt, expiresAt);
+    }
+
+    private void record(
+            String sourceEventId,
+            OffsetDateTime occurredAt,
+            OffsetDateTime expiresAt
+    ) {
         transactions.executeWithoutResult(ignored -> recorder.record(new NotificationSourceEventV1(
                 sourceEventId,
                 NotificationSourceDomain.PICKUP,
@@ -346,7 +379,7 @@ class NotificationTaskWorkerIntegrationTest {
     private void makeRetryDue() {
         jdbcTemplate.update("""
                 UPDATE notification_tasks
-                   SET next_attempt_at = DATE_SUB(NOW(6), INTERVAL 1 SECOND)
+                   SET next_attempt_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)
                  WHERE status = 'PENDING'
                 """);
     }
@@ -377,16 +410,24 @@ class NotificationTaskWorkerIntegrationTest {
 
     private void awaitDatabaseTimeAtOrAfter(OffsetDateTime threshold)
             throws InterruptedException {
-        BigDecimal epochSeconds = BigDecimal.valueOf(threshold.toEpochSecond())
-                .add(BigDecimal.valueOf(threshold.getNano(), 9));
-        awaitDatabaseTimeAtOrAfter(epochSeconds);
+        LocalDateTime thresholdUtc = LocalDateTime.ofInstant(
+                threshold.toInstant(), ZoneOffset.UTC);
+        awaitDatabaseCondition(
+                "SELECT UTC_TIMESTAMP(6) >= ?",
+                thresholdUtc);
     }
 
-    private void awaitDatabaseTimeAtOrAfter(BigDecimal epochSeconds)
+    private void awaitTaskExpiry()
+            throws InterruptedException {
+        awaitDatabaseCondition(
+                "SELECT UTC_TIMESTAMP(6) >= expires_at FROM notification_tasks");
+    }
+
+    private void awaitDatabaseCondition(String sql, Object... arguments)
             throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!Boolean.TRUE.equals(jdbcTemplate.queryForObject(
-                "SELECT UNIX_TIMESTAMP(NOW(6)) >= ?", Boolean.class, epochSeconds))) {
+                sql, Boolean.class, arguments))) {
             if (System.nanoTime() >= deadline) {
                 throw new IllegalStateException("database clock did not reach expiry threshold");
             }
