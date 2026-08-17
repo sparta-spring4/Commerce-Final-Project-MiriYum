@@ -234,8 +234,10 @@ components:
       properties:
         reservationCandidate:
           $ref: "#/components/schemas/CountMetric"
+          description: 후보 판정 producer 계약이 없어 null/UNAVAILABLE로 유지한다.
         reservationConfirmed:
           $ref: "#/components/schemas/CountMetric"
+          description: 운영자가 확정한 Reservation NO_SHOW audit의 고유 예약 팀 수다.
         waitingConfirmed:
           $ref: "#/components/schemas/CountMetric"
     NoShowMetric:
@@ -438,15 +440,15 @@ components:
                           corrected: false
                           reasonCode: SOURCE_CONTRACT_MISSING
                         reservationConfirmed:
-                          value: null
+                          value: 1
                           definitionVersion: analytics-004-reservation-no-show-confirmed-v1
-                          aggregationVersion: 1
+                          aggregationVersion: 49
                           asOf: "2026-08-16T18:00:00+09:00"
-                          dataThrough: null
-                          inputCheckpoint: null
-                          completeness: UNAVAILABLE
+                          dataThrough: "2026-08-16T17:58:00+09:00"
+                          inputCheckpoint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                          completeness: COMPLETE
                           corrected: false
-                          reasonCode: SOURCE_CONTRACT_MISSING
+                          reasonCode: null
                         waitingConfirmed:
                           value: 2
                           definitionVersion: analytics-004-waiting-no-show-confirmed-v1
@@ -457,11 +459,11 @@ components:
                           completeness: COMPLETE
                           corrected: false
                           reasonCode: null
-                      definitionVersion: analytics-004-no-show-v1
-                      aggregationVersion: 2
+                      definitionVersion: analytics-004-no-show-v2
+                      aggregationVersion: 49
                       asOf: "2026-08-16T18:00:00+09:00"
                       dataThrough: "2026-08-16T17:59:54+09:00"
-                      inputCheckpoint: "waiting:912"
+                      inputCheckpoint: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
                       completeness: PARTIAL
                       corrected: false
                       reasonCode: SOURCE_CONTRACT_MISSING

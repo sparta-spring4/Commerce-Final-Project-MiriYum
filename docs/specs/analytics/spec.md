@@ -1,7 +1,7 @@
 # 매장 운영 대시보드 통계 기능 명세
 
 > 상태: Issue #270 contract-first 활성 명세
-> Runtime: Issue #270 branch에서 구현됨. V48 병합·rebase 검증 전에는 PR 병합 금지다.
+> Runtime: Issue #270 branch에서 구현됨. #240/PR #394와 최신 dev를 반영했으며 focused/CI 검증 전에는 PR 병합 금지다.
 > 소유자: Store/Analytics 통합 `@116Lv`; Reservation·Waiting 공개 계약 공동 검토
 
 ## 관련 정책과 범위
@@ -19,12 +19,12 @@
 
 | 의존성 | 현재 공개 계약 | #270에 충분한가 | 해제 방법 |
 |---|---|---|---|
-| Store 권한 | `StoreService.requireManagementOwnership(...)`, `ManagedStoreResponse` | 부분 충족. 소유권 검증은 가능하지만 버전된 권한 snapshot이 없다. | #270이 `StoreDashboardAuthority` 공개 DTO와 증가하는 `dashboardAuthorityVersion`을 추가한다. |
-| Reservation 목록 | `ReservationService.getStoreReservations(...)`, `StoreReservationPageResponse` | 불충분. 페이지 사이 일관성, source checkpoint와 보정 version이 없다. | #270이 `ReservationAnalyticsQueryService`와 집계 DTO를 Reservation 공개 계약으로 추가한다. |
-| Reservation 수용량 | 예약 가능 여부 조회와 수용량 교체 응답 | 불충분. 통계용 분자·분모와 입력 checkpoint가 없다. | 확정 Reservation allocation과 유효 capacity bucket을 집계하는 공개 계약을 추가한다. |
-| Reservation 취소 | 현재 상태와 단건 cancellation audit | 불충분. 한 번 확정된 모집단과 정정 의미가 공개되지 않는다. | Reservation 공개 집계가 확정 이력·취소 감사를 고유 Reservation 단위로 계산한다. |
-| Waiting #271/#272 | `WaitingTeamQueryService`의 FIFO page/detail, versioned settings, 원장 상태 사건 | 부분 충족. runtime은 병합됐지만 동일 `asOf` aggregate 조회가 없다. | #270이 `WaitingAnalyticsQueryService`와 집계 DTO를 Waiting 공개 계약으로 추가한다. |
-| 예약 노쇼 #240 | 없음. Reservation 공개 상태는 `CONFIRMED`, `CANCELLED`, `FULFILLED`뿐이다. | 차단 | #240 담당자 `@usersy628`가 확정 노쇼 공개 Service·DTO·오류를 병합한다. |
+| Store 권한 | `StoreService.requireDashboardAuthority(...)`, `StoreDashboardAuthority` | 충족 | authority version과 KST time zone을 동일 snapshot 경계로 사용한다. |
+| Reservation 통계 | `ReservationAnalyticsQueryService.getDashboardSnapshot(...)`, `ReservationAnalyticsSnapshot` | 확정 노쇼 필드 외 충족 | #240 audit aggregate와 `confirmedNoShowTeams`를 공개 DTO에 추가한다. |
+| Reservation 수용량 | 공개 Reservation 통계의 allocation/capacity aggregate | 충족 | `policy_published_at <= asOf`인 최신 정책만 사용한다. |
+| Reservation 취소 | 공개 Reservation 통계의 lifecycle/cancellation aggregate | 충족 | 고유 Reservation과 cancellation audit를 동일 `asOf`로 집계한다. |
+| Waiting #271/#272 | `WaitingAnalyticsQueryService.getDashboardSnapshot(...)`, `WaitingAnalyticsSnapshot` | 충족 | Waiting 원장의 동일 `asOf` aggregate를 사용한다. |
+| 예약 노쇼 #240 | `NO_SHOW`, `no_show_at`, 예약별 단일 `reservation_no_show_audits` | 확정값 충족, 후보 제외 | source-owned public analytics DTO로 확정 팀 수·version·dataThrough만 공개한다. |
 
 #271과 #272는 완료됐지만 공개 목록 계약을 Dashboard가 반복 호출해 합계를 만들지는 않는다. 페이지 도중 상태가 바뀌면 같은 `asOf`가 아니고, 원 도메인의 페이지 크기·정렬을 분석 계약으로 고착시키기 때문이다.
 
@@ -81,24 +81,23 @@ source DTO는 값뿐 아니라 `inputCheckpoint`, `dataThrough`, source schema/v
 
 ## 노쇼 계약 경계
 
-현재 응답은 다음을 강제한다.
+2단계 통합 완료 응답은 다음을 강제한다.
 
 - `reservationCandidate`: `value=null`, `UNAVAILABLE`, `SOURCE_CONTRACT_MISSING`
-- `reservationConfirmed`: `value=null`, `UNAVAILABLE`, `SOURCE_CONTRACT_MISSING`
+- `reservationConfirmed`: #240의 운영자 확정 `NO_SHOW` audit를 이용한 실제 집계값
 - `waitingConfirmed`: #272 원장을 이용한 실제 집계값
-- `noShow.completeness`: 예약 source가 없고 Waiting source가 있으면 `PARTIAL`
+- `noShow.completeness`: 후보 계약이 없으므로 두 확정값이 정상이어도 `PARTIAL/SOURCE_CONTRACT_MISSING`
 - 예약과 Waiting의 판정 기준이 다르므로 합계 `total`을 만들지 않는다.
 
-#240 producer에게 필요한 계약은 다음과 같다.
+#240/PR #394가 제공한 확정 노쇼 계약은 다음과 같이 소비한다.
 
-1. 공개 상태와 포함 조건. 최소 `CONFIRMED_NO_SHOW`, 후보를 제공하려면 별도 `CANDIDATE`.
-2. `confirmedAt`, 원 Reservation/status `version`, 안정적인 사건 ID 또는 checkpoint.
-3. 동일 명령 replay와 중복 사건의 의미.
-4. 확정 철회·방문 완료 정정이 가능한지와 새 version/보정 사건의 의미.
-5. `asOf` 조회, `dataThrough`, 격리·지연·누락 상태.
-6. 공개 오류와 retryable 여부.
+1. Reservation source가 영업일의 예약과 `reservation_no_show_audits.occurred_at <= asOf`를 결합해 고유 확정 팀 수를 집계한다.
+2. 예약별 audit unique 제약으로 멱등 replay와 중복 명령을 한 번만 반영한다.
+3. 최대 no-show audit ID를 source version/checkpoint에 포함하고 최대 `occurred_at`을 `dataThrough`에 포함한다.
+4. `ReservationAnalyticsSnapshot.confirmedNoShowTeams`로 개인정보·예약 ID·사유 없이 공개한다.
+5. #240은 `NO_SHOW`를 terminal 상태로 두고 정식 정정 workflow를 제외했으므로 현재 `corrected=false`다.
 
-#240은 현재 6시간 후보와 정식 정정 workflow를 제외하므로 병합되더라도 제공된 범위만 연결한다. 후보 계약이 없다면 `reservationCandidate`는 계속 `UNAVAILABLE`이다. `@usersy628`의 공개 계약이 `dev`에 병합되기 전에는 Analytics가 Reservation Entity, 상태 문자열, audit table을 추측해 구현하지 않는다.
+#240은 6시간 후보·자동 판정·정식 정정 workflow를 제외했다. 따라서 `reservationCandidate`는 계속 `UNAVAILABLE`이며, Analytics는 Reservation Entity·상태 문자열·audit Repository를 직접 참조하지 않고 공개 `ReservationAnalyticsQueryService`/DTO만 소비한다.
 
 ## 권한·존재 노출·HTTP
 
@@ -167,6 +166,7 @@ Issue #270은 혼합 방식을 채택한다. 범용 Kafka/Outbox나 새 사용�
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationCapacityAllocationRepository.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationCancellationAuditRepository.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationFulfillmentAuditRepository.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationNoShowAuditRepository.java`
 - Create: `backend/src/main/java/com/miriyum/domain/reservation/waiting/dto/WaitingAnalyticsSnapshot.java`
 - Create: `backend/src/main/java/com/miriyum/domain/reservation/waiting/service/WaitingAnalyticsQueryService.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/waiting/repository/WaitingTeamRepository.java`
@@ -212,12 +212,12 @@ Issue #270은 혼합 방식을 채택한다. 범용 Kafka/Outbox나 새 사용�
 
 | 차단 항목 | 현재 상태 | 해제 조건 |
 |---|---|---|
-| Store 권한 version | 공개 version 없음 | `StoreDashboardAuthority`와 V51의 증가 version 계약 승인 |
-| Reservation 통계 source | 공개 aggregate/asOf/checkpoint 없음 | Reservation 공개 Service·DTO와 MySQL 집계 테스트 승인 |
-| Waiting 통계 source | 목록만 존재 | Waiting 공개 Service·DTO와 asOf 집계 테스트 승인 |
-| 예약 확정 노쇼 | #240 open, #367에 blocked | #367과 #240 병합, 상태·confirmedAt·version·정정·오류 공개 |
+| Store 권한 version | 구현 완료 | focused authority/HTTP/CI 검증 통과 |
+| Reservation 통계 source | 확정 노쇼 필드 외 구현 완료 | 확정 노쇼 공개 DTO와 MySQL 집계 테스트 승인 |
+| Waiting 통계 source | 구현 완료 | focused asOf 집계/CI 검증 통과 |
+| 예약 확정 노쇼 | #240/PR #394 병합 완료 | Reservation 공개 DTO·asOf 집계와 MySQL consumer 테스트 승인 |
 | 예약 노쇼 후보 | #240 제외 범위 | #240 범위 변경 또는 별도 producer Issue 병합 |
-| V51 | #385 V48 병합, 복수 migration PR 열림 | Issue #270 병합 직전 최신 dev 최댓값 + 1로 재확인 |
+| V51 | 최신 dev에 V49/V50 병합되어 현재 최댓값 + 1 | Issue #270 병합 직전 다시 재확인 |
 
 노쇼 차단은 나머지 다섯 지표와 Waiting 확정 미응답의 contract/runtime 구현을 막지 않는다. 다만 누락 source를 0 또는 `COMPLETE`로 반환하는 구현은 금지한다.
 
@@ -227,7 +227,7 @@ Issue #270은 혼합 방식을 채택한다. 범용 Kafka/Outbox나 새 사용�
 - top-level과 모든 metric의 `asOf`가 정확히 같고 source 입력은 그 시각을 넘지 않는다.
 - 분모가 없거나 유효하지 않은 비율은 0이 아니라 `UNAVAILABLE/INVALID_DENOMINATOR`다.
 - Reservation source 실패가 Waiting 성공을 덮지 않고 반대도 동일하다.
-- 예약 노쇼 계약이 없을 때 두 예약 노쇼 값은 null/UNAVAILABLE이고 Waiting 확정 미응답은 독립 집계된다.
+- 예약 확정 노쇼와 Waiting 확정 미응답은 각각 실제 값·독립 metadata를 가지며, 후보만 null/UNAVAILABLE이다.
 - 다른 매장은 403, 실제 없는 공개 매장은 404이며 어떤 경우에도 통계·하위 개인 자료가 노출되지 않는다.
 - 중복·역순·보정 입력 뒤 같은 checkpoint의 전체·증분 재집계 결과가 일치한다.
 - Analytics production code에는 Reservation·Waiting Entity·Repository import가 없다.

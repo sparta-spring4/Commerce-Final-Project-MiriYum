@@ -666,6 +666,13 @@ git commit -m "test(analytics): align dashboard contracts"
 
 Otherwise do not create an empty commit.
 
-## Deferred #240 integration
+## Phase 2: merged #240 confirmed no-show integration
 
-Do not add a runtime task for unknown producer types. After #240 merges, write a separate delta plan from its exact public signatures. That plan must first replace the OpenAPI example/contract tests so `reservationConfirmed` becomes a measured count, then add the adapter test, and only then change production. `reservationCandidate` remains unavailable unless the producer explicitly ships that state. This deferral is a compile-time and contract blocker, not a placeholder implementation.
+#240/PR #394 is merged. Keep `reservationCandidate` unavailable because the producer explicitly excludes six-hour candidates and automatic classification. Activate only `reservationConfirmed` in this order:
+
+1. Change the OpenAPI example and contract tests so `reservationConfirmed` is measured and complete while the top no-show metric remains partial because the candidate contract is missing.
+2. Extend `ReservationAnalyticsSnapshot` with `confirmedNoShowTeams`.
+3. Add an `asOf` aggregate to `ReservationNoShowAuditRepository`: join the audit to the Reservation business date, count unique reservation audits with `occurred_at <= asOf`, and return max audit ID plus max occurred time.
+4. Include that audit version in Reservation sourceVersion/inputCheckpoint and its occurred time in dataThrough; keep corrected false because #240 has no correction workflow.
+5. Compose Reservation and Waiting confirmed cells independently in `StoreDashboardAnalyticsService`; hash both opaque source checkpoints for the top no-show checkpoint and bump the top definition to `ANALYTICS-004-v2`.
+6. Verify unit contracts, actual MySQL earlier/later `asOf`, partial source failure isolation, controller/OpenAPI drift, architecture imports, and `git diff --check` before pushing.
