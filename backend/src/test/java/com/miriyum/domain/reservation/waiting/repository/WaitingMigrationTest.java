@@ -82,16 +82,18 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("V47까지 적용하면 Waiting 소유 테이블 열 개만 존재한다")
+    @DisplayName("V51까지 적용하면 Waiting 소유 테이블 열두 개만 존재한다")
     void createsExactWaitingLedgerTableSet() throws SQLException {
         migrate();
 
         assertThat(waitingTables()).containsExactly(
                 "waiting_active_memberships",
+                "waiting_auto_open_jobs",
                 "waiting_closure_job_items",
                 "waiting_closure_jobs",
                 "waiting_conversion_compensations",
                 "waiting_queue_sequences",
+                "waiting_reception_windows",
                 "waiting_setting_audits",
                 "waiting_settings",
                 "waiting_status_events",
@@ -109,11 +111,14 @@ class WaitingMigrationTest {
                 "waiting_active_memberships.consumer_account_id->consumer_accounts.consumer_account_id",
                 "waiting_active_memberships.store_id->stores.store_id",
                 "waiting_active_memberships.waiting_team_id->waiting_teams.waiting_team_id",
+                "waiting_auto_open_jobs.store_id->stores.store_id",
                 "waiting_closure_job_items.waiting_closure_job_id->waiting_closure_jobs.waiting_closure_job_id",
                 "waiting_closure_job_items.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_closure_jobs.store_id->stores.store_id",
                 "waiting_conversion_compensations.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_queue_sequences.store_id->stores.store_id",
+                "waiting_reception_windows.opened_by_job_id->waiting_auto_open_jobs.waiting_auto_open_job_id",
+                "waiting_reception_windows.store_id->stores.store_id",
                 "waiting_setting_audits.store_id->stores.store_id",
                 "waiting_settings.store_id->stores.store_id",
                 "waiting_status_events.waiting_team_id->waiting_teams.waiting_team_id",
