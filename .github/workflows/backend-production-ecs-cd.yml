@@ -41,7 +41,7 @@ jobs:
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository) ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev')
     outputs:
       deployable: ${{ steps.source.outputs.deployable }}
       image_tag: ${{ steps.source.outputs.image_tag }}
@@ -147,6 +147,18 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
           retry-max-attempts: 2
+
+      - name: Require immutable ECR image tags
+        run: |
+          image_tag_mutability=$(aws ecr describe-repositories \
+            --repository-names "$ECR_REPOSITORY" \
+            --query 'repositories[0].imageTagMutability' \
+            --output text)
+
+          if [ "$image_tag_mutability" != "IMMUTABLE" ]; then
+            echo "::error::Production deployment requires an IMMUTABLE ECR repository."
+            exit 1
+          fi
 
       - name: Log in to Amazon ECR
         id: ecr

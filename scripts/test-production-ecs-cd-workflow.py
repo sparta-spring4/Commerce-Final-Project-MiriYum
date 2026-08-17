@@ -21,13 +21,18 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("github.event.workflow_run.conclusion == 'success'", self.workflow)
 
     def test_manual_deployment_validates_main_history_and_exact_ci(self):
-        self.assertIn("github.event_name == 'workflow_dispatch'", self.workflow)
+        self.assertIn("github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev'", self.workflow)
         self.assertNotIn("github.ref == 'refs/heads/main'", self.workflow)
         self.assertIn('compare/$image_tag...main', self.workflow)
         self.assertIn('Manual deployment SHA must be contained in the current main history.', self.workflow)
         self.assertIn('actions/runs?head_sha=$image_tag&event=push&status=completed', self.workflow)
         self.assertIn('.name == "Backend CI" and .head_branch == "main" and .conclusion == "success"', self.workflow)
         self.assertIn('Manual deployment requires a successful Backend CI run for this main SHA.', self.workflow)
+
+    def test_production_deployment_requires_immutable_ecr_tags(self):
+        self.assertIn("Require immutable ECR image tags", self.workflow)
+        self.assertIn("imageTagMutability", self.workflow)
+        self.assertIn('Production deployment requires an IMMUTABLE ECR repository.', self.workflow)
 
     def test_task_definition_rejects_missing_or_wrong_backend_container(self):
         self.assertIn("Expected exactly one $ECS_CONTAINER_NAME container", self.workflow)
