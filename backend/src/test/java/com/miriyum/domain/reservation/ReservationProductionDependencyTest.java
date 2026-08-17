@@ -18,6 +18,12 @@ import com.miriyum.domain.reservation.service.ReservationHoldService;
 import com.miriyum.domain.reservation.service.ReservationHoldTransitionPrimitive;
 import com.miriyum.domain.reservation.waiting.service.WaitingStoreAuthority;
 import com.miriyum.domain.reservation.waiting.service.WaitingStoreAuthorityPort;
+import com.miriyum.domain.reservation.waiting.service.StoreScheduleWaitingOperatingIntervalAdapter;
+import com.miriyum.domain.reservation.waiting.service.WaitingOperatingInterval;
+import com.miriyum.domain.reservation.waiting.service.WaitingOperatingIntervalPort;
+import com.miriyum.domain.schedule.dto.contract.WaitingOperatingIntervalSnapshot;
+import com.miriyum.domain.schedule.service.WaitingOperatingIntervalService;
+import com.miriyum.domain.store.dto.contract.StoreWaitingReceptionProfile;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.service.StoreService;
 import java.io.IOException;
@@ -25,7 +31,11 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 import java.time.Duration;
@@ -138,6 +148,55 @@ class ReservationProductionDependencyTest {
         assertThat(WaitingStoreAuthorityPort.class.getMethod(
                 "requireMutation", long.class, long.class).getReturnType())
                 .isEqualTo(WaitingStoreAuthority.class);
+    }
+
+    @Test
+    void waitingAutoOpenConsumesOnlyPublishedStoreAndScheduleContracts()
+            throws NoSuchMethodException {
+        assertThat(StoreService.class.getMethod(
+                "getWaitingReceptionProfiles", Set.class).getReturnType())
+                .isEqualTo(Map.class);
+        assertThat(StoreService.class.getMethod(
+                "inspectWaitingReceptionForUpdate", long.class).getReturnType())
+                .isEqualTo(StoreWaitingReceptionProfile.class);
+        assertThat(WaitingOperatingIntervalService.class.getMethod(
+                "findWaitingOperatingIntervals",
+                Set.class,
+                Instant.class,
+                Instant.class).getReturnType())
+                .isEqualTo(List.class);
+        assertThat(WaitingOperatingIntervalService.class.getMethod(
+                "lockCurrentWaitingOperatingInterval",
+                long.class,
+                String.class,
+                Instant.class,
+                Instant.class,
+                Instant.class).getReturnType())
+                .isEqualTo(Optional.class);
+        assertThat(WaitingOperatingIntervalService.class.getMethod(
+                "lockCurrentWaitingOperatingIntervals",
+                long.class,
+                LocalDate.class,
+                Instant.class).getReturnType())
+                .isEqualTo(List.class);
+        assertThat(WaitingOperatingIntervalPort.class.getMethod(
+                "findUpcoming", Set.class, Instant.class, Instant.class).getReturnType())
+                .isEqualTo(List.class);
+        assertThat(WaitingOperatingIntervalPort.class.getMethod(
+                "lockCurrent",
+                long.class,
+                String.class,
+                Instant.class,
+                Instant.class,
+                Instant.class).getReturnType())
+                .isEqualTo(Optional.class);
+        assertThat(WaitingOperatingIntervalPort.class.getMethod(
+                "lockCurrent", long.class, LocalDate.class, Instant.class).getReturnType())
+                .isEqualTo(List.class);
+        assertThat(WaitingOperatingIntervalPort.class)
+                .isAssignableFrom(StoreScheduleWaitingOperatingIntervalAdapter.class);
+        assertThat(WaitingOperatingInterval.class).isNotEqualTo(
+                WaitingOperatingIntervalSnapshot.class);
     }
 
     @Test

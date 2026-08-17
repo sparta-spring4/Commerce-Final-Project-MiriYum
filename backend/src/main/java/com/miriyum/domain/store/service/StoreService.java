@@ -1,10 +1,12 @@
 package com.miriyum.domain.store.service;
 
 import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
+import com.miriyum.domain.store.dto.contract.StoreWaitingReceptionProfile;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreUpdateRequest;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreBaseSettings;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
@@ -60,6 +62,7 @@ public class StoreService {
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final StoreAdministrationService storeAdministrationService;
 
     public StoreCommandResult create(
             long operatorAccountId,
@@ -161,6 +164,13 @@ public class StoreService {
                             modes == null ? null : modes.pickupEnabled(),
                             request.operationStatus(),
                             verified);
+                    storeAdministrationService.recomposeAfterOperatorUpdate(
+                            storeId,
+                            new StoreBaseSettings(
+                                    request.operationStatus(),
+                                    modes == null ? null : modes.reservationEnabled(),
+                                    modes == null ? null : modes.menuHoldEnabled(),
+                                    modes == null ? null : modes.pickupEnabled()));
                     Store saved = saveStore(store);
                     return success(HttpStatus.OK, saved);
                 }));
@@ -261,6 +271,35 @@ public class StoreService {
                         Function.identity()));
     }
 
+    /**
+     * 웨이팅 일정 해석을 위해 매장 상태를 공개 계약으로 일괄 투영한다.
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, StoreWaitingReceptionProfile> getWaitingReceptionProfiles(
+            Set<Long> storeIds
+    ) {
+        if (storeIds == null || storeIds.isEmpty()) {
+            return Map.of();
+        }
+        return storeRepository.findAllById(storeIds).stream()
+                .map(StoreService::waitingReceptionProfile)
+                .collect(Collectors.toUnmodifiableMap(
+                        StoreWaitingReceptionProfile::storeId,
+                        Function.identity()));
+    }
+
+    /**
+     * 웨이팅 접수 명령을 위해 Store 행을 잠그고 현재 상태를 공개 DTO로 반환한다.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public StoreWaitingReceptionProfile inspectWaitingReceptionForUpdate(
+            long storeId
+    ) {
+        Store store = storeRepository.findByIdForUpdate(storeId)
+                .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+        return waitingReceptionProfile(store);
+    }
+
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public StoreScheduleAuthority requireSchedulePublicationAuthority(
             long operatorAccountId,
@@ -324,6 +363,7 @@ public class StoreService {
         Store store = storeRepository.findById(storeId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
         store.requireManagedBy(operatorAccountId);
+        store.requirePlatformManagementAllowed();
         return store;
     }
 
@@ -339,6 +379,7 @@ public class StoreService {
         Store store = storeRepository.findByIdForUpdate(storeId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
         store.requireManagedBy(operatorAccountId);
+        store.requirePlatformManagementAllowed();
         return store;
     }
 
@@ -373,6 +414,16 @@ public class StoreService {
                 store.getId(),
                 store.getTimeZoneId(),
                 reservationAccepting);
+    }
+
+    private static StoreWaitingReceptionProfile waitingReceptionProfile(Store store) {
+        boolean waitingReceptionEligible =
+                store.getVerificationStatus() == VerificationStatus.APPROVED
+                && store.getOperationStatus() == OperationStatus.OPEN;
+        return new StoreWaitingReceptionProfile(
+                store.getId(),
+                store.getTimeZoneId(),
+                waitingReceptionEligible);
     }
 
     private static BusinessResult<ManagedStoreResponse> success(
