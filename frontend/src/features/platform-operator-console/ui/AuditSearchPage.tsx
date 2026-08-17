@@ -45,6 +45,9 @@ const REASON_LABEL: Record<AuditReason, string> = {
   SECURITY_RESPONSE: '보안 대응',
   AUDIT_VERIFICATION: '감사 검증',
   RECORD_CORRECTION: '기록 보정',
+  // #279 매장 제재가 추가한 사유다. 매장 제재 화면 자체는 이번 범위가 아니지만,
+  // 감사 조회는 그 사유로 기록된 사건도 함께 읽으므로 표시명이 필요하다.
+  STORE_ENFORCEMENT: '매장 제재',
 }
 
 /**
