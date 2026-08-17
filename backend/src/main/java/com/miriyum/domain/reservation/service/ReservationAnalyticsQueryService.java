@@ -5,6 +5,7 @@ import com.miriyum.domain.reservation.repository.ReservationCancellationAuditRep
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationFulfillmentAuditRepository;
+import com.miriyum.domain.reservation.repository.ReservationNoShowAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -27,19 +28,22 @@ public class ReservationAnalyticsQueryService {
     private final ReservationCapacityAllocationRepository allocationRepository;
     private final ReservationCancellationAuditRepository cancellationAuditRepository;
     private final ReservationFulfillmentAuditRepository fulfillmentAuditRepository;
+    private final ReservationNoShowAuditRepository noShowAuditRepository;
 
     public ReservationAnalyticsQueryService(
             ReservationRepository reservationRepository,
             ReservationCapacityBucketRepository bucketRepository,
             ReservationCapacityAllocationRepository allocationRepository,
             ReservationCancellationAuditRepository cancellationAuditRepository,
-            ReservationFulfillmentAuditRepository fulfillmentAuditRepository
+            ReservationFulfillmentAuditRepository fulfillmentAuditRepository,
+            ReservationNoShowAuditRepository noShowAuditRepository
     ) {
         this.reservationRepository = reservationRepository;
         this.bucketRepository = bucketRepository;
         this.allocationRepository = allocationRepository;
         this.cancellationAuditRepository = cancellationAuditRepository;
         this.fulfillmentAuditRepository = fulfillmentAuditRepository;
+        this.noShowAuditRepository = noShowAuditRepository;
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ, timeout = 5)
@@ -66,6 +70,9 @@ public class ReservationAnalyticsQueryService {
         ReservationFulfillmentAuditRepository.ReservationFulfillmentAnalytics fulfillments =
                 Objects.requireNonNull(fulfillmentAuditRepository.aggregateDashboardFulfillments(
                         storeId, businessDate, asOf));
+        ReservationNoShowAuditRepository.ReservationNoShowAnalytics noShows =
+                Objects.requireNonNull(noShowAuditRepository.aggregateDashboardNoShows(
+                        storeId, businessDate, asOf));
 
         long reservationVersion = value(lifecycle.getMaxReservationId());
         long capacityPolicyVersion = value(offers.getPolicyVersion());
@@ -73,7 +80,8 @@ public class ReservationAnalyticsQueryService {
         long bucketVersion = value(offers.getMaxBucketId());
         long cancellationVersion = value(cancellations.getMaxAuditId());
         long fulfillmentVersion = value(fulfillments.getMaxAuditId());
-        long sourceVersion = Math.max(1L, Stream.of(
+        long noShowVersion = value(noShows.getMaxAuditId());
+        long baseSourceVersion = Math.max(1L, Stream.of(
                         reservationVersion,
                         value(lifecycle.getMaxCapacityPolicyVersion()),
                         capacityPolicyVersion,
@@ -84,6 +92,7 @@ public class ReservationAnalyticsQueryService {
                 .mapToLong(Long::longValue)
                 .max()
                 .orElse(0L));
+        long sourceVersion = Math.addExact(baseSourceVersion, noShowVersion);
 
         String checkpoint = checkpoint(
                 reservationVersion,
@@ -91,12 +100,14 @@ public class ReservationAnalyticsQueryService {
                 allocationVersion,
                 bucketVersion,
                 cancellationVersion,
-                fulfillmentVersion);
+                fulfillmentVersion,
+                noShowVersion);
         Instant dataThrough = Stream.of(
                         instant(lifecycle.getDataThroughEpochMicros()),
                         instant(offers.getDataThroughEpochMicros()),
                         instant(cancellations.getDataThroughEpochMicros()),
-                        instant(fulfillments.getDataThroughEpochMicros()))
+                        instant(fulfillments.getDataThroughEpochMicros()),
+                        instant(noShows.getDataThroughEpochMicros()))
                 .filter(Objects::nonNull)
                 .max(Instant::compareTo)
                 .orElse(null);
@@ -112,6 +123,7 @@ public class ReservationAnalyticsQueryService {
                 value(offers.getOfferedTeamUnits()),
                 value(lifecycle.getCancelledTeams()),
                 value(lifecycle.getEverConfirmedTeams()),
+                value(noShows.getConfirmedNoShowTeams()),
                 checkpoint,
                 dataThrough,
                 sourceVersion,

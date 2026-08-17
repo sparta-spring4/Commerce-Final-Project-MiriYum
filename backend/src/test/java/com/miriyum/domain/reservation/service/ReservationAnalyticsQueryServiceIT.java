@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.reservation.dto.contract.ReservationAnalyticsSnapshot;
+import com.miriyum.domain.reservation.repository.ReservationNoShowAuditRepository;
 import java.time.Instant;
 import java.time.LocalDate;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,6 +50,7 @@ class ReservationAnalyticsQueryServiceIT {
     }
 
     @Autowired ReservationAnalyticsQueryService service;
+    @Autowired ReservationNoShowAuditRepository noShowAuditRepository;
     @Autowired JdbcTemplate jdbc;
 
     @BeforeEach
@@ -63,6 +65,7 @@ class ReservationAnalyticsQueryServiceIT {
                 "2026-08-16 08:30:00", null);
         insertReservation(4L, "FULFILLED", "2026-08-16 08:15:00", null,
                 "2026-08-16 08:50:00");
+        insertReservation(5L, "CONFIRMED", "2026-08-16 08:20:00", null, null);
         for (long reservationId = 1L; reservationId <= 4L; reservationId++) {
             jdbc.update("""
                     INSERT INTO reservation_capacity_allocations (
@@ -81,9 +84,12 @@ class ReservationAnalyticsQueryServiceIT {
                 ) VALUES (4, 'STORE_OPERATOR', 31, '2026-08-16 08:49:00',
                     '2026-08-16 08:50:00', 'CONFIRMED', 'FULFILLED', 1, 1, 'fulfill-4')
                 """);
+        insertNoShowAudit(1L, "2026-08-16 08:55:00", "no-show-1");
+        insertNoShowAudit(5L, "2026-08-16 09:30:00", "no-show-5");
     }
 
     private void resetFixture() {
+        jdbc.execute("DELETE FROM reservation_no_show_audits");
         jdbc.execute("DELETE FROM reservation_fulfillment_audits");
         jdbc.execute("DELETE FROM reservation_cancellation_audits");
         jdbc.execute("DELETE FROM reservation_capacity_allocations");
@@ -99,14 +105,14 @@ class ReservationAnalyticsQueryServiceIT {
         ReservationAnalyticsSnapshot snapshot = service.getDashboardSnapshot(
                 STORE_ID, BUSINESS_DATE, AS_OF);
 
-        assertThat(snapshot.todayReservationTeams()).isEqualTo(3L);
+        assertThat(snapshot.todayReservationTeams()).isEqualTo(4L);
         assertThat(snapshot.cancelledTeams()).isEqualTo(1L);
-        assertThat(snapshot.everConfirmedTeams()).isEqualTo(4L);
+        assertThat(snapshot.everConfirmedTeams()).isEqualTo(5L);
         assertThat(snapshot.reservedPeopleUnits()).isEqualTo(6L);
         assertThat(snapshot.reservedTeamUnits()).isEqualTo(3L);
         assertThat(snapshot.offeredPeopleUnits()).isEqualTo(8L);
         assertThat(snapshot.offeredTeamUnits()).isEqualTo(4L);
-        assertThat(snapshot.dataThrough()).isEqualTo(Instant.parse("2026-08-16T08:50:00Z"));
+        assertThat(snapshot.dataThrough()).isEqualTo(Instant.parse("2026-08-16T08:55:00Z"));
     }
 
     @Test
@@ -132,6 +138,29 @@ class ReservationAnalyticsQueryServiceIT {
         ReservationAnalyticsSnapshot rebuilt = service.getDashboardSnapshot(
                 STORE_ID, BUSINESS_DATE, AS_OF);
         assertThat(rebuilt).isEqualTo(before);
+    }
+
+    @Test
+    void confirmedNoShowsRespectTheSharedAsOfAndAdvanceSourceMetadata() {
+        ReservationAnalyticsSnapshot earlier = service.getDashboardSnapshot(
+                STORE_ID, BUSINESS_DATE, AS_OF);
+        ReservationAnalyticsSnapshot later = service.getDashboardSnapshot(
+                STORE_ID, BUSINESS_DATE, Instant.parse("2026-08-16T09:45:00Z"));
+
+        assertThat(earlier.confirmedNoShowTeams()).isEqualTo(1L);
+        assertThat(earlier.dataThrough()).isEqualTo(Instant.parse("2026-08-16T08:55:00Z"));
+        assertThat(later.confirmedNoShowTeams()).isEqualTo(2L);
+        assertThat(later.dataThrough()).isEqualTo(Instant.parse("2026-08-16T09:30:00Z"));
+        assertThat(later.sourceVersion()).isGreaterThan(earlier.sourceVersion());
+        assertThat(later.inputCheckpoint()).isNotEqualTo(earlier.inputCheckpoint());
+        assertThat(later.corrected()).isFalse();
+
+        ReservationNoShowAuditRepository.ReservationNoShowAnalytics noShows =
+                noShowAuditRepository.aggregateDashboardNoShows(
+                        STORE_ID, BUSINESS_DATE, Instant.parse("2026-08-16T09:45:00Z"));
+        assertThat(noShows.getConfirmedNoShowTeams()).isEqualTo(2L);
+        assertThat(noShows.getDataThroughEpochMicros())
+                .isEqualTo(epochMicros(Instant.parse("2026-08-16T09:30:00Z")));
     }
 
     private void insertParents() {
@@ -219,5 +248,22 @@ class ReservationAnalyticsQueryServiceIT {
                 ) VALUES (?, 'CONSUMER', 41, NULL, ?, ?, 'CONFIRMED', 'CANCELLED',
                     1, 1, ?)
                 """, reservationId, occurredAt, occurredAt, commandId);
+    }
+
+    private void insertNoShowAudit(long reservationId, String occurredAt, String commandId) {
+        jdbc.update("""
+                INSERT INTO reservation_no_show_audits (
+                    reservation_id, store_id, actor_type, actor_id, reason,
+                    requested_at, occurred_at, before_status, after_status,
+                    reservation_time_policy_version, capacity_policy_version, command_id
+                ) VALUES (?, 17, 'STORE_OPERATOR', 31, 'UNCLEAR', ?, ?,
+                    'CONFIRMED', 'NO_SHOW', 1, 1, ?)
+                """, reservationId, occurredAt, occurredAt, commandId);
+    }
+
+    private static long epochMicros(Instant instant) {
+        return Math.addExact(
+                Math.multiplyExact(instant.getEpochSecond(), 1_000_000L),
+                instant.getNano() / 1_000L);
     }
 }

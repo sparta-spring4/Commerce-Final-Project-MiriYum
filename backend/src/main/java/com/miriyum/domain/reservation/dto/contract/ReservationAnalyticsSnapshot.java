@@ -15,6 +15,7 @@ public record ReservationAnalyticsSnapshot(
         long offeredTeamUnits,
         long cancelledTeams,
         long everConfirmedTeams,
+        long confirmedNoShowTeams,
         String inputCheckpoint,
         Instant dataThrough,
         long sourceVersion,
@@ -31,11 +32,13 @@ public record ReservationAnalyticsSnapshot(
                 || offeredTeamUnits < 0
                 || cancelledTeams < 0
                 || everConfirmedTeams < 0
+                || confirmedNoShowTeams < 0
                 || sourceVersion <= 0) {
             throw new IllegalArgumentException("analytics counts and sourceVersion are invalid");
         }
         if (cancelledTeams > everConfirmedTeams
-                || todayReservationTeams > everConfirmedTeams) {
+                || todayReservationTeams > everConfirmedTeams
+                || confirmedNoShowTeams > everConfirmedTeams) {
             throw new IllegalArgumentException("reservation lifecycle counts are inconsistent");
         }
         if (inputCheckpoint == null || !inputCheckpoint.matches("[0-9a-f]{64}")) {

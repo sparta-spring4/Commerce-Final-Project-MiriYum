@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 
 import com.miriyum.domain.reservation.dto.contract.ReservationAnalyticsSnapshot;
@@ -8,6 +9,7 @@ import com.miriyum.domain.reservation.repository.ReservationCancellationAuditRep
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationFulfillmentAuditRepository;
+import com.miriyum.domain.reservation.repository.ReservationNoShowAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -29,12 +31,14 @@ class ReservationAnalyticsQueryServiceTest {
     @Mock ReservationCapacityAllocationRepository allocationRepository;
     @Mock ReservationCancellationAuditRepository cancellationAuditRepository;
     @Mock ReservationFulfillmentAuditRepository fulfillmentAuditRepository;
+    @Mock ReservationNoShowAuditRepository noShowAuditRepository;
 
     @Mock ReservationRepository.ReservationAnalyticsLifecycle lifecycle;
     @Mock ReservationCapacityBucketRepository.ReservationCapacityOfferAnalytics offers;
     @Mock ReservationCapacityAllocationRepository.ReservationCapacityUsageAnalytics usage;
     @Mock ReservationCancellationAuditRepository.ReservationCancellationAnalytics cancellations;
     @Mock ReservationFulfillmentAuditRepository.ReservationFulfillmentAnalytics fulfillments;
+    @Mock ReservationNoShowAuditRepository.ReservationNoShowAnalytics noShows;
 
     private ReservationAnalyticsQueryService service;
 
@@ -45,7 +49,8 @@ class ReservationAnalyticsQueryServiceTest {
                 bucketRepository,
                 allocationRepository,
                 cancellationAuditRepository,
-                fulfillmentAuditRepository);
+                fulfillmentAuditRepository,
+                noShowAuditRepository);
     }
 
     @Test
@@ -60,6 +65,8 @@ class ReservationAnalyticsQueryServiceTest {
                 STORE_ID, BUSINESS_DATE, AS_OF)).willReturn(cancellations);
         given(fulfillmentAuditRepository.aggregateDashboardFulfillments(
                 STORE_ID, BUSINESS_DATE, AS_OF)).willReturn(fulfillments);
+        given(noShowAuditRepository.aggregateDashboardNoShows(
+                STORE_ID, BUSINESS_DATE, AS_OF)).willReturn(noShows);
 
         given(lifecycle.getTodayReservationTeams()).willReturn(12L);
         given(lifecycle.getCancelledTeams()).willReturn(2L);
@@ -84,6 +91,10 @@ class ReservationAnalyticsQueryServiceTest {
         given(fulfillments.getMaxAuditId()).willReturn(501L);
         given(fulfillments.getDataThroughEpochMicros())
                 .willReturn(epochMicros(AS_OF.minusSeconds(10)));
+        given(noShows.getConfirmedNoShowTeams()).willReturn(2L);
+        given(noShows.getMaxAuditId()).willReturn(601L);
+        given(noShows.getDataThroughEpochMicros())
+                .willReturn(epochMicros(AS_OF.minusSeconds(5)));
 
         ReservationAnalyticsSnapshot result = service.getDashboardSnapshot(
                 STORE_ID, BUSINESS_DATE, AS_OF);
@@ -95,11 +106,22 @@ class ReservationAnalyticsQueryServiceTest {
         assertThat(result.offeredTeamUnits()).isEqualTo(20);
         assertThat(result.cancelledTeams()).isEqualTo(2);
         assertThat(result.everConfirmedTeams()).isEqualTo(14);
+        assertThat(result.confirmedNoShowTeams()).isEqualTo(2);
         assertThat(result.asOf()).isEqualTo(AS_OF);
-        assertThat(result.dataThrough()).isEqualTo(AS_OF.minusSeconds(10));
+        assertThat(result.dataThrough()).isEqualTo(AS_OF.minusSeconds(5));
         assertThat(result.inputCheckpoint()).hasSize(64);
-        assertThat(result.sourceVersion()).isEqualTo(501L);
+        assertThat(result.sourceVersion()).isEqualTo(1102L);
         assertThat(result.corrected()).isFalse();
+    }
+
+    @Test
+    void rejectsConfirmedNoShowCountsOutsideConfirmedLifecycle() {
+        assertThatThrownBy(() -> new ReservationAnalyticsSnapshot(
+                STORE_ID, BUSINESS_DATE, AS_OF,
+                1, 1, 1, 1, 1, 0, 1, 2,
+                "a".repeat(64), AS_OF, 1, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("lifecycle counts");
     }
 
     private static long epochMicros(Instant instant) {
