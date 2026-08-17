@@ -223,8 +223,8 @@ class S3FileStorageAdapterTest {
     }
 
     @Test
-    @DisplayName("S3 어댑터는 suspended 버킷의 null 버전을 다른 요청의 객체로 삭제하지 않는다")
-    void doesNotDeleteByKeyWhenUploadVersionIsSuspendedNullVersion() {
+    @DisplayName("S3 어댑터는 업로드 version ID를 알 수 없으면 다른 요청의 객체를 삭제하지 않는다")
+    void doesNotDeleteByKeyWhenUploadVersionIsUnavailable() {
         S3Client s3Client = mock(S3Client.class);
         when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
                 .thenReturn(PutObjectResponse.builder().versionId("null").build());
