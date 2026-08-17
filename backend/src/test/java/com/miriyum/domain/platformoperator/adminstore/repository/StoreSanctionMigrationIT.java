@@ -20,7 +20,10 @@ class StoreSanctionMigrationIT {
     assertThat(tables(c)).contains("store_enforcement_states","store_sanction_cases","store_sanction_impact_previews","store_sanctions","store_sanction_approvals");
     assertThat(columns(c,"stores")).contains("platform_management_allowed");
     assertThat(columns(c,"store_sanctions")).contains("sanction_version","store_enforcement_version").doesNotContain("active_store_marker");
-    assertThat(columns(c,"store_enforcement_states")).contains("active_enforcements");
+    assertThat(columns(c,"store_enforcement_states")).contains(
+            "active_enforcements", "permanent_closure_sanction_id",
+            "permanent_closure_approval_id", "permanent_closure_cause",
+            "permanent_closure_policy_version");
     assertThat(columns(c,"platform_operator_audit_events")).contains("store_id","store_sanction_id","store_sanction_version",
             "store_enforcement_version","before_snapshot","after_snapshot");
     assertThat(columns(c,"store_sanction_impact_previews")).contains("case_version","store_enforcement_version","digest","expires_at");

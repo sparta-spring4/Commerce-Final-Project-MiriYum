@@ -50,4 +50,25 @@ class StoreSanctionPolicyCatalogTest {
 
         assertThat(command.operationStatus()).isNull();
     }
+
+    @Test
+    void permanentExitCannotUseGenericEnforcementProjection() {
+        var current = new EnforcementResult(
+                7L, 3L, OperationStatus.OPEN,
+                true, true, true, true, true, Set.of());
+        var shape = new SanctionShape(
+                SanctionType.PERMANENT_EXIT,
+                Set.of(),
+                null,
+                null);
+
+        assertThatThrownBy(() -> policy.command(7L, 3L, 91L, current, shape))
+                .isInstanceOf(ServiceException.class);
+    }
+
+    @Test
+    void permanentExitCannotUseGenericSanctionRelease() {
+        assertThatThrownBy(() -> policy.validateRelease(SanctionType.PERMANENT_EXIT))
+                .isInstanceOf(ServiceException.class);
+    }
 }

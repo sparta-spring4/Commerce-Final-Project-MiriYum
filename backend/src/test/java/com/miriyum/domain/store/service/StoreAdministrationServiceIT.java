@@ -10,6 +10,8 @@ import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.RestrictedFeature;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.ReleaseCommand;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreBaseSettings;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.PermanentClosureCause;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.PermanentClosureCommand;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.entity.StoreEnforcementState;
 import com.miriyum.domain.store.enums.BusinessType;
@@ -22,6 +24,7 @@ import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -274,6 +277,46 @@ class StoreAdministrationServiceIT {
         var result = service.release(new ReleaseCommand(TARGET_STORE_ID, 91L));
 
         assertThat(result.reservationEnabled()).isTrue();
+    }
+
+    @Test
+    void permanentClosureBindsApprovalFactsOnceAndCannotUseGenericRelease() {
+        Store target = openStore(TARGET_STORE_ID, 11L);
+        Store sibling = openStore(SIBLING_STORE_ID, 11L);
+        AtomicReference<StoreEnforcementState> savedState = new AtomicReference<>();
+        given(storeRepository.findByIdForUpdate(TARGET_STORE_ID)).willReturn(Optional.of(target));
+        given(enforcementStates.findByStoreIdForUpdate(TARGET_STORE_ID)).willReturn(Optional.empty());
+        given(enforcementStates.save(any(StoreEnforcementState.class))).willAnswer(invocation -> {
+            StoreEnforcementState state = invocation.getArgument(0);
+            savedState.set(state);
+            return state;
+        });
+
+        var result = service.closePermanently(new PermanentClosureCommand(
+                TARGET_STORE_ID,
+                0L,
+                91L,
+                301L,
+                PermanentClosureCause.PLATFORM_SANCTION,
+                "ADMIN-007-v1"));
+
+        assertThat(result.operationStatus()).isEqualTo(OperationStatus.CLOSED);
+        assertThat(result.enforcementVersion()).isEqualTo(1L);
+        assertThat(result.restrictedFeatures()).containsExactlyInAnyOrder(
+                RestrictedFeature.values());
+        assertThat(target.getOperationStatus()).isEqualTo(OperationStatus.CLOSED);
+        assertThat(sibling.getOperationStatus()).isEqualTo(OperationStatus.OPEN);
+        assertThat(savedState.get().getPermanentClosureSanctionId()).isEqualTo(91L);
+        assertThat(savedState.get().getPermanentClosureApprovalId()).isEqualTo(301L);
+        assertThat(savedState.get().getPermanentClosureCause())
+                .isEqualTo(PermanentClosureCause.PLATFORM_SANCTION);
+        assertThat(savedState.get().getPermanentClosurePolicyVersion())
+                .isEqualTo("ADMIN-007-v1");
+        assertThatThrownBy(() ->
+                savedState.get().release(new ReleaseCommand(TARGET_STORE_ID, 91L)))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_ENFORCEMENT_VERSION_CONFLICT);
     }
 
     private Store openStore(long storeId, long operatorId) {

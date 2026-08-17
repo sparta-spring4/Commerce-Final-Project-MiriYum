@@ -4,6 +4,8 @@ import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.RestrictedFeature;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.ReleaseCommand;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreBaseSettings;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.PermanentClosureCause;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.PermanentClosureCommand;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.entity.BaseEntity;
@@ -67,6 +69,19 @@ public class StoreEnforcementState extends BaseEntity {
     @Column(name = "last_sanction_id")
     private Long lastSanctionId;
 
+    @Column(name = "permanent_closure_sanction_id", unique = true)
+    private Long permanentClosureSanctionId;
+
+    @Column(name = "permanent_closure_approval_id")
+    private Long permanentClosureApprovalId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "permanent_closure_cause", length = 40)
+    private PermanentClosureCause permanentClosureCause;
+
+    @Column(name = "permanent_closure_policy_version", length = 50)
+    private String permanentClosurePolicyVersion;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "active_enforcements", nullable = false, columnDefinition = "json")
     private List<ActiveEnforcement> activeEnforcements;
@@ -100,24 +115,35 @@ public class StoreEnforcementState extends BaseEntity {
     }
 
     public void requireFeatureAllowed(RestrictedFeature feature) {
-        boolean allowed = switch (feature) {
-            case WAITING -> waitingAllowed;
-            case STORE_MANAGEMENT -> storeManagementAllowed;
-            default -> true;
-        };
-        if (!allowed) {
+        if (activeRestrictedFeatures().contains(feature)) {
             throw new ServiceException(StoreErrorCode.STORE_FEATURE_RESTRICTED);
         }
     }
 
     public void release(ReleaseCommand command) {
         if (!storeId.equals(command.storeId())
+                || permanentClosureSanctionId != null
+                && permanentClosureSanctionId == command.sanctionId()
                 || activeEnforcements.stream().noneMatch(value -> value.sanctionId() == command.sanctionId())) {
             throw new ServiceException(StoreErrorCode.STORE_ENFORCEMENT_VERSION_CONFLICT);
         }
         activeEnforcements = activeEnforcements.stream()
                 .filter(value -> value.sanctionId() != command.sanctionId())
                 .toList();
+        enforcementVersion++;
+        recompose();
+    }
+
+    public void closePermanently(PermanentClosureCommand command) {
+        if (!storeId.equals(command.storeId())
+                || enforcementVersion != command.expectedEnforcementVersion()
+                || permanentClosureSanctionId != null) {
+            throw new ServiceException(StoreErrorCode.STORE_ENFORCEMENT_VERSION_CONFLICT);
+        }
+        permanentClosureSanctionId = command.sanctionId();
+        permanentClosureApprovalId = command.approvalId();
+        permanentClosureCause = command.cause();
+        permanentClosurePolicyVersion = command.policyVersion();
         enforcementVersion++;
         recompose();
     }
@@ -135,6 +161,9 @@ public class StoreEnforcementState extends BaseEntity {
     }
 
     public OperationStatus effectiveOperationStatus() {
+        if (permanentClosureSanctionId != null) {
+            return OperationStatus.CLOSED;
+        }
         if (activeEnforcements.stream().anyMatch(value -> value.operationStatus() == OperationStatus.CLOSED)) {
             return OperationStatus.CLOSED;
         }
@@ -147,6 +176,9 @@ public class StoreEnforcementState extends BaseEntity {
     public Set<RestrictedFeature> activeRestrictedFeatures() {
         EnumSet<RestrictedFeature> restricted = EnumSet.noneOf(RestrictedFeature.class);
         activeEnforcements.forEach(value -> restricted.addAll(value.restrictedFeatures()));
+        if (permanentClosureSanctionId != null) {
+            restricted.addAll(EnumSet.allOf(RestrictedFeature.class));
+        }
         return Set.copyOf(restricted);
     }
 
@@ -169,7 +201,7 @@ public class StoreEnforcementState extends BaseEntity {
         lastSanctionId = activeEnforcements.stream()
                 .max(Comparator.comparingLong(ActiveEnforcement::sanctionId))
                 .map(ActiveEnforcement::sanctionId)
-                .orElse(null);
+                .orElse(permanentClosureSanctionId);
     }
 
     public record ActiveEnforcement(long sanctionId, OperationStatus operationStatus,

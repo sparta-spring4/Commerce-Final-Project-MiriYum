@@ -12,6 +12,8 @@ import com.miriyum.domain.platformoperator.enums.*;
 import com.miriyum.domain.platformoperator.service.*;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.ReleaseCommand;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.PermanentClosureCause;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.PermanentClosureCommand;
 import com.miriyum.domain.store.service.StoreAdministrationService;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.*;
@@ -78,8 +80,14 @@ public class StoreSanctionCommandService {
   var current=stores.inspect(storeId);var before=Map.<String,Object>of(
           "case",AdminStoreAuditSnapshots.caseData(c.data()),"sanction",AdminStoreAuditSnapshots.sanction(s.data()),
           "store",AdminStoreAuditSnapshots.store(current));
-  var applied=stores.apply(policy.command(storeId,current.enforcementVersion(),s.getId(),current,shape));
-  s.approve(request.expectedSanctionVersion(),applied.enforcementVersion()); approvals.save(StoreSanctionApproval.approve(sanctionId,principal.accountId(),request.note(),clock.instant()));c.activate();
+  StoreSanctionApproval approval=approvals.saveAndFlush(StoreSanctionApproval.approve(
+          sanctionId,principal.accountId(),request.note(),clock.instant()));
+  var applied=s.getType()==StoreSanctionEnums.SanctionType.PERMANENT_EXIT
+          ? stores.closePermanently(new PermanentClosureCommand(
+                  storeId,current.enforcementVersion(),s.getId(),approval.getId(),
+                  PermanentClosureCause.PLATFORM_SANCTION,c.getPolicyVersion()))
+          : stores.apply(policy.command(storeId,current.enforcementVersion(),s.getId(),current,shape));
+  s.approve(request.expectedSanctionVersion(),applied.enforcementVersion());c.activate();
   var after=Map.<String,Object>of("case",AdminStoreAuditSnapshots.caseData(c.data()),
           "sanction",AdminStoreAuditSnapshots.sanction(s.data()),"store",AdminStoreAuditSnapshots.store(applied));
   audit.appendStore(event(context,PlatformOperatorAuditAction.STORE_SANCTION_APPROVED,reason,storeId,c,s,command.idempotencyKey(),before,after,correlationId));
@@ -91,6 +99,7 @@ public class StoreSanctionCommandService {
  public IdempotentOutcome release(IdempotencyCommand command,PlatformOperatorPrincipal principal,long storeId,String caseId,long caseVersion,long sanctionId,
                              SanctionRelease request,String approvalToken,PlatformOperatorAuditReason reason,String correlationId){return idempotency.execute(command,()->{
   StoreSanctionCase c=cases.requireAssigned(principal,storeId,caseId,caseVersion); StoreSanction s=locked(storeId,caseId,sanctionId);
+  policy.validateRelease(s.getType());
   AdminAuditContext context=guard.authorize(highRisk(principal,storeId,caseId,caseVersion,approvalToken,correlationId));
   var before=Map.<String,Object>of("case",AdminStoreAuditSnapshots.caseData(c.data()),
           "sanction",AdminStoreAuditSnapshots.sanction(s.data()),"store",AdminStoreAuditSnapshots.store(stores.inspect(storeId)));

@@ -34,17 +34,21 @@ public class StoreSanctionPolicyCatalog {
                 || shape.type()==SanctionType.FEATURE_RESTRICTION
                 && shape.restrictedFeatures().containsAll(EnumSet.allOf(RestrictedFeature.class));
     }
+    public void validateRelease(SanctionType type) {
+        if (type == SanctionType.PERMANENT_EXIT) reject();
+    }
     public EnforcementCommand command(long storeId, long version, long sanctionId,
                                       EnforcementResult current, SanctionShape shape) {
+        if (shape.type() == SanctionType.PERMANENT_EXIT) reject();
         Set<RestrictedFeature> restricted = switch (shape.type()) {
             case WARNING -> Set.of();
             case FEATURE_RESTRICTION -> shape.restrictedFeatures();
             case TEMPORARY_SUSPENSION -> Set.copyOf(TRANSACTION_FEATURES);
-            case PERMANENT_EXIT -> EnumSet.allOf(RestrictedFeature.class);
+            case PERMANENT_EXIT -> throw new IllegalStateException("permanent exit uses OPER-009");
         };
         OperationStatus operation = switch (shape.type()) {
             case TEMPORARY_SUSPENSION -> OperationStatus.TEMPORARILY_CLOSED;
-            case PERMANENT_EXIT -> OperationStatus.CLOSED;
+            case PERMANENT_EXIT -> throw new IllegalStateException("permanent exit uses OPER-009");
             default -> null;
         };
         return new EnforcementCommand(storeId, version, sanctionId, operation,

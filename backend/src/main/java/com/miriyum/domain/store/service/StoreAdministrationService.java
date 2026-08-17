@@ -7,6 +7,7 @@ import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreSnapshot;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreSnapshotPage;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreBaseSettings;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.PermanentClosureCommand;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.entity.StoreEnforcementState;
 import com.miriyum.domain.store.error.StoreErrorCode;
@@ -81,6 +82,18 @@ public class StoreAdministrationService {
             applyEffective(store, enforcement);
         }
         return result(store, state.orElse(null));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public EnforcementResult closePermanently(PermanentClosureCommand command) {
+        Store store = stores.findByIdForUpdate(command.storeId())
+                .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+        StoreEnforcementState state = enforcementStates.findByStoreIdForUpdate(command.storeId())
+                .orElseGet(() -> enforcementStates.save(StoreEnforcementState.initial(store)));
+        state.closePermanently(command);
+        store.close();
+        applyEffective(store, state);
+        return result(store, state);
     }
 
     @Transactional(readOnly = true)

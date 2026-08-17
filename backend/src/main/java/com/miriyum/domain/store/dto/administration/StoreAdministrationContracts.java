@@ -19,6 +19,27 @@ public final class StoreAdministrationContracts {
         STORE_MANAGEMENT
     }
 
+    public enum PermanentClosureCause {
+        PLATFORM_SANCTION
+    }
+
+    public record PermanentClosureCommand(
+            long storeId,
+            long expectedEnforcementVersion,
+            long sanctionId,
+            long approvalId,
+            PermanentClosureCause cause,
+            String policyVersion
+    ) {
+        public PermanentClosureCommand {
+            if (storeId <= 0 || expectedEnforcementVersion < 0 || sanctionId <= 0
+                    || approvalId <= 0 || cause == null || policyVersion == null
+                    || policyVersion.isBlank() || policyVersion.length() > 50) {
+                throw new IllegalArgumentException("permanent Store closure command is invalid");
+            }
+        }
+    }
+
     public record EnforcementCommand(
             long storeId,
             long expectedEnforcementVersion,

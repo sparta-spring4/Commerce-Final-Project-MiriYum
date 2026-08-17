@@ -1,6 +1,7 @@
 package com.miriyum.domain.platformoperator.adminstore.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.platformoperator.adminstore.entity.*;
 import com.miriyum.domain.platformoperator.adminstore.entity.StoreSanctionEnums.*;
@@ -11,10 +12,14 @@ import com.miriyum.domain.platformoperator.adminstore.dto.AdminStoreRequests.San
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.RestrictedFeature;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreBaseSettings;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.PermanentClosureCause;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.PermanentClosureCommand;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.*;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.store.service.StoreAdministrationService;
+import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.ReleaseCommand;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
@@ -34,6 +39,7 @@ class StoreSanctionConcurrencyIT {
  @Autowired PlatformOperatorAccountRepository platformAccounts; @Autowired StoreSanctionCaseRepository cases;
  @Autowired StoreSanctionRepository sanctions; @Autowired PlatformTransactionManager transactions; @Autowired PasswordEncoder encoder;
  @Autowired StoreAdministrationService storeAdministration; @Autowired StoreSanctionPolicyCatalog policy;
+ @Autowired StoreTransactionEligibilityService transactionEligibility; @Autowired StoreSanctionApprovalRepository approvals;
  @Autowired StoreSanctionExpiryTransaction expiryTransaction; @Autowired JdbcTemplate jdbc;
 
  @Test void exactlyOneConcurrentReleaseTransitionSucceeds() throws Exception {
@@ -77,6 +83,76 @@ class StoreSanctionConcurrencyIT {
 
   Integer count=jdbc.queryForObject("select count(*) from platform_operator_audit_events where action='STORE_SANCTION_EXPIRED' and store_sanction_id=? and before_snapshot is not null and after_snapshot is not null",Integer.class,sanction.getId());
   assertThat(count).isEqualTo(1);
+ }
+ @Test void activeRestrictionSurvivesOperatorModeUpdateAndReleaseRestoresLatestBase() {
+  var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner-base279@example.com","hash","owner"));
+  Store store=stores.saveAndFlush(Store.create(owner.getId(),"1234567895",BusinessType.CAFE,"base-effective","",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
+  var admin=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("admin-base279@example.com",encoder.encode("Password1!"),"admin",Instant.now().plusSeconds(600)));
+  StoreSanctionCase c=cases.saveAndFlush(StoreSanctionCase.create(store.getId(),admin.getId(),"FRAUD",Set.of("evidence://base"),"ADMIN-007-v1",Instant.now()));
+  StoreSanction restriction=sanctions.saveAndFlush(StoreSanction.create(c.getPublicId(),store.getId(),SanctionType.FEATURE_RESTRICTION,Set.of(RestrictedFeature.RESERVATION),"reservation",Instant.now(),null,admin.getId(),false,0,Instant.now()));
+  apply(restriction);
+  new TransactionTemplate(transactions).executeWithoutResult(status->{
+   Store locked=stores.findByIdForUpdate(store.getId()).orElseThrow();
+   locked.update(null,null,null,null,null,null,true,null,null,null);
+   storeAdministration.recomposeAfterOperatorUpdate(store.getId(),new StoreBaseSettings(null,true,null,null));
+  });
+
+  assertThatThrownBy(()->new TransactionTemplate(transactions).executeWithoutResult(status->
+          transactionEligibility.requireReservationTransactionEligibility(store.getId())))
+          .isInstanceOfSatisfying(ServiceException.class,error->assertThat(error.getErrorCode())
+                  .isEqualTo(com.miriyum.domain.store.error.StoreErrorCode.STORE_FEATURE_RESTRICTED));
+
+  releaseApplied(restriction);
+  assertThat(storeAdministration.inspect(store.getId()).reservationEnabled()).isTrue();
+ }
+ @Test void temporaryAndFeatureEffectsRecomposeAcrossBothApplicationOrders() {
+  assertTemporaryFeatureOrder("temp-first", "1234567896", true);
+  assertTemporaryFeatureOrder("feature-first", "1234567897", false);
+ }
+ @Test void permanentClosureBindsApprovalAndRejectsGenericRelease() {
+  var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner-permanent279@example.com","hash","owner"));
+  Store store=stores.saveAndFlush(Store.create(owner.getId(),"1234567898",BusinessType.CAFE,"permanent","",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
+  var creator=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("creator-permanent279@example.com",encoder.encode("Password1!"),"creator",Instant.now().plusSeconds(600)));
+  var approver=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("approver-permanent279@example.com",encoder.encode("Password1!"),"approver",Instant.now().plusSeconds(600)));
+  StoreSanctionCase c=cases.saveAndFlush(StoreSanctionCase.create(store.getId(),creator.getId(),"FRAUD",Set.of("evidence://permanent"),"ADMIN-007-v9",Instant.now()));
+  StoreSanction sanction=sanctions.saveAndFlush(StoreSanction.create(c.getPublicId(),store.getId(),SanctionType.PERMANENT_EXIT,Set.of(),"permanent",Instant.now(),null,creator.getId(),true,0,Instant.now()));
+  StoreSanctionApproval approval=approvals.saveAndFlush(StoreSanctionApproval.approve(sanction.getId(),approver.getId(),"approved",Instant.now()));
+  new TransactionTemplate(transactions).executeWithoutResult(status->{
+   StoreSanction locked=sanctions.findScopedForUpdate(sanction.getId(),c.getPublicId(),store.getId()).orElseThrow();
+   var current=storeAdministration.inspect(store.getId());
+   var result=storeAdministration.closePermanently(new PermanentClosureCommand(
+           store.getId(),current.enforcementVersion(),sanction.getId(),approval.getId(),
+           PermanentClosureCause.PLATFORM_SANCTION,c.getPolicyVersion()));
+   locked.approve(locked.getSanctionVersion(),result.enforcementVersion());
+  });
+
+  var closed=storeAdministration.inspect(store.getId());
+  assertThat(closed.operationStatus()).isEqualTo(OperationStatus.CLOSED);
+  assertThat(closed.restrictedFeatures()).containsExactlyInAnyOrder(RestrictedFeature.values());
+  assertThatThrownBy(()->new TransactionTemplate(transactions).executeWithoutResult(status->
+          storeAdministration.release(new ReleaseCommand(store.getId(),sanction.getId()))))
+          .isInstanceOfSatisfying(ServiceException.class,error->assertThat(error.getErrorCode())
+                  .isEqualTo(com.miriyum.domain.store.error.StoreErrorCode.STORE_ENFORCEMENT_VERSION_CONFLICT));
+  Map<String,Object> binding=jdbc.queryForMap("select permanent_closure_sanction_id,permanent_closure_approval_id,permanent_closure_cause,permanent_closure_policy_version from store_enforcement_states where store_id=?",store.getId());
+  assertThat(binding).containsEntry("permanent_closure_sanction_id",sanction.getId())
+          .containsEntry("permanent_closure_approval_id",approval.getId())
+          .containsEntry("permanent_closure_cause","PLATFORM_SANCTION")
+          .containsEntry("permanent_closure_policy_version","ADMIN-007-v9");
+ }
+ private void assertTemporaryFeatureOrder(String suffix,String businessNumber,boolean temporaryFirst){
+  var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner-"+suffix+"279@example.com","hash","owner"));
+  Store store=stores.saveAndFlush(Store.create(owner.getId(),businessNumber,BusinessType.CAFE,"order-"+suffix,"",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
+  var admin=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("admin-"+suffix+"279@example.com",encoder.encode("Password1!"),"admin",Instant.now().plusSeconds(600)));
+  StoreSanctionCase c=cases.saveAndFlush(StoreSanctionCase.create(store.getId(),admin.getId(),"FRAUD",Set.of("evidence://"+suffix),"ADMIN-007-v1",Instant.now()));
+  StoreSanction temporary=sanctions.saveAndFlush(StoreSanction.create(c.getPublicId(),store.getId(),SanctionType.TEMPORARY_SUSPENSION,Set.of(),"temporary",Instant.now(),Instant.now().plusSeconds(3600),admin.getId(),false,0,Instant.now()));
+  StoreSanction feature=sanctions.saveAndFlush(StoreSanction.create(c.getPublicId(),store.getId(),SanctionType.FEATURE_RESTRICTION,Set.of(RestrictedFeature.RESERVATION),"feature",Instant.now(),null,admin.getId(),false,0,Instant.now()));
+  if(temporaryFirst){apply(temporary);apply(feature);releaseApplied(temporary);}
+  else{apply(feature);apply(temporary);releaseApplied(feature);}
+  var remaining=storeAdministration.inspect(store.getId());
+  if(temporaryFirst){assertThat(remaining.operationStatus()).isEqualTo(OperationStatus.OPEN);assertThat(remaining.reservationEnabled()).isFalse();releaseApplied(feature);}
+  else{assertThat(remaining.operationStatus()).isEqualTo(OperationStatus.TEMPORARILY_CLOSED);releaseApplied(temporary);}
+  var restored=storeAdministration.inspect(store.getId());
+  assertThat(restored.operationStatus()).isEqualTo(OperationStatus.OPEN);assertThat(restored.reservationEnabled()).isTrue();
  }
  private void assertOverlappingReleaseOrder(String suffix,boolean releaseEarlier){
   var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner-overlap-"+suffix+"@example.com","hash","owner"));

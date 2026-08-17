@@ -45,6 +45,10 @@ CREATE TABLE store_enforcement_states (
     waiting_allowed BOOLEAN NOT NULL DEFAULT TRUE,
     store_management_allowed BOOLEAN NOT NULL DEFAULT TRUE,
     last_sanction_id BIGINT NULL,
+    permanent_closure_sanction_id BIGINT NULL,
+    permanent_closure_approval_id BIGINT NULL,
+    permanent_closure_cause VARCHAR(40) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    permanent_closure_policy_version VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NULL,
     active_enforcements JSON NOT NULL,
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NOT NULL,
@@ -52,7 +56,19 @@ CREATE TABLE store_enforcement_states (
     CONSTRAINT uk_store_enforcement_states_store UNIQUE (store_id),
     CONSTRAINT fk_store_enforcement_states_store FOREIGN KEY (store_id)
         REFERENCES stores (store_id) ON DELETE RESTRICT,
-    CONSTRAINT ck_store_enforcement_states_version CHECK (enforcement_version >= 0)
+    CONSTRAINT uk_store_enforcement_states_permanent_closure UNIQUE (permanent_closure_sanction_id),
+    CONSTRAINT ck_store_enforcement_states_version CHECK (enforcement_version >= 0),
+    CONSTRAINT ck_store_enforcement_states_permanent_closure CHECK (
+        (permanent_closure_sanction_id IS NULL
+            AND permanent_closure_approval_id IS NULL
+            AND permanent_closure_cause IS NULL
+            AND permanent_closure_policy_version IS NULL)
+        OR
+        (permanent_closure_sanction_id IS NOT NULL
+            AND permanent_closure_approval_id IS NOT NULL
+            AND permanent_closure_cause = 'PLATFORM_SANCTION'
+            AND permanent_closure_policy_version IS NOT NULL)
+    )
 );
 
 CREATE TABLE store_sanction_cases (
@@ -162,3 +178,11 @@ CREATE TABLE store_sanction_approvals (
     CONSTRAINT fk_store_sanction_approvals_operator FOREIGN KEY (approver_id)
         REFERENCES platform_operator_accounts (platform_operator_account_id) ON DELETE RESTRICT
 );
+
+ALTER TABLE store_enforcement_states
+    ADD CONSTRAINT fk_store_enforcement_states_permanent_sanction
+        FOREIGN KEY (permanent_closure_sanction_id)
+        REFERENCES store_sanctions (store_sanction_id) ON DELETE RESTRICT,
+    ADD CONSTRAINT fk_store_enforcement_states_permanent_approval
+        FOREIGN KEY (permanent_closure_approval_id)
+        REFERENCES store_sanction_approvals (store_sanction_approval_id) ON DELETE RESTRICT;
