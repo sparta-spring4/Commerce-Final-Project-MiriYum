@@ -33,7 +33,7 @@ public final class StoreAdministrationContracts {
     ) {
         public EnforcementCommand {
             if (storeId <= 0 || expectedEnforcementVersion < 0 || sanctionId <= 0
-                    || operationStatus == null || restrictedFeatures == null) {
+                    || restrictedFeatures == null) {
                 throw new IllegalArgumentException("store enforcement command is invalid");
             }
             restrictedFeatures = Set.copyOf(restrictedFeatures);

@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.miriyum.domain.platformoperator.adminstore.dto.AdminStoreRequests.SanctionShape;
 import com.miriyum.domain.platformoperator.adminstore.entity.StoreSanctionEnums.SanctionType;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.RestrictedFeature;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.EnforcementResult;
+import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
 import java.util.EnumSet;
@@ -30,5 +32,22 @@ class StoreSanctionPolicyCatalogTest {
                 Set.of(RestrictedFeature.RESERVATION), now.plusSeconds(1), null);
 
         assertThatThrownBy(() -> policy.validate(shape, now)).isInstanceOf(ServiceException.class);
+    }
+
+    @Test
+    void featureRestrictionDoesNotCopyCurrentEffectiveOperationStatus() {
+        var current = new EnforcementResult(
+                7L, 3L, OperationStatus.TEMPORARILY_CLOSED,
+                false, false, false, false, true,
+                Set.of(RestrictedFeature.RESERVATION));
+        var shape = new SanctionShape(
+                SanctionType.FEATURE_RESTRICTION,
+                Set.of(RestrictedFeature.PICKUP),
+                null,
+                null);
+
+        var command = policy.command(7L, 3L, 91L, current, shape);
+
+        assertThat(command.operationStatus()).isNull();
     }
 }

@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.EnforcementCommand;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.EnforcementResult;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.RestrictedFeature;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.ReleaseCommand;
 import com.miriyum.domain.store.entity.Store;
@@ -26,6 +27,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import com.miriyum.domain.platformoperator.adminstore.dto.AdminStoreRequests.SanctionShape;
+import com.miriyum.domain.platformoperator.adminstore.entity.StoreSanctionEnums.SanctionType;
+import com.miriyum.domain.platformoperator.adminstore.model.StoreSanctionPolicyCatalog;
 
 @ExtendWith(MockitoExtension.class)
 class StoreAdministrationServiceIT {
@@ -177,6 +181,41 @@ class StoreAdministrationServiceIT {
 
         assertThat(result.reservationEnabled()).isFalse();
         assertThat(result.waitingAllowed()).isTrue();
+        assertThat(result.restrictedFeatures()).containsExactly(RestrictedFeature.RESERVATION);
+    }
+
+    @Test
+    void releasingTemporarySuspensionDoesNotRetainStatusCopiedByFeatureRestriction() {
+        Store target = openStore(TARGET_STORE_ID, 11L);
+        StoreEnforcementState state = StoreEnforcementState.initial(target);
+        state.apply(new EnforcementCommand(
+                TARGET_STORE_ID, 0L, 91L, OperationStatus.TEMPORARILY_CLOSED,
+                false, false, false, false, true,
+                Set.of(RestrictedFeature.RESERVATION, RestrictedFeature.WAITING,
+                        RestrictedFeature.MENU_HOLD, RestrictedFeature.PICKUP)));
+        target.applyPlatformEnforcement(
+                state.effectiveOperationStatus(),
+                state.effectiveReservationEnabled(),
+                state.effectiveMenuHoldEnabled(),
+                state.effectivePickupEnabled(),
+                state.isStoreManagementAllowed());
+        EnforcementResult suspended = new EnforcementResult(
+                TARGET_STORE_ID, 1L, target.getOperationStatus(),
+                target.isReservationEnabled(), target.isMenuHoldEnabled(),
+                target.isPickupEnabled(), state.isWaitingAllowed(),
+                state.isStoreManagementAllowed(), state.activeRestrictedFeatures());
+        StoreSanctionPolicyCatalog policy = new StoreSanctionPolicyCatalog();
+        state.apply(policy.command(
+                TARGET_STORE_ID, 1L, 92L, suspended,
+                new SanctionShape(
+                        SanctionType.FEATURE_RESTRICTION,
+                        Set.of(RestrictedFeature.RESERVATION), null, null)));
+        given(storeRepository.findByIdForUpdate(TARGET_STORE_ID)).willReturn(Optional.of(target));
+        given(enforcementStates.findByStoreIdForUpdate(TARGET_STORE_ID)).willReturn(Optional.of(state));
+
+        var result = service.release(new ReleaseCommand(TARGET_STORE_ID, 91L));
+
+        assertThat(result.operationStatus()).isEqualTo(OperationStatus.OPEN);
         assertThat(result.restrictedFeatures()).containsExactly(RestrictedFeature.RESERVATION);
     }
 

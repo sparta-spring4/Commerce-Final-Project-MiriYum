@@ -45,7 +45,7 @@ public class StoreSanctionPolicyCatalog {
         OperationStatus operation = switch (shape.type()) {
             case TEMPORARY_SUSPENSION -> OperationStatus.TEMPORARILY_CLOSED;
             case PERMANENT_EXIT -> OperationStatus.CLOSED;
-            default -> current.operationStatus();
+            default -> null;
         };
         return new EnforcementCommand(storeId, version, sanctionId, operation,
                 current.reservationEnabled() && !restricted.contains(RestrictedFeature.RESERVATION),

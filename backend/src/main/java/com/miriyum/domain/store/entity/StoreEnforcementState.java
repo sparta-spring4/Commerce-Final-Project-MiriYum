@@ -162,7 +162,7 @@ public class StoreEnforcementState extends BaseEntity {
     public record ActiveEnforcement(long sanctionId, OperationStatus operationStatus,
                                     Set<RestrictedFeature> restrictedFeatures) {
         public ActiveEnforcement {
-            if (sanctionId <= 0 || operationStatus == null || restrictedFeatures == null) {
+            if (sanctionId <= 0 || restrictedFeatures == null) {
                 throw new IllegalArgumentException("active store enforcement is invalid");
             }
             restrictedFeatures = Set.copyOf(restrictedFeatures);
