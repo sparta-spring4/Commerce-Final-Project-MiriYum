@@ -28,6 +28,7 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -269,6 +270,15 @@ public class StoreService {
                 .collect(Collectors.toUnmodifiableMap(
                         StoreServiceProfile::storeId,
                         Function.identity()));
+    }
+
+    /** 다른 도메인의 사용자 표시 문구에 필요한 공개 매장명만 조회한다. */
+    @Transactional(readOnly = true)
+    public Optional<String> findDisplayName(long storeId) {
+        if (storeId <= 0) {
+            return Optional.empty();
+        }
+        return storeRepository.findById(storeId).map(Store::getName);
     }
 
     /**

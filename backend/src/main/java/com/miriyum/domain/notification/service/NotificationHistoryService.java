@@ -111,6 +111,7 @@ public class NotificationHistoryService {
         try {
             context = sourceRegistry.readContext(
                     task.sourceDomain(),
+                    task.purpose(),
                     task.resourceType(),
                     task.resourceId(),
                     task.resourceVersion(),
