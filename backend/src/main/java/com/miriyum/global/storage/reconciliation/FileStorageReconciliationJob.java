@@ -56,9 +56,7 @@ public class FileStorageReconciliationJob {
                         metadata.toPublicMetadata(), metadata.getObjectCleanupClaimToken(), now);
                 completed++;
             } catch (RuntimeException exception) {
-                transactionExecutor.rescheduleClaimedObjectCleanup(
-                        metadata.getFileId(), metadata.getObjectCleanupClaimToken(), now,
-                        properties.retryBaseDelaySeconds());
+                rescheduleClaimedCleanup(metadata, now);
                 failed++;
             }
         }
@@ -85,9 +83,7 @@ public class FileStorageReconciliationJob {
                 completed++;
             } catch (RuntimeException exception) {
                 if (claimedMetadata != null) {
-                    transactionExecutor.rescheduleClaimedObjectCleanup(
-                            claimedMetadata.getFileId(), claimedMetadata.getObjectCleanupClaimToken(), now,
-                            properties.retryBaseDelaySeconds());
+                    rescheduleClaimedCleanup(claimedMetadata, now);
                 }
                 failed++;
             }
@@ -115,6 +111,17 @@ public class FileStorageReconciliationJob {
                 || properties.retryBaseDelaySeconds() <= 0
                 || properties.claimLeaseSeconds() <= 0) {
             throw new IllegalStateException("파일 저장소 정리 재시도 설정값이 올바르지 않습니다.");
+        }
+    }
+
+    /** 재시도 시각 기록까지 실패해도 lease 만료 뒤 후속 주기가 회수할 수 있으므로 batch를 계속 진행한다. */
+    private void rescheduleClaimedCleanup(FileMetadata metadata, Instant now) {
+        try {
+            transactionExecutor.rescheduleClaimedObjectCleanup(
+                    metadata.getFileId(), metadata.getObjectCleanupClaimToken(), now,
+                    properties.retryBaseDelaySeconds());
+        } catch (RuntimeException ignored) {
+            // 식별자·SDK 예외는 남기지 않고 마지막 집계 failed 수로만 관측한다.
         }
     }
 
