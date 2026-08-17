@@ -13,6 +13,8 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.time.Instant;
+import org.springframework.data.domain.PageRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
@@ -146,6 +148,50 @@ public class FileMetadataTransactionExecutor {
         }
         metadata.discardPending(deletedAt);
         return saveTerminalState(metadata);
+    }
+
+    /** 오래된 PENDING은 공개하지 않고 보상 삭제 대상으로 전환한다. */
+    @Transactional(readOnly = true)
+    public List<FileStorageMetadata> findStalePending(Instant cutoff, int batchSize) {
+        return fileMetadataRepository
+                .findByStorageStatusAndCreatedAtLessThanEqualOrderByCreatedAtAsc(
+                        FileStorageStatus.PENDING, cutoff, PageRequest.of(0, batchSize))
+                .stream()
+                .map(FileMetadata::toPublicMetadata)
+                .toList();
+    }
+
+    /** 물리 삭제를 아직 확인하지 못한 논리 삭제 파일을 제한된 batch로 찾는다. */
+    @Transactional(readOnly = true)
+    public List<FileStorageMetadata> findPendingCleanup(int batchSize) {
+        return fileMetadataRepository
+                .findByStorageStatusAndCleanupCompletedAtIsNullOrderByCleanupRequestedAtAsc(
+                        FileStorageStatus.DELETED, PageRequest.of(0, batchSize))
+                .stream()
+                .map(FileMetadata::toPublicMetadata)
+                .toList();
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordCleanupAttempt(String fileId, Instant attemptedAt) {
+        FileMetadata metadata = fileMetadataRepository.findByFileIdForUpdate(fileId)
+                .orElseThrow(() -> new IllegalStateException("파일 메타데이터를 찾을 수 없습니다."));
+        if (metadata.getStorageStatus() == FileStorageStatus.DELETED
+                && metadata.getCleanupCompletedAt() == null) {
+            metadata.recordCleanupAttempt(attemptedAt);
+            saveTerminalState(metadata);
+        }
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void completeCleanup(String fileId, Instant completedAt) {
+        FileMetadata metadata = fileMetadataRepository.findByFileIdForUpdate(fileId)
+                .orElseThrow(() -> new IllegalStateException("파일 메타데이터를 찾을 수 없습니다."));
+        if (metadata.getStorageStatus() == FileStorageStatus.DELETED
+                && metadata.getCleanupCompletedAt() == null) {
+            metadata.completeCleanup(completedAt);
+            saveTerminalState(metadata);
+        }
     }
 
     private FileMetadata saveTerminalState(FileMetadata metadata) {

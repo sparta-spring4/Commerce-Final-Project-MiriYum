@@ -3,6 +3,7 @@ package com.miriyum.global.storage.s3;
 import com.miriyum.global.storage.FileStoragePort;
 import com.miriyum.global.storage.service.FileMetadataTransactionExecutor;
 import com.miriyum.global.storage.service.FileStorageFacade;
+import java.time.Clock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -42,8 +43,9 @@ public class S3StorageConfig {
     @Bean
     public FileStorageFacade fileStorageFacade(
             FileStoragePort fileStoragePort,
-            FileMetadataTransactionExecutor transactionExecutor
+            FileMetadataTransactionExecutor transactionExecutor,
+            Clock clock
     ) {
-        return new FileStorageFacade(fileStoragePort, transactionExecutor);
+        return new FileStorageFacade(fileStoragePort, transactionExecutor, clock);
     }
 }

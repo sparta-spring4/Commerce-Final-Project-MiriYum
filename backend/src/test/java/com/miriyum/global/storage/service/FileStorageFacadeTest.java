@@ -251,8 +251,9 @@ class FileStorageFacadeTest {
 
             assertThat(logAppender.list)
                     .extracting(ILoggingEvent::getFormattedMessage)
-                    .contains("event=file_storage_object_delete_failed file_id=" + confirmed.fileId())
-                    .noneMatch(message -> message.contains(confirmed.objectKey()));
+                    .contains("event=file_storage_object_delete_failed")
+                    .noneMatch(message -> message.contains(confirmed.objectKey())
+                            || message.contains(confirmed.fileId().toString()));
         } finally {
             logger.detachAppender(logAppender);
             logAppender.stop();
@@ -388,6 +389,16 @@ class FileStorageFacadeTest {
                     Instant.parse("2026-08-10T07:00:00Z"));
             metadata.discardPending(deletedAt);
             return metadata;
+        }
+
+        @Override
+        public void recordCleanupAttempt(String fileId, Instant attemptedAt) {
+            // Unit tests for the facade use an in-memory transaction double.
+        }
+
+        @Override
+        public void completeCleanup(String fileId, Instant completedAt) {
+            // The durable state transition is covered by repository integration tests.
         }
 
         private List<String> failedFileIds() {

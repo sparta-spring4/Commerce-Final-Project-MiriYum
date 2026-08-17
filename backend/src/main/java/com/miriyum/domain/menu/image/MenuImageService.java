@@ -89,9 +89,6 @@ public class MenuImageService {
             MenuPublicImageResponse response = MenuPublicImageResponse.from(stored);
             return success(HttpStatus.OK, stored.fileId().toString(), response);
         });
-        if (outcome.replayed()) {
-            retryDeletedImageCleanup(menuId);
-        }
         return result(outcome);
     }
 
@@ -113,9 +110,6 @@ public class MenuImageService {
             registerCommittedReplacementCleanup(existing);
             return success(HttpStatus.NO_CONTENT, null, null);
         });
-        if (outcome.replayed()) {
-            retryDeletedImageCleanup(menuId);
-        }
     }
 
     private void requireManagementAuthority(long operatorAccountId, long storeId) {
@@ -134,10 +128,6 @@ public class MenuImageService {
 
     private List<FileStorageMetadata> confirmedImages(long menuId) {
         return images(menuId, FileStorageStatus.CONFIRMED);
-    }
-
-    private List<FileStorageMetadata> deletedImages(long menuId) {
-        return images(menuId, FileStorageStatus.DELETED);
     }
 
     private List<FileStorageMetadata> images(long menuId, FileStorageStatus status) {
@@ -206,7 +196,7 @@ public class MenuImageService {
                     try {
                         requireFacade().discardPending(imageId, clock.instant());
                     } catch (RuntimeException exception) {
-                        log.warn("event=menu_image_rollback_cleanup_failed image_id={}", imageId);
+                        log.warn("event=menu_image_rollback_cleanup_failed");
                     }
                 }
             }
@@ -242,17 +232,6 @@ public class MenuImageService {
         } catch (RuntimeException exception) {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
-    }
-
-    /** 멱등 재시도에서 이전 교체의 DELETED 메타데이터도 다시 정리한다. */
-    private void retryDeletedImageCleanup(long menuId) {
-        deletedImages(menuId).forEach(metadata -> {
-            try {
-                delete(metadata);
-            } catch (ServiceException exception) {
-                log.warn("event=menu_image_replacement_cleanup_retry_failed image_id={}", metadata.fileId());
-            }
-        });
     }
 
     private FileStorageFacade requireFacade() {

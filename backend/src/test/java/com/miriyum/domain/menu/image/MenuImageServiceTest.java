@@ -123,36 +123,30 @@ class MenuImageServiceTest {
     }
 
     @Test
-    void retriesDeletedImageCleanupWhenPutIsReplayed() {
+    void replayedPutDoesNotScanHistoricalDeletedImagesOnTheRequestPath() {
         UUID deletedImageId = UUID.fromString("523e4567-e89b-12d3-a456-426614174000");
-        FileStorageMetadata deleted = deletedMenuImage(deletedImageId);
 
         given(idempotencyExecutor.execute(any(), any())).willReturn(new IdempotentOutcome(
                 true, 200, "SUCCESS", "MENU_IMAGE", "623e4567-e89b-12d3-a456-426614174000",
                 JsonMapper.builder().build().createObjectNode().put(
                         "url", "/api/v1/public-files/623e4567-e89b-12d3-a456-426614174000")));
-        given(fileStorageFacadeProvider.getIfAvailable()).willReturn(fileStorageFacade);
-        given(fileStorageFacade.findPublicMetadata(any(), org.mockito.ArgumentMatchers.eq(FileStoragePurpose.MENU_IMAGE), any()))
-                .willReturn(List.of(deleted));
-
         service.putMenuImage(11L, 7L, 13L,
                 IdempotencyKey.parse("723e4567-e89b-42d3-a456-426614174000"), pngFile());
 
-        then(fileStorageFacade).should().delete(deletedImageId, NOW);
+        then(fileStorageFacade).should(org.mockito.Mockito.never()).delete(deletedImageId, NOW);
         then(storeService).should().requireManagementOwnership(11L, 7L);
     }
 
     @Test
-    void retriesDeletedImageCleanupWhenDeleteIsReplayedAfterObjectDeleteFailure() {
+    void replayedDeleteDoesNotRepeatHistoricalObjectCleanupOnTheRequestPath() {
         UUID imageId = UUID.fromString("823e4567-e89b-12d3-a456-426614174000");
         FileStorageMetadata confirmed = confirmedMenuImage(imageId).toPublicMetadata();
-        FileStorageMetadata deleted = deletedMenuImage(imageId);
 
         given(menuRepository.findByIdForUpdate(13L)).willReturn(Optional.of(menu));
         given(menu.getStoreId()).willReturn(7L);
         given(fileStorageFacadeProvider.getIfAvailable()).willReturn(fileStorageFacade);
         given(fileStorageFacade.findPublicMetadata(any(), org.mockito.ArgumentMatchers.eq(FileStoragePurpose.MENU_IMAGE), any()))
-                .willReturn(List.of(confirmed), List.of(deleted));
+                .willReturn(List.of(confirmed));
         given(idempotencyExecutor.execute(any(), any()))
                 .willAnswer(invocation -> {
                     @SuppressWarnings("unchecked")
@@ -164,8 +158,7 @@ class MenuImageServiceTest {
                 .willReturn(new IdempotentOutcome(true, 204, "SUCCESS", "MENU_IMAGE", null, null));
         given(fileStorageFacade.delete(imageId, NOW))
                 .willThrow(new com.miriyum.global.exception.ServiceException(
-                        com.miriyum.global.exception.CommonErrorCode.SERVICE_UNAVAILABLE))
-                .willReturn(deleted);
+                        com.miriyum.global.exception.CommonErrorCode.SERVICE_UNAVAILABLE));
 
         TransactionSynchronizationManager.initSynchronization();
         service.deleteMenuImage(11L, 7L, 13L,
@@ -178,19 +171,13 @@ class MenuImageServiceTest {
                 IdempotencyKey.parse("923e4567-e89b-42d3-a456-426614174000"));
 
         then(fileStorageFacade).should().markDeletedWithinCurrentTransaction(imageId, NOW);
-        then(fileStorageFacade).should(org.mockito.Mockito.times(2)).delete(imageId, NOW);
+        then(fileStorageFacade).should().delete(imageId, NOW);
     }
 
     private FileMetadata confirmedMenuImage(UUID imageId) {
         FileMetadata metadata = menuImage(imageId);
         metadata.confirm();
         return metadata;
-    }
-
-    private FileStorageMetadata deletedMenuImage(UUID imageId) {
-        FileMetadata metadata = confirmedMenuImage(imageId);
-        metadata.delete(NOW);
-        return metadata.toPublicMetadata();
     }
 
     private FileMetadata menuImage(UUID imageId) {

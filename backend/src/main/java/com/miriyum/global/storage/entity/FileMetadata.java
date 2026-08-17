@@ -71,6 +71,21 @@ public class FileMetadata {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+    @Convert(converter = UtcInstantConverter.class)
+    @Column(name = "cleanup_requested_at")
+    private Instant cleanupRequestedAt;
+
+    @Convert(converter = UtcInstantConverter.class)
+    @Column(name = "cleanup_last_attempt_at")
+    private Instant cleanupLastAttemptAt;
+
+    @Convert(converter = UtcInstantConverter.class)
+    @Column(name = "cleanup_completed_at")
+    private Instant cleanupCompletedAt;
+
+    @Column(name = "cleanup_attempts", nullable = false)
+    private long cleanupAttempts;
+
     @Version
     @Column(name = "version", nullable = false)
     private Long version;
@@ -208,6 +223,7 @@ public class FileMetadata {
         }
         storageStatus = FileStorageStatus.DELETED;
         this.deletedAt = deletedAt;
+        requestCleanup(deletedAt);
     }
 
     /** 바깥 업무 트랜잭션이 롤백된 대기 파일을 공개 전에 폐기한다. */
@@ -220,6 +236,31 @@ public class FileMetadata {
         }
         storageStatus = FileStorageStatus.DELETED;
         this.deletedAt = deletedAt;
+        requestCleanup(deletedAt);
+    }
+
+    /** 물리 객체 삭제는 DB 상태와 분리해 멱등적으로 재시도한다. */
+    public void recordCleanupAttempt(Instant attemptedAt) {
+        if (storageStatus != FileStorageStatus.DELETED || attemptedAt == null) {
+            throw new IllegalStateException("삭제 상태 파일만 정리 재시도를 기록할 수 있습니다.");
+        }
+        cleanupLastAttemptAt = attemptedAt;
+        cleanupAttempts++;
+    }
+
+    /** 객체 저장소 삭제가 확인된 뒤에만 재시도 대상에서 제외한다. */
+    public void completeCleanup(Instant completedAt) {
+        if (storageStatus != FileStorageStatus.DELETED || completedAt == null) {
+            throw new IllegalStateException("삭제 상태 파일만 정리 완료를 기록할 수 있습니다.");
+        }
+        cleanupCompletedAt = completedAt;
+    }
+
+    private void requestCleanup(Instant requestedAt) {
+        cleanupRequestedAt = requestedAt;
+        cleanupLastAttemptAt = null;
+        cleanupCompletedAt = null;
+        cleanupAttempts = 0;
     }
 
     private void changeStatus(FileStorageStatus nextStatus) {

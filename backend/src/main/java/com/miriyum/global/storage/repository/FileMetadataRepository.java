@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Collection;
 import jakarta.persistence.LockModeType;
 import java.util.Optional;
+import java.time.Instant;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -49,4 +51,10 @@ public interface FileMetadataRepository extends JpaRepository<FileMetadata, Stri
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT metadata FROM FileMetadata metadata WHERE metadata.fileId = :fileId")
     Optional<FileMetadata> findByFileIdForUpdate(@Param("fileId") String fileId);
+
+    List<FileMetadata> findByStorageStatusAndCreatedAtLessThanEqualOrderByCreatedAtAsc(
+            FileStorageStatus storageStatus, Instant cutoff, Pageable pageable);
+
+    List<FileMetadata> findByStorageStatusAndCleanupCompletedAtIsNullOrderByCleanupRequestedAtAsc(
+            FileStorageStatus storageStatus, Pageable pageable);
 }

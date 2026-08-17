@@ -8,6 +8,7 @@ import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.FileStorageOwner;
 import com.miriyum.global.storage.FileStoragePurpose;
 import com.miriyum.global.storage.entity.FileMetadata;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -23,6 +24,15 @@ public class FileStorageFacade {
 
     private final FileStoragePort fileStoragePort;
     private final FileMetadataTransactionExecutor transactionExecutor;
+    private final Clock clock;
+
+    /** 기존 단위 테스트와 명시적 생성 경로는 UTC 시계를 사용한다. */
+    public FileStorageFacade(
+            FileStoragePort fileStoragePort,
+            FileMetadataTransactionExecutor transactionExecutor
+    ) {
+        this(fileStoragePort, transactionExecutor, Clock.systemUTC());
+    }
 
     /** 대기 상태를 저장한 뒤 파일을 저장하고, 무결성 검증에 성공한 경우에만 완료 상태로 전환한다. */
     public FileStorageMetadata store(FileStorageMetadata metadata, FileStorageRequest request) {
@@ -97,12 +107,12 @@ public class FileStorageFacade {
         FileStorageMetadata deleted = transactionExecutor.deleteOrGetDeleted(fileId.toString(), deletedAt)
                 .toPublicMetadata();
         try {
+            transactionExecutor.recordCleanupAttempt(deleted.fileId().toString(), clock.instant());
             fileStoragePort.delete(deleted.objectKey());
+            transactionExecutor.completeCleanup(deleted.fileId().toString(), clock.instant());
         } catch (RuntimeException exception) {
             log.warn(
-                    "event=file_storage_object_delete_failed file_id={}",
-                    deleted.fileId(),
-                    exception);
+                    "event=file_storage_object_delete_failed");
             throw exception;
         }
         return deleted;
@@ -116,12 +126,12 @@ public class FileStorageFacade {
         FileStorageMetadata deleted = transactionExecutor.discardPendingOrGetDeleted(fileId.toString(), deletedAt)
                 .toPublicMetadata();
         try {
+            transactionExecutor.recordCleanupAttempt(deleted.fileId().toString(), clock.instant());
             fileStoragePort.delete(deleted.objectKey());
+            transactionExecutor.completeCleanup(deleted.fileId().toString(), clock.instant());
         } catch (RuntimeException exception) {
             log.warn(
-                    "event=file_storage_pending_compensation_failed file_id={}",
-                    deleted.fileId(),
-                    exception);
+                    "event=file_storage_pending_compensation_failed");
             throw exception;
         }
         return deleted;
