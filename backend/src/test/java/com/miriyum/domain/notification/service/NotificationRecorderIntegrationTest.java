@@ -11,6 +11,7 @@ import com.miriyum.domain.notification.dto.source.NotificationResourceType;
 import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import com.miriyum.domain.notification.exception.NotificationErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -49,7 +50,9 @@ class NotificationRecorderIntegrationTest {
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.url",
+                () -> MYSQL.getJdbcUrl()
+                        + "?connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true");
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
     }
@@ -85,6 +88,16 @@ class NotificationRecorderIntegrationTest {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT correlation_id FROM notification_tasks", String.class))
                 .isEqualTo("correlation-first");
+    }
+
+    @Test
+    void plusNineImmediateNotificationIsStoredAsTheSameUtcInstant() {
+        record(event("correlation-plus-nine", "CONFIRMED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT scheduled_at FROM notification_tasks",
+                LocalDateTime.class))
+                .isEqualTo(LocalDateTime.parse("2026-08-12T01:02:03"));
     }
 
     @Test
