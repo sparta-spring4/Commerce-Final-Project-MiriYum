@@ -5,7 +5,8 @@
 > 기능 소유자: `reservation` 도메인의 Waiting capability
 >
 > 계약 범위: Issue #271 매장 운영자 설정 조회·교체와 비활성화 영향 조회,
-> Issue #272 중앙 원장·운영자 전이, Issue #307 계정당 활성 웨이팅 1개 제한
+> Issue #272 중앙 원장·운영자 전이, Issue #307 계정당 활성 웨이팅 1개 제한,
+> Issue #408 소비자 등록·조회·취소, Issue #409 GPS 위치 증명·일행 참여 관리
 >
 > 구현 순서: `#271 계약 + #307 계약 → #272 원장·종결 공개 계약/runtime → #271 설정 runtime`.
 > 활성 대기 팀 판정과 종결의 상태 전이·실행 결과는 Issue #272가 소유한다.
@@ -30,7 +31,12 @@ HTTP 형상은 같은 디렉터리의 [OpenAPI](openapi.yaml)가 소유한다.
 - 매장별 등록 반경 설정
 - 좌석·테이블 조건과 조건별 호출 대상 선택
 - 순번 미루기
-- 웨이팅 등록용 현장 증명 QR
+- 웨이팅 등록용 매장 현장 증명 QR·회전 코드 Runtime
+
+Issue #409는 GPS 위치 증명 세션과 일행 참여·이탈·제거·대표자 이전 Runtime을 현재 고도화
+범위로 활성화한다. 매장 현장 증명은 GPS 실패를 성공으로 추정하지 않는 계약 경계만 유지하고,
+QR·회전 코드의 발급·검증·소비와 운영자 통제 API는 후속 Issue #446이 활성화하기 전까지
+제공하지 않는다.
 
 Waiting은 Reservation이 소유하는 capability다. 새 최상위 Java 도메인이나 별도 배포 단위를
 만들지 않는다. 이 계약은 store-operator audience 진입점에 고도화 path를 조합하지만 1차 MVP
@@ -116,8 +122,8 @@ Issue #307은 `WAIT-008`을 버전 설정형 다중 한도에서 일반 사용�
 대체한다.
 
 - 계정은 전체 매장을 합쳐 활성 웨이팅을 최대 1건만 유지한다.
-- 현재 고도화 기본 범위의 대표자 관계를 계정 활성 관계로 계산한다. 향후 구성원 합류를
-  활성화할 때도 대표자·구성원 역할과 관계없이 같은 계정 단위 제한을 적용한다.
+- 대표자와 Issue #409에서 연결된 구성원 관계를 모두 계정 활성 관계로 계산한다. 역할과
+  매장에 관계없이 같은 계정 단위 제한을 적용한다.
 - `WAIT-007`의 같은 매장 중복은 이 계정 전체 검사에 포섭한다. 생성·합류·대표자 이전은
   계정 활성 관계를 한 번만 검사·점유하고 별도 매장 단위 유일성 제약이나 오류 경로를 두지
   않는다. 같은 계정·같은 팀 관계는 멱등 결과 또는 기존 관계를 유지하고, 다른 활성 팀은
@@ -136,8 +142,8 @@ Issue #307은 `WAIT-008`을 버전 설정형 다중 한도에서 일반 사용�
 - 예약은 활성 웨이팅 수에 포함하지 않는다. 서로 다른 매장 또는 겹치지 않는 시간대의 복수
   예약 허용 계약을 변경하지 않는다.
 
-이 계약 PR은 일반 사용자 웨이팅 생성·합류 HTTP path를 새로 만들지 않는다. 해당 path는
-별도 소유 Issue에서 활성화할 때 계정 중복 전용 `WAITING_011` response를 연결한다. 현재
+Issue #307 계약 PR은 일반 사용자 웨이팅 생성·합류 HTTP path를 만들지 않았고, #408과 #409가
+각 소비자 생성과 합류 path를 활성화하며 계정 중복 전용 `WAITING_011` response를 연결한다. 현재
 OpenAPI의 store-operator path와 공용 `WaitingLedgerConflict`에는 `WAITING_011`이나 계정 중복
 예시를 노출하지 않고, `WAITING_008`은 기존 활성 membership 전제 충돌 의미를 유지한다.
 `WAITING_011`은 응답 `code`의 wire 값이고 `ACCOUNT_ACTIVE_WAITING_EXISTS`는 서버 오류 식별자 이름이다.
@@ -482,13 +488,11 @@ version CAS는 Issue #380이 별도로 소유한다.
 사이에 설정이나 영업 구간이 닫힐 수 있으므로 등록 트랜잭션은 Store/Schedule 접수 게이트를
 다시 잠그고 검사하며, 닫힌 경우 어떤 팀·membership·감사·상태 사건도 기록하지 않는다.
 
-#409가 계정·매장·목적에 결속된 단기 위치 증명 세션을 등록 트랜잭션에서 한 번만 소비하도록
-연결하기 전에는 `miriyum.waiting.consumer-registration.location-proof-connected`의 기본값을
-`false`로 유지한다. 이 상태의 신규 등록 POST는 활성 계정을 재확인하고 멱등 키를 선점한 최초
-실행 콜백에서 `409 WAITING_012`로 실패 폐쇄하며, Store/Schedule 검증이나 팀·순번·membership
-생성은 실행하지 않는다. 이미 성공한 같은 키·지문은 플래그가 `true`에서 `false`로 바뀐 뒤에도
-최초 HTTP 상태와 snapshot을 재생한다. 조회·availability·취소는 이 게이트의 영향을 받지 않는다.
-속성을 `true`로 바꾸는 배포 권한과 위치 증명-팀 생성 원자 결합 검증은 #409가 소유한다.
+Issue #409 연결 뒤 등록 요청은 `locationProofSessionId`가 필수다. 최초 멱등 실행은 계정·매장·
+`WAITING_REGISTRATION` 목적에 결속된 `VERIFIED` 세션을 잠그고, 만료·소비·binding을 확인한 뒤
+Store/Schedule 접수 gate, 계정 활성 membership, FIFO 순번을 처리한다. 증명 소비와 팀·순번·
+대표자 membership·감사·상태 사건·멱등 결과는 같은 `READ_COMMITTED` 트랜잭션에서 확정하며
+어느 단계든 실패하면 소비도 롤백한다. 위치 증명 연결 전 임시 feature flag는 제거한다.
 
 availability는 Waiting 설정 유무를 접수 가능 여부로 해석하기 전에 Store 존재를 확인한다. 없는
 매장은 `404 STORE_001`, 설정이 없거나 접수가 닫힌 기존 매장은 `200 accepting=false`다. 등록의
@@ -501,15 +505,54 @@ call/cancel이 같은 version으로 경합하면 팀 row lock에서 먼저 확�
 `409 WAITING_005`다. 취소 성공은 활성 membership을 제거하고 `CONSUMER` actor 감사를 한 번만
 기록한다.
 
-소비자 snapshot은 `waitingTeamId`, `storeId`, `businessDate`, `status`, `queueSequence`,
-`teamsAhead`, `partySize`, `createdAt`, `calledAt`, `arrivalDeadline`, `arrivedAt`, `cancelledAt`,
-`version`만 공개한다. `teamsAhead`는 같은 매장·영업일의 앞선 활성 FIFO 팀 수를 조회 시점에
-계산한다. 다른 소비자의 팀은 존재 여부와 소유권을 구분하지 않고 `404 WAITING_003`으로
-응답한다. 계정 ID, 운영 메모, 좌표, 원본 식별자, 멱등 키는 반환하지 않는다.
+소비자 snapshot은 기존 팀 필드와 `memberships`를 공개한다. membership 항목은 opaque
+`membershipId`, `REPRESENTATIVE|MEMBER`, `joinedAt`, 요청자 자신의 항목인지 나타내는 `self`만
+포함한다. `teamsAhead`는 같은 매장·영업일의 앞선 활성 FIFO 팀 수를 조회 시점에 계산한다.
+다른 소비자의 팀은 존재 여부와 소유권을 구분하지 않고 `404 WAITING_003`으로 응답한다. 계정 ID,
+연락처, 운영 메모, 좌표, 원본 식별자, 멱등 키는 반환하지 않는다.
 
-플랫폼 3km 정책은 유지하고 위치 판정·좌표 수집 구현은 #409가 소유한다. #408은 위치를
-입력받거나 검증 완료를 주장하지 않으며, 후속 위치 증명 경계가 연결되기 전에는 등록을 기본
-비활성화해 원격 팀·순번·membership이 생성되지 않도록 실패 폐쇄한다.
+플랫폼 3km 정책은 유지하고 위치 판정·좌표 수집 구현은 #409가 소유한다. 위치 원문은 판정 호출
+스택에서만 사용하며 위치 판정 발급에는 전역 멱등 지문을 만들지 않는다. DB에는 계정·매장·목적,
+판정 결과·정확도 범주, 정책·매장 좌표 version, 발급·판정·만료·소비 시각과 소비 team ID만
+남긴다. 정확 좌표·거리 계산값·원본 정확도·측정 시각은 응답·DB·감사·로그에 남기지 않는다.
+
+### GPS 위치 증명과 일행 참여 Runtime (#409)
+
+`WAITING_LOCATION_V1`은 공통 반경 3,000m, 최대 정확도 반경 100m, 측정 최대 경과 30초,
+미래 시각 허용 오차 5초, 통과 세션 TTL 120초를 사용한다. 통과는 매장 기준점과의 거리와
+`accuracyMeters`의 합이 3,000m 이하일 때만 가능하다. 권한 거부·위치 미수신·낮은 정확도·
+오래된 측정·조작 의심은 성공으로 추정하거나 IP 위치로 대체하지 않는다. Waiting은 Store
+Entity·Repository를 참조하지 않고 `StoreService`가 반환하는 `StoreWaitingLocationProfile`의
+승인 좌표와 좌표 version만 요청 처리 중 소비한다.
+
+위치 판정은 `MEASURED`, `PERMISSION_DENIED`, `POSITION_UNAVAILABLE` 측정 상태와
+`CLEAR`, `MANIPULATION_SUSPECTED` 무결성 상태를 받아 `VERIFIED`, `OUTSIDE_RADIUS`,
+`ACCURACY_INSUFFICIENT`, `PERMISSION_DENIED`, `MEASUREMENT_STALE`, `POSITION_UNAVAILABLE`,
+`MANIPULATION_SUSPECTED` 중 하나를 반환한다. 응답에는 session ID, 결과 범주, 정책·매장 좌표
+version과 발급·판정·만료 시각만 둔다. 유효한 판정 요청의 실패 결과도 HTTP 200으로 반환하고,
+등록 시 사용할 수 없는 모든 세션은 `409 WAITING_013 LOCATION_PROOF_INVALID`로 닫는다.
+
+`waiting_active_memberships`는 한 팀의 여러 계정 행을 허용하되 `UNIQUE
+(consumer_account_id)`를 유지한다. 대표자는 `waiting_teams.consumer_account_id`가 소유하며
+항상 같은 팀의 활성 membership을 갖는다. 입력 `partySize`는 실제 방문 인원수이므로 일행 계정
+합류·이탈·제거로 바꾸지 않고 활성 membership 수가 이를 넘지 않게 한다. 종결은 팀의 모든
+membership을 삭제하고 1건 이상이 없으면 중앙 원장 충돌로 실패 폐쇄한다.
+
+대표자는 15분 만료형 일회 초대를 발급·철회한다. 초대 원문은 최초 응답에서만 반환하고 DB에는
+SHA-256 hash만 저장한다. 같은 멱등 키 replay는 같은 초대 metadata를 반환하되 원문 코드는
+재생하지 않으므로 최초 응답을 잃은 대표자는 기존 초대를 철회하고 새 초대를 발급한다. 수락은
+`WAITING` 팀 행을 잠근 뒤 초대, 계정 전체 활성 관계와 남은
+인원수를 검사하여 membership만 추가한다. 새 팀이나 queue sequence를 만들지 않는다. 구성원은
+본인 이탈, 대표자는 다른 구성원 제거만 수행하며 실제 호출 이후와 종결 상태에서는 모두
+`WAITING_015 PARTY_MUTATION_NOT_ALLOWED`로 거부한다.
+
+대표자 이전 제안은 5분 만료이고 팀당 하나만 활성이다. 대상 활성 구성원의 수락 전에는 기존
+대표자를 유지하며 거절·만료·철회는 역할을 바꾸지 않는다. 수락은 team 행 잠금 아래 대표자와
+team version을 바꾼다. 팀 취소도 같은 행을 먼저 잠그므로 이전 수락과 취소 중 하나만 확정되고
+부분 역할 변경은 없다. 모든 일행 쓰기는 UUID `Idempotency-Key`를 사용한다. 초대 수락은
+초대에 고정된 발급 당시 team version을 검증하고, 다른 구성 변경 요청은 본문의
+`expectedVersion`을 검증한다. 구성 변경은 team version을 1 증가시키고 별도 일행 감사에
+행위자·대상 membership·전후 version·사유·명령 ID만 남긴다.
 
 ### 활성 팀 종결 작업과 #271 경계
 
