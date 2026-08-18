@@ -91,6 +91,10 @@ class StoreSearchOpenApiContractTest {
                         "REGION_SELECTION_REQUIRED");
         assertThat(list(map(schemas.get("MenuAlternativeSearchRequest")).get("required")))
                 .containsExactlyInAnyOrder("quantity", "serviceDate", "startTime", "partySize");
+        assertThat(list(map(schemas.get("MenuAlternativeItem")).get("required")))
+                .contains("alternativeScore", "rankingReason", "scoreBreakdown");
+        assertThat(list(map(schemas.get("MenuAlternativeRankingReason")).get("enum")))
+                .containsExactly("LLM_CONCEPT", "SECONDARY_CATEGORY", "PRICE_SIMILARITY");
         assertThat(list(map(schemas.get("StoreSummary")).get("required")))
                 .containsExactlyInAnyOrder(
                         "storeId", "name", "region", "address", "storeCategoryCode",
