@@ -23,7 +23,7 @@ paths:
   /api/v1/platform-operators/reauthentication-approvals:
     $ref: "./platform-operator-authorization/openapi.yaml#/paths/~1api~1v1~1platform-operators~1reauthentication-approvals"
   /api/v1/platform-operators/me:
-    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1me"
+    $ref: "./platform-operator-capabilities/openapi.yaml#/paths/~1api~1v1~1platform-operators~1me"
   /api/v1/platform-operators/members:
     $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1members"
   /api/v1/platform-operators/members/{accountType}/{accountId}:

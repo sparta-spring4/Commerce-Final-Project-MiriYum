@@ -9,6 +9,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.platformoperator.controller.auth.PlatformOperatorAuthController;
+import com.miriyum.domain.platformoperator.controller.account.PlatformOperatorCapabilitiesController;
+import com.miriyum.domain.platformoperator.service.PlatformOperatorCapabilitiesService;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +49,10 @@ class PlatformOperatorFeatureFlagIT {
     @Test
     void disabledFeatureExposesNeitherControllerNorOpenEndedNamespace() throws Exception {
         assertThat(context.getBeansOfType(PlatformOperatorAuthController.class)).isEmpty();
+        assertThat(context.getBeansOfType(PlatformOperatorCapabilitiesController.class)).isEmpty();
+        assertThat(context.getBeansOfType(PlatformOperatorCapabilitiesService.class)).isEmpty();
+        mvc.perform(get("/api/v1/platform-operators/me"))
+                .andExpect(status().isNotFound());
         mvc.perform(post("/api/v1/platform-operators/auth/sessions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"x@example.com\",\"password\":\"Password1!\"}"))
