@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.miriyum.global.storage.FileStorageObject;
+import com.miriyum.global.storage.FileStorageOutcomeUnknownException;
 import com.miriyum.global.storage.FileStorageRequest;
 import com.miriyum.global.storage.FileStorageSaveResult;
 import java.io.ByteArrayInputStream;
@@ -21,7 +22,10 @@ import org.mockito.ArgumentCaptor;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.BucketVersioningStatus;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetBucketVersioningRequest;
+import software.amazon.awssdk.services.s3.model.GetBucketVersioningResponse;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
@@ -68,6 +72,33 @@ class S3FileStorageAdapterTest {
         assertThat(result.sizeBytes()).isEqualTo(5L);
         assertThat(result.checksum())
                 .isEqualTo("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        verify(s3Client).headObject(any(HeadObjectRequest.class));
+    }
+
+    @Test
+    @DisplayName("S3 저장 성공 뒤 임시 파일 삭제가 실패해도 저장 결과는 성공으로 유지한다")
+    void keepsSaveSuccessfulWhenTemporaryFileCleanupFails() {
+        S3Client s3Client = mock(S3Client.class);
+        when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                .thenReturn(PutObjectResponse.builder().build());
+        when(s3Client.headObject(any(HeadObjectRequest.class)))
+                .thenReturn(HeadObjectResponse.builder()
+                        .contentLength(5L)
+                        .contentType("image/jpeg")
+                        .checksumSHA256("LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=")
+                        .build());
+        S3FileStorageAdapter adapter = new S3FileStorageAdapter(
+                s3Client,
+                "miriyum-test-bucket",
+                10_485_760L,
+                temporaryFile -> {
+                    throw new IOException("temporary file cleanup failed");
+                });
+
+        FileStorageSaveResult result = adapter.save(request("public/store/10/menu-image/sample.jpg"));
+
+        assertThat(result.objectKey()).isEqualTo("public/store/10/menu-image/sample.jpg");
+        verify(s3Client).putObject(any(PutObjectRequest.class), any(RequestBody.class));
         verify(s3Client).headObject(any(HeadObjectRequest.class));
     }
 
@@ -213,15 +244,14 @@ class S3FileStorageAdapterTest {
                 new ByteArrayInputStream("hello".getBytes(StandardCharsets.UTF_8)));
 
         assertThatThrownBy(() -> adapter.save(request))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("stored file size");
+                .isInstanceOf(FileStorageOutcomeUnknownException.class);
 
         verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
     }
 
     @Test
-    @DisplayName("S3 어댑터는 suspended 버킷의 null 버전을 다른 요청의 객체로 삭제하지 않는다")
-    void doesNotDeleteByKeyWhenUploadVersionIsSuspendedNullVersion() {
+    @DisplayName("S3 어댑터는 업로드 version ID가 null 문자열이면 다른 요청의 객체를 삭제하지 않는다")
+    void doesNotDeleteByKeyWhenUploadVersionIdIsNullLiteral() {
         S3Client s3Client = mock(S3Client.class);
         when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
                 .thenReturn(PutObjectResponse.builder().versionId("null").build());
@@ -239,8 +269,57 @@ class S3FileStorageAdapterTest {
                 new ByteArrayInputStream("hello".getBytes(StandardCharsets.UTF_8)));
 
         assertThatThrownBy(() -> adapter.save(request))
+                .isInstanceOf(FileStorageOutcomeUnknownException.class);
+
+        verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
+    }
+
+    @Test
+    @DisplayName("S3 어댑터는 PutObject 응답 유실을 결과 불명으로 보존한다")
+    void keepsOutcomeUnknownWhenPutObjectResponseIsLost() {
+        S3Client s3Client = mock(S3Client.class);
+        when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                .thenThrow(new IllegalStateException("S3 response timed out"));
+        S3FileStorageAdapter adapter = new S3FileStorageAdapter(s3Client, "miriyum-test-bucket", 10_485_760L);
+
+        assertThatThrownBy(() -> adapter.save(request("public/store/10/menu-image/sample.jpg")))
+                .isInstanceOf(FileStorageOutcomeUnknownException.class)
+                .hasMessageContaining("PutObject outcome");
+
+        verify(s3Client, never()).headObject(any(HeadObjectRequest.class));
+        verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
+    }
+
+    @Test
+    @DisplayName("S3 어댑터는 Versioning 활성 버킷에서 저장을 거절한다")
+    void rejectsSaveWhenBucketVersioningIsEnabled() {
+        S3Client s3Client = mock(S3Client.class);
+        when(s3Client.getBucketVersioning(any(GetBucketVersioningRequest.class)))
+                .thenReturn(GetBucketVersioningResponse.builder()
+                        .status(BucketVersioningStatus.ENABLED)
+                        .build());
+        S3FileStorageAdapter adapter = new S3FileStorageAdapter(s3Client, "miriyum-test-bucket", 10_485_760L);
+
+        assertThatThrownBy(() -> adapter.save(request("public/store/10/menu-image/sample.jpg")))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("stored file size");
+                .hasMessageContaining("Versioning must be disabled");
+
+        verify(s3Client, never()).putObject(any(PutObjectRequest.class), any(RequestBody.class));
+    }
+
+    @Test
+    @DisplayName("S3 어댑터는 Versioning 활성 버킷에서 삭제를 거절한다")
+    void rejectsDeleteWhenBucketVersioningIsEnabled() {
+        S3Client s3Client = mock(S3Client.class);
+        when(s3Client.getBucketVersioning(any(GetBucketVersioningRequest.class)))
+                .thenReturn(GetBucketVersioningResponse.builder()
+                        .status(BucketVersioningStatus.SUSPENDED)
+                        .build());
+        S3FileStorageAdapter adapter = new S3FileStorageAdapter(s3Client, "miriyum-test-bucket", 10_485_760L);
+
+        assertThatThrownBy(() -> adapter.delete("public/store/10/menu-image/sample.jpg"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Versioning must be disabled");
 
         verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
     }
@@ -257,6 +336,15 @@ class S3FileStorageAdapterTest {
         verify(s3Client).deleteObject(requestCaptor.capture());
         assertThat(requestCaptor.getValue().bucket()).isEqualTo("miriyum-test-bucket");
         assertThat(requestCaptor.getValue().key()).isEqualTo("public/store/10/store-image/sample.png");
+    }
+
+    private FileStorageRequest request(String objectKey) {
+        return new FileStorageRequest(
+                objectKey,
+                "image/jpeg",
+                5L,
+                new ByteArrayInputStream("hello".getBytes(StandardCharsets.UTF_8))
+        );
     }
 
     private static final class ReadLengthLimitedInputStream extends InputStream {
