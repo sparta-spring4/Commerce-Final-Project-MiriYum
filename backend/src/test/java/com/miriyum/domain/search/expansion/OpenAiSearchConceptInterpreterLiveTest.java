@@ -6,15 +6,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.miriyum.domain.search.config.OpenAiSearchInterpretationProperties;
 import com.miriyum.domain.search.config.SearchInterpretationHttpConfig;
 import java.util.Set;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import tools.jackson.databind.ObjectMapper;
 
 /** 실제 OpenAI 계약과 대표 한국어 검색 표현을 명시적으로 검증하는 opt-in 테스트다. */
+@Tag("external-live")
 class OpenAiSearchConceptInterpreterLiveTest {
 
     @Test
-    @EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".+")
     void interpretsSpicySoupAsAnApprovedStewConcept() {
         OpenAiSearchInterpretationProperties properties =
                 new OpenAiSearchInterpretationProperties(
