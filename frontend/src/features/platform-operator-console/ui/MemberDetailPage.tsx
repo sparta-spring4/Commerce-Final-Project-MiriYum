@@ -4,6 +4,7 @@ import { ROUTES } from '../../../app/routes'
 import { Badge, type BadgeTone } from '../../../shared/ui/Badge'
 import { EmptyState, ErrorState, Loading } from '../../../shared/ui/Feedback'
 import { usePlatformOperatorAuth } from '../../platform-operator-auth'
+import { SanctionForm } from './SanctionForm'
 import {
   fetchMember,
   memberQueryKeys,
@@ -195,6 +196,20 @@ export function MemberDetailPage() {
               </div>
             )}
           </section>
+
+          {/*
+            제재는 조회와 같은 화면에 두되 목록에서 한 번의 클릭으로 확정되지
+            않게 한다. 수준·사유·정책 version을 채우고 재인증까지 통과해야 전송된다.
+
+            성공 뒤에는 낙관 확정하지 않고 서버에서 상세를 다시 읽는다.
+            `supportVersion`이 바뀌므로 재조회 없이는 다음 명령이 409로 거절된다.
+          */}
+          <SanctionForm
+            accountType={memberQuery.data.accountType}
+            accountId={memberQuery.data.accountId}
+            supportVersion={memberQuery.data.supportVersion}
+            onApplied={() => void memberQuery.refetch()}
+          />
         </>
       )}
     </section>

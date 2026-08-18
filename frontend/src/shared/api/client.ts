@@ -3,6 +3,7 @@ import { IDEMPOTENCY_KEY_HEADER } from './idempotencyKey'
 import { checkSuccessEnvelope, isApiErrorBody, type ApiSuccess } from './envelope'
 import type {
   AdminAuditContextOf,
+  AdminCaseRefOf,
   AdminReauthenticationOf,
   ApiPath,
   CsrfOf,
@@ -50,6 +51,7 @@ export type RequestOptions<P extends ApiPath, M extends MethodOf<P>> = {
   IfMatchOf<OperationOf<P, M>> &
   AdminReauthenticationOf<P, OperationOf<P, M>> &
   AdminAuditContextOf<OperationOf<P, M>> &
+  AdminCaseRefOf<OperationOf<P, M>> &
   CommonRequestOptions
 
 /** 성공 응답은 봉투 그대로 노출한다. 화면이 code·message·data를 구분해 쓴다. */
@@ -133,6 +135,7 @@ export function createApiClient(
         caseVersion: number
         reasonCode: string
       }
+      adminCaseRef?: { caseId: string; caseVersion: number }
       signal?: AbortSignal
     },
   ): Promise<Response> {
@@ -160,6 +163,13 @@ export function createApiClient(
         options.adminAuditContext.caseVersion,
       )
       headers[ADMIN_REASON_CODE_HEADER] = options.adminAuditContext.reasonCode
+    }
+    // 사유 코드 없이 사건만 참조하는 명령이다. 조회와 헤더 구성이 다르다.
+    if (options.adminCaseRef) {
+      headers[ADMIN_CASE_ID_HEADER] = options.adminCaseRef.caseId
+      headers[ADMIN_CASE_VERSION_HEADER] = String(
+        options.adminCaseRef.caseVersion,
+      )
     }
     const token = getAccessToken?.()
     if (token) {
@@ -223,6 +233,7 @@ export function createApiClient(
       ifMatch,
       adminReauthentication,
       adminAuditContext,
+      adminCaseRef,
       query,
       signal,
     } = options as RequestOptions<P, M> & {
@@ -237,6 +248,7 @@ export function createApiClient(
         caseVersion: number
         reasonCode: string
       }
+      adminCaseRef?: { caseId: string; caseVersion: number }
     }
 
     const url = buildUrl(path, pathParams, query)
@@ -248,6 +260,7 @@ export function createApiClient(
       ifMatch,
       adminReauthentication,
       adminAuditContext,
+      adminCaseRef,
       signal,
     }
 

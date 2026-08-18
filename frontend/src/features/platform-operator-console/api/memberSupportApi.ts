@@ -11,6 +11,7 @@ export type CasePageData = components['schemas']['CasePageData']
 export type CaseType = components['schemas']['CaseType']
 export type CaseStatus = components['schemas']['CaseStatus']
 export type SanctionLevel = components['schemas']['SanctionLevel']
+export type RestrictedFeature = components['schemas']['RestrictedFeature']
 export type Sanction = components['schemas']['Sanction']
 export type ActiveSanctionSummary =
   components['schemas']['ActiveSanctionSummary']

@@ -109,3 +109,43 @@ export async function fetchAuditEvent(
   )
   return response.data
 }
+
+export type CorrectionRequest = components['schemas']['CorrectionRequest']
+
+/**
+ * 보정 사건 추가.
+ *
+ * 원 사건을 수정하지 않고 연결된 새 사건을 append한다. 그래서 응답은
+ * 원 사건이 아니라 새로 만들어진 보정 사건이다.
+ *
+ * 조회 헤더(사건·version·사유)에 더해 재인증 승인과 멱등 키까지 요구한다.
+ * 보정은 조회가 아니라 고위험 명령이기 때문이다.
+ */
+export async function createAuditCorrection(
+  apiClient: ApiClient,
+  input: {
+    eventKey: string
+    context: AuditReviewContext
+    reauthenticationApproval: string
+    idempotencyKey: string
+    body: CorrectionRequest
+  },
+) {
+  const response = await apiClient(
+    '/api/v1/platform-operators/audit-events/{eventKey}/corrections',
+    {
+      method: 'post',
+      pathParams: { eventKey: input.eventKey },
+      body: input.body,
+      // 보정은 조회와 달리 사유 코드 헤더를 요구하지 않는다.
+      // 사유는 본문의 `reason: RECORD_CORRECTION` 고정값이 담당한다.
+      adminCaseRef: {
+        caseId: input.context.caseId,
+        caseVersion: input.context.caseVersion,
+      },
+      adminReauthentication: input.reauthenticationApproval,
+      idempotencyKey: input.idempotencyKey,
+    },
+  )
+  return response.data
+}

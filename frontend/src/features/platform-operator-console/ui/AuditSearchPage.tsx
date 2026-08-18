@@ -1,54 +1,26 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Badge, type BadgeTone } from '../../../shared/ui/Badge'
+import { Link } from 'react-router'
+import { Badge } from '../../../shared/ui/Badge'
 import { Button } from '../../../shared/ui/Button'
-import { SelectField, TextField } from '../../../shared/ui/Field'
-import { Alert, EmptyState, ErrorState, Loading } from '../../../shared/ui/Feedback'
+import { SelectField } from '../../../shared/ui/Field'
+import { EmptyState, ErrorState, Loading } from '../../../shared/ui/Feedback'
 import { Pagination } from '../../../shared/ui/Pagination'
 import { usePlatformOperatorAuth } from '../../platform-operator-auth'
 import {
   auditQueryKeys,
   searchAuditEvents,
   type AuditOutcome,
-  type AuditReason,
   type AuditReviewContext,
   type AuditSearchQuery,
   type EventSource,
 } from '../api/auditApi'
+import { auditEventDetailPath } from '../model/paths'
+import { AuditReviewContextForm } from './AuditReviewContextForm'
+import { OUTCOME_LABEL, OUTCOME_TONE, REASON_LABEL, SOURCE_LABEL } from './auditLabels'
 import './page.css'
 
 const PAGE_SIZE = 20
-
-const OUTCOME_LABEL: Record<AuditOutcome, string> = {
-  SUCCESS: '성공',
-  DENIED: '거부',
-  FAILED: '실패',
-}
-
-const OUTCOME_TONE: Record<AuditOutcome, BadgeTone> = {
-  SUCCESS: 'positive',
-  DENIED: 'attention',
-  FAILED: 'negative',
-}
-
-const SOURCE_LABEL: Record<EventSource, string> = {
-  AUTH: '인증',
-  ADMIN: '관리 명령',
-}
-
-/** 계약이 정한 조회 사유 코드. 자유 입력이 아니다. */
-const REASON_LABEL: Record<AuditReason, string> = {
-  AUTHENTICATION_EVENT: '인증 사건 확인',
-  ACCOUNT_PROVISIONING: '계정 발급 확인',
-  RESPONSIBILITY_CHANGE: '담당 변경 확인',
-  EMPLOYMENT_END: '퇴직 처리 확인',
-  SECURITY_RESPONSE: '보안 대응',
-  AUDIT_VERIFICATION: '감사 검증',
-  RECORD_CORRECTION: '기록 보정',
-  // #279 매장 제재가 추가한 사유다. 매장 제재 화면 자체는 이번 범위가 아니지만,
-  // 감사 조회는 그 사유로 기록된 사건도 함께 읽으므로 표시명이 필요하다.
-  STORE_ENFORCEMENT: '매장 제재',
-}
 
 /**
  * 감사 이력 조회.
@@ -68,7 +40,13 @@ export function AuditSearchPage() {
   const [context, setContext] = useState<AuditReviewContext | null>(null)
 
   if (context === null) {
-    return <AuditReviewContextForm onSubmit={setContext} />
+    return (
+      <AuditReviewContextForm
+        heading="감사 이력 조회"
+        subtitle="조회할 감사 사건과 사유를 먼저 지정합니다."
+        onSubmit={setContext}
+      />
+    )
   }
 
   return (
@@ -77,104 +55,6 @@ export function AuditSearchPage() {
       context={context}
       onChangeContext={() => setContext(null)}
     />
-  )
-}
-
-/**
- * 조회 맥락 입력.
- *
- * 조회 전에 받는다. 결과 화면에 섞어 두면 사유를 비운 채 목록이 먼저 뜨고,
- * 그 상태에서 보낸 요청이 서버에 거부로 기록된다.
- */
-function AuditReviewContextForm({
-  onSubmit,
-}: {
-  onSubmit: (context: AuditReviewContext) => void
-}) {
-  const [caseId, setCaseId] = useState('')
-  const [caseVersion, setCaseVersion] = useState('')
-  const [reasonCode, setReasonCode] = useState<AuditReason>('AUDIT_VERIFICATION')
-  const [errors, setErrors] = useState<Record<string, string>>({})
-
-  function handleSubmit(event: React.FormEvent) {
-    event.preventDefault()
-    const nextErrors: Record<string, string> = {}
-    if (caseId.trim().length === 0) {
-      nextErrors.caseId = '배정받은 감사 사건 ID를 입력해 주세요.'
-    }
-    const parsedVersion = Number(caseVersion)
-    if (
-      caseVersion.trim().length === 0 ||
-      !Number.isInteger(parsedVersion) ||
-      parsedVersion < 0
-    ) {
-      nextErrors.caseVersion = '사건 version을 숫자로 입력해 주세요.'
-    }
-    setErrors(nextErrors)
-    if (Object.keys(nextErrors).length > 0) {
-      return
-    }
-    onSubmit({ caseId: caseId.trim(), caseVersion: parsedVersion, reasonCode })
-  }
-
-  return (
-    <section aria-labelledby="audit-context-heading">
-      <header className="po-page__header">
-        <div>
-          <h1 className="po-page__title" id="audit-context-heading">
-            감사 이력 조회
-          </h1>
-          <p className="po-page__subtitle">
-            조회할 감사 사건과 사유를 먼저 지정합니다.
-          </p>
-        </div>
-      </header>
-
-      <Alert tone="info" title="이 조회는 감사 기록에 남습니다.">
-        허용된 조회와 거부된 조회가 모두 기록됩니다. 배정받은 사건과 실제 사유를
-        입력해 주세요. 권한만으로는 조회할 수 없으며 사건 배정이 필요합니다.
-      </Alert>
-
-      <form
-        className="po-form"
-        onSubmit={handleSubmit}
-        aria-label="감사 조회 맥락"
-        noValidate
-      >
-        <TextField
-          label="감사 사건 ID"
-          name="caseId"
-          value={caseId}
-          error={errors.caseId ?? null}
-          onChange={(event) => setCaseId(event.target.value)}
-        />
-        <TextField
-          label="사건 version"
-          name="caseVersion"
-          inputMode="numeric"
-          value={caseVersion}
-          error={errors.caseVersion ?? null}
-          onChange={(event) => setCaseVersion(event.target.value)}
-        />
-        <SelectField
-          label="조회 사유"
-          value={reasonCode}
-          onChange={(event) =>
-            setReasonCode(event.target.value as AuditReason)
-          }
-        >
-          {Object.entries(REASON_LABEL).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </SelectField>
-
-        <Button type="submit" variant="primary" size="lg">
-          조회 시작
-        </Button>
-      </form>
-    </section>
   )
 }
 
@@ -292,7 +172,14 @@ function AuditSearchResults({
                 <tbody>
                   {auditQuery.data.content.map((event) => (
                     <tr key={event.eventKey}>
-                      <th scope="row">{formatTimestamp(event.occurredAt)}</th>
+                      <th scope="row">
+                        <Link
+                          to={auditEventDetailPath(event.eventKey)}
+                          className="po-table__link"
+                        >
+                          {formatTimestamp(event.occurredAt)}
+                        </Link>
+                      </th>
                       <td>{SOURCE_LABEL[event.source] ?? event.source}</td>
                       <td>{event.action}</td>
                       <td>{event.actorOperatorId}</td>

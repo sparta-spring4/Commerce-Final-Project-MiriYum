@@ -177,6 +177,34 @@ export type AdminAuditContextOf<Op> = Op extends {
   : { adminAuditContext?: never }
 
 /**
+ * 사건만 참조하는 명령의 헤더.
+ *
+ * 보정은 조회와 달리 `X-Admin-Reason-Code`를 요구하지 않는다. 사유가 본문의
+ * `reason: RECORD_CORRECTION` 고정값으로 들어가기 때문이다. 조회용 세 헤더를
+ * 그대로 재사용하면 계약에 없는 헤더를 보내게 되므로 분리한다.
+ */
+export type AdminCaseRefOf<Op> = Op extends {
+  parameters: {
+    header: {
+      'X-Admin-Case-Id': unknown
+      'X-Admin-Case-Version': unknown
+      'X-Admin-Reason-Code': unknown
+    }
+  }
+}
+  ? { adminCaseRef?: never }
+  : Op extends {
+        parameters: {
+          header: {
+            'X-Admin-Case-Id': unknown
+            'X-Admin-Case-Version': unknown
+          }
+        }
+      }
+    ? { adminCaseRef: { caseId: string; caseVersion: number } }
+    : { adminCaseRef?: never }
+
+/**
  * 재인증 승인 헤더를 요구하는 operation.
  *
  * 원칙은 다른 헤더와 같이 생성 타입에서 파생하는 것이다. 그런데

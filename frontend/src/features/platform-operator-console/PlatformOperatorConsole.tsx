@@ -7,10 +7,13 @@ import {
   PlatformOperatorSignInPage,
   RequirePlatformOperatorAuth,
 } from '../platform-operator-auth'
+import { AuditDetailPage } from './ui/AuditDetailPage'
 import { AuditSearchPage } from './ui/AuditSearchPage'
 import { ConsoleLayout } from './ui/ConsoleLayout'
 import { MemberDetailPage } from './ui/MemberDetailPage'
 import { MemberListPage } from './ui/MemberListPage'
+import { SupportCaseDetailPage } from './ui/SupportCaseDetailPage'
+import { SupportCaseListPage } from './ui/SupportCaseListPage'
 
 /**
  * 운영 콘솔의 route 묶음.
@@ -50,8 +53,20 @@ export default function PlatformOperatorConsole() {
               element={<MemberDetailPage />}
             />
             <Route
+              path={relative(ROUTES.platformOperatorSupportCases)}
+              element={<SupportCaseListPage />}
+            />
+            <Route
+              path={relative(ROUTES.platformOperatorSupportCaseDetail)}
+              element={<SupportCaseDetailPage />}
+            />
+            <Route
               path={relative(ROUTES.platformOperatorAudit)}
               element={<AuditSearchPage />}
+            />
+            <Route
+              path={relative(ROUTES.platformOperatorAuditDetail)}
+              element={<AuditDetailPage />}
             />
             {/* 콘솔 진입점은 회원 관리다. 대시보드 계약이 없다. */}
             <Route

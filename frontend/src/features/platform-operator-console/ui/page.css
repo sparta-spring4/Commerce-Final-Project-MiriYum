@@ -156,3 +156,96 @@
     gap: 0.25rem;
   }
 }
+
+/*
+ * 재인증 다이얼로그.
+ *
+ * 화면 흐름을 끊는 것이 목적이라 본문 위에 겹친다. 배경은 시안의 scrim 규칙대로
+ * Deep Charcoal 40%를 쓴다.
+ */
+.po-dialog {
+  position: fixed;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  z-index: 20;
+  width: min(26rem, calc(100vw - 2rem));
+  padding-inline: 1.5rem;
+  padding-block: 1.5rem;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card, #fff);
+  box-shadow: 0 4px 12px rgb(26 35 126 / 20%);
+}
+
+.po-dialog__title {
+  margin-block: 0 0.5rem;
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.75rem;
+}
+
+.po-dialog__description {
+  margin-block: 0 1.25rem;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.po-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.po-dialog__notice {
+  margin: 0;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.po-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.po-fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0;
+  padding-inline: 1rem;
+  padding-block: 0.875rem;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 0.5rem;
+}
+
+.po-fieldset__legend {
+  padding-inline: 0.25rem;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.po-fieldset__error {
+  flex-basis: 100%;
+  margin: 0;
+  color: #d32f2f;
+  font-size: 0.8125rem;
+}
+
+.po-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.875rem;
+}
+
+.po-form__notice {
+  margin: 0;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.8125rem;
+  line-height: 1.125rem;
+}
