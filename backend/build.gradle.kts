@@ -76,6 +76,7 @@ tasks.withType<Test> {
 }
 
 val integrationTag = "integration"
+val externalLiveTag = "external-live"
 val integrationShardATag = "integration-shard-a"
 val integrationShardBTag = "integration-shard-b"
 val integrationShardCTag = "integration-shard-c"
@@ -120,7 +121,21 @@ val verifyIntegrationTestTags = tasks.register("verifyIntegrationTestTags") {
 
 tasks.named<Test>("test") {
     useJUnitPlatform {
-        excludeTags(integrationTag)
+        excludeTags(integrationTag, externalLiveTag)
+    }
+    dependsOn(verifyIntegrationTestTags)
+}
+
+tasks.register<Test>("openAiSearchConceptLiveTest") {
+    group = "verification"
+    description = "OPENAI_API_KEY가 있을 때 실제 OpenAI 검색 개념 계약을 검증합니다."
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform {
+        includeTags(externalLiveTag)
+    }
+    onlyIf("OPENAI_API_KEY must be set") {
+        !System.getenv("OPENAI_API_KEY").isNullOrBlank()
     }
     dependsOn(verifyIntegrationTestTags)
 }

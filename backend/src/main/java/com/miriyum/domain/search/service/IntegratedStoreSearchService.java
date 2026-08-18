@@ -1,9 +1,9 @@
 package com.miriyum.domain.search.service;
 
-import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
+import com.miriyum.domain.reservation.dto.request.ReservationSearchAvailabilityCondition;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
-import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.reservation.service.ReservationSearchAvailabilityService;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.recommendation.ranking.RankedRecommendation;
 import com.miriyum.domain.recommendation.ranking.RecommendationAvailability;
@@ -18,7 +18,12 @@ import com.miriyum.domain.search.dto.publicapi.NormalizedSearchCondition;
 import com.miriyum.domain.search.dto.publicapi.PublicStoreCoordinates;
 import com.miriyum.domain.search.dto.publicapi.PublicStoreModes;
 import com.miriyum.domain.search.dto.publicapi.ReservationAvailability;
+import com.miriyum.domain.search.config.OpenAiSearchInterpretationProperties;
 import com.miriyum.domain.search.config.StoreSearchCandidateLimit;
+import com.miriyum.domain.search.expansion.SearchConceptExpansion;
+import com.miriyum.domain.search.expansion.SearchConceptExpansionService;
+import com.miriyum.domain.search.expansion.SearchConceptPurpose;
+import com.miriyum.domain.search.expansion.SearchConceptRequest;
 import com.miriyum.domain.search.interpreter.InterpretationResult;
 import com.miriyum.domain.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.search.interpreter.PriceRange;
@@ -27,6 +32,7 @@ import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
 import com.miriyum.domain.search.query.IntegratedStoreSearchSort;
 import com.miriyum.domain.search.repository.IntegratedStoreSearchCandidate;
 import com.miriyum.domain.search.repository.IntegratedStoreSearchRepository;
+import com.miriyum.domain.search.repository.IntegratedStoreSearchSlice;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
@@ -34,6 +40,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,19 +52,23 @@ public class IntegratedStoreSearchService {
 
     private final IntegratedSearchInterpreter interpreter;
     private final IntegratedStoreSearchRepository repository;
-    private final ReservationService reservationService;
+    private final ReservationSearchAvailabilityService reservationService;
     private final StoreSearchCandidateLimit candidateLimit;
     private final IntegratedSearchCursorCodec cursorCodec;
     private final StoreRecommendationService recommendationService;
+    private final SearchConceptExpansionService expansionService;
+    private final OpenAiSearchInterpretationProperties llmProperties;
     private final Clock clock;
 
     public IntegratedStoreSearchService(
             IntegratedSearchInterpreter interpreter,
             IntegratedStoreSearchRepository repository,
-            ReservationService reservationService,
+            ReservationSearchAvailabilityService reservationService,
             StoreSearchCandidateLimit candidateLimit,
             IntegratedSearchCursorCodec cursorCodec,
             StoreRecommendationService recommendationService,
+            SearchConceptExpansionService expansionService,
+            OpenAiSearchInterpretationProperties llmProperties,
             Clock clock
     ) {
         this.interpreter = interpreter;
@@ -65,6 +77,8 @@ public class IntegratedStoreSearchService {
         this.candidateLimit = candidateLimit;
         this.cursorCodec = cursorCodec;
         this.recommendationService = recommendationService;
+        this.expansionService = expansionService;
+        this.llmProperties = llmProperties;
         this.clock = clock;
     }
 
@@ -101,8 +115,8 @@ public class IntegratedStoreSearchService {
     ) {
         InterpretationResult interpretation = interpreter.interpret(searchInput);
         InterpretedSearchCondition condition = interpretation.condition();
-        boolean completeReservation = hasCompleteReservation(condition);
-        if ((includesInfants || availableOnly) && !completeReservation) {
+        boolean reservationRequested = hasReservationDate(condition);
+        if ((includesInfants || availableOnly) && !reservationRequested) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
 
@@ -130,6 +144,7 @@ public class IntegratedStoreSearchService {
         String scanCursor = cursor;
         String responseCursor = null;
         boolean finished = false;
+        boolean exactExhausted = false;
         int scannedCandidates = 0;
         int scanLimit = candidateLimit.value();
         while (!finished
@@ -144,7 +159,7 @@ public class IntegratedStoreSearchService {
                     scanCursor,
                     requestedSize,
                     cursorCodec);
-            var slice = repository.search(query);
+            IntegratedStoreSearchSlice slice = repository.search(query);
             List<IntegratedStoreSearchCandidate> original = slice.content();
             List<IntegratedStoreSearchCandidate> before =
                     repository.refreshCurrentlyPublic(original);
@@ -173,11 +188,11 @@ public class IntegratedStoreSearchService {
                 ReservationAvailability candidateAvailability =
                         availability.values().getOrDefault(
                                 current.storeId(),
-                                completeReservation
+                                reservationRequested
                                         ? ReservationAvailability.UNAVAILABLE
                                         : ReservationAvailability.NOT_REQUESTED);
                 candidateAvailability = reconcileCurrentState(
-                        current, candidateAvailability, completeReservation);
+                        current, candidateAvailability, reservationRequested);
                 if (availableOnly
                         && candidateAvailability != ReservationAvailability.AVAILABLE) {
                     continue;
@@ -205,10 +220,24 @@ public class IntegratedStoreSearchService {
             scanCursor = slice.nextCursor();
             if (scanCursor == null || original.isEmpty()) {
                 responseCursor = null;
+                exactExhausted = true;
                 finished = true;
             } else if (lastProcessed != null) {
                 responseCursor = scanCursor;
             }
+        }
+
+        if (cursor == null
+                && exactExhausted
+                && items.size() < requestedSize
+                && !condition.remainingKeyword().isBlank()) {
+            appendExpandedCandidates(
+                    items,
+                    requestQuery,
+                    condition,
+                    includesInfants,
+                    availableOnly,
+                    requestedSize);
         }
 
         return new IntegratedStoreSearchData(
@@ -236,6 +265,7 @@ public class IntegratedStoreSearchService {
         }
         int scannedCandidates = 0;
         String scanCursor = null;
+        boolean exactExhausted = false;
         List<RecommendationSearchCandidate> rankingCandidates = new ArrayList<>();
         Map<Long, CandidateState> stateById = new LinkedHashMap<>();
 
@@ -249,7 +279,7 @@ public class IntegratedStoreSearchService {
                     scanCursor,
                     scanPageSize,
                     cursorCodec);
-            var slice = repository.search(scanQuery);
+            IntegratedStoreSearchSlice slice = repository.search(scanQuery);
             List<IntegratedStoreSearchCandidate> original = slice.content();
             List<IntegratedStoreSearchCandidate> before =
                     repository.refreshCurrentlyPublic(original);
@@ -274,13 +304,13 @@ public class IntegratedStoreSearchService {
                 ReservationAvailability candidateAvailability =
                         availability.values().getOrDefault(
                                 current.storeId(),
-                                hasCompleteReservation(condition)
+                                hasReservationDate(condition)
                                         ? ReservationAvailability.UNAVAILABLE
                                         : ReservationAvailability.NOT_REQUESTED);
                 candidateAvailability = reconcileCurrentState(
                         current,
                         candidateAvailability,
-                        hasCompleteReservation(condition));
+                        hasReservationDate(condition));
                 if (availableOnly
                         && candidateAvailability != ReservationAvailability.AVAILABLE) {
                     continue;
@@ -299,17 +329,19 @@ public class IntegratedStoreSearchService {
 
             scanCursor = slice.nextCursor();
             if (scanCursor == null || original.isEmpty()) {
+                exactExhausted = true;
                 break;
             }
         }
 
+        RecommendationSearchSignals signals = new RecommendationSearchSignals(
+                condition.storeCategoryCodes(),
+                condition.menuCategoryCodes(),
+                condition.tagCodes());
         List<RankedRecommendation> ranked = recommendationService.rank(
                 consumerAccountId,
                 rankingCandidates,
-                new RecommendationSearchSignals(
-                        condition.storeCategoryCodes(),
-                        condition.menuCategoryCodes(),
-                        condition.tagCodes()),
+                signals,
                 clock.instant());
         RecommendationCursorKey pageKey = requestQuery.cursor()
                 .map(decoded -> parseRecommendationCursor(
@@ -320,7 +352,7 @@ public class IntegratedStoreSearchService {
                 .toList();
         int pageSize = Math.min(requestQuery.size(), remaining.size());
         List<RankedRecommendation> page = remaining.subList(0, pageSize);
-        List<IntegratedStoreSearchItem> items = page.stream()
+        List<IntegratedStoreSearchItem> items = new ArrayList<>(page.stream()
                 .map(result -> new RankedCandidateState(
                         result,
                         stateById.get(result.candidate().storeId())))
@@ -329,10 +361,24 @@ public class IntegratedStoreSearchService {
                         result.state().candidate(),
                         result.state().availability(),
                         result.ranked().reason()))
-                .toList();
+                .toList());
         String nextCursor = remaining.size() > pageSize && !page.isEmpty()
                 ? recommendationCursor(requestQuery, page.getLast())
                 : null;
+        if (requestQuery.cursor().isEmpty()
+                && exactExhausted
+                && items.size() < requestQuery.size()
+                && !condition.remainingKeyword().isBlank()) {
+            appendRankedExpandedCandidates(
+                    consumerAccountId,
+                    items,
+                    stateById.keySet(),
+                    requestQuery,
+                    condition,
+                    includesInfants,
+                    availableOnly,
+                    signals);
+        }
         return new IntegratedStoreSearchData(
                 items,
                 normalized(condition),
@@ -341,6 +387,81 @@ public class IntegratedStoreSearchService {
                 interpretation.vocabularyVersion(),
                 StoreRecommendationService.RULE_VERSION,
                 nextCursor);
+    }
+
+    private void appendRankedExpandedCandidates(
+            Long consumerAccountId,
+            List<IntegratedStoreSearchItem> items,
+            Set<Long> exactStoreIds,
+            IntegratedStoreSearchQuery query,
+            InterpretedSearchCondition condition,
+            boolean includesInfants,
+            boolean availableOnly,
+            RecommendationSearchSignals signals
+    ) {
+        SearchConceptExpansion expansion = expansionService.expand(new SearchConceptRequest(
+                condition.remainingKeyword(), SearchConceptPurpose.STORE_SEARCH));
+        if (expansion == null || expansion.concepts().isEmpty()) {
+            return;
+        }
+        List<IntegratedStoreSearchCandidate> expanded = repository.searchExpanded(
+                        query,
+                        expansion.concepts(),
+                        llmProperties.supplementCandidateLimit())
+                .stream()
+                .filter(candidate -> !exactStoreIds.contains(candidate.storeId()))
+                .toList();
+        List<IntegratedStoreSearchCandidate> before =
+                repository.refreshCurrentlyPublic(expanded);
+        AvailabilityBatch availability = availabilityById(
+                before, condition, includesInfants);
+        if (!availability.valid()) {
+            return;
+        }
+        List<IntegratedStoreSearchCandidate> after =
+                repository.refreshCurrentlyPublic(before);
+        Map<Long, CandidateState> supplementalStates = new LinkedHashMap<>();
+        List<RecommendationSearchCandidate> supplementalRanking = new ArrayList<>();
+        for (IntegratedStoreSearchCandidate candidate : after) {
+            ReservationAvailability candidateAvailability = availability.values().getOrDefault(
+                    candidate.storeId(),
+                    hasReservationDate(condition)
+                            ? ReservationAvailability.UNAVAILABLE
+                            : ReservationAvailability.NOT_REQUESTED);
+            candidateAvailability = reconcileCurrentState(
+                    candidate, candidateAvailability, hasReservationDate(condition));
+            if (availableOnly
+                    && candidateAvailability != ReservationAvailability.AVAILABLE) {
+                continue;
+            }
+            if (supplementalStates.putIfAbsent(
+                    candidate.storeId(),
+                    new CandidateState(candidate, candidateAvailability)) != null) {
+                continue;
+            }
+            supplementalRanking.add(new RecommendationSearchCandidate(
+                    candidate.storeId(),
+                    candidate.relevanceTier(),
+                    toRecommendationAvailability(candidateAvailability),
+                    null));
+        }
+        List<RankedRecommendation> supplementalRanked = recommendationService.rank(
+                consumerAccountId,
+                supplementalRanking,
+                signals,
+                clock.instant());
+        for (RankedRecommendation ranked : supplementalRanked) {
+            if (items.size() >= query.size()) {
+                return;
+            }
+            CandidateState state = supplementalStates.get(ranked.candidate().storeId());
+            if (state != null) {
+                items.add(toItem(
+                        state.candidate(),
+                        state.availability(),
+                        ranked.reason()));
+            }
+        }
     }
 
     private String recommendationCursor(
@@ -371,7 +492,7 @@ public class IntegratedStoreSearchService {
             boolean includesInfants
     ) {
         Map<Long, ReservationAvailability> byId = new LinkedHashMap<>();
-        if (!hasCompleteReservation(condition)) {
+        if (!hasReservationDate(condition)) {
             candidates.forEach(candidate -> byId.put(
                     candidate.storeId(), ReservationAvailability.NOT_REQUESTED));
             return new AvailabilityBatch(true, byId);
@@ -384,7 +505,7 @@ public class IntegratedStoreSearchService {
         }
         List<ReservationAvailabilityResult> results = reservationService.getAvailabilities(
                 storeIds,
-                new ReservationAvailabilityCondition(
+                new ReservationSearchAvailabilityCondition(
                         condition.reservationDate(),
                         condition.reservationTime(),
                         null,
@@ -399,6 +520,65 @@ public class IntegratedStoreSearchService {
                         ? ReservationAvailability.AVAILABLE
                         : ReservationAvailability.UNAVAILABLE));
         return new AvailabilityBatch(true, byId);
+    }
+
+    private void appendExpandedCandidates(
+            List<IntegratedStoreSearchItem> items,
+            IntegratedStoreSearchQuery query,
+            InterpretedSearchCondition condition,
+            boolean includesInfants,
+            boolean availableOnly,
+            int requestedSize
+    ) {
+        SearchConceptExpansion expansion = expansionService.expand(new SearchConceptRequest(
+                condition.remainingKeyword(), SearchConceptPurpose.STORE_SEARCH));
+        if (expansion == null || expansion.concepts().isEmpty()) {
+            return;
+        }
+        Set<Long> existingIds = items.stream()
+                .map(IntegratedStoreSearchItem::storeId)
+                .map(Long::parseLong)
+                .collect(Collectors.toSet());
+        List<IntegratedStoreSearchCandidate> expanded = repository.searchExpanded(
+                        query,
+                        expansion.concepts(),
+                        llmProperties.supplementCandidateLimit())
+                .stream()
+                .filter(candidate -> !existingIds.contains(candidate.storeId()))
+                .toList();
+        List<IntegratedStoreSearchCandidate> before =
+                repository.refreshCurrentlyPublic(expanded);
+        AvailabilityBatch availability = availabilityById(
+                before, condition, includesInfants);
+        if (!availability.valid()) {
+            return;
+        }
+        List<IntegratedStoreSearchCandidate> after =
+                repository.refreshCurrentlyPublic(before);
+        Map<Long, IntegratedStoreSearchCandidate> currentById = new LinkedHashMap<>();
+        after.forEach(candidate -> currentById.put(candidate.storeId(), candidate));
+        for (IntegratedStoreSearchCandidate original : expanded) {
+            if (items.size() >= requestedSize) {
+                return;
+            }
+            IntegratedStoreSearchCandidate current = currentById.get(original.storeId());
+            if (current == null) {
+                continue;
+            }
+            ReservationAvailability candidateAvailability =
+                    availability.values().getOrDefault(
+                            current.storeId(),
+                            hasReservationDate(condition)
+                                    ? ReservationAvailability.UNAVAILABLE
+                                    : ReservationAvailability.NOT_REQUESTED);
+            candidateAvailability = reconcileCurrentState(
+                    current, candidateAvailability, hasReservationDate(condition));
+            if (availableOnly
+                    && candidateAvailability != ReservationAvailability.AVAILABLE) {
+                continue;
+            }
+            items.add(toItem(current, candidateAvailability));
+        }
     }
 
     private static boolean matches(
@@ -432,10 +612,8 @@ public class IntegratedStoreSearchService {
         return availability;
     }
 
-    private static boolean hasCompleteReservation(InterpretedSearchCondition condition) {
-        return condition.partySize() != null
-                && condition.reservationDate() != null
-                && condition.reservationTime() != null;
+    private static boolean hasReservationDate(InterpretedSearchCondition condition) {
+        return condition.reservationDate() != null;
     }
 
     private static RecommendationAvailability toRecommendationAvailability(
@@ -514,4 +692,5 @@ public class IntegratedStoreSearchService {
             CandidateState state
     ) {
     }
+
 }
