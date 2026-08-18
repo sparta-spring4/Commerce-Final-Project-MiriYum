@@ -19,10 +19,10 @@ Issue #285의 인증·공개 검색·예약 생성·알림 이력 기준선을 �
 - `auth.accountAliases`, 예약 template, `notification.accountAliases`가 서로 겹치지 않도록 분리한 합성 계정과 각 계정의 email/password 환경변수 이름
 - baseline 인증 계정 풀은 전역 VU ID 충돌을 막기 위해 전체 `MAX_VUS` 이상이어야 하며, 한 VU는 실행 중 같은 계정으로 login과 refresh를 이어서 수행
 - 공백이 아닌 1~100자 공개 검색 입력
-- 예약별 account alias, 충돌하지 않는 store/date/time/party/menu 조합
+- 예약별 account alias와 충돌하지 않는 store/date 조합. `performance/k6` 전용 fail-closed 계약으로 같은 account alias·store·date는 startTime, offset, party 또는 menu가 달라도 하나만 허용한다. 이는 운영 backend 정책을 바꾸지 않으며, 실제 운영에서는 서버가 계산한 서비스 구간이 겹치지 않는 같은 날 예약을 허용할 수 있다
 - `notification.accountAliases`에 지정한 서로 다른 최소 2개 계정과, 각 계정의 `pageSize + 1`개 이상 공개 `IN_APP` 전달 완료 알림
 
-예약 baseline은 `reservationCreate`에 배분된 `ARRIVAL_RATE × DURATION_SECONDS`만큼 서로 충돌하지 않는 template이 필요하다. template을 순환 재사용하지 않으므로 부족하면 init context에서 실패한다.
+예약 baseline은 `reservationCreate`에 배분된 `ARRIVAL_RATE × DURATION_SECONDS + 1`만큼 서로 충돌하지 않는 template이 필요하다. 마지막 `+ 1`은 duration 경계에서 executor가 예약할 수 있는 iteration guard이며, 예를 들어 예약 단독 `1 iteration/s × 30초`에는 31개가 필요하다. template을 순환 재사용하지 않으므로 부족하면 init context에서 실패한다.
 
 비밀번호 값은 저장소 밖 파일, 예를 들어 `C:\secure\miriyum-k6.env`에 둔다.
 
@@ -148,7 +148,7 @@ backend 기본 IP rate limit은 login 성공 표본을 단일 source IP 기준 5
 3. 두 SHA가 다르면 별도 리뷰된 split-SHA 승인과 `STAGING_SPLIT_SHA_APPROVED=true`
 4. harness checkout의 `HEAD`가 `HARNESS_COMMIT_SHA`이고 `performance/k6`의 tracked·staged·untracked 변경이 모두 없다는 검증
 5. 팀 공지·실행 시간·최대 VU·duration·arrival rate, operator와 독립 observer/stop 담당 승인
-6. `reservationCreate`는 #358이 `dev`에 병합된 뒤에만 `STAGING_RESERVATION_FIXTURE_APPROVED=true`; 그전에는 `SCENARIOS`에서 명시적으로 제외
+6. `reservationCreate`는 배분된 arrival rate와 duration의 경계 guard까지 포함한 비충돌 template 수를 검토하고 `STAGING_RESERVATION_FIXTURE_APPROVED=true`로 승인
 7. 두 SHA와 동일 fixture의 staging smoke 성공 `RUN_ID`
 
 staging smoke 전에 승인된 harness checkout에서 다음을 실행한다. 출력이 하나라도 있거나 HEAD가 다르면 중단하며 `STAGING_HARNESS_SOURCE_VERIFIED`를 설정하지 않는다.
@@ -162,7 +162,7 @@ if ($actualHarnessSha -ne $harnessCommitSha -or $harnessChanges.Count -ne 0) {
 $stagingHarnessSourceVerified = 'true'
 ```
 
-staging smoke에는 `TARGET_ENV=staging`, HTTPS `BASE_URL`, `STAGING_APPROVED=true`, `STAGING_HARNESS_SOURCE_VERIFIED=true`, 두 full SHA를 전달한다. baseline에는 추가로 `PROFILE=staging-baseline`, `STAGING_SMOKE_RUN_ID`, `SMOKE_PROOF_PATH=/results/{STAGING_SMOKE_RUN_ID}.json`을 전달한다. #358 전에는 `SCENARIOS=authRefresh,storeSearch,notificationHistory`처럼 예약을 명시적으로 제외해야 하며, 생략해 네 시나리오 기본값을 선택하면 요청 전에 실패한다. 신뢰 staging host는 `staging-api.miriyum.click` 하나이며, HTTPS health smoke 성공 증거 전에는 `NOT RUN`으로 유지한다. production hostname, 실사용자 계정 또는 운영 데이터는 어떤 값으로도 실행하지 않는다.
+staging smoke에는 `TARGET_ENV=staging`, HTTPS `BASE_URL`, `STAGING_APPROVED=true`, `STAGING_HARNESS_SOURCE_VERIFIED=true`, 두 full SHA를 전달한다. baseline에는 추가로 `PROFILE=staging-baseline`, `STAGING_SMOKE_RUN_ID`, `SMOKE_PROOF_PATH=/results/{STAGING_SMOKE_RUN_ID}.json`을 전달한다. `reservationCreate`를 포함하면 경계 guard까지 충족하는 비충돌 template을 준비하고 `STAGING_RESERVATION_FIXTURE_APPROVED=true`를 전달해야 하며, 승인되지 않았으면 요청 전에 실패한다. 신뢰 staging host는 `staging-api.miriyum.click` 하나이며, HTTPS health smoke 성공 증거 전에는 `NOT RUN`으로 유지한다. production hostname, 실사용자 계정 또는 운영 데이터는 어떤 값으로도 실행하지 않는다.
 
 ### 예외 제거와 기본 429 복구
 
