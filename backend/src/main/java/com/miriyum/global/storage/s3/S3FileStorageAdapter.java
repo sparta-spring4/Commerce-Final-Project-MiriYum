@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
+import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -28,6 +29,7 @@ import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
+@Slf4j
 public class S3FileStorageAdapter implements FileStoragePort {
 
     private static final int BUFFER_SIZE = 8 * 1024;
@@ -35,11 +37,22 @@ public class S3FileStorageAdapter implements FileStoragePort {
     private final S3Client s3Client;
     private final String bucket;
     private final long maxSizeBytes;
+    private final TemporaryFileDeleter temporaryFileDeleter;
 
     public S3FileStorageAdapter(S3Client s3Client, String bucket, long maxSizeBytes) {
+        this(s3Client, bucket, maxSizeBytes, Files::deleteIfExists);
+    }
+
+    S3FileStorageAdapter(
+            S3Client s3Client,
+            String bucket,
+            long maxSizeBytes,
+            TemporaryFileDeleter temporaryFileDeleter
+    ) {
         this.s3Client = s3Client;
         this.bucket = bucket;
         this.maxSizeBytes = maxSizeBytes;
+        this.temporaryFileDeleter = temporaryFileDeleter;
     }
 
     @Override
@@ -243,15 +256,22 @@ public class S3FileStorageAdapter implements FileStoragePort {
 
     private void deleteTemporaryFile(Path temporaryFile, RuntimeException failure) {
         try {
-            Files.deleteIfExists(temporaryFile);
+            temporaryFileDeleter.deleteIfExists(temporaryFile);
         } catch (IOException exception) {
             IllegalStateException cleanupException = new IllegalStateException("failed to delete temporary file", exception);
             if (failure != null) {
                 failure.addSuppressed(cleanupException);
                 return;
             }
-            throw cleanupException;
+            // A remote object was already verified. Local temp-file cleanup must not turn that success into FAILED.
+            log.warn("event=file_storage_temporary_file_cleanup_failed");
         }
+    }
+
+    @FunctionalInterface
+    interface TemporaryFileDeleter {
+
+        boolean deleteIfExists(Path temporaryFile) throws IOException;
     }
 
     private MessageDigest messageDigest() {

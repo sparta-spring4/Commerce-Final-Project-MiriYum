@@ -76,6 +76,33 @@ class S3FileStorageAdapterTest {
     }
 
     @Test
+    @DisplayName("S3 저장 성공 뒤 임시 파일 삭제가 실패해도 저장 결과는 성공으로 유지한다")
+    void keepsSaveSuccessfulWhenTemporaryFileCleanupFails() {
+        S3Client s3Client = mock(S3Client.class);
+        when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                .thenReturn(PutObjectResponse.builder().build());
+        when(s3Client.headObject(any(HeadObjectRequest.class)))
+                .thenReturn(HeadObjectResponse.builder()
+                        .contentLength(5L)
+                        .contentType("image/jpeg")
+                        .checksumSHA256("LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=")
+                        .build());
+        S3FileStorageAdapter adapter = new S3FileStorageAdapter(
+                s3Client,
+                "miriyum-test-bucket",
+                10_485_760L,
+                temporaryFile -> {
+                    throw new IOException("temporary file cleanup failed");
+                });
+
+        FileStorageSaveResult result = adapter.save(request("public/store/10/menu-image/sample.jpg"));
+
+        assertThat(result.objectKey()).isEqualTo("public/store/10/menu-image/sample.jpg");
+        verify(s3Client).putObject(any(PutObjectRequest.class), any(RequestBody.class));
+        verify(s3Client).headObject(any(HeadObjectRequest.class));
+    }
+
+    @Test
     @DisplayName("S3 어댑터는 저장 크기와 실제 바이트 수가 다르면 거절한다")
     void rejectsSizeMismatch() {
         S3Client s3Client = mock(S3Client.class);

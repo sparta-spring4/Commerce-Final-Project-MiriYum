@@ -53,9 +53,12 @@ public class FileStorageReconciliationJob {
             FileMetadata metadata = claimed.get();
             attempted++;
             try {
-                fileStorageFacade.deleteForReconciliation(
-                        metadata.toPublicMetadata(), metadata.getObjectCleanupClaimToken(), now);
-                completed++;
+                if (fileStorageFacade.deleteForReconciliation(
+                        metadata.toPublicMetadata(), metadata.getObjectCleanupClaimToken(), now)) {
+                    completed++;
+                } else {
+                    skipped++;
+                }
             } catch (RuntimeException exception) {
                 rescheduleClaimedCleanup(metadata, now);
                 failed++;
@@ -79,9 +82,12 @@ public class FileStorageReconciliationJob {
                 }
                 attempted++;
                 claimedMetadata = claimed.get();
-                fileStorageFacade.deleteForReconciliation(
-                        claimedMetadata.toPublicMetadata(), claimedMetadata.getObjectCleanupClaimToken(), now);
-                completed++;
+                if (fileStorageFacade.deleteForReconciliation(
+                        claimedMetadata.toPublicMetadata(), claimedMetadata.getObjectCleanupClaimToken(), now)) {
+                    completed++;
+                } else {
+                    skipped++;
+                }
             } catch (RuntimeException exception) {
                 if (claimedMetadata != null) {
                     rescheduleClaimedCleanup(claimedMetadata, now);

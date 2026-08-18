@@ -119,9 +119,9 @@ public class FileStorageFacade {
      * reconciliation worker가 이미 claim한 논리 삭제 객체를 재시도한다.
      * 이 경로는 배치의 식별자 없는 집계 로그만 남기기 위해 개별 실패 로그를 만들지 않는다.
      */
-    public void deleteForReconciliation(FileStorageMetadata deleted, String claimToken, Instant completedAt) {
+    public boolean deleteForReconciliation(FileStorageMetadata deleted, String claimToken, Instant completedAt) {
         fileStoragePort.delete(deleted.objectKey());
-        transactionExecutor.completeClaimedObjectCleanup(deleted.fileId().toString(), claimToken, completedAt);
+        return transactionExecutor.completeClaimedObjectCleanup(deleted.fileId().toString(), claimToken, completedAt);
     }
 
     /**

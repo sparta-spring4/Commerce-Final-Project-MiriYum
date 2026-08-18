@@ -40,6 +40,7 @@ class FileStorageReconciliationJobTest {
                 .thenReturn(Optional.of(pending));
         when(executor.claimObjectCleanup(eq(pending.getFileId()), eq(NOW), any())).thenReturn(Optional.of(pending));
         when(executor.countLongStayCandidates(any(), any())).thenReturn(0L);
+        when(facade.deleteForReconciliation(any(), any(), eq(NOW))).thenReturn(true);
 
         FileStorageReconciliationJob.ReconciliationResult result = new FileStorageReconciliationJob(
                 executor,
@@ -49,6 +50,27 @@ class FileStorageReconciliationJobTest {
 
         assertThat(result).isEqualTo(new FileStorageReconciliationJob.ReconciliationResult(2, 2, 0, 0, 0));
         verify(facade, org.mockito.Mockito.times(2)).deleteForReconciliation(any(), any(), eq(NOW));
+    }
+
+    @Test
+    @DisplayName("만료된 claim으로 DB 완료 기록이 거절되면 완료가 아닌 건너뜀으로 집계한다")
+    void skipsObjectCleanupWhenClaimTokenWasReplaced() {
+        FileMetadataTransactionExecutor executor = mock(FileMetadataTransactionExecutor.class);
+        FileStorageFacade facade = mock(FileStorageFacade.class);
+        FileMetadata deleted = deletedMetadata();
+        when(executor.findObjectCleanupCandidates(eq(NOW), eq(1))).thenReturn(List.of(deleted));
+        when(executor.claimObjectCleanup(eq(deleted.getFileId()), eq(NOW), any())).thenReturn(Optional.of(deleted));
+        when(executor.findStalePendingCandidates(NOW.minusSeconds(600), 1)).thenReturn(List.of());
+        when(executor.countLongStayCandidates(any(), any())).thenReturn(0L);
+        when(facade.deleteForReconciliation(any(), any(), eq(NOW))).thenReturn(false);
+
+        FileStorageReconciliationJob.ReconciliationResult result = new FileStorageReconciliationJob(
+                executor,
+                facade,
+                new FileStorageReconciliationProperties(true, 60_000, 2, 600, 3_600, 60, 300),
+                Clock.fixed(NOW, ZoneOffset.UTC)).reconcile();
+
+        assertThat(result).isEqualTo(new FileStorageReconciliationJob.ReconciliationResult(1, 0, 1, 0, 0));
     }
 
     @Test
