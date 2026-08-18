@@ -1,5 +1,6 @@
 import { check } from 'k6'
 
+import * as fixtureContracts from '../lib/contracts.js'
 import { loginConsumer, runAuthRefresh } from '../scenarios/auth-refresh.js'
 import { runNotificationHistory } from '../scenarios/notification-history.js'
 import { runReservationCreate } from '../scenarios/reservation-create.js'
@@ -103,6 +104,50 @@ function validReservationData() {
     createdAt: '2026-08-14T12:00:00+09:00',
     cancelledBy: null,
     cancellationReason: null,
+  }
+}
+
+function reservationCapacityFixture(templateCount) {
+  return {
+    allowedOrigin: 'http://localhost:5173',
+    accounts: [
+      {
+        alias: 'auth-contract',
+        emailEnv: 'K6_AUTH_CONTRACT_EMAIL',
+        passwordEnv: 'K6_AUTH_CONTRACT_PASSWORD',
+      },
+      {
+        alias: 'reservation-contract',
+        emailEnv: 'K6_RESERVATION_CONTRACT_EMAIL',
+        passwordEnv: 'K6_RESERVATION_CONTRACT_PASSWORD',
+      },
+      {
+        alias: 'notification-contract-1',
+        emailEnv: 'K6_NOTIFICATION_CONTRACT_1_EMAIL',
+        passwordEnv: 'K6_NOTIFICATION_CONTRACT_1_PASSWORD',
+      },
+      {
+        alias: 'notification-contract-2',
+        emailEnv: 'K6_NOTIFICATION_CONTRACT_2_EMAIL',
+        passwordEnv: 'K6_NOTIFICATION_CONTRACT_2_PASSWORD',
+      },
+    ],
+    auth: { accountAliases: ['auth-contract'] },
+    search: { input: '서울 한식' },
+    reservationTemplates: Array.from({ length: templateCount }, (_, index) => ({
+      accountAlias: 'reservation-contract',
+      storeId: '301',
+      serviceDate: `2026-09-${String(Math.floor(index / 24) + 1).padStart(2, '0')}`,
+      startTime: `${String(index % 24).padStart(2, '0')}:00:00`,
+      startOffset: '+09:00',
+      party: { adultCount: 2, childCount: 0, infantCount: 0 },
+      menuSelections: [],
+    })),
+    notification: {
+      accountAliases: ['notification-contract-1', 'notification-contract-2'],
+      pageSize: 2,
+      minimumDeliveredItemsPerAccount: 3,
+    },
   }
 }
 
@@ -250,6 +295,68 @@ class MalformedLoginClient extends RecordingClient {
 }
 
 export default function () {
+  const requiredReservationTemplateCount = fixtureContracts.requiredReservationTemplateCount
+  const buildExecutionScenarios = fixtureContracts.buildExecutionScenarios
+  const singleScenarioRequired = typeof requiredReservationTemplateCount === 'function'
+    ? requiredReservationTemplateCount({
+      profile: 'local-baseline',
+      totalArrivalRate: 1,
+      durationSeconds: 30,
+      scenarioIndex: 0,
+      scenarioCount: 1,
+    })
+    : null
+  const mixedScenarioFirstRequired = typeof requiredReservationTemplateCount === 'function'
+    ? requiredReservationTemplateCount({
+      profile: 'local-baseline',
+      totalArrivalRate: 4,
+      durationSeconds: 30,
+      scenarioIndex: 0,
+      scenarioCount: 3,
+    })
+    : null
+  const mixedScenarioThirdRequired = typeof requiredReservationTemplateCount === 'function'
+    ? requiredReservationTemplateCount({
+      profile: 'local-baseline',
+      totalArrivalRate: 4,
+      durationSeconds: 30,
+      scenarioIndex: 2,
+      scenarioCount: 3,
+    })
+    : null
+  const singleScenarioConfig = {
+    profile: 'local-baseline',
+    targetEnv: 'local',
+    scenarioNames: ['reservationCreate'],
+    limits: { arrivalRate: 1, durationSeconds: 30, maxVus: 1 },
+  }
+  const oneShortFixtureRejected = typeof buildExecutionScenarios === 'function'
+    && Number.isInteger(singleScenarioRequired)
+    && throws(() => buildExecutionScenarios(
+      singleScenarioConfig,
+      fixtureContracts.validateFixture(reservationCapacityFixture(singleScenarioRequired - 1)),
+    ))
+  const sufficientScenarios = typeof buildExecutionScenarios === 'function'
+    && Number.isInteger(singleScenarioRequired)
+    ? buildExecutionScenarios(
+      singleScenarioConfig,
+      fixtureContracts.validateFixture(reservationCapacityFixture(singleScenarioRequired)),
+    )
+    : null
+  const mixedScenarioFirstScenarios = typeof buildExecutionScenarios === 'function'
+    ? buildExecutionScenarios({
+      ...singleScenarioConfig,
+      scenarioNames: ['reservationCreate', 'storeSearch', 'notificationHistory'],
+      limits: { arrivalRate: 4, durationSeconds: 30, maxVus: 3 },
+    }, fixtureContracts.validateFixture(reservationCapacityFixture(61)))
+    : null
+  const mixedScenarioThirdScenarios = typeof buildExecutionScenarios === 'function'
+    ? buildExecutionScenarios({
+      ...singleScenarioConfig,
+      scenarioNames: ['storeSearch', 'notificationHistory', 'reservationCreate'],
+      limits: { arrivalRate: 4, durationSeconds: 30, maxVus: 3 },
+    }, fixtureContracts.validateFixture(reservationCapacityFixture(31)))
+    : null
   const client = new RecordingClient()
   const authResult = runAuthRefresh({
     client,
@@ -348,6 +455,28 @@ export default function () {
   }))
 
   check(null, {
+    'smoke requires one reservation template': () =>
+      typeof requiredReservationTemplateCount === 'function'
+      && requiredReservationTemplateCount({
+        profile: 'smoke',
+        totalArrivalRate: 100,
+        durationSeconds: 300,
+        scenarioIndex: 0,
+        scenarioCount: 1,
+      }) === 1,
+    'single reservation baseline includes the executor boundary iteration': () =>
+      singleScenarioRequired === 31,
+    'one fewer reservation template is rejected before execution': () =>
+      oneShortFixtureRejected,
+    'the exact boundary-inclusive reservation capacity is accepted': () =>
+      sufficientScenarios?.reservationCreate.rate === 1
+      && sufficientScenarios.reservationCreate.duration === '30s',
+    'mixed scenario allocation includes the remainder and boundary guard': () =>
+      mixedScenarioFirstRequired === 61
+      && mixedScenarioFirstScenarios?.reservationCreate.rate === 2,
+    'mixed scenario capacity uses allocated rate instead of total rate': () =>
+      mixedScenarioThirdRequired === 31
+      && mixedScenarioThirdScenarios?.reservationCreate.rate === 1,
     'login uses the consumer session resource': () =>
       loginCall.method === 'POST'
       && loginCall.url === 'http://backend:8080/api/v1/consumers/auth/sessions',

@@ -215,6 +215,81 @@ export function validateAuthPoolCapacity(fixture, requiredAccounts) {
   return fixture
 }
 
+export function allocateScenarioLimit(total, index, count) {
+  return Math.floor(total / count) + (index < total % count ? 1 : 0)
+}
+
+export function requiredReservationTemplateCount({
+  profile,
+  totalArrivalRate,
+  durationSeconds,
+  scenarioIndex,
+  scenarioCount,
+}) {
+  if (profile === 'smoke') return 1
+  return allocateScenarioLimit(totalArrivalRate, scenarioIndex, scenarioCount)
+    * durationSeconds + 1
+}
+
+export function validateReservationTemplateCapacity(fixture, requiredTemplates) {
+  if (!Number.isInteger(requiredTemplates) || requiredTemplates < 1) {
+    throw new Error('required reservation template capacity must be a positive integer')
+  }
+  if (!Array.isArray(fixture.reservationTemplates)
+      || fixture.reservationTemplates.length < requiredTemplates) {
+    throw new Error(`reservation fixture requires ${requiredTemplates} non-conflicting templates`)
+  }
+  return fixture
+}
+
+export function buildExecutionScenarios(config, fixture) {
+  const { profile, scenarioNames, limits, targetEnv } = config
+  if (profile !== 'smoke' && scenarioNames.includes('authRefresh')) {
+    validateAuthPoolCapacity(fixture, limits.maxVus)
+  }
+  if (scenarioNames.includes('reservationCreate')) {
+    const reservationIndex = scenarioNames.indexOf('reservationCreate')
+    validateReservationTemplateCapacity(fixture, requiredReservationTemplateCount({
+      profile,
+      totalArrivalRate: limits.arrivalRate,
+      durationSeconds: limits.durationSeconds,
+      scenarioIndex: reservationIndex,
+      scenarioCount: scenarioNames.length,
+    }))
+  }
+
+  const scenarios = {}
+  const count = scenarioNames.length
+  scenarioNames.forEach((name, index) => {
+    if (profile === 'smoke') {
+      scenarios[name] = {
+        executor: 'shared-iterations',
+        exec: name,
+        vus: 1,
+        iterations: name === 'notificationHistory'
+          ? fixture.notification.accountAliases.length
+          : 1,
+        maxDuration: '1m',
+        gracefulStop: '5s',
+        tags: { phase: 'measured', profile, target_env: targetEnv },
+      }
+      return
+    }
+    scenarios[name] = {
+      executor: 'constant-arrival-rate',
+      exec: name,
+      rate: allocateScenarioLimit(limits.arrivalRate, index, count),
+      timeUnit: '1s',
+      duration: `${limits.durationSeconds}s`,
+      preAllocatedVUs: allocateScenarioLimit(limits.maxVus, index, count),
+      maxVUs: allocateScenarioLimit(limits.maxVus, index, count),
+      gracefulStop: '30s',
+      tags: { phase: 'measured', profile, target_env: targetEnv },
+    }
+  })
+  return scenarios
+}
+
 export function parseEnvelope(response) {
   requireObject(response, 'response')
   if (typeof response.body !== 'string') {
