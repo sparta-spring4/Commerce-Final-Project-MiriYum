@@ -48,7 +48,7 @@ curl.exe https://api.miriyum.click/actuator/health
 직전 task definition이 이전에는 정상이어도, 현재 배포가 Flyway 스키마 변경이나 secret·환경 설정 변경을 이미 적용했을 수 있다. 이전 revision 선택 전 다음을 확인한다.
 
 1. 이번 release의 Flyway 변경이 expand → migrate → contract 순서를 지켜 이전 애플리케이션과 현재 스키마가 하위 호환되는지 확인한다.
-2. 현재 Secrets Manager JSON key와 환경 변수 참조가 이전 task definition에도 존재하고, 이전 revision이 새 필수 설정을 요구하지 않는지 확인한다.
+2. 이전 task definition과 이전 애플리케이션이 요구한 모든 Secrets Manager JSON key·환경 변수가 현재 실행 환경에 남아 있고 유효한지 확인한다. 제거·이름 변경된 key와 조건부 feature flag의 현재 값도 이전 revision의 기동 조건과 대조한다.
 3. 해당 release에서 이전 revision으로의 rollback 검증 증거가 있으면 링크·실행 시각·결과만 확인한다. 비밀값과 고객 데이터는 기록하지 않는다.
 
 셋 중 하나라도 확인할 수 없으면 task definition을 자동으로 되돌리지 않는다. 배포·DB 소유자가 현재 schema와 설정에서의 수동 복구 방법을 결정한 뒤에만 후속 조치를 수행한다.
