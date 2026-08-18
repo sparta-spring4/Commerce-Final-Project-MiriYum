@@ -30,7 +30,7 @@ public class SearchConceptExpansionService {
             return SearchConceptExpansion.empty();
         }
         String purpose = request.purpose().metricValue();
-        if (!ExternalSearchTextPolicy.allowsExternalInterpretation(request.text())) {
+        if (!ExternalSearchTextPolicy.allowsExternalInterpretation(request)) {
             outcome(purpose, SearchConceptFailureReason.SENSITIVE_INPUT.metricValue());
             return SearchConceptExpansion.empty();
         }

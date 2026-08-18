@@ -1,6 +1,7 @@
 package com.miriyum.domain.search.expansion;
 
 import static com.miriyum.domain.search.expansion.SearchConceptFailureReason.TIMEOUT;
+import static com.miriyum.domain.search.expansion.SearchConceptPurpose.MENU_ALTERNATIVE;
 import static com.miriyum.domain.search.expansion.SearchConceptPurpose.STORE_SEARCH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
@@ -79,6 +80,10 @@ class SearchConceptExpansionServiceTest {
             "내일 예약하고 싶은 김치찌개",
             "사용자 ID abc 김치찌개",
             "지난주 예약한 김치찌개",
+            "김철수와 지난주 먹었던 김치찌개",
+            "김철수가 좋아하던 김치찌개",
+            "김철수 김치찌개",
+            "분위기 좋은 곳",
             "123 Main St 김치찌개",
             "김치찌개 example.com/private",
             "우유를 피하고 싶어요"
@@ -114,6 +119,23 @@ class SearchConceptExpansionServiceTest {
                 "miriyum.search.llm.outcomes",
                 "purpose", "store_search",
                 "outcome", "timeout").count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void catalogOwnedAlternativeTextRetainsSensitiveDataScreeningWithoutFoodAllowlist() {
+        var registry = new SimpleMeterRegistry();
+        var request = new SearchConceptRequest(
+                "김치찌개 돼지고기와 두부가 든 얼큰한 찌개 MAIN STEW 얼큰한",
+                MENU_ALTERNATIVE);
+        given(interpreter.interpret(request)).willReturn(new SearchConceptExpansion(
+                List.of("김치찌개", "찌개"), 80, 10));
+
+        SearchConceptExpansion result = service(true, registry).expand(request);
+
+        assertThat(result.concepts()).containsExactly("김치찌개", "찌개");
+        assertThat(registry.counter(
+                "miriyum.search.llm.calls", "purpose", "menu_alternative").count())
+                .isEqualTo(1.0);
     }
 
     @Test

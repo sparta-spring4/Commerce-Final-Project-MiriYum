@@ -2,8 +2,9 @@ package com.miriyum.domain.search.expansion;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
-/** 외부 검색 해석 제공자에 보낼 수 없는 연락처·민감 표현을 차단한다. */
+/** 외부 검색 해석 제공자에 전달할 수 있는 음식 표현만 실패 폐쇄로 허용한다. */
 final class ExternalSearchTextPolicy {
 
     private static final int CASE_INSENSITIVE_UNICODE =
@@ -32,11 +33,28 @@ final class ExternalSearchTextPolicy {
     private static final Pattern COORDINATE_PAIR = Pattern.compile(
             "([+-]?\\d{1,2}\\.\\d{3,})\\s*[,/ ]\\s*"
                     + "([+-]?\\d{1,3}\\.\\d{3,})");
+    private static final Pattern STORE_SEARCH_TOKEN_SEPARATOR = Pattern.compile(
+            "[\\p{Zs}\\s,!?%&()'\"_-]+");
+    private static final Pattern APPROVED_STORE_SEARCH_TERM = Pattern.compile(
+            "(얼큰|얼큰한|매콤|매콤한|매운|순한|담백|담백한|달콤|달콤한|"
+                    + "짭짤|짭짤한|새콤|새콤한|고소|고소한|바삭|바삭한|쫄깃|쫄깃한|"
+                    + "따뜻한|뜨거운|차가운|시원한|든든한|가벼운|건강한|"
+                    + "국물|찌개|전골|탕|국|면|국수|라면|우동|냉면|파스타|"
+                    + "밥|덮밥|비빔밥|볶음밥|볶음|구이|튀김|전|만두|죽|"
+                    + "샐러드|디저트|음료|커피|차|빵|떡|고기|닭고기|돼지고기|"
+                    + "소고기|생선|해산물|초밥|피자|버거|김치찌개|된장찌개|"
+                    + "순두부찌개|부대찌개|food|menu|spicy|mild|savory|sweet|"
+                    + "sour|crispy|chewy|hot|cold|soup|stew|noodle|noodles|rice|"
+                    + "grill|grilled|fried|dumpling|dumplings|salad|dessert|drink|"
+                    + "coffee|tea|bread|meat|chicken|pork|beef|fish|seafood|sushi|"
+                    + "pizza|pasta|burger)",
+            CASE_INSENSITIVE_UNICODE);
 
     private ExternalSearchTextPolicy() {
     }
 
-    static boolean allowsExternalInterpretation(String text) {
+    static boolean allowsExternalInterpretation(SearchConceptRequest request) {
+        String text = request.text();
         if (text == null || text.isBlank()
                 || !SAFE_CHARACTERS.matcher(text).matches()
                 || !HAS_LETTER.matcher(text).find()
@@ -51,7 +69,18 @@ final class ExternalSearchTextPolicy {
                 return false;
             }
         }
-        return !LONG_NUMBER.matcher(text).find();
+        return !LONG_NUMBER.matcher(text).find()
+                && (request.purpose() != SearchConceptPurpose.STORE_SEARCH
+                || containsOnlyApprovedStoreSearchTerms(text));
+    }
+
+    private static boolean containsOnlyApprovedStoreSearchTerms(String text) {
+        String normalized = STORE_SEARCH_TOKEN_SEPARATOR.matcher(text).replaceAll(" ").trim();
+        if (normalized.isEmpty()) {
+            return false;
+        }
+        return Stream.of(normalized.split("\\s+"))
+                .allMatch(term -> APPROVED_STORE_SEARCH_TERM.matcher(term).matches());
     }
 
     private static boolean containsCoordinatePair(String text) {
