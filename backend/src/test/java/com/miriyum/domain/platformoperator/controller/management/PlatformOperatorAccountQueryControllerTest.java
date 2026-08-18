@@ -4,19 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.miriyum.domain.platformoperator.dto.management.PlatformOperatorCurrentAccountData;
-import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
-import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorAccountQueryService;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.global.exception.GlobalExceptionHandler;
-import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.MethodParameter;
@@ -41,23 +35,6 @@ class PlatformOperatorAccountQueryControllerTest {
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setCustomArgumentResolvers(new PrincipalResolver())
                 .build();
-    }
-
-    @Test
-    void currentResponseContainsCentralCapabilitiesWithoutAuthenticationSecrets() throws Exception {
-        when(service.current(principal)).thenReturn(new PlatformOperatorCurrentAccountData(
-                "1", "Operator", "ACTIVE", 3L,
-                List.of(PlatformOperatorRole.SUPER_ADMIN),
-                List.of(PlatformOperatorPermission.OPERATOR_AUTHORITY_MANAGE), false));
-
-        mvc.perform(get("/api/v1/platform-operators/me"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.operatorId").value("1"))
-                .andExpect(jsonPath("$.data.permissions[0]").value("OPERATOR_AUTHORITY_MANAGE"))
-                .andExpect(content().string(org.hamcrest.Matchers.not(
-                        org.hamcrest.Matchers.containsString("secret@example.com"))))
-                .andExpect(content().string(org.hamcrest.Matchers.not(
-                        org.hamcrest.Matchers.containsString("session-secret"))));
     }
 
     @Test

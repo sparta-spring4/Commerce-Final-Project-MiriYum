@@ -3,7 +3,6 @@ package com.miriyum.domain.platformoperator.controller.management;
 import com.miriyum.domain.platformoperator.dto.management.PlatformOperatorAccountDetailData;
 import com.miriyum.domain.platformoperator.dto.management.PlatformOperatorAccountPageData;
 import com.miriyum.domain.platformoperator.dto.management.PlatformOperatorAccountSearchRequest;
-import com.miriyum.domain.platformoperator.dto.management.PlatformOperatorCurrentAccountData;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorAccountQueryService;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.global.exception.CommonErrorCode;
@@ -26,12 +25,6 @@ public class PlatformOperatorAccountQueryController {
 
     public PlatformOperatorAccountQueryController(PlatformOperatorAccountQueryService service) {
         this.service = service;
-    }
-
-    @GetMapping("/me")
-    public ApiResponse<PlatformOperatorCurrentAccountData> current(
-            @AuthenticationPrincipal PlatformOperatorPrincipal principal) {
-        return ApiResponse.success("현재 운영자 정보를 조회했습니다.", service.current(principal));
     }
 
     @GetMapping("/accounts")

@@ -10,13 +10,21 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.jayway.jsonpath.JsonPath;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
+import com.miriyum.domain.auth.jwt.SessionTokenClaims;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
+import com.miriyum.domain.platformoperator.entity.PlatformOperatorPermissionGrant;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorRoleGrant;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
+import com.miriyum.domain.platformoperator.repository.PlatformOperatorPermissionGrantRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorRoleGrantRepository;
+import com.miriyum.domain.platformoperator.service.OperatorAuthorityService;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -70,7 +78,10 @@ class PlatformOperatorAccountQueryHttpIT {
     @Autowired PasswordEncoder encoder;
     @Autowired PlatformOperatorAccountRepository accounts;
     @Autowired PlatformOperatorRoleGrantRepository roles;
+    @Autowired PlatformOperatorPermissionGrantRepository permissions;
+    @Autowired OperatorAuthorityService authorityService;
     @Autowired JwtTokenProvider jwtTokenProvider;
+    private int loginRequestSequence;
 
     @Test
     void centralSessionAndManagePermissionProtectSelfListAndDetailReads() throws Exception {
@@ -89,10 +100,12 @@ class PlatformOperatorAccountQueryHttpIT {
         mvc.perform(get("/api/v1/platform-operators/me")
                         .header("Authorization", "Bearer " + superToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.operatorId").value(String.valueOf(superAdmin.getId())))
+                .andExpect(jsonPath("$.data", org.hamcrest.Matchers.aMapWithSize(3)))
                 .andExpect(jsonPath("$.data.roles[0]").value("SUPER_ADMIN"))
                 .andExpect(jsonPath("$.data.permissions",
                         org.hamcrest.Matchers.hasItem("OPERATOR_AUTHORITY_MANAGE")))
+                .andExpect(jsonPath("$.data.permissions",
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("AUDIT_READ"))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(
                         org.hamcrest.Matchers.containsString("accessToken"))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(
@@ -161,6 +174,73 @@ class PlatformOperatorAccountQueryHttpIT {
                 .andExpect(status().isUnauthorized());
     }
 
+    @Test
+    void capabilitiesCombineDirectGrantAndReflectItsRevocation() throws Exception {
+        PlatformOperatorAccount operator = create("capability-union@example.com", "Capability Union");
+        roles.saveAndFlush(PlatformOperatorRoleGrant.create(
+                operator.getId(), PlatformOperatorRole.ONBOARDING_REVIEWER, Instant.now()));
+        permissions.saveAndFlush(PlatformOperatorPermissionGrant.create(
+                operator.getId(), PlatformOperatorPermission.AUDIT_READ, Instant.now()));
+        String limited = JsonPath.read(login("capability-union@example.com", "Password1!")
+                .getResponse().getContentAsString(), "$.data.accessToken");
+        String token = changePassword(limited, "Password1!", "Changed2@");
+
+        mvc.perform(get("/api/v1/platform-operators/me")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.roles[0]").value("ONBOARDING_REVIEWER"))
+                .andExpect(jsonPath("$.data.permissions[0]").value("AUDIT_READ"))
+                .andExpect(jsonPath("$.data.permissions[1]").value("ONBOARDING_EVIDENCE_READ"))
+                .andExpect(jsonPath("$.data.permissions[2]").value("ONBOARDING_REVIEW"));
+
+        authorityService.revokePermission(operator.getId(), PlatformOperatorPermission.AUDIT_READ);
+        mvc.perform(get("/api/v1/platform-operators/me")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_015"));
+
+        String refreshedAuthorityToken = JsonPath.read(login("capability-union@example.com", "Changed2@")
+                .getResponse().getContentAsString(), "$.data.accessToken");
+        mvc.perform(get("/api/v1/platform-operators/me")
+                        .header("Authorization", "Bearer " + refreshedAuthorityToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.permissions",
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("AUDIT_READ"))));
+    }
+
+    @Test
+    void unauthenticatedExpiredAndSuspendedOperatorsKeepExistingAuthenticationErrors() throws Exception {
+        mvc.perform(get("/api/v1/platform-operators/me"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_001"));
+
+        JwtTokenProvider expiredTokenProvider = new JwtTokenProvider(
+                "test-only-secret-key-must-be-at-least-32-bytes",
+                "miriyum",
+                Clock.fixed(Instant.now().minus(Duration.ofHours(1)), ZoneOffset.UTC));
+        String expiredToken = expiredTokenProvider.generateAccessToken(
+                TokenNamespace.PLATFORM_OPERATOR,
+                1L,
+                new SessionTokenClaims("expired-session", 1L, 1L, false));
+        mvc.perform(get("/api/v1/platform-operators/me")
+                        .header("Authorization", "Bearer " + expiredToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_002"));
+
+        PlatformOperatorAccount operator = create("capability-suspended@example.com", "Capability Suspended");
+        String limited = JsonPath.read(login("capability-suspended@example.com", "Password1!")
+                .getResponse().getContentAsString(), "$.data.accessToken");
+        String token = changePassword(limited, "Password1!", "Changed2@");
+        PlatformOperatorAccount current = accounts.findById(operator.getId()).orElseThrow();
+        current.suspend();
+        accounts.saveAndFlush(current);
+
+        mvc.perform(get("/api/v1/platform-operators/me")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_011"));
+    }
+
     private PlatformOperatorAccount create(String email, String displayName) {
         return accounts.saveAndFlush(PlatformOperatorAccount.createTemporary(
                 email, encoder.encode("Password1!"), displayName, Instant.now().plusSeconds(600)));
@@ -168,6 +248,10 @@ class PlatformOperatorAccountQueryHttpIT {
 
     private MvcResult login(String email, String password) throws Exception {
         return mvc.perform(post("/api/v1/platform-operators/auth/sessions")
+                        .with(request -> {
+                            request.setRemoteAddr("198.51.100." + ++loginRequestSequence);
+                            return request;
+                        })
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}"))
                 .andExpect(status().isOk()).andReturn();
