@@ -332,8 +332,9 @@ class ReservationVisitIT {
     }
 
     @Test
-    void qrAndDirectFulfillmentRaceLeavesOneTerminalAudit() throws Exception {
+    void v2QrAndDirectFulfillmentRaceLeavesOneMatchingDisposition() throws Exception {
         Scenario scenario = confirmedScenario();
+        seedCompletedDepositProcess(scenario);
         clock.set(START_AT.plusSeconds(60));
         ReservationCheckInQrGrantResult issued = grantFacade.issue(
                 scenario.consumerId(), scenario.reservationId()
@@ -372,6 +373,22 @@ class ReservationVisitIT {
                 Integer.class,
                 scenario.reservationId()
         )).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT source_event_type, responsibility_code,
+                       target_refund_rate_basis_points, status
+                  FROM reservation_deposit_disposition_obligations
+                 WHERE reservation_id = ?
+                """, scenario.reservationId()))
+                .containsEntry("source_event_type", "RESERVATION_FULFILLED")
+                .containsEntry("responsibility_code", "CONSUMER")
+                .containsEntry("target_refund_rate_basis_points", 10_000)
+                .containsEntry("status", "PENDING");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_deposit_disposition_obligations "
+                        + "WHERE reservation_id = ?",
+                Integer.class,
+                scenario.reservationId()
+        )).isOne();
     }
 
     private Scenario confirmedScenario() {
