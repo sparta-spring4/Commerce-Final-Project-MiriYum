@@ -137,6 +137,7 @@ For the first production activation or an emergency claim stop, use an approved 
 
 ```bash
 set -euo pipefail
+umask 077
 
 export AWS_REGION=ap-northeast-2
 export ECS_CLUSTER=replace-with-production-cluster
@@ -156,6 +157,14 @@ current_task_definition=$(aws ecs describe-services \
   --output text)
 
 work_dir=$(mktemp -d)
+cleanup() {
+  rm -f -- \
+    "$work_dir/current-task-definition.json" \
+    "$work_dir/next-task-definition.json"
+  rmdir -- "$work_dir"
+}
+trap cleanup EXIT
+
 aws ecs describe-task-definition \
   --task-definition "$current_task_definition" \
   --query taskDefinition \
@@ -261,7 +270,7 @@ if [ "$old_task_count" != "0" ]; then
 fi
 ```
 
-The temporary JSON files contain production configuration and resource identifiers even though they contain no secret values. Keep the directory private and remove it after recording only the new task definition ARN, requested worker value, Service stability result, and old-task count.
+The temporary JSON files contain production configuration and resource identifiers even though they contain no secret values. The restrictive umask keeps them private, and the `EXIT` trap removes them after either success or failure. Record only the new task definition ARN, requested worker value, Service stability result, and old-task count.
 
 Use this order when an image rollback must not start new reservation deposit claims:
 
