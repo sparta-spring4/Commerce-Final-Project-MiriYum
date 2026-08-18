@@ -86,6 +86,7 @@ components:
           type: integer
           format: int64
           minimum: 1
+          description: 같은 매장·영업일·지표의 대체 상태를 식별하는 단조 증가 버전이다.
         asOf:
           allOf:
             - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
@@ -145,6 +146,7 @@ components:
           type: integer
           format: int64
           minimum: 1
+          description: 같은 매장·영업일·지표의 대체 상태를 식별하는 단조 증가 버전이다.
         asOf:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
         dataThrough:
@@ -214,6 +216,7 @@ components:
           type: integer
           format: int64
           minimum: 1
+          description: 같은 매장·영업일·지표의 대체 상태를 식별하는 단조 증가 버전이다.
         asOf:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
         dataThrough:
@@ -263,6 +266,7 @@ components:
           type: integer
           format: int64
           minimum: 1
+          description: 같은 매장·영업일·지표의 대체 상태를 식별하는 단조 증가 버전이다.
         asOf:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
         dataThrough:
@@ -307,6 +311,7 @@ components:
           type: integer
           format: int64
           minimum: 1
+          description: 매장 관리 허용 상태가 실제 전환될 때 증가하며 snapshot identity를 분리한다.
         metrics:
           type: object
           additionalProperties: false

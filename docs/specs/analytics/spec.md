@@ -122,6 +122,8 @@ Store는 공개 탐색 가능한 자원이므로 기존 authorized enumeration �
 - snapshot 유일 키는 `(store_id, business_date, as_of, store_authority_version)`이다.
 - metric cell 유일 키는 `(dashboard_snapshot_id, metric_key)`다.
 - 동일 1분 버킷 replay는 source가 그 사이 바뀌어도 최초 저장 snapshot을 반환한다. 다른 input checkpoint나 보정 입력은 다음 분 snapshot에서 새 `aggregationVersion`으로 반영한다.
+- Analytics 게시 경계는 매장·영업일·지표별 직전 cell과 값·checkpoint·완전성 상태를 비교한다. 상태가 바뀌면 source version보다 작아지지 않으면서 직전 `aggregationVersion + 1` 이상을 부여하고, 상태가 같으면 직전 version보다 작아지지 않게 하여 source 실패·복구에서도 version 감소·재사용을 막는다.
+- `platformManagementAllowed`가 실제로 전환될 때만 `storeAuthorityVersion`을 증가시킨다. 제한 후 해제된 같은 1분 버킷은 제한 전 snapshot과 다른 identity로 다시 게시한다.
 - 최초 동시 발행은 안정적인 `stores` 행을 `SELECT ... FOR UPDATE`로 잠근 뒤 게시하여 business date별 최신 marker를 하나만 남긴다.
 - snapshot은 성공 후 제자리 덮어쓰지 않는다. 발행 transaction은 `stores` 행 잠금 안에서 header와 여섯 metric 삽입까지만 수행한다.
 - 31일을 초과한 header는 발행과 분리된 시간당 retention job이 `(generated_at, dashboard_snapshot_id)` 인덱스로 최대 1,000행씩 10개 transaction에서 정리하고, metric FK의 `ON DELETE CASCADE`로 함께 삭제한다. 삭제된 기간은 재조회 시 source에서 다시 계산할 수 있다.

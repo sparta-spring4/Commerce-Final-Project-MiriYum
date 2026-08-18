@@ -25,6 +25,7 @@ import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
@@ -72,7 +73,6 @@ public class DashboardSnapshotTransactionExecutor {
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public DashboardSnapshotResponse publish(DashboardSnapshotDraft draft) {
-        DashboardSnapshot candidate = DashboardSnapshot.create(draft);
         lockStore(draft.storeId());
         DashboardSnapshot existing = snapshotRepository
                 .findByStoreIdAndBusinessDateAndAsOfAndStoreAuthorityVersion(
@@ -83,14 +83,17 @@ public class DashboardSnapshotTransactionExecutor {
             return storedResponse(existing);
         }
 
+        DashboardSnapshotDraft publishedDraft = withDurableAggregationVersions(draft);
+        DashboardSnapshot candidate = DashboardSnapshot.create(publishedDraft);
+
         jdbcTemplate.update("""
                 UPDATE dashboard_analytics_snapshots
                 SET latest_marker = NULL, updated_at = UTC_TIMESTAMP(6)
                 WHERE store_id = ? AND business_date = ? AND latest_marker = TRUE
-                """, draft.storeId(), draft.businessDate());
+                """, publishedDraft.storeId(), publishedDraft.businessDate());
 
         UUID snapshotId = candidate.publicId();
-        long aggregationVersion = draft.metrics().stream()
+        long aggregationVersion = publishedDraft.metrics().stream()
                 .mapToLong(metric -> metric.metadata().aggregationVersion())
                 .max()
                 .orElseThrow();
@@ -100,9 +103,10 @@ public class DashboardSnapshotTransactionExecutor {
                     as_of, generated_at, store_authority_version, aggregation_version,
                     latest_marker, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
-                """, snapshotId.toString(), draft.storeId(), draft.businessDate(),
-                draft.timeZoneId(), utc(draft.asOf()), utc(draft.generatedAt()),
-                draft.storeAuthorityVersion(), aggregationVersion);
+                """, snapshotId.toString(), publishedDraft.storeId(), publishedDraft.businessDate(),
+                publishedDraft.timeZoneId(), utc(publishedDraft.asOf()),
+                utc(publishedDraft.generatedAt()), publishedDraft.storeAuthorityVersion(),
+                aggregationVersion);
 
         if (inserted != 1) {
             throw new IllegalStateException("dashboard snapshot insert invariant violated");
@@ -113,8 +117,71 @@ public class DashboardSnapshotTransactionExecutor {
                         + "WHERE public_snapshot_id = ?",
                 Long.class,
                 snapshotId.toString());
-        insertMetrics(databaseId, draft.metrics());
-        return response(snapshotId, draft.generatedAt(), draft);
+        insertMetrics(databaseId, publishedDraft.metrics());
+        return response(snapshotId, publishedDraft.generatedAt(), publishedDraft);
+    }
+
+    private DashboardSnapshotDraft withDurableAggregationVersions(DashboardSnapshotDraft draft) {
+        DashboardSnapshot latest = snapshotRepository
+                .findByStoreIdAndBusinessDateAndLatestMarkerTrue(
+                        draft.storeId(), draft.businessDate())
+                .orElse(null);
+        if (latest == null) {
+            return draft;
+        }
+        List<DashboardMetricSnapshot> stored = metricRepository
+                .findAllByDashboardSnapshotIdOrderByMetricKeyAsc(latest.getId());
+        if (stored.size() != DashboardSnapshot.REQUIRED_METRIC_KEYS.size()) {
+            throw new IllegalStateException("latest dashboard snapshot is incomplete");
+        }
+        Map<String, DashboardMetricDraft> previous = stored.stream()
+                .map(this::storedDraft)
+                .collect(Collectors.toMap(DashboardMetricDraft::metricKey, Function.identity()));
+        List<DashboardMetricDraft> versioned = draft.metrics().stream()
+                .map(metric -> withDurableAggregationVersion(
+                        metric, previous.get(metric.metricKey())))
+                .toList();
+        return new DashboardSnapshotDraft(
+                draft.storeId(), draft.businessDate(), draft.timeZoneId(), draft.asOf(),
+                draft.generatedAt(), draft.storeAuthorityVersion(), versioned);
+    }
+
+    private DashboardMetricDraft withDurableAggregationVersion(
+            DashboardMetricDraft incoming,
+            DashboardMetricDraft previous
+    ) {
+        if (previous == null) {
+            return incoming;
+        }
+        long previousVersion = previous.metadata().aggregationVersion();
+        long durableVersion = sameAggregationState(incoming, previous)
+                ? Math.max(incoming.metadata().aggregationVersion(), previousVersion)
+                : Math.max(incoming.metadata().aggregationVersion(),
+                        Math.addExact(previousVersion, 1L));
+        if (durableVersion == incoming.metadata().aggregationVersion()) {
+            return incoming;
+        }
+        MetricMetadata metadata = incoming.metadata();
+        return new DashboardMetricDraft(
+                incoming.metricKey(), incoming.value(), new MetricMetadata(
+                metadata.definitionVersion(), durableVersion, metadata.asOf(),
+                metadata.dataThrough(), metadata.inputCheckpoint(), metadata.completeness(),
+                metadata.corrected(), metadata.reasonCode()));
+    }
+
+    private static boolean sameAggregationState(
+            DashboardMetricDraft incoming,
+            DashboardMetricDraft previous
+    ) {
+        MetricMetadata left = incoming.metadata();
+        MetricMetadata right = previous.metadata();
+        return Objects.equals(incoming.value(), previous.value())
+                && Objects.equals(left.definitionVersion(), right.definitionVersion())
+                && Objects.equals(left.dataThrough(), right.dataThrough())
+                && Objects.equals(left.inputCheckpoint(), right.inputCheckpoint())
+                && left.completeness() == right.completeness()
+                && left.corrected() == right.corrected()
+                && left.reasonCode() == right.reasonCode();
     }
 
     private void lockStore(long storeId) {

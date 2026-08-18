@@ -418,7 +418,12 @@ public class Store extends BaseEntity {
             boolean pickupEnabled,
             boolean platformManagementAllowed
     ) {
-        this.operationStatus = Objects.requireNonNull(operationStatus, "operation status is required");
+        OperationStatus requiredOperationStatus = Objects.requireNonNull(
+                operationStatus, "operation status is required");
+        if (this.platformManagementAllowed != platformManagementAllowed) {
+            this.dashboardAuthorityVersion = Math.addExact(this.dashboardAuthorityVersion, 1L);
+        }
+        this.operationStatus = requiredOperationStatus;
         this.reservationEnabled = reservationEnabled;
         this.menuHoldEnabled = menuHoldEnabled;
         this.pickupEnabled = pickupEnabled;

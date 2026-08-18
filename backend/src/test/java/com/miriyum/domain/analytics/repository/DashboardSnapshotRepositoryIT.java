@@ -4,6 +4,7 @@ import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.Metri
 import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricCompleteness.PARTIAL;
 import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricCompleteness.UNAVAILABLE;
 import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricReasonCode.SOURCE_CONTRACT_MISSING;
+import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricReasonCode.SOURCE_FAILED;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.MiriyumApplication;
@@ -11,6 +12,7 @@ import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.CountMetricR
 import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.DashboardMetricDraft;
 import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.DashboardSnapshotDraft;
 import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.DashboardSnapshotResponse;
+import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricCompleteness;
 import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricMetadata;
 import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.NoShowValue;
 import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.RateValue;
@@ -136,6 +138,24 @@ class DashboardSnapshotRepositoryIT {
     }
 
     @Test
+    void metricAggregationVersionRemainsMonotonicAcrossSourceFailureAndRecovery() {
+        DashboardSnapshotResponse normal = executor.publish(draftWithMetricState(
+                AS_OF, 27L, 4L, "reservation:7|waiting:20", COMPLETE));
+        DashboardSnapshotResponse failed = executor.publish(draftWithMetricState(
+                AS_OF.plusSeconds(60), 21L, null, null, UNAVAILABLE));
+        DashboardSnapshotResponse recovered = executor.publish(draftWithMetricState(
+                AS_OF.plusSeconds(120), 27L, 4L,
+                "reservation:7|waiting:20", COMPLETE));
+
+        assertThat(normal.metrics().todayReservationTeams().metadata().aggregationVersion())
+                .isEqualTo(27L);
+        assertThat(failed.metrics().todayReservationTeams().metadata().aggregationVersion())
+                .isEqualTo(28L);
+        assertThat(recovered.metrics().todayReservationTeams().metadata().aggregationVersion())
+                .isEqualTo(29L);
+    }
+
+    @Test
     void concurrentFirstPublishesSerializeOnTheStoreAndLeaveOneLatestSnapshot()
             throws Exception {
         jdbc.execute("""
@@ -200,6 +220,33 @@ class DashboardSnapshotRepositoryIT {
 
     private DashboardSnapshotDraft draftWithReservationCount(long reservationCount, String checkpoint) {
         return draftAt(AS_OF, reservationCount, checkpoint);
+    }
+
+    private DashboardSnapshotDraft draftWithMetricState(
+            Instant asOf,
+            long sourceVersion,
+            Long reservationCount,
+            String checkpoint,
+            MetricCompleteness completeness
+    ) {
+        DashboardSnapshotDraft base = draftAt(asOf, 4L, "base");
+        MetricMetadata metadata = new MetricMetadata(
+                "ANALYTICS-001-v1", sourceVersion, asOf,
+                completeness == COMPLETE ? asOf.minusSeconds(1) : null,
+                checkpoint, completeness, false,
+                completeness == COMPLETE ? null : SOURCE_FAILED);
+        List<DashboardMetricDraft> metrics = base.metrics().stream()
+                .map(metric -> metric.metricKey().equals("TODAY_RESERVATION_TEAMS")
+                        ? new DashboardMetricDraft(
+                                metric.metricKey(),
+                                reservationCount == null
+                                        ? null : objectMapper.valueToTree(reservationCount),
+                                metadata)
+                        : metric)
+                .toList();
+        return new DashboardSnapshotDraft(
+                base.storeId(), base.businessDate(), base.timeZoneId(), asOf,
+                asOf.plusSeconds(1), base.storeAuthorityVersion(), metrics);
     }
 
     private DashboardSnapshotDraft draftAt(

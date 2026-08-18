@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.DashboardMetricDraft;
@@ -116,6 +117,29 @@ class StoreDashboardAnalyticsServiceTest {
         verify(reservationSource, never()).getDashboardSnapshot(STORE_ID, DATE, AS_OF);
         verify(waitingSource, never()).getDashboardSnapshot(STORE_ID, DATE, AS_OF);
         verify(executor, never()).publish(any());
+    }
+
+    @Test
+    void releasedAuthorityDoesNotReplayPreRestrictionSnapshotInTheSameMinute() {
+        DashboardSnapshotResponse preRestriction = org.mockito.Mockito.mock(
+                DashboardSnapshotResponse.class);
+        given(storeService.requireDashboardAuthority(41L, STORE_ID))
+                .willReturn(
+                        new StoreDashboardAuthority(STORE_ID, "Asia/Seoul", 1L),
+                        new StoreDashboardAuthority(STORE_ID, "Asia/Seoul", 3L));
+        given(executor.findStoredSnapshot(STORE_ID, DATE, AS_OF, 1L))
+                .willReturn(Optional.of(preRestriction));
+        given(executor.findStoredSnapshot(STORE_ID, DATE, AS_OF, 3L))
+                .willReturn(Optional.empty());
+        given(reservationSource.getDashboardSnapshot(STORE_ID, DATE, AS_OF))
+                .willReturn(reservationSnapshot());
+
+        assertThat(service.getDashboard(41L, STORE_ID)).isSameAs(preRestriction);
+        service.getDashboard(41L, STORE_ID);
+
+        verify(reservationSource, times(1)).getDashboardSnapshot(STORE_ID, DATE, AS_OF);
+        verify(waitingSource, times(1)).getDashboardSnapshot(STORE_ID, DATE, AS_OF);
+        verify(executor, times(1)).publish(any());
     }
 
     @Test
