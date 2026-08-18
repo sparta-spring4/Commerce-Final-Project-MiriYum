@@ -37,6 +37,7 @@ export type IconName =
   | 'edit'
   | 'phone'
   | 'bag'
+  | 'logout'
 
 /**
  * 24×24 좌표계의 선 그림.
@@ -174,6 +175,12 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <path d="M4.75 7.75h14.5l-1.1 12a1.5 1.5 0 0 1-1.5 1.35H7.35a1.5 1.5 0 0 1-1.5-1.35Z" />
       <path d="M8.75 10.5v-3a3.25 3.25 0 0 1 6.5 0v3" />
+    </>
+  ),
+  logout: (
+    <>
+      <path d="M14.5 4.75H6.75a2 2 0 0 0-2 2v10.5a2 2 0 0 0 2 2h7.75" />
+      <path d="M17.5 8.5 21 12l-3.5 3.5M20.5 12h-9" />
     </>
   ),
 }

@@ -130,11 +130,22 @@ export function AppLayout({ shell, accountSlot }: Props) {
               </div>
             </nav>
 
+            {/*
+              로그인한 사용자에게 로그인·회원가입을 계속 보이지 않는다. 이미 끝난
+              일을 남겨 두면 지금 상태가 아닌 화면을 읽게 된다. 로그아웃은 헤더
+              계정 메뉴가 단독으로 가지므로 푸터에 두 번 두지 않는다.
+            */}
             <nav aria-label="계정 메뉴">
               <p className="app-footer__heading">계정</p>
               <div className="app-footer__links">
-                <Link to={ROUTES.consumerSignIn}>로그인</Link>
-                <Link to={ROUTES.consumerSignUp}>회원가입</Link>
+                {shell === 'consumer' ? (
+                  <Link to={ROUTES.myPage}>마이페이지</Link>
+                ) : (
+                  <>
+                    <Link to={ROUTES.consumerSignIn}>로그인</Link>
+                    <Link to={ROUTES.consumerSignUp}>회원가입</Link>
+                  </>
+                )}
               </div>
             </nav>
           </div>
