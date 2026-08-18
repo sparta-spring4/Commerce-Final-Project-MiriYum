@@ -11,9 +11,11 @@ class ReservationCancellationPolicyRegistryTest {
             new ReservationCancellationPolicyRegistry();
 
     @Test
-    void recognizesOnlyStoredVersionOne() {
+    void recognizesStoredVersionsOneAndTwo() {
         assertThat(registry.findByStoredVersion(1L))
                 .contains(new ReservationCancellationPolicyVersion(1L));
+        assertThat(registry.findByStoredVersion(2L))
+                .contains(new ReservationCancellationPolicyVersion(2L));
     }
 
     @Test
@@ -21,6 +23,6 @@ class ReservationCancellationPolicyRegistryTest {
         assertThat(registry.findByStoredVersion(null)).isEmpty();
         assertThat(registry.findByStoredVersion(0L)).isEmpty();
         assertThat(registry.findByStoredVersion(-1L)).isEmpty();
-        assertThat(registry.findByStoredVersion(2L)).isEmpty();
+        assertThat(registry.findByStoredVersion(3L)).isEmpty();
     }
 }

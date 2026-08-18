@@ -1,5 +1,6 @@
 package com.miriyum.domain.payment.repository;
 
+import com.miriyum.domain.payment.entity.PaymentLedgerEntry;
 import com.miriyum.domain.payment.entity.PaymentRefund;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
@@ -15,10 +16,11 @@ public interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Lo
     Optional<PaymentRefund> findByPayment_IdAndIdempotencyKey(Long paymentId, String idempotencyKey);
     Optional<PaymentRefund> findByPayment_IdAndSourceEventId(Long paymentId, String sourceEventId);
     List<PaymentRefund> findByPayment_IdOrderByRequestedAtAsc(Long paymentId);
-    List<PaymentRefund> findByPayment_IdAndStatusAndRequestedAtLessThanEqualOrderByRequestedAtAsc(
+    List<PaymentRefund>
+    findByPayment_IdAndStatusAndProcessingStartedAtLessThanEqualOrderByProcessingStartedAtAsc(
             Long paymentId,
             com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus status,
-            Instant requestedAt
+            Instant processingStartedAt
     );
     boolean existsByPayment_IdAndProviderCancellationIdAndStatus(
             Long paymentId,
@@ -28,6 +30,19 @@ public interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Lo
     boolean existsByPayment_IdAndStatusIn(
             Long paymentId,
             Collection<com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus> statuses
+    );
+
+    @Query("""
+            select count(l)
+            from PaymentLedgerEntry l
+            where l.payment.id = :paymentId
+              and l.type = :type
+              and l.occurredAt >= :occurredAt
+            """)
+    long countPaymentLedgerEntriesAtOrAfter(
+            @Param("paymentId") Long paymentId,
+            @Param("type") PaymentLedgerEntry.Type type,
+            @Param("occurredAt") Instant occurredAt
     );
 
     @Query("""

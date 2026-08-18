@@ -1,12 +1,12 @@
 # 기능 명세: 일반 예약
 
-> 문서 상태: 4단계 승인 (Issue #238 예약금 조정 계약·runtime 활성, Issue #240 체크인·노쇼 활성)
+> 문서 상태: 4단계 승인 (Issue #238 예약금 조정, Issue #239 예약금 취소 V2·처분 obligation, Issue #240 체크인·노쇼 활성)
 > 적용 단계: 1차 MVP (취소 V1은 1·2차 MVP 공통), 고도화 예약금 계약·회전형 QR 체크인·운영자 노쇼
 > 도메인 소유자: 3번 팀원 — 예약
 > 협업 검토: 2번 팀원 — 매장·운영시간·소속, 4번 팀원 — 선택 메뉴 홀드·수량 복구
 > 관련 정책 ID: RES-001~RES-015의 1차 범위, CHECK-001·CHECK-003·CHECK-005~CHECK-007·CHECK-010, HOLD-004, HOLD-007, PAY-001~PAY-010, S-001~S-003, E-003, E-005, C-001~C-013
 > OpenAPI: `docs/specs/reservation/openapi.yaml`
-> 최종 승인일: 2026-08-16
+> 최종 승인일: 2026-08-18
 
 ## 범위
 
@@ -22,12 +22,13 @@
 - 매장별 예약 시간 정책 버전과 실제 서비스·점유 종료 계산
 - 중복 예약 방지와 동시 수용량 처리
 - 고도화의 예약금 선점·결제 준비·최종 확정·사용자 포기·전액 환불 보상 계약
+- 고도화 신규 예약금 거래의 취소 V2, Payment 처분 obligation·worker와 최신 조회 projection
 
 ### 제외
 
 - 예약 변경·시간 이동·인원 변경
 - 매장 승인·거절 대기
-- frontend 결제 SDK·화면과 확정 Reservation의 금전 취소·노쇼 환불 정책
+- frontend 결제 SDK·화면과 노쇼 환불 정책
 - 일회 확인번호·일부 인원 체크인·매장별 체크인 창/지각 설정·6시간 후보·24시간 자동 노쇼·정식 이의/정정
 - 대리 예약·예약 양도·단체 별도 승인
 - 웨이팅 전환·자동 승계
@@ -289,6 +290,17 @@
 - `CANCELLED`, `FULFILLED`에서 새로운 취소 명령을 실행할 수 없다.
 - 취소 주체는 `CONSUMER` 또는 `STORE_OPERATOR` 사건 필드로 기록하며 상태 enum을 늘리지 않는다.
 
+### 고도화 예약금 취소 V2
+
+- 예약금 필요 신규 Hold는 `cancellationPolicyVersion=2`를 저장하고 final Reservation이 그대로 승계한다. 비예약금 직접 Reservation은 V1이며 기존 V1/null/unknown을 V2로 backfill·fallback·소급 해석하지 않는다.
+- evaluator 입력은 저장 version, `responsibilityCode`, `confirmedAt=Reservation.createdAt`, `startAt`, command facade가 한 번 얻은 `requestedAt`이다. Store·Platform 귀책은 10000 bps다. Consumer는 `requestedAt <= confirmedAt + 10분 && requestedAt < startAt` 또는 `requestedAt <= startAt - 48시간`이면 10000, `startAt - 48시간 < requestedAt <= startAt - 24시간`이면 5000, 그 뒤면 0 bps다.
+- V2 취소는 멱등 claim과 Reservation 잠금 뒤 `finalReservationId`로 예약금 process scalar link를 비잠금 조회한다. `COMPLETED`, 같은 final Reservation, 양수 문자열 `paymentId`가 아니면 실패 폐쇄한다. process를 잠그거나 변경하지 않는다.
+- `CANCELLED`, 수용량·MenuHold 수량 복구, 취소 감사, stable UUID와 Payment scalar를 가진 `ReservationDepositDispositionObligation(PENDING)`은 같은 transaction에서 commit한다. 이 transaction 안에서는 Payment를 호출하지 않는다.
+- obligation 상태는 `PENDING | PROCESSING | COMPLETED | RECONCILIATION_REQUIRED | RECOVERY_REQUIRED`, operation은 `APPLY | QUERY`다. claim과 결과 반영은 각각 `REQUIRES_NEW` 짧은 transaction이며 외부 Payment 공개 Service 호출은 그 사이 transaction 밖에서 실행한다. 결과 반영은 obligation과 fencing token만 잠그고 stale 결과를 무시한다.
+- `RECONCILIATION_REQUIRED`에서는 Payment 기존 source 결과를 `QUERY`만 하며 실패 후에도 `QUERY`를 유지한다. Payment 환불 처리 임대 안의 `PROCESSING` poll은 provider 대사 시도 횟수를 소비하지 않는다. 임대 만료 뒤 결과 불명 조회만 유한 재시도 한도를 소비하며, 새 apply·refund를 만들지 않고 한도 소진 시 `RECOVERY_REQUIRED`로 보낸다.
+- 최초 cancellation POST와 같은 key·지문 replay는 저장된 최초 projection을 반환한다. Reservation detail GET은 최신 obligation projection만 읽고 Payment를 동기 호출하지 않는다. V1/null/unknown은 `depositDisposition: null`이다.
+- scheduler·worker는 `miriyum.reservation.deposit-worker.enabled=true`일 때만 등록되며 누락·false에서는 비활성이다.
+
 ## 방문 완료·회전형 QR·노쇼
 
 ### 기존 직접 방문 완료 보존
@@ -371,6 +383,7 @@ QR 패턴·필수값 등 Bean Validation 실패는 `COMMON_001`, 잘못된 JSON�
 - 최종 충돌은 `COMMON_008`을 사용하고 성공이나 자원 부족을 추측하지 않는다.
 - H2·mock만으로 동시성 성공을 주장하지 않고 Testcontainers MySQL에서 마지막 수용량과 메뉴 수량 경합을 검증한다.
 - QR/no-show의 MySQL 업무 transaction도 `READ_COMMITTED`, timeout 5초를 사용한다. 교착·lock timeout·낙관 충돌만 transaction 밖에서 최초 실행 포함 최대 3회 재시도하고, QR·시간·상태·권한 같은 업무 거절은 재시도하지 않는다.
+- 예약금 취소 V2 worker의 claim/result transaction은 Reservation/process/MenuHold를 다시 잠그지 않는다. `APPLY`와 `QUERY` Payment 호출은 transaction 밖이며 QUERY 실패를 APPLY로 되돌리지 않는다.
 
 ## Migration·호환성 요구
 
@@ -386,6 +399,7 @@ QR 패턴·필수값 등 Bean Validation 실패는 `COMMON_001`, 잘못된 JSON�
 - V49는 reservation별 current QR grant 한 행, unique SHA-256 digest, 양수 version, Auth snapshot, 정확한 30초 issued/expires와 consumed 시각을 보존하는 `reservation_check_in_qr_grants`를 만든다.
 - V49는 append-only `reservation_check_in_audits`와 reservation별 성공 한 건의 `reservation_no_show_audits`를 만들고 actor·이벤트·reason·전이·정책·command 유일성/CHECK를 DB에서 방어한다. raw QR·digest·opaque epoch는 audit에 복제하지 않는다.
 - migration 순서는 #385 MenuHold `FORFEITED` V48 뒤 #240 V49이며, Draft #382는 V50 이상으로 조정한다.
+- Issue #239 Payment 처분 원장은 V56·V57의 번호 점유 뒤 V58, Reservation disposition obligation은 V59다. V58/V59는 신규 원장·lease·fencing·Payment snapshot만 추가하고 기존 V1/null/unknown 예약을 갱신하지 않는다. PR #389/#400은 기능 의존성이 아니라 V56/V57 번호 점유만 선행한다.
 
 ## 인수 조건
 
@@ -408,6 +422,10 @@ QR 패턴·필수값 등 Bean Validation 실패는 `COMMON_001`, 잘못된 JSON�
 - 자정 넘김과 DST 누락·중복 시각이 날짜·offset 손실 없이 처리되거나 명시적으로 실패 폐쇄된다.
 - 1·2차 MVP의 V1에서 권한·소유 및 `CONFIRMED` 조건을 통과한 `CONSUMER`·`STORE_OPERATOR`의 취소 결과는 `requestedAt`이 `startAt` 전·정각·후라는 시간만으로 달라지지 않는다.
 - V1 판정은 저장된 `cancellationPolicyVersion`과 서버 중앙에서 한 번 얻은 `requestedAt`을 사용하며 client timestamp·client version·current-version fallback이 없다. 금전·환불·시간 구간·cutoff·`PAY-*` 참조는 공개 응답과 판정에 없다.
+- 신규 예약금 Hold만 V2를 저장·승계하고 10분·48시간·24시간 포함 경계가 10000·5000·0 bps 목표 누적 환불률로 결정된다.
+- V2 취소·자원 복구·감사·PENDING obligation이 한 transaction이며 Payment 외부 호출은 그 transaction 밖에서만 실행된다.
+- `RECONCILIATION_REQUIRED`의 외부 실패·`FAILED/RETRYABLE` 결과 뒤에도 다음 operation은 QUERY이고 새 처분·환불을 실행하지 않는다.
+- POST replay는 최초 projection, GET은 latest projection, V1/null/unknown은 null을 반환하며 Reservation은 Payment Entity·Repository를 참조하지 않는다.
 
 ## 추천안 결정 이력
 
