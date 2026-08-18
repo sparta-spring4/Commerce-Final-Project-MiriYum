@@ -71,6 +71,25 @@ public class FileMetadata {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+    /** 실제 객체 저장소 삭제까지 끝난 시각이다. 논리 삭제와 물리 삭제 실패를 구분한다. */
+    @Convert(converter = UtcInstantConverter.class)
+    @Column(name = "object_cleanup_completed_at")
+    private Instant objectCleanupCompletedAt;
+
+    @Convert(converter = UtcInstantConverter.class)
+    @Column(name = "object_cleanup_next_attempt_at")
+    private Instant objectCleanupNextAttemptAt;
+
+    @Convert(converter = UtcInstantConverter.class)
+    @Column(name = "object_cleanup_claimed_until")
+    private Instant objectCleanupClaimedUntil;
+
+    @Column(name = "object_cleanup_claim_token", length = 36)
+    private String objectCleanupClaimToken;
+
+    @Column(name = "object_cleanup_failure_count", nullable = false)
+    private int objectCleanupFailureCount;
+
     @Version
     @Column(name = "version", nullable = false)
     private Long version;
@@ -208,6 +227,7 @@ public class FileMetadata {
         }
         storageStatus = FileStorageStatus.DELETED;
         this.deletedAt = deletedAt;
+        objectCleanupNextAttemptAt = deletedAt;
     }
 
     /** 바깥 업무 트랜잭션이 롤백된 대기 파일을 공개 전에 폐기한다. */
@@ -220,6 +240,54 @@ public class FileMetadata {
         }
         storageStatus = FileStorageStatus.DELETED;
         this.deletedAt = deletedAt;
+        objectCleanupNextAttemptAt = deletedAt;
+    }
+
+    /** 객체 저장소의 멱등 삭제가 성공한 뒤에만 물리 정리 완료를 기록한다. */
+    public void completeObjectCleanup(Instant completedAt) {
+        if (storageStatus != FileStorageStatus.DELETED) {
+            throw new IllegalStateException("삭제 상태의 파일 메타데이터만 객체 정리 완료를 기록할 수 있습니다.");
+        }
+        if (completedAt == null) {
+            throw new IllegalArgumentException("객체 정리 완료 시각은 필수입니다.");
+        }
+        if (objectCleanupCompletedAt == null) {
+            objectCleanupCompletedAt = completedAt;
+        }
+        objectCleanupNextAttemptAt = null;
+        objectCleanupClaimedUntil = null;
+        objectCleanupClaimToken = null;
+    }
+
+    public boolean claimObjectCleanup(Instant now, Instant claimedUntil, String claimToken) {
+        if (storageStatus != FileStorageStatus.DELETED || objectCleanupCompletedAt != null
+                || (objectCleanupNextAttemptAt != null && objectCleanupNextAttemptAt.isAfter(now))
+                || (objectCleanupClaimedUntil != null && objectCleanupClaimedUntil.isAfter(now))) {
+            return false;
+        }
+        objectCleanupClaimedUntil = claimedUntil;
+        objectCleanupClaimToken = claimToken;
+        return true;
+    }
+
+    public boolean completeClaimedObjectCleanup(String claimToken, Instant completedAt) {
+        if (!claimToken.equals(objectCleanupClaimToken)) {
+            return false;
+        }
+        completeObjectCleanup(completedAt);
+        return true;
+    }
+
+    public boolean rescheduleClaimedObjectCleanup(String claimToken, Instant now, long retryBaseSeconds) {
+        if (!claimToken.equals(objectCleanupClaimToken)) {
+            return false;
+        }
+        long multiplier = 1L << Math.min(objectCleanupFailureCount, 6);
+        objectCleanupNextAttemptAt = now.plusSeconds(Math.multiplyExact(retryBaseSeconds, multiplier));
+        objectCleanupFailureCount++;
+        objectCleanupClaimedUntil = null;
+        objectCleanupClaimToken = null;
+        return true;
     }
 
     private void changeStatus(FileStorageStatus nextStatus) {
