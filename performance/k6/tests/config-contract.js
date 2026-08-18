@@ -1,6 +1,6 @@
 import { check } from 'k6'
 
-import { loadConfig } from '../config.js'
+import { loadConfig, loadRecoveryConfig, validateShaEvidence } from '../config.js'
 import { assertSafeTarget, parsePositiveInt } from '../lib/safety.js'
 
 export const options = {
@@ -18,6 +18,15 @@ function throws(action) {
   }
 }
 
+function errorMessage(action) {
+  try {
+    action()
+    return null
+  } catch (error) {
+    return error.message
+  }
+}
+
 const LOCAL_SMOKE_ENV = {
   TARGET_ENV: 'local',
   BASE_URL: 'https://loadtest-proxy:8443',
@@ -26,6 +35,21 @@ const LOCAL_SMOKE_ENV = {
   FIXTURE_PATH: '/scripts/fixtures/test-data.local.json',
   RUN_ID: 'local-smoke-20260814',
   COMMIT_SHA: '0123456789abcdef0123456789abcdef01234567',
+  HARNESS_COMMIT_SHA: '0123456789abcdef0123456789abcdef01234567',
+}
+
+const RECOVERY_ENV = {
+  ...LOCAL_SMOKE_ENV,
+  TARGET_ENV: 'staging',
+  BASE_URL: 'https://staging.example.test',
+  ALLOWED_HOSTS: 'staging.example.test',
+  STAGING_APPROVED: 'true',
+  STAGING_HARNESS_SOURCE_VERIFIED: 'true',
+  RECOVERY_VERIFICATION_APPROVED: 'true',
+  RATE_LIMIT_EXCEPTION_REMOVED: 'true',
+  RATE_LIMIT_WINDOW_CONFIRMED: 'true',
+  K6_RECOVERY_EMAIL: 'synthetic@example.test',
+  K6_RECOVERY_PASSWORD: ' synthetic password ',
 }
 
 export default function () {
@@ -114,6 +138,101 @@ export default function () {
       delete withoutCommit.COMMIT_SHA
       return throws(() => loadConfig(withoutCommit))
     },
+    'missing harness commit SHA is rejected': () => {
+      const withoutHarnessCommit = { ...LOCAL_SMOKE_ENV }
+      delete withoutHarnessCommit.HARNESS_COMMIT_SHA
+      return throws(() => loadConfig(withoutHarnessCommit))
+    },
+    'local execution rejects split deployed and harness SHAs': () =>
+      throws(() => loadConfig({
+        ...LOCAL_SMOKE_ENV,
+        HARNESS_COMMIT_SHA: 'fedcba9876543210fedcba9876543210fedcba98',
+      })),
+    'staging split SHA requires a dedicated approval': () =>
+      throws(() => validateShaEvidence({
+        targetEnv: 'staging',
+        commitSha: LOCAL_SMOKE_ENV.COMMIT_SHA,
+        harnessCommitSha: 'fedcba9876543210fedcba9876543210fedcba98',
+        stagingSplitApproved: false,
+        harnessSourceVerified: true,
+      })),
+    'staging requires verified harness source provenance': () =>
+      throws(() => validateShaEvidence({
+        targetEnv: 'staging',
+        commitSha: LOCAL_SMOKE_ENV.COMMIT_SHA,
+        harnessCommitSha: LOCAL_SMOKE_ENV.HARNESS_COMMIT_SHA,
+        stagingSplitApproved: false,
+        harnessSourceVerified: false,
+      })),
+    'approved staging split SHA preserves both full SHAs': () => {
+      const evidence = validateShaEvidence({
+        targetEnv: 'staging',
+        commitSha: LOCAL_SMOKE_ENV.COMMIT_SHA,
+        harnessCommitSha: 'fedcba9876543210fedcba9876543210fedcba98',
+        stagingSplitApproved: true,
+        harnessSourceVerified: true,
+      })
+      return evidence.commitSha === LOCAL_SMOKE_ENV.COMMIT_SHA
+        && evidence.harnessCommitSha === 'fedcba9876543210fedcba9876543210fedcba98'
+    },
+    'recovery verification is staging-only': () =>
+      errorMessage(() => loadRecoveryConfig({
+        ...RECOVERY_ENV,
+        TARGET_ENV: 'local',
+        BASE_URL: 'https://loadtest-proxy:8443',
+        ALLOWED_HOSTS: 'loadtest-proxy',
+      })) === 'rate-limit recovery verification requires TARGET_ENV=staging',
+    'recovery verification requires its dedicated approval': () => {
+      const env = { ...RECOVERY_ENV }
+      delete env.RECOVERY_VERIFICATION_APPROVED
+      return errorMessage(() => loadRecoveryConfig(env))
+        === 'rate-limit recovery verification requires RECOVERY_VERIFICATION_APPROVED=true'
+    },
+    'recovery verification requires the exception removal attestation': () => {
+      const env = { ...RECOVERY_ENV }
+      delete env.RATE_LIMIT_EXCEPTION_REMOVED
+      return errorMessage(() => loadRecoveryConfig(env))
+        === 'rate-limit recovery verification requires RATE_LIMIT_EXCEPTION_REMOVED=true'
+    },
+    'recovery verification requires a fresh rate-limit window': () => {
+      const env = { ...RECOVERY_ENV }
+      delete env.RATE_LIMIT_WINDOW_CONFIRMED
+      return errorMessage(() => loadRecoveryConfig(env))
+        === 'rate-limit recovery verification requires a fresh confirmed rate-limit window'
+    },
+    'recovery verification remains closed until a reviewed staging host exists': () =>
+      errorMessage(() => loadRecoveryConfig(RECOVERY_ENV))
+        === 'staging target host is not configured in the trusted repository allowlist',
+    'staging reservation remains blocked until the #358 fixture contract is approved': () =>
+      errorMessage(() => loadConfig({
+        ...LOCAL_SMOKE_ENV,
+        TARGET_ENV: 'staging',
+        BASE_URL: 'https://staging.example.test',
+        ALLOWED_HOSTS: 'staging.example.test',
+        STAGING_APPROVED: 'true',
+        STAGING_HARNESS_SOURCE_VERIFIED: 'true',
+      })) === 'staging reservationCreate requires STAGING_RESERVATION_FIXTURE_APPROVED=true',
+    'approved non-reservation staging selection proceeds to the trusted-host gate': () =>
+      errorMessage(() => loadConfig({
+        ...LOCAL_SMOKE_ENV,
+        TARGET_ENV: 'staging',
+        BASE_URL: 'https://staging.example.test',
+        ALLOWED_HOSTS: 'staging.example.test',
+        STAGING_APPROVED: 'true',
+        STAGING_HARNESS_SOURCE_VERIFIED: 'true',
+        SCENARIOS: 'authRefresh,storeSearch,notificationHistory',
+      })) === 'staging target host is not configured in the trusted repository allowlist',
+    'approved staging reservation proceeds to the trusted-host gate': () =>
+      errorMessage(() => loadConfig({
+        ...LOCAL_SMOKE_ENV,
+        TARGET_ENV: 'staging',
+        BASE_URL: 'https://staging.example.test',
+        ALLOWED_HOSTS: 'staging.example.test',
+        STAGING_APPROVED: 'true',
+        STAGING_HARNESS_SOURCE_VERIFIED: 'true',
+        STAGING_RESERVATION_FIXTURE_APPROVED: 'true',
+        SCENARIOS: 'reservationCreate',
+      })) === 'staging target host is not configured in the trusted repository allowlist',
     'duplicate scenario selection is rejected': () =>
       throws(() => loadConfig({
         ...LOCAL_SMOKE_ENV,
