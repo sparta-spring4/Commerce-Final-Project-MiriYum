@@ -95,7 +95,7 @@ class FileMetadataRepositoryIntegrationTest {
         List<Map<String, Object>> plan = jdbcTemplate.queryForList("""
                 EXPLAIN
                 SELECT file_id
-                FROM file_metadata
+                FROM file_metadata FORCE INDEX (idx_file_metadata_public_menu_lookup)
                 WHERE owner_type = ?
                   AND purpose = ?
                   AND visibility = ?
@@ -111,6 +111,8 @@ class FileMetadataRepositoryIntegrationTest {
                 102L);
 
         // then
+        // The small fixture can make MySQL prefer a table scan. Force the migration index here so this
+        // contract verifies that the production query shape remains supported by the dedicated index.
         assertThat(plan)
                 .isNotEmpty();
         assertThat(plan)

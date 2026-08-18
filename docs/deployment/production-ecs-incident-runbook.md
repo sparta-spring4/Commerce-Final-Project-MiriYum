@@ -51,15 +51,3 @@ curl.exe https://api.miriyum.click/actuator/health
 6. 배포 설정의 minimum healthy `100`, maximum `200`이 유지되는지 확인한다.
 7. **업데이트**를 눌러 롤백 배포를 시작한다.
 8. 대상 그룹에서 `Healthy 2`, `Unhealthy 0`과 health endpoint `UP`을 확인한 뒤에만 복구 완료로 기록한다.
-
-## task 한 개 장애 검증
-
-배포가 없는 시간에만 수행한다. 정상 task 하나만 중지하고, desired count는 변경하지 않는다.
-
-1. ECS 서비스의 **task** 탭에서 실행 중인 task 하나를 연다.
-2. **중지**를 선택하고 사유에 `운영 복구 검증`을 입력한다.
-3. ECS가 replacement task를 시작하는지 확인한다.
-4. 대상 그룹이 일시적으로 `Healthy 1`이 된 뒤 새 대상이 `Healthy`가 되는 시간을 기록한다.
-5. 최종적으로 `Healthy 2`, `Unhealthy 0`, endpoint `UP`이면 통과다.
-
-실서비스 요청·회원 데이터·예약 생성으로 검증하지 않는다.
