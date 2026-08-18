@@ -26,6 +26,8 @@ class WaitingOpenApiContractTest {
             "/api/v1/consumers/me/stores/{storeId}/waiting-availabilities";
     private static final String CONSUMER_CREATE_PATH =
             "/api/v1/consumers/me/stores/{storeId}/waiting-teams";
+    private static final String CONSUMER_LOCATION_PROOF_PATH =
+            "/api/v1/consumers/me/stores/{storeId}/waiting-location-proofs";
     private static final String CONSUMER_CURRENT_PATH =
             "/api/v1/consumers/me/waiting-teams/current";
     private static final String CONSUMER_CANCEL_PATH =
@@ -80,6 +82,7 @@ class WaitingOpenApiContractTest {
                         "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations",
                         "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}",
                         CONSUMER_AVAILABILITY_PATH,
+                        CONSUMER_LOCATION_PROOF_PATH,
                         CONSUMER_CREATE_PATH,
                         CONSUMER_CURRENT_PATH,
                         CONSUMER_CANCEL_PATH);
@@ -243,6 +246,36 @@ class WaitingOpenApiContractTest {
                 .containsExactlyInAnyOrder(
                         "WAITING_005", "WAITING_006", "WAITING_008",
                         "COMMON_007", "COMMON_008");
+    }
+
+    @Test
+    void consumerLocationProofContractHasNoIdempotencyOrRawLocationResponse() throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> operation = map(map(map(document.get("paths"))
+                .get(CONSUMER_LOCATION_PROOF_PATH)).get("post"));
+
+        assertThat(operation).containsEntry("x-location-raw-retention", "none");
+        assertThat(list(operation.get("security")))
+                .containsExactly(Map.of("bearerAuth", List.of()));
+        assertThat(list(operation.get("parameters")))
+                .extracting(parameter -> map(parameter).get("$ref"))
+                .doesNotContain(IDEMPOTENCY_KEY);
+        assertThat(map(operation.get("responses")).keySet())
+                .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "429");
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> requestProperties = map(map(
+                schemas.get("WaitingLocationProofRequest")).get("properties"));
+        assertThat(requestProperties).containsOnlyKeys(
+                "measurementStatus", "latitude", "longitude", "accuracyMeters",
+                "measuredAt", "integrityStatus");
+        Map<String, Object> snapshotProperties = map(map(
+                schemas.get("WaitingLocationProofSnapshot")).get("properties"));
+        assertThat(snapshotProperties).containsOnlyKeys(
+                "proofSessionId", "resultCategory", "accuracyCategory", "policyVersion",
+                "storeCoordinateVersion", "issuedAt", "judgedAt", "expiresAt");
+        assertThat(snapshotProperties).doesNotContainKeys(
+                "latitude", "longitude", "distanceMeters", "accuracyMeters", "measuredAt");
     }
 
     @Test

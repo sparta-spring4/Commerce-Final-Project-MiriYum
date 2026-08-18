@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.waiting.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
@@ -20,13 +21,18 @@ import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingReceptionAvailability;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
+import com.miriyum.domain.reservation.waiting.dto.WaitingLocationProofContracts.Snapshot;
+import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession.AccuracyCategory;
+import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession.ResultCategory;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerCommandFacade;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerQueryService;
+import com.miriyum.domain.reservation.waiting.service.WaitingLocationProofService;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -46,6 +52,7 @@ class WaitingConsumerControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean WaitingConsumerQueryService queryService;
     @MockitoBean WaitingConsumerCommandFacade commandFacade;
+    @MockitoBean WaitingLocationProofService locationProofService;
     @MockitoBean JwtTokenProvider jwtTokenProvider;
 
     @Test
@@ -121,6 +128,62 @@ class WaitingConsumerControllerTest {
                 .andExpect(jsonPath("$.code").value("AUTH_004"));
 
         then(commandFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void consumerCanIssueLocationProofWithoutIdempotencyOrRawLocationResponse() throws Exception {
+        authenticateConsumer(200L);
+        UUID proofId = UUID.fromString("d276a024-71f5-4f98-9682-89f16df4fbd0");
+        given(locationProofService.issue(eq(200L), eq(100L), any()))
+                .willReturn(new Snapshot(
+                        proofId, ResultCategory.VERIFIED, AccuracyCategory.ACCEPTABLE,
+                        "WAITING_LOCATION_V1", 4L,
+                        Instant.parse("2026-08-19T03:00:00Z"),
+                        Instant.parse("2026-08-19T03:00:00Z"),
+                        Instant.parse("2026-08-19T03:02:00Z")));
+
+        mockMvc.perform(post("/api/v1/consumers/me/stores/100/waiting-location-proofs")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "measurementStatus":"MEASURED",
+                                  "latitude":37.123456789012345,
+                                  "longitude":127.987654321098765,
+                                  "accuracyMeters":73.25,
+                                  "measuredAt":"2026-08-19T02:59:50Z",
+                                  "integrityStatus":"CLEAR"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.proofSessionId").value(proofId.toString()))
+                .andExpect(jsonPath("$.data.resultCategory").value("VERIFIED"))
+                .andExpect(jsonPath("$.data.policyVersion").value("WAITING_LOCATION_V1"))
+                .andExpect(jsonPath("$.data.latitude").doesNotExist())
+                .andExpect(jsonPath("$.data.longitude").doesNotExist())
+                .andExpect(jsonPath("$.data.distanceMeters").doesNotExist())
+                .andExpect(jsonPath("$.data.accuracyMeters").doesNotExist())
+                .andExpect(jsonPath("$.data.measuredAt").doesNotExist());
+    }
+
+    @Test
+    void anonymousAndStoreOperatorCannotIssueConsumerLocationProof() throws Exception {
+        String body = """
+                {"measurementStatus":"PERMISSION_DENIED","integrityStatus":"CLEAR"}
+                """;
+        mockMvc.perform(post("/api/v1/consumers/me/stores/100/waiting-location-proofs")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+
+        given(jwtTokenProvider.parseAccessToken("store-token"))
+                .willReturn(new ParsedToken(TokenNamespace.STORE_OPERATOR, 33L));
+        mockMvc.perform(post("/api/v1/consumers/me/stores/100/waiting-location-proofs")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_004"));
+
+        then(locationProofService).shouldHaveNoInteractions();
     }
 
     @Test

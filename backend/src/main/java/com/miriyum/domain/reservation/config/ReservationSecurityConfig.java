@@ -45,6 +45,8 @@ public class ReservationSecurityConfig {
             "/api/v1/consumers/me/stores/*/waiting-teams";
     private static final String CONSUMER_WAITING_AVAILABILITY =
             "/api/v1/consumers/me/stores/*/waiting-availabilities";
+    private static final String CONSUMER_WAITING_LOCATION_PROOF =
+            "/api/v1/consumers/me/stores/*/waiting-location-proofs";
     private static final String CONSUMER_WAITING_ME_ROOT =
             "/api/v1/consumers/me/waiting-teams";
     private static final String CONSUMER_WAITING_ME_FAMILY =
@@ -154,6 +156,7 @@ public class ReservationSecurityConfig {
                         RESERVATION_REQUEST_FAMILY,
                         CONSUMER_WAITING_STORE_ROOT,
                         CONSUMER_WAITING_AVAILABILITY,
+                        CONSUMER_WAITING_LOCATION_PROOF,
                         CONSUMER_WAITING_ME_ROOT,
                         CONSUMER_WAITING_ME_FAMILY)
                 .csrf(AbstractHttpConfigurer::disable)
@@ -171,6 +174,7 @@ public class ReservationSecurityConfig {
                         .authenticated()
                         .requestMatchers(HttpMethod.POST, RESERVATION_CHECK_IN_QR_GRANT).authenticated()
                         .requestMatchers(HttpMethod.GET, CONSUMER_WAITING_AVAILABILITY).authenticated()
+                        .requestMatchers(HttpMethod.POST, CONSUMER_WAITING_LOCATION_PROOF).authenticated()
                         .requestMatchers(HttpMethod.POST, CONSUMER_WAITING_STORE_ROOT).authenticated()
                         .requestMatchers(HttpMethod.GET,
                                 CONSUMER_WAITING_ME_ROOT + "/current").authenticated()

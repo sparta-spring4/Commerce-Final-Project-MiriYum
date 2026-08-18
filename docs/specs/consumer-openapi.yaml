@@ -48,6 +48,8 @@ paths:
     $ref: "./notification/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notifications"
   /api/v1/consumers/me/stores/{storeId}/waiting-availabilities:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1stores~1{storeId}~1waiting-availabilities"
+  /api/v1/consumers/me/stores/{storeId}/waiting-location-proofs:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1stores~1{storeId}~1waiting-location-proofs"
   /api/v1/consumers/me/stores/{storeId}/waiting-teams:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1stores~1{storeId}~1waiting-teams"
   /api/v1/consumers/me/waiting-teams/current:

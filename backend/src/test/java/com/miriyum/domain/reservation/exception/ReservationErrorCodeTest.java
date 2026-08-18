@@ -31,7 +31,7 @@ class ReservationErrorCodeTest {
     @DisplayName("예약 오류 외부 코드는 중복되지 않는다")
     void doesNotContainDuplicateExternalCodes() {
         // when & then
-        assertThat(ReservationErrorCode.values()).hasSize(25);
+        assertThat(ReservationErrorCode.values()).hasSize(30);
         assertThat(ReservationErrorCode.values())
                 .extracting(ReservationErrorCode::getCode)
                 .doesNotHaveDuplicates();
@@ -104,7 +104,22 @@ class ReservationErrorCodeTest {
                         "웨이팅 종결 작업 항목 처리 중 실패가 발생했습니다."),
                 Arguments.of(ReservationErrorCode.WAITING_RECEPTION_CLOSED,
                         HttpStatus.CONFLICT, "WAITING_012",
-                        "현재 매장은 신규 웨이팅 접수를 받지 않습니다.")
+                        "현재 매장은 신규 웨이팅 접수를 받지 않습니다."),
+                Arguments.of(ReservationErrorCode.LOCATION_PROOF_INVALID,
+                        HttpStatus.CONFLICT, "WAITING_013",
+                        "사용할 수 없는 위치 증명입니다."),
+                Arguments.of(ReservationErrorCode.PARTY_INVITATION_INVALID,
+                        HttpStatus.CONFLICT, "WAITING_014",
+                        "사용할 수 없는 일행 초대입니다."),
+                Arguments.of(ReservationErrorCode.PARTY_MUTATION_NOT_ALLOWED,
+                        HttpStatus.CONFLICT, "WAITING_015",
+                        "현재 웨이팅 상태에서는 일행 구성을 변경할 수 없습니다."),
+                Arguments.of(ReservationErrorCode.REPRESENTATIVE_TRANSFER_INVALID,
+                        HttpStatus.CONFLICT, "WAITING_016",
+                        "사용할 수 없는 대표자 이전 제안입니다."),
+                Arguments.of(ReservationErrorCode.PARTY_CAPACITY_EXCEEDED,
+                        HttpStatus.CONFLICT, "WAITING_017",
+                        "일행 참여 인원이 등록 인원을 초과합니다.")
         );
     }
 }

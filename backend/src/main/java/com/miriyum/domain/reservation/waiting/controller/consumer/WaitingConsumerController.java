@@ -6,8 +6,10 @@ import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCreateRequest;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingReceptionAvailability;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
+import com.miriyum.domain.reservation.waiting.dto.WaitingLocationProofContracts;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerCommandFacade;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerQueryService;
+import com.miriyum.domain.reservation.waiting.service.WaitingLocationProofService;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -31,6 +33,7 @@ public class WaitingConsumerController {
 
     private final WaitingConsumerQueryService queryService;
     private final WaitingConsumerCommandFacade commandFacade;
+    private final WaitingLocationProofService locationProofService;
 
     @GetMapping("/stores/{storeId}/waiting-availabilities")
     public ApiResponse<WaitingReceptionAvailability> getAvailability(
@@ -40,6 +43,17 @@ public class WaitingConsumerController {
         return ApiResponse.success(
                 "웨이팅 접수 가능 상태를 조회했습니다.",
                 queryService.getAvailability(principal.accountId(), storeId));
+    }
+
+    @PostMapping("/stores/{storeId}/waiting-location-proofs")
+    public ApiResponse<WaitingLocationProofContracts.Snapshot> issueLocationProof(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable @Positive long storeId,
+            @Valid @RequestBody WaitingLocationProofContracts.Request request
+    ) {
+        return ApiResponse.success(
+                "웨이팅 위치를 판정했습니다.",
+                locationProofService.issue(principal.accountId(), storeId, request));
     }
 
     @PostMapping("/stores/{storeId}/waiting-teams")

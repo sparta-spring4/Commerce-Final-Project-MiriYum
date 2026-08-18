@@ -45,6 +45,7 @@ class AudienceOpenApiContractTest {
             "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}");
     private static final Set<String> WAITING_CONSUMER_PATHS = Set.of(
             "/api/v1/consumers/me/stores/{storeId}/waiting-availabilities",
+            "/api/v1/consumers/me/stores/{storeId}/waiting-location-proofs",
             "/api/v1/consumers/me/stores/{storeId}/waiting-teams",
             "/api/v1/consumers/me/waiting-teams/current",
             "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations");

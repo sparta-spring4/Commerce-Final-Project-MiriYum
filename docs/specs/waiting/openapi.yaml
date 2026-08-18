@@ -374,6 +374,44 @@ paths:
           $ref: "#/components/responses/WaitingConsumerStoreNotFound"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/consumers/me/stores/{storeId}/waiting-location-proofs:
+    post:
+      tags: [Consumer Waiting]
+      summary: 웨이팅 등록용 GPS 위치 판정
+      operationId: issueConsumerWaitingLocationProof
+      description: >-
+        계정·매장·WAITING_REGISTRATION 목적에 결속된 120초 일회 소비 세션을 발급한다.
+        좌표·원본 정확도·측정 시각·계산 거리는 요청 처리 중에만 사용하고 응답, DB, 감사,
+        로그에 저장하지 않는다. 권한 거부·위치 미수신·낮은 정확도·오래된 측정·조작 의심은
+        성공으로 추정하거나 IP 위치로 대체하지 않고 해당 판정 범주를 HTTP 200으로 반환한다.
+      x-location-raw-retention: none
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaitingLocationProofRequest"
+      responses:
+        "200":
+          description: 위치 원문을 포함하지 않는 판정 세션 snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingLocationProofSuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingLocationProofBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingConsumerAccountForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingConsumerStoreNotFound"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/consumers/me/stores/{storeId}/waiting-teams:
     post:
       tags: [Consumer Waiting]
@@ -694,6 +732,86 @@ components:
           type: integer
           minimum: 1
           description: 대표자가 등록하는 팀 인원수
+    WaitingLocationProofRequest:
+      type: object
+      additionalProperties: false
+      required: [measurementStatus, integrityStatus]
+      properties:
+        measurementStatus:
+          type: string
+          enum: [MEASURED, PERMISSION_DENIED, POSITION_UNAVAILABLE]
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+        accuracyMeters:
+          type: number
+          exclusiveMinimum: 0
+        measuredAt:
+          type: string
+          format: date-time
+        integrityStatus:
+          type: string
+          enum: [CLEAR, MANIPULATION_SUSPECTED]
+      oneOf:
+        - properties:
+            measurementStatus:
+              const: MEASURED
+          required: [latitude, longitude, accuracyMeters, measuredAt]
+        - properties:
+            measurementStatus:
+              enum: [PERMISSION_DENIED, POSITION_UNAVAILABLE]
+          allOf:
+            - not: {required: [latitude]}
+            - not: {required: [longitude]}
+            - not: {required: [accuracyMeters]}
+            - not: {required: [measuredAt]}
+    WaitingLocationProofSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - proofSessionId
+        - resultCategory
+        - accuracyCategory
+        - policyVersion
+        - storeCoordinateVersion
+        - issuedAt
+        - judgedAt
+        - expiresAt
+      properties:
+        proofSessionId:
+          type: string
+          format: uuid
+        resultCategory:
+          type: string
+          enum:
+            - VERIFIED
+            - OUTSIDE_RADIUS
+            - ACCURACY_INSUFFICIENT
+            - PERMISSION_DENIED
+            - MEASUREMENT_STALE
+            - POSITION_UNAVAILABLE
+            - MANIPULATION_SUSPECTED
+        accuracyCategory:
+          type: string
+          enum: [ACCEPTABLE, INSUFFICIENT, NOT_APPLICABLE]
+        policyVersion:
+          type: string
+          enum: [WAITING_LOCATION_V1]
+        storeCoordinateVersion:
+          type: integer
+          format: int64
+          minimum: 0
+        issuedAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        judgedAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        expiresAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
     WaitingReceptionAvailability:
       type: object
       additionalProperties: false
@@ -940,6 +1058,17 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
         data:
           $ref: "#/components/schemas/WaitingReceptionAvailability"
+    WaitingLocationProofSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/WaitingLocationProofSnapshot"
     WaitingConsumerSnapshotSuccessResponse:
       type: object
       additionalProperties: false
@@ -952,6 +1081,21 @@ components:
         data:
           $ref: "#/components/schemas/WaitingConsumerSnapshot"
   responses:
+    WaitingLocationProofBadRequest:
+      description: storeId, 조건부 위치 측정 본문 또는 JSON 형식이 올바르지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            validationFailed:
+              value:
+                code: COMMON_001
+                message: 입력값이 올바르지 않습니다.
+            malformedRequest:
+              value:
+                code: COMMON_002
+                message: 요청 본문을 읽을 수 없습니다.
     WaitingStoreIdBadRequest:
       description: storeId가 양의 정수 문자열 PublicId 형식이 아님
       content:
