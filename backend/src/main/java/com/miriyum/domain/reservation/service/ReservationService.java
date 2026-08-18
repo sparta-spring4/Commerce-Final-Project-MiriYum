@@ -694,6 +694,10 @@ public class ReservationService {
         if (reservation.getStatus() != ReservationStatus.CONFIRMED) {
             throw new ServiceException(ReservationErrorCode.INVALID_STATE_TRANSITION);
         }
+        DepositDispositionPlan dispositionPlan = fulfillmentDispositionPlan(
+                reservation,
+                correlationId
+        );
         ReservationMenuHoldTerminationPresence presence =
                 menuHoldPort.lockForTermination(reservation.getId());
         if (presence == null) {
@@ -727,13 +731,18 @@ public class ReservationService {
                 correlationId
         );
         fulfillmentAuditRepository.saveAndFlush(audit);
+        ReservationDepositDispositionResponse depositDisposition =
+                persistDispositionObligation(dispositionPlan, occurredAt);
         List<ReservationMenuHoldItemSnapshot> menuSnapshots =
                 presence == ReservationMenuHoldTerminationPresence.HOLD_PRESENT
                         ? menuHoldPort.findSnapshots(reservation.getId())
                         : List.of();
         ReservationDetailResponse response = ReservationDetailResponse.from(
                 reservation,
-                menuSnapshots
+                menuSnapshots,
+                null,
+                null,
+                depositDisposition
         );
         return new BusinessResult<>(
                 HttpStatus.OK.value(),
@@ -1040,8 +1049,49 @@ public class ReservationService {
                 reservation.getId(),
                 link.getPaymentId(),
                 sourceEventId,
+                "RESERVATION_CANCELLED",
                 cancellationIdempotencyKey,
                 disposition
+        );
+    }
+
+    private DepositDispositionPlan fulfillmentDispositionPlan(
+            Reservation reservation,
+            String sourceEventId
+    ) {
+        if (!Long.valueOf(2L).equals(reservation.getCancellationPolicyVersion())) {
+            return null;
+        }
+        if (depositProcessRepository == null || dispositionObligationRepository == null) {
+            throw new IllegalStateException(
+                    "reservation deposit disposition dependencies are required");
+        }
+        ReservationDepositProcessRepository.DepositProcessLink link =
+                depositProcessRepository
+                        .findDepositProcessLinkByFinalReservationId(reservation.getId())
+                        .orElseThrow(() -> new IllegalStateException(
+                                "completed reservation deposit process link is required"));
+        if (link.getProcessId() <= 0
+                || link.getStatus() != ReservationDepositProcessStatus.COMPLETED
+                || link.getFinalReservationId() == null
+                || link.getFinalReservationId() != reservation.getId()
+                || link.getPaymentId() == null
+                || !link.getPaymentId().matches("^[1-9][0-9]{0,18}$")) {
+            throw new IllegalStateException(
+                    "completed reservation deposit process link is required");
+        }
+        String obligationKey = UUID.randomUUID().toString();
+        return new DepositDispositionPlan(
+                link.getProcessId(),
+                reservation.getId(),
+                link.getPaymentId(),
+                sourceEventId,
+                "RESERVATION_FULFILLED",
+                obligationKey,
+                new ReservationDepositDispositionDecision(
+                        2L,
+                        ReservationDepositDispositionDecision.Responsibility.CONSUMER,
+                        10_000)
         );
     }
 
@@ -1058,7 +1108,7 @@ public class ReservationService {
                         plan.reservationId(),
                         plan.paymentId(),
                         plan.sourceEventId(),
-                        "RESERVATION_CANCELLED",
+                        plan.sourceEventType(),
                         null,
                         plan.decision().policyVersion(),
                         plan.decision().responsibility().name(),
@@ -1368,6 +1418,7 @@ public class ReservationService {
             long reservationId,
             String paymentId,
             String sourceEventId,
+            String sourceEventType,
             String cancellationIdempotencyKey,
             ReservationDepositDispositionDecision decision
     ) {

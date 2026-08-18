@@ -1,6 +1,6 @@
 # 기능 명세: 일반 예약
 
-> 문서 상태: 4단계 승인 (Issue #238 예약금 조정, Issue #239 예약금 취소 V2·처분 obligation, Issue #240 체크인·노쇼 활성)
+> 문서 상태: 4단계 승인 (Issue #238 예약금 조정, Issue #239 예약금 취소 V2·처분 obligation, Issue #240 체크인·노쇼 활성, Issue #241 방문 결과 처분 연결)
 > 적용 단계: 1차 MVP (취소 V1은 1·2차 MVP 공통), 고도화 예약금 계약·회전형 QR 체크인·운영자 노쇼
 > 도메인 소유자: 3번 팀원 — 예약
 > 협업 검토: 2번 팀원 — 매장·운영시간·소속, 4번 팀원 — 선택 메뉴 홀드·수량 복구
@@ -308,6 +308,7 @@
 - 활성 매장 운영자의 현재 대표 소유권을 fresh와 replay에서 확인한다. CLOSED·휴점은 신규 거래만 차단하며 이미 `CONFIRMED`인 예약의 방문 완료는 허용한다.
 - `POST /api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/fulfillments`는 QR·시간·노쇼와 독립된 기존 보조 명령으로 유지한다. Reservation과 연결 MenuHold, `reservation_fulfillment_audits` 성공 감사, 멱등 성공 결과는 한 트랜잭션에서 모두 commit하거나 rollback한다.
 - 유효한 매장 운영자만 대상 매장의 `CONFIRMED` 예약을 `FULFILLED`로 전이하며 연결 MenuHold도 `FULFILLED`로 종결한다.
+- V2 예약금 Reservation은 완료된 동일 final Reservation의 process scalar link를 먼저 검증하고 `RESERVATION_FULFILLED`, `CONSUMER`, 10000 bps PENDING obligation을 상태·감사와 같은 transaction에 저장한다. V1/null/unknown과 비예약금 예약은 기존 동작을 유지한다.
 
 ### QR grant 발급·회전
 
@@ -327,20 +328,22 @@
 - Auth 검증은 잠근 Reservation의 `consumerAccountId`와 저장 `ConsumerQrEpochSnapshot`을 `ConsumerQrEpochService.requireCurrent`에 전달한다. stale·account mismatch는 현재 epoch를 노출하지 않는 `AUTH_017`, Valkey 장애는 `COMMON_012`다. logout epoch increment 전 current 판정은 성공할 수 있고 increment 뒤 판정은 실패하는 #305 linearization을 유지하며 분산 transaction은 만들지 않는다.
 - 성공 replay는 현재 operator/store authority를 다시 확인한 뒤 저장 결과를 반환한다. raw QR·digest·expiry·epoch·시간·이미 바뀐 Reservation 상태는 다시 검증하지 않는다.
 - 성공은 기존 `ReservationFulfillmentAudit` 한 건과 QR 전용 audit를 함께 기록한다. QR audit는 방식·tokenVersion·행위자·시각·전이 상태·commandId만 보존하고 raw token·digest·opaque epoch를 복제하지 않는다.
+- V2 예약금 QR 성공은 직접 방문 완료와 같은 `RESERVATION_FULFILLED`, `CONSUMER`, 10000 bps PENDING obligation을 같은 transaction에 저장한다.
 
 ### 운영자 노쇼 확정
 
 - 운영자는 `POST /api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/no-shows`에 `Idempotency-Key`와 strict body `{ "reason": "<ReservationNoShowReason>" }`을 보낸다.
-- reason은 `USER_CAUSE_CANDIDATE`, `STORE_CAUSE_CANDIDATE`, `PLATFORM_EXTERNAL_CAUSE_CANDIDATE`, `UNCLEAR` 중 하나이며 필수이고 기본값이 없다. 후보 분류는 금전 귀책을 확정하지 않는다.
+- reason은 `USER_CAUSE_CANDIDATE`, `STORE_CAUSE_CANDIDATE`, `PLATFORM_EXTERNAL_CAUSE_CANDIDATE`, `UNCLEAR` 중 하나이며 필수이고 기본값이 없다. Issue #241은 최종 `NO_SHOW` 전이 뒤 V2 예약금에만 승인된 금전 매핑을 적용한다.
 - fresh 순서는 `현재 operator/store authority → idempotency claim → Reservation FOR UPDATE → CONFIRMED·now >= startAt+5분·필수 reason → MenuHold termination lock → Reservation NO_SHOW → MenuHold FORFEITED → no-show audit → 멱등 결과 → commit`이다.
-- `FORFEITED`는 수량 무복구 종결이다. 수용량·allocation·메뉴 재고·수량·return ledger·transfer·Payment를 조회하거나 변경하지 않으며 Issue #240은 금전 명령을 실행·enqueue하지 않는다.
+- `FORFEITED`는 수량 무복구 종결이다. 수용량·allocation·메뉴 재고·수량·return ledger·transfer를 조회하거나 변경하지 않는다. V2는 `USER_CAUSE_CANDIDATE → CONSUMER/0`, `STORE_CAUSE_CANDIDATE → STORE_RESPONSIBLE/10000`, `PLATFORM_EXTERNAL_CAUSE_CANDIDATE → PLATFORM_RESPONSIBLE/10000` PENDING obligation을 저장하며 `UNCLEAR`는 저장하지 않는다.
+- 방문 transaction은 Payment 공개 Service나 provider를 호출하지 않고 기존 #239 disposition worker가 후속 처리한다. obligation 저장 실패는 방문 상태·감사·MenuHold·멱등 결과와 함께 rollback한다.
 - replay는 현재 operator/store authority만 다시 확인하고 저장된 성공 결과를 반환한다. 같은 키를 다른 reservation/store/reason에 사용하면 `COMMON_007`이다.
 
 ### 단일 종결 승자
 
 - QR scan, no-show, 기존 직접 방문 완료, cancellation은 모두 Reservation 행을 먼저 잠그므로 하나의 종결 전이만 성공한다. QR/no-show는 이어서 #385의 같은 MenuHold termination lock을 사용한다.
 - `CANCELLED`, `FULFILLED`, `NO_SHOW`는 종결 상태다. 재활성화하거나 다른 종결 상태로 바꾸지 않으며 후속 감사·grant 소비·MenuHold 전이 중 하나라도 실패하면 멱등 기록을 포함해 전부 rollback한다.
-- `FULFILLED`와 `NO_SHOW`는 수용량·allocation·메뉴 재고·수량 원장을 조회하거나 복구하지 않는다.
+- `FULFILLED`와 `NO_SHOW`는 수용량·allocation·메뉴 재고·수량 원장을 조회하거나 복구하지 않으며 V2에서만 승인된 disposition obligation을 생성한다.
 
 ## 오류 코드
 
@@ -405,7 +408,7 @@ QR 패턴·필수값 등 Bean Validation 실패는 `COMMON_001`, 잘못된 JSON�
 - QR scan은 `[startAt, startAt + 5분)` 경계와 Auth epoch를 검증하고 성공 시 Reservation/MenuHold/기존 fulfillment audit/QR audit/grant 소비/멱등 결과를 한 번만 함께 commit한다.
 - 정확히 `startAt + 5분`부터 필수 후보 reason의 no-show가 Reservation `NO_SHOW`, MenuHold `FORFEITED`, audit와 멱등 결과를 함께 commit한다.
 - QR/no-show replay는 현재 매장 권한만 다시 확인하고 저장된 성공을 반환하며 raw QR·expiry·epoch·시간·과거 상태를 다시 검증하지 않는다.
-- QR scan, no-show, direct fulfillment, cancellation 경합은 하나의 종결 상태만 남기고 no-show는 수용량·allocation·inventory·return ledger·transfer·money를 조회·복구·생성하지 않는다.
+- QR scan, no-show, direct fulfillment, cancellation 경합은 하나의 종결 상태만 남긴다. 방문 경로는 수용량·allocation·inventory·return ledger·transfer를 조회·복구하지 않으며 V2에서만 승인된 disposition obligation을 생성한다.
 - 범용 status PATCH, 결제·환불·CHANGE_PENDING API가 없다.
 - 같은 시작 시각이라도 서로 다른 매장 시간 정책은 서로 다른 `occupancyEndAt`을 만들며 입력 순서와 중복을 보존한다.
 - 시간 계산에 성공한 후보만 `[startAt, serviceEndAt)`으로 Store batch 검증하며 turnover 구간을 보내지 않는다. Store의 `NOT_ACCEPTING`은 `UNAVAILABLE`이고 계약과 다른 batch 응답은 전체 실패 폐쇄된다.
@@ -415,6 +418,7 @@ QR 패턴·필수값 등 Bean Validation 실패는 `COMMON_001`, 잘못된 JSON�
 - V1 판정은 저장된 `cancellationPolicyVersion`과 서버 중앙에서 한 번 얻은 `requestedAt`을 사용하며 client timestamp·client version·current-version fallback이 없다. 금전·환불·시간 구간·cutoff·`PAY-*` 참조는 공개 응답과 판정에 없다.
 - 신규 예약금 Hold만 V2를 저장·승계하고 10분·48시간·24시간 포함 경계가 10000·5000·0 bps 목표 누적 환불률로 결정된다.
 - V2 취소·자원 복구·감사·PENDING obligation이 한 transaction이며 Payment 외부 호출은 그 transaction 밖에서만 실행된다.
+- V2 직접 방문 완료·QR 체크인·확정 no-show도 방문 상태·감사와 PENDING obligation을 한 transaction에 저장하고, 승인된 reason 매핑 밖의 `UNCLEAR`와 V1/null/unknown은 obligation을 만들지 않는다.
 - `RECONCILIATION_REQUIRED`의 외부 실패·`FAILED/RETRYABLE` 결과 뒤에도 다음 operation은 QUERY이고 새 처분·환불을 실행하지 않는다.
 - POST replay는 최초 projection, GET은 latest projection, V1/null/unknown은 null을 반환하며 Reservation은 Payment Entity·Repository를 참조하지 않는다.
 
