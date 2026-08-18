@@ -27,6 +27,36 @@ class NotificationOpenApiContractTest {
             "WAITING_CHECKED_IN",
             "WAITING_CLOSED_BY_STORE"
     );
+    private static final Set<String> RESERVATION_TERMINAL_PURPOSES = Set.of(
+            "RESERVATION_VISIT_COMPLETED",
+            "RESERVATION_NO_SHOW"
+    );
+
+    @Test
+    void reservationTerminalPurposesArePublishedWithoutPaymentOrActionExpansion() throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        List<Object> purposes = list(map(schemas.get("NotificationPurpose")).get("enum"));
+
+        assertThat(purposes)
+                .containsAll(RESERVATION_TERMINAL_PURPOSES);
+        assertThat(list(map(schemas.get("NotificationResourceType")).get("enum")))
+                .contains("RESERVATION");
+
+        Map<String, Object> historyItem = map(schemas.get("NotificationHistoryItem"));
+        assertThat(historyItem).containsKey("oneOf");
+        assertThat(list(historyItem.get("oneOf")))
+                .extracting(candidate -> map(candidate).get("$ref"))
+                .contains("#/components/schemas/ReservationTerminalNotificationHistoryItem");
+
+        Map<String, Object> terminalItem =
+                map(schemas.get("ReservationTerminalNotificationHistoryItem"));
+        Map<String, Object> terminalProperties = map(terminalItem.get("properties"));
+        assertThat(map(terminalProperties.get("purpose")).get("$ref"))
+                .isEqualTo("#/components/schemas/ReservationTerminalNotificationPurpose");
+        assertThat(map(terminalProperties.get("action")).get("type"))
+                .isEqualTo("null");
+    }
 
     @Test
     void waitingInAppPurposesAndResourceArePublishedWithoutSseContract() throws IOException {

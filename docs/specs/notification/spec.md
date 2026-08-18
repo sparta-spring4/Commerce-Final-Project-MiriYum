@@ -1,13 +1,14 @@
 # 기능 명세: 알림 계약
 
 > 적용 단계: `고도화`
-> 소유 Issue: 기본 계약 `#247`, Waiting IN_APP 확장 `#250`
-> 구현 선행: `#247`·`#248`과 Waiting `#271`·`#272`가 `dev`에 병합된 뒤 `#250` Runtime을 활성화한다.
+> 소유 Issue: 기본 계약 `#247`, Waiting IN_APP 확장 `#250`, 예약 방문 완료·노쇼 확장 `#426`
+> 구현 선행: 각 확장 Runtime은 해당 contract-first PR과 원 도메인 선행 Runtime이 `dev`에 병합된 뒤 활성화한다. 예약 방문 완료·노쇼는 `#240`, Waiting은 `#271`·`#272`를 소비한다.
 
 ## 관련 정책 ID
 
 - 알림: `NOTI-001`~`NOTI-010`, 특히 `NOTI-004`~`NOTI-009`
 - 예약: `RES-013`, `RES-014`
+- 체크인·노쇼: `CHECK-006`, `CHECK-007`
 - 메뉴 홀드: `HOLD-009`, `HOLD-011`
 - 웨이팅: `WAIT-010`, `WAIT-011`, `WAIT-016`, `WAIT-017`
 - 데이터·API: `docs/07-data-and-api-contracts.md`
@@ -16,7 +17,7 @@
 
 ### 포함
 
-- Reservation·MenuHold·Pickup의 확정 사건과 Waiting의 확정 상태·입장 임박 사건에서 생성하는 IN_APP 알림 목적 카탈로그
+- Reservation·MenuHold·Pickup의 확정 사건, 예약의 방문 완료·노쇼 종결 사건과 Waiting의 확정 상태·입장 임박 사건에서 생성하는 IN_APP 알림 목적 카탈로그
 - 원 사건을 Notification에 기록하는 내부 공개 Service·DTO·오류 의미
 - 렌더링과 행동 유효성 재검증을 위한 원 도메인 공개 조회 경계
 - Notification 소유의 소비자 본인 알림 이력 HTTP API와 cursor 계약
@@ -35,6 +36,7 @@
 
 - 로그인한 일반 사용자는 자신에게 생성되어 현재 보관 중인 논리 알림만 조회한다.
 - 알림은 원 거래 상태를 설명할 뿐 예약·취소·메뉴 대체의 성립 조건이 아니다.
+- 직접 방문 완료와 QR 체크인은 같은 방문 완료 알림으로 표시하고, 매장 운영자가 직접 확정한 노쇼는 별도 노쇼 알림으로 표시한다. 두 알림은 환불·몰취·귀책·결제 결과를 뜻하지 않는다.
 - 사용자는 알림에서 허용된 예약·픽업·대체 메뉴 검토 화면으로 이동할 수 있다. Waiting 목적은 이번 단계에서 행동 링크를 제공하지 않고 알림 이력의 자원 참조와 안전한 제목만 공개한다. 행동이 만료·취소·대체됐으면 화면 이동 전 API가 반환한 중앙 상태를 다시 확인한다.
 - 일반 품절은 목록·상세 화면의 현재 재고 상태로 확인한다. 기존 확정 거래가 실제 영향을 받은 경우에만 영향 알림을 받는다.
 
@@ -45,6 +47,8 @@
 - 1차 허용 채널은 `IN_APP` 하나다. 알림 이력에 조회 가능하게 내구성 기록한 시점을 `IN_APP` 전달 성공으로 기록한다. 전달 전 취소·최종 실패·대기 작업은 내부 작업·감사 상태로만 유지하고 공개 이력에 포함하지 않는다.
 - 목적 카탈로그에 대응하는 원 상태·사건이 아직 활성화되지 않았으면 그 목적은 작업을 만들지 않는다. 다른 활성 목적의 구현과 완료를 막지 않는다.
 - 방문 안내는 원 예약의 `startAt`, `timeZoneId`, 활성 `timingPolicyVersion`으로 계산한 `scheduledAt`을 사용한다. 정확한 선행 시간은 정책 버전이 소유하며 이벤트 생산자나 worker가 임의 숫자를 사용하지 않는다.
+- `RESERVATION_VISIT_COMPLETED`는 직접 방문 완료와 QR 체크인이 확정한 `FULFILLED` 하나에 수렴하고, `RESERVATION_NO_SHOW`는 매장 운영자가 직접 확정한 `NO_SHOW`에만 대응한다. 시간 경과·노쇼 후보·QR 실패는 두 목적을 만들지 않는다.
+- 두 예약 종결 목적은 즉시 IN_APP 목적이며 보호된 예약 상세 route가 활성화되기 전에는 `action=null`이다. frontend 전용 URL이나 금전 결과 문구를 만들지 않는다.
 
 ## 내부 원 사건 계약
 
@@ -79,10 +83,10 @@ NotificationTaskRecorder.record(NotificationSourceEventV1 event)
 | `occurredAt` | offset 포함 date-time | 원 사건 중앙 발생 시각이자 이력 정렬 1차 키 |
 | `scheduledAt` | offset 포함 date-time | 즉시는 `occurredAt`, 예약 목적은 정책 계산 결과 |
 | `expiresAt` | nullable offset date-time | 행동 또는 예약 작업 만료 시각. 원 권리의 기한을 연장하지 않음 |
-| `timingPolicyVersion` | nullable 양의 64-bit integer | 예약 목적에 필수, 즉시 목적에는 null |
+| `timingPolicyVersion` | nullable 양의 64-bit integer | `RESERVATION_VISIT_REMINDER`에 필수, 즉시 목적에는 null |
 | `correlationId` | non-blank string, 최대 100 | 원 명령·감사 상관관계 |
 
-사건에는 전화번호·이메일·수신 주소·완성된 제목/본문·동행자·다른 구매자·결제수단·알레르기 원문을 넣지 않는다. `scheduledAt`과 값이 있는 `expiresAt`은 `occurredAt`보다 과거일 수 없다. 예약 목적은 `scheduledAt`·`expiresAt`·`timingPolicyVersion`이 모두 필수이고 `scheduledAt < expiresAt`이어야 한다.
+사건에는 전화번호·이메일·수신 주소·완성된 제목/본문·동행자·다른 구매자·결제수단·알레르기 원문을 넣지 않는다. 예약 방문 완료 사건에는 raw QR·digest·opaque Auth epoch를, 노쇼 사건에는 후보 사유 원문을 추가로 넣지 않는다. `scheduledAt`과 값이 있는 `expiresAt`은 `occurredAt`보다 과거일 수 없다. 예약 발송 목적 `RESERVATION_VISIT_REMINDER`는 `scheduledAt`·`expiresAt`·`timingPolicyVersion`이 모두 필수이고 `scheduledAt < expiresAt`이어야 한다. 즉시 예약 종결 목적은 `scheduledAt=occurredAt`, `expiresAt=null`, `timingPolicyVersion=null`이다.
 
 ### 논리 멱등 식별
 
@@ -108,7 +112,7 @@ sourceDomain + sourceEventId + recipientAccountId + purpose + resourceType + res
 Notification은 작업 실행과 이력 행동 계산에 필요한 다음 읽기 경계를 소유하고 각 원 도메인은 해당 구현체를 제공한다. 포트 인터페이스와 공통 DTO는 Notification package에 두며, 원 도메인의 구현체는 Notification의 공개 포트만 의존하고 Entity·Repository를 노출하지 않는다. 따라서 기록 호출과 조회 구현의 package 의존은 모두 Reservation·MenuHold·Pickup·Waiting → Notification 한 방향으로 유지한다.
 
 ```text
-ReservationNotificationSource.readContext(resourceId, expectedVersion, recipientAccountId)
+ReservationNotificationSource.readContext(purpose, resourceId, expectedVersion, recipientAccountId)
 MenuHoldNotificationSource.readContext(resourceType, resourceId, expectedVersion, recipientAccountId)
 PickupNotificationSource.readContext(resourceId, expectedVersion, recipientAccountId)
 WaitingNotificationSource.readContext(resourceId, expectedVersion, recipientAccountId)
@@ -126,7 +130,9 @@ WaitingNotificationSource.readContext(resourceId, expectedVersion, recipientAcco
 
 Pickup은 자신의 픽업 예약 확정·취소 사건을 같은 업무 트랜잭션에서 `NotificationTaskRecorder`에 직접 기록한다. `MenuHoldNotificationSource`는 `PICKUP_RESERVATION`을 처리하지 않으며 MenuHold → Pickup 역방향 의존을 만들지 않는다. 메뉴 이행 위험과 대체 제안·결과의 원 사건은 MenuHold가 소유하고, 연결된 `PICKUP_RESERVATION`은 `actionResourceType`·`actionResourceId`로만 반환할 수 있다.
 
-Reservation·Pickup producer 연동에서 `resourceVersion`은 상태 enum ordinal이 아니라 확정 알림 원 사건 revision이다. 확정 사건은 `1`, 취소 사건은 `2`이며 새 원 사건을 만들지 않는 Reservation `FULFILLED`와 Pickup `PICKED_UP`은 최신 revision `2`를 유지한다. 조회 소비자는 version 값만으로 상태를 추론하지 않고 `sourceState`와 `result=SUPERSEDED`를 함께 사용한다. 두 자원의 소유 일반 사용자 계정 관계는 현재 변경 불가능하므로 `recipientRelationVersion=1`로 고정하며, 이 값은 연락처나 채널 주소의 version이 아니다.
+Reservation·Pickup producer 연동에서 `resourceVersion`은 상태 enum ordinal이 아니라 확정 알림 원 사건 revision이다. 확정 사건은 `1`, 취소·방문 완료·노쇼 terminal 사건은 `2`다. 직접 방문 완료와 QR 체크인은 경로가 달라도 같은 예약의 `FULFILLED` revision `2`에 수렴하고, `NO_SHOW`도 terminal revision `2`를 사용한다. Pickup `PICKED_UP`은 새 원 사건을 만들지 않고 최신 revision `2`를 유지한다. 조회 소비자는 version 값만으로 상태를 추론하지 않고 요청 `purpose`, `sourceState`와 `result=SUPERSEDED`를 함께 사용한다. 두 자원의 소유 일반 사용자 계정 관계는 현재 변경 불가능하므로 `recipientRelationVersion=1`로 고정하며, 이 값은 연락처나 채널 주소의 version이 아니다.
+
+예약 종결 producer의 `sourceEventId`는 성공한 terminal 전이를 재처리해도 같은 값을 재사용한다. 원 command 경로, worker instance와 QR token은 식별자에 넣지 않으며, 동일 예약·수신자·목적·terminal revision의 replay는 하나의 논리 알림으로 수렴한다. `NotificationSourceRegistry`는 작업의 `purpose`를 `ReservationNotificationSource`에 그대로 전달한다. 이 포트는 `RESERVATION_VISIT_COMPLETED`와 현재 `FULFILLED`, 또는 `RESERVATION_NO_SHOW`와 현재 `NO_SHOW`의 정확한 조합만 `FOUND`로 반환하고 두 terminal 목적의 action tuple은 모두 null로 반환한다. 기존 목적은 목적별 현재 상태와 기존 action 의미를 유지한다.
 
 Waiting의 `resourceVersion`은 양수 계약을 유지하기 위해 원 사건의 `eventSequence`를 사용한다. 상태 사건의 `eventSequence`는 `WaitingTeam.version + 1`이며 생성 상태의 team version `0`은 event sequence `1`이다. `WAITING_ENTRY_IMMINENT`는 최초 적격 판정 시의 event sequence를 별도 원장에 고정한다. 이 값은 원 사건의 멱등 식별이며 이후 모든 team version과의 일치를 요구하는 대체 판정값이 아니다. Waiting 조회 구현은 요청된 원 사건과 목적별 현재 상태를 함께 검증하고, 사건이 여전히 유효하면 요청된 event sequence를 context의 `resourceVersion`으로 반환한다. 수신자 관계는 해당 팀의 불변 `consumerAccountId`에 결속한다.
 
@@ -184,7 +190,7 @@ Notification이 소유하는 재판정 경계는 `WAITING_TEAM` ID와 Waiting �
 
 ## 상태 대체·만료 계약
 
-- 예약 취소·만료·방문 완료는 같은 예약의 아직 미발송된 확정·변경·방문 안내를 취소한다.
+- 예약 취소·만료·방문 완료·노쇼는 같은 예약의 아직 미발송된 확정·변경·방문 안내를 취소한다.
 - 예약 변경이 확정되면 이전 버전의 방문 안내를 취소하고 유효한 시점 정책이 있을 때 새 버전 안내를 생성한다.
 - `RESERVATION_COORDINATION_REQUIRED`는 최종 변경·취소 또는 원 영향 사건 해소 뒤 행동을 `SUPERSEDED`로 반환한다. 열람·침묵·알림 실패는 조율 동의가 아니다.
 - 메뉴 이행 위험 사건은 원래 이행 확정, 대체 제안, 거래 취소 중 최신 결과가 도착하면 이전 미발송 작업을 대체한다.
@@ -260,6 +266,7 @@ Notification 내부 작업은 `PENDING`, `DELIVERED`, `FAILED`, `CANCELLED`를 �
 
 - `#248`이 만든 Notification 원장·worker·조회 Runtime과 repository는 계속 Notification 도메인이 소유한다. `#250` contract-first PR은 Waiting 목적·자원·조회·재판정 경계만 확정하며 production Java, migration과 별도 worker 설정을 만들지 않는다. `#250` Runtime은 이 계약 PR이 `dev`에 병합된 뒤 최신 migration 번호와 exact allowlist를 Issue에 추가하고, 기존 Notification worker와 repository를 확장하는 별도 PR로 구현한다.
 - `#250` Runtime의 Notification 소유 변경은 작업 version fencing, Waiting 보류와 공개 재판정 Service를 구현한다. Waiting 소유 변경은 상태 사건 dispatcher에서 그 Service를 호출하고 `PUBLISHED`를 같은 원자 경계에 두는 것뿐이다. 기존 일반 일시 장애의 재시도·최종 실패 의미를 Waiting 보류에 재사용하거나 Waiting이 Notification Entity·Repository를 직접 접근하지 않는다.
+- `#426` contract-first PR은 예약 방문 완료·노쇼 목적과 source 상태·대체 규칙만 확정하며 production Java, migration과 worker 설정을 변경하지 않는다. Runtime은 이 계약 PR이 `dev`에 병합된 뒤 최신 `dev`의 충돌과 migration 번호를 확인해 exact allowlist를 Issue에 추가하고, 기존 Notification 원장·worker·Reservation producer를 확장하는 별도 PR로 구현한다.
 - 목적·source event·cursor는 버전 필드를 가져야 한다. 새 목적과 nullable 필드는 하위 호환 추가만 허용하고 기존 enum 의미를 재사용하지 않는다.
 - `NOTI-009` 확정 전에도 보관 만료를 적용할 수 있는 구조를 갖추되 영구 보존이나 임의 삭제 기간을 기본값으로 넣지 않는다.
 - 외부 채널 추가는 논리 알림과 `IN_APP` 이력이 공유하는 `notificationId`를 바꾸지 않고 같은 논리 알림 아래 내부 채널 시도만 추가한다.
@@ -269,6 +276,9 @@ Notification 내부 작업은 `PENDING`, `DELIVERED`, `FAILED`, `CANCELLED`를 �
 - 목적 카탈로그의 모든 활성 목적이 하나의 확정 원 사건·수신자·자원 버전과 연결된다.
 - 현재 없는 source 상태는 알림 작업을 만들지 않으며 다른 활성 목적을 막지 않는다.
 - 같은 원 사건을 병렬·반복 기록해도 하나의 논리 알림에 수렴한다.
+- 직접 방문 완료와 QR 체크인은 `RESERVATION_VISIT_COMPLETED` 하나로 수렴하고, 매장 운영자가 직접 확정한 `NO_SHOW`만 `RESERVATION_NO_SHOW`를 만든다.
+- 두 예약 종결 목적은 환불·몰취·귀책·결제 결과를 주장하지 않고 보호된 예약 상세 route가 활성화되기 전까지 `action=null`이다.
+- 예약 종결 상태가 확정되면 같은 예약의 아직 미발송된 확정·변경·방문 안내를 대체하되 이미 전달된 이력 의미는 수정하지 않는다.
 - 같은 논리 멱등 식별과 다른 사건 내용 fingerprint는 최초 작업을 유지하고 `NOTIFICATION_002`로 거절하며, 동기 producer 명령은 HTTP 409를 반환하고 해당 원 업무 트랜잭션을 rollback한다.
 - 같은 사건·내용을 다른 `correlationId`로 반복 기록하면 기존 작업과 `duplicate=true`로 수렴하며 producer 명령을 rollback하지 않는다.
 - 원 상태 변경·취소·만료와 역순 사건 뒤 최신 유효 작업만 전달 가능하다.
@@ -281,7 +291,7 @@ Notification 내부 작업은 `PENDING`, `DELIVERED`, `FAILED`, `CANCELLED`를 �
 
 ## 공동 리뷰 게이트
 
-- Reservation 소유자는 목적별 원 상태, `ReservationNotificationSource`의 버전·수신자 결속과 취소·변경·방문 완료 대체 규칙을 검토한다.
+- Reservation 소유자는 목적별 원 상태, `ReservationNotificationSource`의 버전·수신자 결속과 취소·변경·방문 완료·노쇼 대체 규칙, 직접 완료와 QR의 단일 목적 수렴을 검토한다.
 - MenuHold 소유자는 메뉴 이행 위험·대체 제안과 결과 사건, `MenuHoldNotificationSource`의 허용 자원 경계를 검토한다.
 - Pickup 소유자는 픽업 확정·취소 사건, `PickupNotificationSource`의 버전·수신자 결속과 MenuHold 역방향 의존 금지를 검토한다.
 - Waiting 소유자는 상태 사건의 `eventSequence = version + 1`, 팀별 입장 임박 유일성, 예약 전환 실패 복귀 시 최초 사건 유지, 상태 사건 `PUBLISHED` 전 재판정과 `WaitingNotificationSource`의 수신자·목적별 상태 재검증·호출 제한 시각을 검토한다.

@@ -265,6 +265,43 @@ export interface components {
       unitPrice: number;
       quantity: number;
     };
+    ReservationDepositDisposition: {
+      /**
+       * Format: int64
+       * @enum {integer}
+       */
+      policyVersion: 2;
+      /** @enum {string} */
+      responsibilityCode: "CONSUMER" | "STORE_RESPONSIBLE" | "PLATFORM_RESPONSIBLE";
+      /**
+       * @description 이번 환불 비율이 아닌 원승인 대비 목표 누적 환불 자격률
+       * @enum {integer}
+       */
+      targetRefundRateBasisPoints: 0 | 5000 | 10000;
+      /** Format: int64 */
+      originalAmountMinor: number | null;
+      /** Format: int64 */
+      targetRefundAmountMinor: number | null;
+      /** Format: int64 */
+      completedRefundAmountMinor: number | null;
+      /** Format: int64 */
+      withheldAmountMinor: number | null;
+      currency: string | null;
+      /** Format: uuid */
+      dispositionId: string | null;
+      refundId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"] | null;
+      /** @enum {string} */
+      status: "PENDING" | "PROCESSING" | "COMPLETED" | "RECONCILIATION_REQUIRED" | "RECOVERY_REQUIRED";
+      /** @enum {string|null} */
+      paymentDispositionStatus: "PROCESSING" | "COMPLETED" | "FAILED" | "RECONCILIATION_REQUIRED" | null;
+      /** @enum {string|null} */
+      failureClassification: "RETRYABLE" | "PERMANENT" | "UNKNOWN" | null;
+      createdAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      updatedAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      completedAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"] | null;
+      paymentRequestedAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"] | null;
+      paymentUpdatedAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"] | null;
+    };
     ReservationDetail: {
       reservationId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
       storeId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
@@ -283,6 +320,8 @@ export interface components {
       /** @enum {string|null} */
       cancelledBy: "CONSUMER" | "STORE_OPERATOR" | null;
       cancellationReason: string | null;
+      /** @description V1/null/unknown 정책은 null. V2 취소 POST는 저장된 최초 PENDING을 replay하고, 예약 상세 GET은 Reservation obligation의 최신 projection을 반환한다. */
+      depositDisposition: components["schemas"]["ReservationDepositDisposition"] | null;
       createdAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
     };
     ReservationSummary: {
