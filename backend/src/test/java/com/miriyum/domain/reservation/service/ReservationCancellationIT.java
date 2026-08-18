@@ -112,6 +112,8 @@ class ReservationCancellationIT {
             "trg_task7_cancel_audit_failure";
     private static final String IDEMPOTENCY_FAILURE_TRIGGER =
             "trg_task7_cancel_idempotency_failure";
+    private static final String DISPOSITION_FAILURE_TRIGGER =
+            "trg_issue239_cancel_disposition_failure";
 
     @Container
     static final MySQLContainer MYSQL =
@@ -170,9 +172,19 @@ class ReservationCancellationIT {
         dropTrigger(MENU_HOLD_FAILURE_TRIGGER);
         dropTrigger(AUDIT_FAILURE_TRIGGER);
         dropTrigger(IDEMPOTENCY_FAILURE_TRIGGER);
+        dropTrigger(DISPOSITION_FAILURE_TRIGGER);
         jdbcTemplate.execute("DELETE FROM notification_task_transition_audits");
         jdbcTemplate.execute("DELETE FROM notification_channel_attempts");
         jdbcTemplate.execute("DELETE FROM notification_tasks");
+        jdbcTemplate.execute("DELETE FROM reservation_deposit_disposition_obligations");
+        jdbcTemplate.execute("DELETE FROM reservation_deposit_refund_obligations");
+        jdbcTemplate.execute("DELETE FROM reservation_deposit_cause_audits");
+        jdbcTemplate.execute("DELETE FROM reservation_deposit_calculation_items");
+        jdbcTemplate.execute("DELETE FROM reservation_deposit_processes");
+        jdbcTemplate.execute("DELETE FROM reservation_hold_warning_tasks");
+        jdbcTemplate.execute("DELETE FROM reservation_hold_transition_audits");
+        jdbcTemplate.execute("DELETE FROM reservation_hold_capacity_allocations");
+        jdbcTemplate.execute("DELETE FROM reservation_holds");
         jdbcTemplate.execute("DELETE FROM reservation_cancellation_audits");
         jdbcTemplate.execute("DELETE FROM menu_hold_items");
         jdbcTemplate.execute("DELETE FROM menu_holds");
@@ -232,6 +244,93 @@ class ReservationCancellationIT {
                 .containsEntry(
                         "request_fingerprint",
                         consumerFingerprint(scenario.reservationId(), null));
+    }
+
+    @Test
+    @DisplayName("V2 소비자 취소는 자원·감사와 PENDING 처분 의무를 원자 확정하고 replay한다")
+    void v2ConsumerCancellationCommitsPendingDispositionExactlyOnce() {
+        Scenario scenario = confirmedScenario(false, false, 1);
+        seedCompletedDepositProcess(scenario);
+        IdempotencyKey key = key(91);
+
+        ReservationCancellationCommandResult first = facade.cancelByConsumer(
+                scenario.consumerId(),
+                scenario.reservationId(),
+                key,
+                new ConsumerCancellationRequest(null));
+        ReservationCancellationCommandResult replay = facade.cancelByConsumer(
+                scenario.consumerId(),
+                scenario.reservationId(),
+                key,
+                new ConsumerCancellationRequest(null));
+
+        assertThat(first.data().status()).isEqualTo("CANCELLED");
+        assertThat(first.data().depositDisposition()).isNotNull();
+        assertThat(first.data().depositDisposition().policyVersion()).isEqualTo(2L);
+        assertThat(first.data().depositDisposition().responsibilityCode())
+                .isEqualTo("CONSUMER");
+        assertThat(first.data().depositDisposition().status()).isEqualTo("PENDING");
+        assertThat(first.data().depositDisposition().originalAmountMinor()).isNull();
+        assertThat(replay).isEqualTo(first);
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT reservation_id, payment_id, source_event_type,
+                       policy_version, responsibility_code,
+                       target_refund_rate_basis_points, status, attempt_count
+                  FROM reservation_deposit_disposition_obligations
+                 WHERE reservation_id = ?
+                """, scenario.reservationId()))
+                .containsEntry("reservation_id", scenario.reservationId())
+                .containsEntry("source_event_type", "RESERVATION_CANCELLED")
+                .containsEntry("policy_version", 2L)
+                .containsEntry("responsibility_code", "CONSUMER")
+                .containsEntry("target_refund_rate_basis_points", 0)
+                .containsEntry("status", "PENDING")
+                .containsEntry("attempt_count", 0);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_deposit_disposition_obligations",
+                Integer.class)).isOne();
+        assertThat(reservationStatus(scenario)).isEqualTo("CANCELLED");
+        assertThat(auditCount(scenario)).isOne();
+        assertCapacity(scenario.originalBucketIds().getFirst(), 0, 0);
+    }
+
+    @Test
+    @DisplayName("V2 obligation 저장 실패는 취소·수용량·감사·멱등 효과를 전부 롤백한다")
+    void v2DispositionPersistenceFailureRollsBackCancellationTransaction() {
+        Scenario scenario = confirmedScenario(false, false, 1);
+        seedCompletedDepositProcess(scenario);
+        IdempotencyKey key = key(92);
+        jdbcTemplate.execute("""
+                CREATE TRIGGER trg_issue239_cancel_disposition_failure
+                BEFORE INSERT ON reservation_deposit_disposition_obligations
+                FOR EACH ROW
+                SIGNAL SQLSTATE '45000'
+                    SET MESSAGE_TEXT = 'reservation disposition persistence failure'
+                """);
+
+        Throwable failure;
+        try {
+            failure = catchThrowable(() -> facade.cancelByConsumer(
+                    scenario.consumerId(),
+                    scenario.reservationId(),
+                    key,
+                    new ConsumerCancellationRequest(null)));
+        } finally {
+            dropTrigger(DISPOSITION_FAILURE_TRIGGER);
+        }
+
+        assertThat(failure)
+                .isNotNull()
+                .hasRootCauseInstanceOf(java.sql.SQLException.class)
+                .hasStackTraceContaining("reservation disposition persistence failure");
+        assertThat(reservationStatus(scenario)).isEqualTo("CONFIRMED");
+        assertThat(auditCount(scenario)).isZero();
+        assertCapacity(scenario.originalBucketIds().getFirst(), PARTY_SIZE, 1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_deposit_disposition_obligations",
+                Integer.class)).isZero();
+        assertThat(successfulCommandCount(
+                "consumer", scenario.consumerId(), key.value())).isZero();
     }
 
     @Test
@@ -803,6 +902,69 @@ class ReservationCancellationIT {
         });
     }
 
+    private void seedCompletedDepositProcess(Scenario scenario) {
+        long holdId = 1_000_000L + scenario.reservationId();
+        String paymentId = Long.toString(
+                8_000_000_000_000_000_000L + scenario.reservationId());
+        jdbcTemplate.update(
+                "UPDATE reservations SET cancellation_policy_version = 2 "
+                        + "WHERE reservation_id = ?",
+                scenario.reservationId());
+        jdbcTemplate.update("""
+                INSERT INTO reservation_holds (
+                    reservation_hold_id, consumer_account_id, store_id,
+                    store_name_snapshot, service_date, start_at, service_end_at,
+                    occupancy_end_at, time_zone_id_snapshot, start_offset_seconds,
+                    service_end_offset_seconds, occupancy_end_offset_seconds,
+                    slot_interval_minutes, service_duration_minutes,
+                    turnover_duration_minutes, reservation_time_policy_store_id,
+                    reservation_policy_version, adult_count, child_count, infant_count,
+                    notification_target_reference, contact_available_at_confirmation,
+                    capacity_policy_version, cancellation_policy_version, status,
+                    status_version, creation_command_id, created_at, expires_at
+                )
+                SELECT ?, consumer_account_id, store_id, store_name_snapshot,
+                       service_date, start_at, service_end_at, occupancy_end_at,
+                       time_zone_id_snapshot, start_offset_seconds,
+                       service_end_offset_seconds, occupancy_end_offset_seconds,
+                       slot_interval_minutes, service_duration_minutes,
+                       turnover_duration_minutes, reservation_time_policy_store_id,
+                       reservation_policy_version, adult_count, child_count, infant_count,
+                       notification_target_reference, contact_available_at_confirmation,
+                       capacity_policy_version, 2, 'CONFIRMED', 0,
+                       CONCAT('deposit-cancellation-it:', reservation_id),
+                       created_at, DATE_ADD(created_at, INTERVAL 10 MINUTE)
+                  FROM reservations
+                 WHERE reservation_id = ?
+                """, holdId, scenario.reservationId());
+        jdbcTemplate.update("""
+                INSERT INTO reservation_deposit_processes (
+                    reservation_hold_id, consumer_account_id, status, expires_at,
+                    payment_id, portone_payment_id, payment_order_name,
+                    payment_amount_minor, payment_currency, payment_source_expires_at,
+                    payment_preparation_status, store_deposit_policy_version,
+                    deposit_rate_percent, deposit_algorithm_version, deposit_party_size,
+                    deposit_amount_minor, deposit_currency, representative_menu_version,
+                    representative_menu_price_total, representative_menu_count,
+                    abandonment_requested, resources_protected, resources_protected_at,
+                    final_reservation_id, requested_at, completed_at
+                ) VALUES (
+                    ?, ?, 'COMPLETED', '2026-08-02 00:10:00.000000',
+                    ?, CONCAT('portone-', ?), 'V2 cancellation deposit',
+                    10001, 'KRW', '2026-08-02 00:10:00.000000',
+                    'READY', 1, 20, 1, 2, 10001, 'KRW', 1, 50005, 1,
+                    FALSE, TRUE, '2026-08-02 00:01:00.000000',
+                    ?, '2026-08-02 00:00:00.000000',
+                    '2026-08-02 00:02:00.000000'
+                )
+                """,
+                holdId,
+                scenario.consumerId(),
+                paymentId,
+                paymentId,
+                scenario.reservationId());
+    }
+
     private List<Long> seedCapacityVersion(
             long storeId,
             long reservationId,
@@ -1122,7 +1284,8 @@ class ReservationCancellationIT {
         Set<String> allowed = Set.of(
                 MENU_HOLD_FAILURE_TRIGGER,
                 AUDIT_FAILURE_TRIGGER,
-                IDEMPOTENCY_FAILURE_TRIGGER);
+                IDEMPOTENCY_FAILURE_TRIGGER,
+                DISPOSITION_FAILURE_TRIGGER);
         if (!allowed.contains(triggerName)) {
             throw new IllegalArgumentException("unsupported trigger");
         }

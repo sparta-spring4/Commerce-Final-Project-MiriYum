@@ -15,10 +15,11 @@ public interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Lo
     Optional<PaymentRefund> findByPayment_IdAndIdempotencyKey(Long paymentId, String idempotencyKey);
     Optional<PaymentRefund> findByPayment_IdAndSourceEventId(Long paymentId, String sourceEventId);
     List<PaymentRefund> findByPayment_IdOrderByRequestedAtAsc(Long paymentId);
-    List<PaymentRefund> findByPayment_IdAndStatusAndRequestedAtLessThanEqualOrderByRequestedAtAsc(
+    List<PaymentRefund>
+    findByPayment_IdAndStatusAndProcessingStartedAtLessThanEqualOrderByProcessingStartedAtAsc(
             Long paymentId,
             com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus status,
-            Instant requestedAt
+            Instant processingStartedAt
     );
     boolean existsByPayment_IdAndProviderCancellationIdAndStatus(
             Long paymentId,

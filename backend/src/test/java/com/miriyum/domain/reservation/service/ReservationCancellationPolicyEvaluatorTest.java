@@ -7,7 +7,11 @@ import com.miriyum.domain.reservation.entity.ReservationCancellationActorType;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import java.time.Instant;
 import java.util.EnumSet;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 class ReservationCancellationPolicyEvaluatorTest {
 
@@ -64,7 +68,7 @@ class ReservationCancellationPolicyEvaluatorTest {
 
     @Test
     void rejectsNullAndUnknownVersionsByPolicyForConfirmedReservations() {
-        Long[] storedVersions = {null, 0L, -1L, 2L};
+        Long[] storedVersions = {null, 0L, -1L, 3L};
 
         for (Long storedVersion : storedVersions) {
             assertThat(evaluator.evaluate(
@@ -110,5 +114,79 @@ class ReservationCancellationPolicyEvaluatorTest {
         );
 
         assertThat(second).isEqualTo(first);
+    }
+
+    @ParameterizedTest
+    @MethodSource("consumerDispositionBoundaries")
+    void evaluatesConsumerDispositionAtExactPolicyBoundaries(
+            Instant confirmedAt,
+            Instant startAt,
+            Instant requestedAt,
+            int expectedBasisPoints
+    ) {
+        ReservationDepositDispositionDecision result = evaluator.evaluateDepositDisposition(
+                2L,
+                ReservationDepositDispositionDecision.Responsibility.CONSUMER,
+                confirmedAt,
+                startAt,
+                requestedAt
+        );
+
+        assertThat(result.policyVersion()).isEqualTo(2L);
+        assertThat(result.responsibility())
+                .isEqualTo(ReservationDepositDispositionDecision.Responsibility.CONSUMER);
+        assertThat(result.targetRefundRateBasisPoints()).isEqualTo(expectedBasisPoints);
+    }
+
+    @Test
+    void fullyRefundsStoreAndPlatformResponsibleCancellations() {
+        Instant confirmedAt = START_AT.minusSeconds(86_400);
+
+        for (ReservationDepositDispositionDecision.Responsibility responsibility :
+                EnumSet.of(
+                        ReservationDepositDispositionDecision.Responsibility.STORE_RESPONSIBLE,
+                        ReservationDepositDispositionDecision.Responsibility.PLATFORM_RESPONSIBLE)) {
+            assertThat(evaluator.evaluateDepositDisposition(
+                    2L,
+                    responsibility,
+                    confirmedAt,
+                    START_AT,
+                    START_AT.plusSeconds(1)
+            ).targetRefundRateBasisPoints()).isEqualTo(10_000);
+        }
+    }
+
+    @Test
+    void rejectsDispositionEvaluationForV1NullAndUnknownVersions() {
+        for (Long storedVersion : new Long[]{1L, null, 3L}) {
+            assertThatIllegalArgumentException().isThrownBy(() ->
+                    evaluator.evaluateDepositDisposition(
+                            storedVersion,
+                            ReservationDepositDispositionDecision.Responsibility.CONSUMER,
+                            START_AT.minusSeconds(60),
+                            START_AT,
+                            START_AT.minusSeconds(1)
+                    ));
+        }
+    }
+
+    private static Stream<Arguments> consumerDispositionBoundaries() {
+        Instant startAt = Instant.parse("2026-08-10T12:00:00Z");
+        Instant earlyConfirmedAt = Instant.parse("2026-08-01T00:00:00Z");
+        Instant lateConfirmedAt = startAt.minusSeconds(20 * 60L);
+        return Stream.of(
+                Arguments.of(lateConfirmedAt, startAt,
+                        lateConfirmedAt.plusSeconds(600), 10_000),
+                Arguments.of(lateConfirmedAt, startAt,
+                        lateConfirmedAt.plusSeconds(600).plusNanos(1), 0),
+                Arguments.of(earlyConfirmedAt, startAt,
+                        startAt.minusSeconds(48 * 3600L), 10_000),
+                Arguments.of(earlyConfirmedAt, startAt,
+                        startAt.minusSeconds(48 * 3600L).plusNanos(1), 5_000),
+                Arguments.of(earlyConfirmedAt, startAt,
+                        startAt.minusSeconds(24 * 3600L), 5_000),
+                Arguments.of(earlyConfirmedAt, startAt,
+                        startAt.minusSeconds(24 * 3600L).plusNanos(1), 0)
+        );
     }
 }

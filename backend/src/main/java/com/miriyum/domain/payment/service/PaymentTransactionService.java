@@ -1,6 +1,11 @@
 package com.miriyum.domain.payment.service;
 
+import com.miriyum.domain.payment.dto.PaymentContracts.ApplyReservationDepositDispositionCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.ConfirmPaymentCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.DispositionFailureClassification;
+import com.miriyum.domain.payment.dto.PaymentContracts.DispositionResult;
+import com.miriyum.domain.payment.dto.PaymentContracts.DispositionStatus;
+import com.miriyum.domain.payment.dto.PaymentContracts.GetReservationDepositDispositionQuery;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentHistoryQuery;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentHistorySlice;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
@@ -20,7 +25,9 @@ import com.miriyum.domain.payment.entity.PaymentAttempt;
 import com.miriyum.domain.payment.entity.PaymentLedgerEntry;
 import com.miriyum.domain.payment.entity.PaymentLedgerEntry.Type;
 import com.miriyum.domain.payment.entity.PaymentRefund;
+import com.miriyum.domain.payment.entity.ReservationDepositDisposition;
 import com.miriyum.domain.payment.exception.PaymentErrorCode;
+import com.miriyum.domain.payment.port.PaymentProviderClient;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderCancellation;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderPayment;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderStatus;
@@ -29,6 +36,7 @@ import com.miriyum.domain.payment.repository.PaymentLedgerEntryRepository;
 import com.miriyum.domain.payment.repository.PaymentReferenceAllocator;
 import com.miriyum.domain.payment.repository.PaymentRefundRepository;
 import com.miriyum.domain.payment.repository.PaymentRepository;
+import com.miriyum.domain.payment.repository.ReservationDepositDispositionRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.nio.charset.StandardCharsets;
@@ -135,6 +143,60 @@ public class PaymentTransactionService {
         }
     }
 
+    record DispositionClaim(
+            boolean requiresRefund,
+            String dispositionId,
+            RequestRefundCommand refundCommand,
+            DispositionResult completedResult
+    ) {
+        public static DispositionClaim requiresRefund(
+                String dispositionId,
+                RequestRefundCommand refundCommand
+        ) {
+            return new DispositionClaim(true, dispositionId, refundCommand, null);
+        }
+
+        public static DispositionClaim completed(DispositionResult result) {
+            return new DispositionClaim(false, result.dispositionId(), null, result);
+        }
+    }
+
+    record DispositionReconciliationClaim(
+            boolean requiresProviderLookup,
+            String dispositionId,
+            String paymentId,
+            String portOnePaymentId,
+            String refundId,
+            long paymentAmountMinor,
+            long refundAmountMinor,
+            String currency,
+            String reasonCode,
+            DispositionResult completedResult
+    ) {
+        public static DispositionReconciliationClaim requiresLookup(
+                String dispositionId,
+                String paymentId,
+                String portOnePaymentId,
+                String refundId,
+                long paymentAmountMinor,
+                long refundAmountMinor,
+                String currency,
+                String reasonCode,
+                DispositionResult currentResult
+        ) {
+            return new DispositionReconciliationClaim(
+                    true, dispositionId, paymentId, portOnePaymentId, refundId,
+                    paymentAmountMinor, refundAmountMinor, currency, reasonCode, currentResult);
+        }
+
+        public static DispositionReconciliationClaim completed(DispositionResult result) {
+            return new DispositionReconciliationClaim(
+                    false, result.dispositionId(), result.paymentId(), null, result.refundId(),
+                    result.originalAmountMinor(), result.incrementalRefundAmountMinor(),
+                    result.currency(), null, result);
+        }
+    }
+
     private static final String RESERVATION_DEPOSIT = "RESERVATION_DEPOSIT";
     private static final String WAITING_RESERVATION_DEPOSIT = "WAITING_RESERVATION_DEPOSIT";
     private static final Duration CONFIRMATION_PROCESSING_LEASE = Duration.ofMinutes(5);
@@ -143,6 +205,7 @@ public class PaymentTransactionService {
     private final PaymentRepository payments;
     private final PaymentAttemptRepository attempts;
     private final PaymentRefundRepository refunds;
+    private final ReservationDepositDispositionRepository dispositions;
     private final PaymentLedgerEntryRepository ledger;
     private final PaymentReferenceAllocator references;
     private final PaymentSettings settings;
@@ -152,6 +215,7 @@ public class PaymentTransactionService {
             PaymentRepository payments,
             PaymentAttemptRepository attempts,
             PaymentRefundRepository refunds,
+            ReservationDepositDispositionRepository dispositions,
             PaymentLedgerEntryRepository ledger,
             PaymentReferenceAllocator references,
             PaymentSettings settings,
@@ -160,6 +224,7 @@ public class PaymentTransactionService {
         this.payments = payments;
         this.attempts = attempts;
         this.refunds = refunds;
+        this.dispositions = dispositions;
         this.ledger = ledger;
         this.references = references;
         this.settings = settings;
@@ -532,12 +597,43 @@ public class PaymentTransactionService {
             }
         }
         List<PaymentRefund> expiredProcessing =
-                refunds.findByPayment_IdAndStatusAndRequestedAtLessThanEqualOrderByRequestedAtAsc(
+                refunds
+                .findByPayment_IdAndStatusAndProcessingStartedAtLessThanEqualOrderByProcessingStartedAtAsc(
                         payment.getId(),
                         RefundStatus.PROCESSING,
                         now.minus(REFUND_PROCESSING_LEASE)
                 );
         expiredProcessing.forEach(refund -> markRefundReconciliation(refund, payment, now));
+        if (existing != null && existing.getStatus() == RefundStatus.FAILED) {
+            if (payment.getStatus() != Payment.Status.PAID
+                    && payment.getStatus() != Payment.Status.PARTIALLY_REFUNDED) {
+                throw new ServiceException(PaymentErrorCode.INVALID_STATE_TRANSITION);
+            }
+            long processingAmount = refunds.sumAmountMinorByPaymentIdAndStatus(
+                    payment.getId(), RefundStatus.PROCESSING);
+            long availableAmount = payment.getRefundableAmountMinor() - processingAmount;
+            if (existing.getAmountMinor() > availableAmount) {
+                throw new ServiceException(PaymentErrorCode.REFUND_AMOUNT_EXCEEDED);
+            }
+            existing.retry(now);
+            ledger.save(PaymentLedgerEntry.record(
+                    payment,
+                    existing,
+                    "refund-retry-requested:" + existing.getRefundId()
+                            + ":" + existing.getAttemptCount(),
+                    Type.REFUND_RETRY_REQUESTED,
+                    existing.getAmountMinor(),
+                    now
+            ));
+            return RefundClaim.requiresCall(
+                    existing.getRefundId(),
+                    payment.getPaymentId(),
+                    payment.getPortOnePaymentId(),
+                    existing.getAmountMinor(),
+                    existing.getCurrency(),
+                    existing.getReasonCode()
+            );
+        }
         if (existing != null) {
             return RefundClaim.completed(toRefundResult(existing));
         }
@@ -625,7 +721,8 @@ public class PaymentTransactionService {
                 ledger.save(PaymentLedgerEntry.record(
                         payment,
                         refund,
-                        "refund-failed:" + refund.getRefundId(),
+                        "refund-failed:" + refund.getRefundId()
+                                + ":" + refund.getAttemptCount(),
                         Type.REFUND_FAILED,
                         refund.getAmountMinor(),
                         now
@@ -654,6 +751,296 @@ public class PaymentTransactionService {
             markRefundReconciliation(refund, payment, now);
         }
         return toRefundResult(refund);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public DispositionClaim claimDisposition(
+            ApplyReservationDepositDispositionCommand command,
+            Instant now
+    ) {
+        Payment payment = paymentForUpdate(command.paymentId());
+        String fingerprint = dispositionFingerprint(command);
+        ReservationDepositDisposition existing = dispositions
+                .findByPayment_IdAndIdempotencyKey(payment.getId(), command.idempotencyKey())
+                .orElse(null);
+        if (existing != null) {
+            if (!existing.getRequestFingerprint().equals(fingerprint)) {
+                throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
+            }
+            if (existing.getStatus() == DispositionStatus.FAILED
+                    && existing.getFailureClassification()
+                    == DispositionFailureClassification.RETRYABLE) {
+                if (!canRetryDisposition(payment, existing)) {
+                    existing.rejectRetryPermanently(now);
+                    return DispositionClaim.completed(toDispositionResult(existing));
+                }
+                existing.retry(now);
+                return refundClaimFor(existing);
+            }
+            if (existing.getStatus() == DispositionStatus.PROCESSING) {
+                return refundClaimFor(existing);
+            }
+            return DispositionClaim.completed(toDispositionResult(existing));
+        }
+        ReservationDepositDisposition existingSource = dispositions
+                .findByPayment_IdAndSourceEventId(
+                        payment.getId(), command.sourceEventId())
+                .orElse(null);
+        if (existingSource != null) {
+            if (!existingSource.getRequestFingerprint().equals(fingerprint)) {
+                throw new ServiceException(PaymentErrorCode.INVALID_STATE_TRANSITION);
+            }
+            return DispositionClaim.completed(toDispositionResult(existingSource));
+        }
+
+        long previouslyCompleted = 0L;
+        boolean invalidCorrection = false;
+        if (command.correctsSourceEventId() != null) {
+            ReservationDepositDisposition corrected = dispositions
+                    .findByPayment_IdAndSourceEventId(
+                            payment.getId(), command.correctsSourceEventId())
+                    .orElse(null);
+            if (corrected == null) {
+                invalidCorrection = true;
+            } else {
+                previouslyCompleted = corrected.getCompletedRefundAmountMinor();
+                invalidCorrection = corrected.getStatus() != DispositionStatus.COMPLETED
+                        || dispositions.existsLineageChild(
+                                payment.getId(),
+                                command.correctsSourceEventId(),
+                                DispositionStatus.FAILED,
+                                DispositionFailureClassification.PERMANENT);
+            }
+        }
+
+        long targetAmount = dispositionTargetAmount(
+                payment.getAmountMinor(), command.targetRefundRateBasisPoints());
+        boolean invalid = !RESERVATION_DEPOSIT.equals(payment.getSourceType())
+                || (payment.getStatus() != Payment.Status.PAID
+                && payment.getStatus() != Payment.Status.PARTIALLY_REFUNDED)
+                || invalidCorrection
+                || targetAmount < previouslyCompleted
+                || Math.max(0L, targetAmount - previouslyCompleted)
+                > payment.getRefundableAmountMinor();
+        ReservationDepositDisposition disposition = invalid
+                ? ReservationDepositDisposition.rejectPermanent(
+                        payment,
+                        command.idempotencyKey(),
+                        command.sourceEventId(),
+                        command.sourceEventType(),
+                        command.correctsSourceEventId(),
+                        command.policyVersion(),
+                        command.responsibilityCode(),
+                        command.targetRefundRateBasisPoints(),
+                        targetAmount,
+                        previouslyCompleted,
+                        fingerprint,
+                        now)
+                : ReservationDepositDisposition.create(
+                        payment,
+                        command.idempotencyKey(),
+                        command.sourceEventId(),
+                        command.sourceEventType(),
+                        command.correctsSourceEventId(),
+                        command.policyVersion(),
+                        command.responsibilityCode(),
+                        command.targetRefundRateBasisPoints(),
+                        targetAmount,
+                        previouslyCompleted,
+                        fingerprint,
+                        now);
+        dispositions.saveAndFlush(disposition);
+        if (disposition.getStatus() != DispositionStatus.PROCESSING) {
+            return DispositionClaim.completed(toDispositionResult(disposition));
+        }
+        return refundClaimFor(disposition);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public DispositionResult finalizeDisposition(
+            String dispositionId,
+            RefundResult refundResult,
+            Instant now
+    ) {
+        ReservationDepositDisposition disposition = dispositionForUpdate(dispositionId);
+        if (disposition.getStatus() != DispositionStatus.PROCESSING) {
+            return toDispositionResult(disposition);
+        }
+        switch (refundResult.status()) {
+            case COMPLETED -> disposition.completeRefund(
+                    refundResult.refundId(), refundResult.completedAmountMinor(), now);
+            case FAILED -> disposition.failRetryable(refundResult.refundId(), now);
+            case RECONCILIATION_REQUIRED -> disposition.requireReconciliation(
+                    refundResult.refundId(), now);
+            case REQUESTED, VALIDATING, PROCESSING -> disposition.attachRefund(
+                    refundResult.refundId(), now);
+        }
+        return toDispositionResult(disposition);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public DispositionResult resolveDispositionAfterRefundFailure(
+            String dispositionId,
+            Instant now
+    ) {
+        ReservationDepositDisposition disposition = dispositionForUpdate(dispositionId);
+        if (disposition.getStatus() != DispositionStatus.PROCESSING) {
+            return toDispositionResult(disposition);
+        }
+        PaymentRefund refund = refunds.findByPayment_IdAndIdempotencyKey(
+                disposition.getPayment().getId(), disposition.getIdempotencyKey()).orElse(null);
+        if (refund == null || !matchesDispositionRefund(disposition, refund)) {
+            disposition.failPermanent(now);
+            return toDispositionResult(disposition);
+        }
+        switch (refund.getStatus()) {
+            case COMPLETED -> disposition.completeRefund(
+                    refund.getRefundId(), refund.getAmountMinor(), now);
+            case FAILED -> disposition.failPermanent(now);
+            case RECONCILIATION_REQUIRED -> disposition.requireReconciliation(
+                    refund.getRefundId(), now);
+            case REQUESTED, VALIDATING, PROCESSING -> disposition.attachRefund(
+                    refund.getRefundId(), now);
+        }
+        return toDispositionResult(disposition);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public DispositionReconciliationClaim claimDispositionReconciliation(
+            GetReservationDepositDispositionQuery query
+    ) {
+        Payment payment = paymentForUpdate(query.paymentId());
+        ReservationDepositDisposition found = dispositions
+                .findByPayment_PaymentIdAndSourceEventId(
+                        query.paymentId(), query.sourceEventId())
+                .orElseThrow(() -> new ServiceException(PaymentErrorCode.PAYMENT_NOT_FOUND));
+        ReservationDepositDisposition disposition = dispositionForUpdate(found.getDispositionId());
+        DispositionResult current = toDispositionResult(disposition);
+        if (disposition.getStatus() != DispositionStatus.RECONCILIATION_REQUIRED
+                || disposition.getFailureClassification()
+                != DispositionFailureClassification.UNKNOWN
+                || disposition.getRefundId() == null) {
+            return DispositionReconciliationClaim.completed(current);
+        }
+        PaymentRefund refund = refundForUpdate(disposition.getRefundId());
+        if (!refund.getPayment().getId().equals(payment.getId())
+                || refund.getStatus() != RefundStatus.RECONCILIATION_REQUIRED
+                || !matchesDispositionRefund(disposition, refund)) {
+            return DispositionReconciliationClaim.completed(current);
+        }
+        return DispositionReconciliationClaim.requiresLookup(
+                disposition.getDispositionId(),
+                payment.getPaymentId(),
+                payment.getPortOnePaymentId(),
+                refund.getRefundId(),
+                payment.getAmountMinor(),
+                refund.getAmountMinor(),
+                refund.getCurrency(),
+                refund.getReasonCode(),
+                current);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public DispositionResult finalizeDispositionReconciliation(
+            DispositionReconciliationClaim claim,
+            ProviderCancellation cancellation,
+            Instant now
+    ) {
+        Payment payment = paymentForUpdate(claim.paymentId());
+        ReservationDepositDisposition disposition = dispositionForUpdate(claim.dispositionId());
+        if (disposition.getStatus() != DispositionStatus.RECONCILIATION_REQUIRED) {
+            return toDispositionResult(disposition);
+        }
+        PaymentRefund refund = refundForUpdate(claim.refundId());
+        String expectedReason = PaymentProviderClient.cancellationReason(
+                refund.getReasonCode(), refund.getRefundId());
+        if (refund.getStatus() != RefundStatus.RECONCILIATION_REQUIRED
+                || !refund.getPayment().getId().equals(payment.getId())
+                || !disposition.getRefundId().equals(refund.getRefundId())
+                || !matchesDispositionRefund(disposition, refund)
+                || cancellation.amountMinor() != refund.getAmountMinor()
+                || !cancellation.currency().equals(refund.getCurrency())
+                || !expectedReason.equals(cancellation.reason())) {
+            return toDispositionResult(disposition);
+        }
+        switch (cancellation.status()) {
+            case CANCELLED, PARTIALLY_CANCELLED -> {
+                payment.applyCompletedRefund(refund.getAmountMinor(), now);
+                refund.complete(cancellation.cancellationId(), now);
+                disposition.completeReconciledRefund(
+                        refund.getRefundId(), refund.getAmountMinor(), now);
+                ledger.save(PaymentLedgerEntry.record(
+                        payment,
+                        refund,
+                        "refund-completed:" + cancellation.cancellationId(),
+                        Type.REFUND_COMPLETED,
+                        refund.getAmountMinor(),
+                        now
+                ));
+                if (hasUnresolvedRefund(payment)) {
+                    payment.markRefundReconciliationRequired(now);
+                }
+            }
+            case FAILED -> {
+                refund.fail(now);
+                disposition.failReconciledRetryable(refund.getRefundId(), now);
+                if (payment.getStatus() == Payment.Status.RECONCILIATION_REQUIRED
+                        && !hasUnresolvedRefund(payment)) {
+                    payment.restoreRefundableStatusAfterReconciliation(now);
+                }
+                ledger.save(PaymentLedgerEntry.record(
+                        payment,
+                        refund,
+                        "refund-failed:" + refund.getRefundId()
+                                + ":" + refund.getAttemptCount(),
+                        Type.REFUND_FAILED,
+                        refund.getAmountMinor(),
+                        now
+                ));
+            }
+            case PAY_PENDING, PAID, UNKNOWN -> {
+                return toDispositionResult(disposition);
+            }
+        }
+        return toDispositionResult(disposition);
+    }
+
+    private DispositionClaim refundClaimFor(ReservationDepositDisposition disposition) {
+        return DispositionClaim.requiresRefund(
+                disposition.getDispositionId(),
+                new RequestRefundCommand(
+                        disposition.getPayment().getPaymentId(),
+                        disposition.getSourceEventId(),
+                        disposition.getIncrementalRefundAmountMinor(),
+                        "RESERVATION_DEPOSIT_DISPOSITION",
+                        disposition.getPolicyVersion(),
+                        disposition.getIdempotencyKey()
+                )
+        );
+    }
+
+    private boolean matchesDispositionRefund(
+            ReservationDepositDisposition disposition,
+            PaymentRefund refund
+    ) {
+        return refund.getSourceEventId().equals(disposition.getSourceEventId())
+                && refund.getAmountMinor() == disposition.getIncrementalRefundAmountMinor()
+                && refund.getPolicyVersion() == disposition.getPolicyVersion()
+                && "RESERVATION_DEPOSIT_DISPOSITION".equals(refund.getReasonCode());
+    }
+
+    private boolean canRetryDisposition(
+            Payment payment,
+            ReservationDepositDisposition disposition
+    ) {
+        if (payment.getStatus() != Payment.Status.PAID
+                && payment.getStatus() != Payment.Status.PARTIALLY_REFUNDED) {
+            return false;
+        }
+        long processingAmount = refunds.sumAmountMinorByPaymentIdAndStatus(
+                payment.getId(), RefundStatus.PROCESSING);
+        return disposition.getIncrementalRefundAmountMinor()
+                <= payment.getRefundableAmountMinor() - processingAmount;
     }
 
     private void markRefundReconciliation(PaymentRefund refund, Payment payment, Instant now) {
@@ -783,6 +1170,11 @@ public class PaymentTransactionService {
                 .orElseThrow(() -> new ServiceException(PaymentErrorCode.PAYMENT_NOT_FOUND));
     }
 
+    private ReservationDepositDisposition dispositionForUpdate(String dispositionId) {
+        return dispositions.findByDispositionIdForUpdate(dispositionId)
+                .orElseThrow(() -> new ServiceException(PaymentErrorCode.PAYMENT_NOT_FOUND));
+    }
+
     private PaymentAttempt latestAttempt(Payment payment) {
         return attempts.findFirstByPayment_IdOrderByAttemptNoDesc(payment.getId())
                 .orElseThrow(() -> new IllegalStateException("confirmation attempt is missing"));
@@ -905,6 +1297,31 @@ public class PaymentTransactionService {
         );
     }
 
+    private DispositionResult toDispositionResult(ReservationDepositDisposition disposition) {
+        return new DispositionResult(
+                disposition.getDispositionId(),
+                disposition.getPayment().getPaymentId(),
+                disposition.getSourceEventId(),
+                disposition.getSourceEventType(),
+                disposition.getCorrectsSourceEventId(),
+                disposition.getPolicyVersion(),
+                disposition.getResponsibilityCode(),
+                disposition.getTargetRefundRateBasisPoints(),
+                disposition.getOriginalAmountMinor(),
+                disposition.getTargetRefundAmountMinor(),
+                disposition.getIncrementalRefundAmountMinor(),
+                disposition.getCompletedRefundAmountMinor(),
+                disposition.getWithheldAmountMinor(),
+                disposition.getCurrency(),
+                disposition.getRefundId(),
+                disposition.getStatus(),
+                disposition.getFailureClassification(),
+                disposition.getRequestedAt(),
+                disposition.getUpdatedAt(),
+                disposition.getCompletedAt()
+        );
+    }
+
     private static String refundFingerprint(RequestRefundCommand command) {
         String canonical = command.paymentId() + "\n" + command.sourceEventId() + "\n"
                 + command.refundAmountMinor() + "\n" + command.reasonCode()
@@ -915,6 +1332,30 @@ public class PaymentTransactionService {
         } catch (Exception exception) {
             throw new IllegalStateException("SHA-256 is not available", exception);
         }
+    }
+
+    private static String dispositionFingerprint(
+            ApplyReservationDepositDispositionCommand command
+    ) {
+        String canonical = command.paymentId() + "\n" + command.sourceEventId() + "\n"
+                + command.sourceEventType() + "\n" + command.correctsSourceEventId() + "\n"
+                + command.policyVersion() + "\n" + command.responsibilityCode() + "\n"
+                + command.targetRefundRateBasisPoints();
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception exception) {
+            throw new IllegalStateException("SHA-256 is not available", exception);
+        }
+    }
+
+    private static long dispositionTargetAmount(long originalAmountMinor, int rateBasisPoints) {
+        return switch (rateBasisPoints) {
+            case 0 -> 0L;
+            case 5000 -> originalAmountMinor / 2L;
+            case 10000 -> originalAmountMinor;
+            default -> throw new IllegalArgumentException("unsupported target refund rate");
+        };
     }
 
     private static String preparationFingerprint(PrepareReservationDepositCommand command) {
