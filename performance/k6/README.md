@@ -6,7 +6,7 @@ Issue #285의 인증·공개 검색·예약 생성·알림 이력 기준선을 �
 
 - `TARGET_ENV`는 `local` 또는 `staging`만 허용한다. production hostname과 allowlist 밖 host는 HTTP 요청 전에 거부하며, local은 전용 HTTPS proxy 또는 loopback host만 허용한다.
 - staging은 `STAGING_APPROVED=true`가 필요하다. `COMMIT_SHA`는 실제 배포 backend full SHA, `HARNESS_COMMIT_SHA`는 실행 중인 k6 script full SHA다. local은 둘이 반드시 같아야 하며 staging에서만 `STAGING_SPLIT_SHA_APPROVED=true`로 리뷰된 split SHA를 허용한다. staging은 아래 clean-checkout 검증을 통과한 뒤에만 `STAGING_HARNESS_SOURCE_VERIFIED=true`를 허용한다. local·staging baseline은 성공한 smoke의 run ID와 JSON artifact를 함께 요구하고, artifact의 profile·target·두 SHA·fixture·threshold를 현재 실행과 대조한다.
-- staging의 reviewed hostname은 `staging-api.miriyum.click` 하나다. 다만 `#419`의 HTTPS/TLS 병합과 `https://staging-api.miriyum.click/actuator/health` smoke가 완료되기 전 staging k6는 `NOT RUN`이며, 이 전제 없이 실행하지 않는다.
+- staging의 reviewed hostname은 `staging-api.miriyum.click` 하나다. `https://staging-api.miriyum.click/actuator/health` HTTPS smoke 성공 증거가 기록되기 전 staging k6는 `NOT RUN`이며, 이 전제 없이 실행하지 않는다.
 - `MAX_VUS`와 `ARRIVAL_RATE`는 선택한 시나리오 전체에 배분되는 상한이다. 일반 `MAX_VUS` 상한은 100이지만 `authRefresh`를 선택하면 CSRF 준비 예산을 보존하도록 50 이하로 제한하며, duration은 setup bearer의 유효성을 보존하기 위해 최대 600초다.
 - 실제 계정 비밀번호는 저장소 밖 환경 파일에서만 읽는다. Access/Refresh Token, cookie, cursor, 알림 제목, 응답 body와 자원 ID는 summary에 쓰지 않는다.
 - `test-data.example.json`은 schema 예시이며 실행 가능한 데이터가 아니다. 실제 local fixture는 ignored `fixtures/test-data.local.json`, staging fixture는 저장소 밖 승인 경로를 사용한다.
@@ -151,7 +151,7 @@ backend 기본 IP rate limit은 login 성공 표본을 단일 source IP 기준 5
 6. `reservationCreate`는 #358이 `dev`에 병합된 뒤에만 `STAGING_RESERVATION_FIXTURE_APPROVED=true`; 그전에는 `SCENARIOS`에서 명시적으로 제외
 7. 두 SHA와 동일 fixture의 staging smoke 성공 `RUN_ID`
 
- staging smoke 전에 승인된 harness checkout에서 다음을 실행한다. 출력이 하나라도 있거나 HEAD가 다르면 중단하며 `STAGING_HARNESS_SOURCE_VERIFIED`를 설정하지 않는다.
+staging smoke 전에 승인된 harness checkout에서 다음을 실행한다. 출력이 하나라도 있거나 HEAD가 다르면 중단하며 `STAGING_HARNESS_SOURCE_VERIFIED`를 설정하지 않는다.
 
 ```powershell
 $actualHarnessSha = (git rev-parse HEAD).Trim()
@@ -162,7 +162,7 @@ if ($actualHarnessSha -ne $harnessCommitSha -or $harnessChanges.Count -ne 0) {
 $stagingHarnessSourceVerified = 'true'
 ```
 
-staging smoke에는 `TARGET_ENV=staging`, HTTPS `BASE_URL`, `STAGING_APPROVED=true`, `STAGING_HARNESS_SOURCE_VERIFIED=true`, 두 full SHA를 전달한다. baseline에는 추가로 `PROFILE=staging-baseline`, `STAGING_SMOKE_RUN_ID`, `SMOKE_PROOF_PATH=/results/{STAGING_SMOKE_RUN_ID}.json`을 전달한다. #358 전에는 `SCENARIOS=authRefresh,storeSearch,notificationHistory`처럼 예약을 명시적으로 제외해야 하며, 생략해 네 시나리오 기본값을 선택하면 요청 전에 실패한다. 신뢰 staging host는 `staging-api.miriyum.click` 하나이며, `#419`의 HTTPS/TLS 병합과 health smoke 전에는 `NOT RUN`으로 유지한다. production hostname, 실사용자 계정 또는 운영 데이터는 어떤 값으로도 실행하지 않는다.
+staging smoke에는 `TARGET_ENV=staging`, HTTPS `BASE_URL`, `STAGING_APPROVED=true`, `STAGING_HARNESS_SOURCE_VERIFIED=true`, 두 full SHA를 전달한다. baseline에는 추가로 `PROFILE=staging-baseline`, `STAGING_SMOKE_RUN_ID`, `SMOKE_PROOF_PATH=/results/{STAGING_SMOKE_RUN_ID}.json`을 전달한다. #358 전에는 `SCENARIOS=authRefresh,storeSearch,notificationHistory`처럼 예약을 명시적으로 제외해야 하며, 생략해 네 시나리오 기본값을 선택하면 요청 전에 실패한다. 신뢰 staging host는 `staging-api.miriyum.click` 하나이며, HTTPS health smoke 성공 증거 전에는 `NOT RUN`으로 유지한다. production hostname, 실사용자 계정 또는 운영 데이터는 어떤 값으로도 실행하지 않는다.
 
 ### 예외 제거와 기본 429 복구
 
@@ -190,7 +190,7 @@ docker run --rm `
   /scripts/recovery-rate-limit.js
 ```
 
- verifier는 단일 VU·단일 iteration으로 순차 실행한다. 로그인 5회가 모두 성공하고 각 session이 logout된 뒤 6번째 로그인만 정확히 `429`여야 성공한다. summary에는 두 SHA, 성공 횟수 `5`, 최종 상태 `429`, threshold 결과만 남으며 실제 IP·email·password·Token·cookie·Authorization header·요청/응답 원문은 남기지 않는다. `--http-debug`를 사용하지 않는다.
+verifier는 단일 VU·단일 iteration으로 순차 실행한다. 로그인 5회가 모두 성공하고 각 session이 logout된 뒤 6번째 로그인만 정확히 `429`여야 성공한다. summary에는 두 SHA, 성공 횟수 `5`, 최종 상태 `429`, threshold 결과만 남으며 실제 IP·email·password·Token·cookie·Authorization header·요청/응답 원문은 남기지 않는다. `--http-debug`를 사용하지 않는다.
 
 ## 종료와 결과 취급
 
