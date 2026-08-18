@@ -26,6 +26,7 @@ class BackendCiPathFilterTest(unittest.TestCase):
         self.assert_scope(["backend/src/main/java/com/miriyum/MiriyumApplication.java"], "full")
         self.assert_scope(["backend/src/main/resources/db/migration/V57__example.sql"], "full")
         self.assert_scope([".github/workflows/backend-ci.yml"], "full")
+        self.assert_scope(["deploy/deploy.sh"], "full")
 
     def test_openapi_changes_run_unit_tests_without_integration_shards(self):
         self.assert_scope(["docs/specs/auth-account/openapi.yaml"], "unit")

@@ -62,7 +62,7 @@ Pull Request는 변경 요약과 구현 과정에서 생성된 증거를 소유�
 
 CI는 자체 실행 출력을 소유한다. 이를 영구 저장소 로그에 옮겨 적지 않는다. 구성된 workflow만으로 현재 PR이 통과했거나 저장소 검사가 필수라는 증거가 되지는 않는다.
 
-현재 `dev` 브랜치에는 `backend-ci` required check가 구성되어 있다. `Backend CI`의 `backend-ci` 집계 job은 모든 PR에서 실행한다. 백엔드 코드·migration·Gradle·Backend CI 변경과 미분류 경로는 unit·integration test가 모두 성공해야 하며, OpenAPI·배포 설정은 unit test와 계약 검증이 성공해야 한다. 프론트·k6·일반 문서·런북 전용 변경은 계약 검증만 성공하면 된다. 각 PR은 실제 해당 commit의 CI 실행 링크를 증거로 남기며, 존재하지 않는 check를 통과했다고 표시하지 않는다.
+현재 `dev` 브랜치에는 `backend-ci` required check가 구성되어 있다. `Backend CI`의 `backend-ci` 집계 job은 모든 PR에서 실행한다. 백엔드 코드·migration·Gradle·Backend CI 변경, `deploy/deploy.sh`, 미분류 경로는 unit·integration test가 모두 성공해야 하며, OpenAPI와 그 밖의 배포 설정은 unit test와 계약 검증이 성공해야 한다. 프론트·k6·일반 문서·런북 전용 변경은 계약 검증만 성공하면 된다. 각 PR은 실제 해당 commit의 CI 실행 링크를 증거로 남기며, 존재하지 않는 check를 통과했다고 표시하지 않는다.
 
 ## 위임과 인계(handoff)
 

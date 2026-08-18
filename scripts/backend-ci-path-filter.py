@@ -11,7 +11,10 @@ SAFE_SKIP_PATHS = (
     ".github/workflows/frontend-ci.yml",
     ".github/workflows/k6-contract.yml",
 )
-FULL_TEST_PATHS = (".github/workflows/backend-ci.yml",)
+FULL_TEST_PATHS = (
+    ".github/workflows/backend-ci.yml",
+    "deploy/deploy.sh",
+)
 
 
 def classify(paths):
