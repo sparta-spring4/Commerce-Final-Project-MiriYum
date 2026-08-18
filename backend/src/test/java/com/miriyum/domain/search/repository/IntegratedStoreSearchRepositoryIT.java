@@ -270,6 +270,9 @@ class IntegratedStoreSearchRepositoryIT {
         Menu sameStoreCandidate = publishMenu(
                 sourceStore, "동일 매장 후보", 11_000, "BEVERAGE", List.of(),
                 MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Menu secondaryConceptCandidate = publishMenu(
+                sourceStore, "보조 분류 후보", 11_000, "BEVERAGE", List.of("DESSERT"),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
         Store nearbyStore = createStore(
                 "인근 후보 매장", Region.SEOUL, "KOREAN", Set.of(), false);
         setVerifiedCoordinates(sourceStore, "37.566500000000000", "126.978000000000000");
@@ -281,9 +284,15 @@ class IntegratedStoreSearchRepositoryIT {
         BoundingBox box = new BoundingBox(37.5, 37.6, 126.9, 127.1);
 
         assertThat(alternativeCandidateRepository.findSameStoreExpandedCandidates(
-                sourceStore.getId(), source.getId(), List.of("동일 매장 후보"), 20))
-                .extracting(candidate -> candidate.menuId())
-                .containsExactly(sameStoreCandidate.getId());
+                sourceStore.getId(), source.getId(),
+                List.of("동일 매장 후보", "DESSERT"), 20))
+                .satisfiesExactly(candidate -> {
+                    assertThat(candidate.menuId()).isEqualTo(sameStoreCandidate.getId());
+                    assertThat(candidate.conceptScore()).isEqualTo(50);
+                }, candidate -> {
+                    assertThat(candidate.menuId()).isEqualTo(secondaryConceptCandidate.getId());
+                    assertThat(candidate.conceptScore()).isEqualTo(45);
+                });
         assertThat(alternativeCandidateRepository.findNearbyExpandedCandidates(
                 sourceStore.getId(), source.getId(), box,
                 List.of("인근 매장 후보"), 20))

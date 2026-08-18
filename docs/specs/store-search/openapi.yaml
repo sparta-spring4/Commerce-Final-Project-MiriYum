@@ -1322,6 +1322,9 @@ components:
     AlternativeReasonCode:
       type: string
       enum: [SAME_PRIMARY_CATEGORY, PRICE_WITHIN_20_PERCENT, SECONDARY_CATEGORY_MATCH, ALLERGEN_FILTER_PASSED, IN_STOCK]
+    MenuAlternativeRankingReason:
+      type: string
+      enum: [LLM_CONCEPT, SECONDARY_CATEGORY, PRICE_SIMILARITY]
     AllergenIngredientCode:
       type: string
       enum: [EGG, MILK, BUCKWHEAT, PEANUT, SOYBEAN, WHEAT, MACKEREL, CRAB, SHRIMP, PORK, PEACH, TOMATO, SULFITES, WALNUT, CHICKEN, BEEF, SQUID, SHELLFISH, PINE_NUT]
@@ -1371,7 +1374,7 @@ components:
     MenuAlternativeItem:
       type: object
       additionalProperties: false
-      required: [storeId, storeName, menuId, menuName, unitPrice, availableOnlineQuantity, secondaryCategoryMatchCount, distanceMeters, coordinates, reasonCodes]
+      required: [storeId, storeName, menuId, menuName, unitPrice, availableOnlineQuantity, secondaryCategoryMatchCount, distanceMeters, coordinates, reasonCodes, alternativeScore, rankingReason, scoreBreakdown]
       properties:
         storeId:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
@@ -1400,6 +1403,31 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AlternativeReasonCode"
+        alternativeScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        rankingReason:
+          $ref: "#/components/schemas/MenuAlternativeRankingReason"
+        scoreBreakdown:
+          $ref: "#/components/schemas/MenuAlternativeScoreBreakdown"
+    MenuAlternativeScoreBreakdown:
+      type: object
+      additionalProperties: false
+      required: [llmConcept, secondaryCategory, priceSimilarity]
+      properties:
+        llmConcept:
+          type: integer
+          minimum: 0
+          maximum: 50
+        secondaryCategory:
+          type: integer
+          minimum: 0
+          maximum: 20
+        priceSimilarity:
+          type: integer
+          minimum: 0
+          maximum: 30
     MenuAlternativeSearchData:
       type: object
       additionalProperties: false

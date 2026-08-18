@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.search.config.OpenAiSearchInterpretationProperties;
 import com.miriyum.domain.search.config.SearchInterpretationHttpConfig;
-import java.util.Set;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
@@ -15,7 +14,7 @@ import tools.jackson.databind.ObjectMapper;
 class OpenAiSearchConceptInterpreterLiveTest {
 
     @Test
-    void interpretsSpicySoupAsAnApprovedStewConcept() {
+    void returnsMultipleFoodConceptsWithoutPinnedDishContract() {
         OpenAiSearchInterpretationProperties properties =
                 new OpenAiSearchInterpretationProperties(
                         true,
@@ -38,6 +37,8 @@ class OpenAiSearchConceptInterpreterLiveTest {
                 new SearchConceptRequest("얼큰한 국물", STORE_SEARCH));
 
         assertThat(result.concepts())
-                .anyMatch(Set.of("김치찌개", "찌개")::contains);
+                .hasSizeBetween(3, 8)
+                .allMatch(value -> !value.isBlank())
+                .doesNotHaveDuplicates();
     }
 }

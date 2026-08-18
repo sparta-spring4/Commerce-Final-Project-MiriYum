@@ -2,6 +2,7 @@ package com.miriyum.domain.search.expansion;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalToJson;
+import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
@@ -11,6 +12,7 @@ import static com.miriyum.domain.search.expansion.SearchConceptFailureReason.HTT
 import static com.miriyum.domain.search.expansion.SearchConceptFailureReason.MALFORMED_RESPONSE;
 import static com.miriyum.domain.search.expansion.SearchConceptFailureReason.REFUSAL;
 import static com.miriyum.domain.search.expansion.SearchConceptFailureReason.TIMEOUT;
+import static com.miriyum.domain.search.expansion.SearchConceptPurpose.MENU_ALTERNATIVE;
 import static com.miriyum.domain.search.expansion.SearchConceptPurpose.STORE_SEARCH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -43,7 +45,7 @@ class OpenAiSearchConceptInterpreterTest {
     }
 
     @Test
-    void sendsStrictBoundedSchemaAndMapsUsage() {
+    void sendsDeterministicDiverseConceptInstructionAndMapsUsage() {
         wireMock.stubFor(post(urlEqualTo("/v1/chat/completions"))
                 .willReturn(okJson(successResponse())));
         OpenAiSearchConceptInterpreter interpreter = interpreter(properties(2_000));
@@ -60,10 +62,11 @@ class OpenAiSearchConceptInterpreterTest {
                         {
                           "model":"gpt-4o-mini",
                           "messages":[
-                            {"role":"system","content":"사용자가 실제 등록 메뉴를 찾도록 검색 표현을 짧은 한국어 음식명과 검색 동의어로 변환하세요. 가장 가능성 높은 구체적 메뉴명을 먼저 두고 '메뉴명:', '재료:', '맛:', '조리형태:' 같은 라벨이나 설명 문장을 쓰지 마세요. 예: '얼큰한 국물'은 '김치찌개', '찌개', '매운 국물'. 알레르기, 식이 안전, 재고, 예약 가능 여부를 추론하지 마세요."},
+                            {"role":"system","content":"사용자가 실제 등록 메뉴를 찾도록 검색 표현을 짧은 한국어 음식명과 검색 동의어로 변환하세요. 맛, 재료, 국물 여부, 조리 형태를 종합해 서로 다른 음식 계열의 구체적인 메뉴 후보를 다양하게 제시하고, 입력에 없는 특정 메뉴 하나로 단정하지 마세요. 가장 가능성 높은 후보부터 배열하되 같은 계열의 표현만 반복하지 마세요. '메뉴명:', '재료:', '맛:', '조리형태:' 같은 라벨이나 설명 문장을 쓰지 마세요. 알레르기, 식이 안전, 재고, 예약 가능 여부를 추론하지 마세요."},
                             {"role":"user","content":"얼큰한 국물"}
                           ],
                           "max_tokens":100,
+                          "temperature":0.0,
                           "response_format":{
                             "type":"json_schema",
                             "json_schema":{
@@ -85,6 +88,26 @@ class OpenAiSearchConceptInterpreterTest {
                           }
                         }
                         """, true, true)));
+    }
+
+    @Test
+    void menuAlternativeRequestsConcreteAlternativesAndStandaloneSearchTraits() {
+        wireMock.stubFor(post(urlEqualTo("/v1/chat/completions"))
+                .withRequestBody(matchingJsonPath(
+                        "$.messages[0].content",
+                        com.github.tomakehurst.wiremock.client.WireMock.containing(
+                                "정확히 8개")))
+                .withRequestBody(matchingJsonPath(
+                        "$.response_format.json_schema.schema.properties.concepts.minItems",
+                        equalTo("8")))
+                .willReturn(okJson(successResponse())));
+        OpenAiSearchConceptInterpreter interpreter = interpreter(properties(2_000));
+
+        SearchConceptExpansion result = interpreter.interpret(new SearchConceptRequest(
+                "매콤한 철판 닭갈비 고추장 양념에 볶은 닭고기 철판요리 MEAT",
+                MENU_ALTERNATIVE));
+
+        assertThat(result.concepts()).containsExactly("김치찌개", "찌개");
     }
 
     @ParameterizedTest
