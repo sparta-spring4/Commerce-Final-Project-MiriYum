@@ -4,6 +4,7 @@ import com.miriyum.domain.reservation.dto.ReservationHoldContracts;
 import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
 import com.miriyum.domain.reservation.repository.ReservationHoldRepository;
 import com.miriyum.domain.reservation.repository.ReservationHoldTransitionAuditRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -28,17 +29,23 @@ public class ReservationHoldExpirationService {
     private final ReservationHoldRepository holdRepository;
     private final ReservationHoldTransitionAuditRepository auditRepository;
     private final ReservationHoldCommandFacade commandFacade;
+    private final ReservationDepositProcessRepository processRepository;
+    private final ReservationDepositProcessCommandFacade depositCommandFacade;
     private final Clock clock;
 
     public ReservationHoldExpirationService(
             ReservationHoldRepository holdRepository,
             ReservationHoldTransitionAuditRepository auditRepository,
             ReservationHoldCommandFacade commandFacade,
+            ReservationDepositProcessRepository processRepository,
+            ReservationDepositProcessCommandFacade depositCommandFacade,
             Clock clock
     ) {
         this.holdRepository = Objects.requireNonNull(holdRepository);
         this.auditRepository = Objects.requireNonNull(auditRepository);
         this.commandFacade = Objects.requireNonNull(commandFacade);
+        this.processRepository = Objects.requireNonNull(processRepository);
+        this.depositCommandFacade = Objects.requireNonNull(depositCommandFacade);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -73,7 +80,14 @@ public class ReservationHoldExpirationService {
                 long candidateId = requireNextCandidate(candidate, afterId);
                 afterId = candidateId;
                 try {
-                    commandFacade.transition(expirationCommand(candidate));
+                    Long processId = processRepository
+                            .findProcessIdByReservationHoldId(candidateId)
+                            .orElse(null);
+                    if (processId == null) {
+                        commandFacade.transition(expirationCommand(candidate));
+                    } else {
+                        depositCommandFacade.reconcileLinkedExpiration(processId);
+                    }
                     completed++;
                 } catch (RuntimeException failure) {
                     log.warn(

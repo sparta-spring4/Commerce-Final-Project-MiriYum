@@ -9,6 +9,7 @@ import static org.mockito.Mockito.times;
 import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
+import com.miriyum.domain.payment.service.PaymentPreparationRetryableConflictException;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationPartyRequest;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
@@ -78,6 +79,52 @@ class ReservationCreationCommandFacadeTest {
 
         assertThat(actual).isSameAs(expected);
         then(reservationService).should().createReservation(ACCOUNT_ID, KEY, REQUEST);
+    }
+
+    @Test
+    void retriesOnePaymentPreparationConflictAndReturnsTheNewTransactionResult() {
+        ReservationCreationCommandResult expected =
+                new ReservationCreationCommandResult(201, null);
+        given(reservationService.createReservation(ACCOUNT_ID, KEY, REQUEST))
+                .willThrow(new PaymentPreparationRetryableConflictException())
+                .willReturn(expected);
+        List<Long> delays = new ArrayList<>();
+        ReservationCreationCommandFacade facade = new ReservationCreationCommandFacade(
+                reservationService,
+                ignored -> 100L,
+                delays::add
+        );
+
+        ReservationCreationCommandResult actual = facade.create(ACCOUNT_ID, KEY, REQUEST);
+
+        assertThat(actual).isSameAs(expected);
+        assertThat(delays).isEmpty();
+        then(reservationService).should(times(2)).createReservation(ACCOUNT_ID, KEY, REQUEST);
+    }
+
+    @Test
+    void propagatesTheSecondPaymentPreparationConflictWithoutAThirdAttempt() {
+        PaymentPreparationRetryableConflictException first =
+                new PaymentPreparationRetryableConflictException();
+        PaymentPreparationRetryableConflictException second =
+                new PaymentPreparationRetryableConflictException();
+        ReservationCreationCommandResult unexpectedThirdResult =
+                new ReservationCreationCommandResult(201, null);
+        given(reservationService.createReservation(ACCOUNT_ID, KEY, REQUEST))
+                .willThrow(first)
+                .willThrow(second)
+                .willReturn(unexpectedThirdResult);
+        List<Long> delays = new ArrayList<>();
+        ReservationCreationCommandFacade facade = new ReservationCreationCommandFacade(
+                reservationService,
+                ignored -> 100L,
+                delays::add
+        );
+
+        assertThatThrownBy(() -> facade.create(ACCOUNT_ID, KEY, REQUEST))
+                .isSameAs(second);
+        assertThat(delays).isEmpty();
+        then(reservationService).should(times(2)).createReservation(ACCOUNT_ID, KEY, REQUEST);
     }
 
     @Test
