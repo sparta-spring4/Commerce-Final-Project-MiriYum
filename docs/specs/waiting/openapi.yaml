@@ -1024,11 +1024,10 @@ components:
         - properties:
             measurementStatus:
               enum: [PERMISSION_DENIED, POSITION_UNAVAILABLE]
-          allOf:
-            - not: {required: [latitude]}
-            - not: {required: [longitude]}
-            - not: {required: [accuracyMeters]}
-            - not: {required: [measuredAt]}
+            latitude: false
+            longitude: false
+            accuracyMeters: false
+            measuredAt: false
     WaitingLocationProofSnapshot:
       type: object
       additionalProperties: false
