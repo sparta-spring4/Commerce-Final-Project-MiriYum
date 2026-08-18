@@ -19,6 +19,7 @@ import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
+import com.miriyum.domain.reservation.dto.response.ReservationDepositDispositionResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationHistoryPageResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationTimePolicyResponse;
@@ -37,6 +38,8 @@ import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationFulfillmentActorType;
 import com.miriyum.domain.reservation.entity.ReservationFulfillmentAudit;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
+import com.miriyum.domain.reservation.entity.ReservationDepositProcessStatus;
+import com.miriyum.domain.reservation.entity.ReservationDepositDispositionObligation;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyAudit;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
@@ -56,6 +59,7 @@ import com.miriyum.domain.reservation.repository.ReservationCapacityBucketReposi
 import com.miriyum.domain.reservation.repository.ReservationCancellationAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationFulfillmentAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositDispositionObligationRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
@@ -90,10 +94,12 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -149,6 +155,7 @@ public class ReservationService {
     private ReservationHoldCreationPrimitive holdCreationPrimitive;
     private PaymentService paymentService;
     private ReservationDepositProcessRepository depositProcessRepository;
+    private ReservationDepositDispositionObligationRepository dispositionObligationRepository;
 
     ReservationService(
             StoreScheduleService storeScheduleService,
@@ -252,7 +259,8 @@ public class ReservationService {
             ReservationDepositCalculator depositCalculator,
             ReservationHoldCreationPrimitive holdCreationPrimitive,
             PaymentService paymentService,
-            ReservationDepositProcessRepository depositProcessRepository
+            ReservationDepositProcessRepository depositProcessRepository,
+            ReservationDepositDispositionObligationRepository dispositionObligationRepository
     ) {
         this(
                 storeScheduleService,
@@ -282,6 +290,7 @@ public class ReservationService {
         this.holdCreationPrimitive = holdCreationPrimitive;
         this.paymentService = paymentService;
         this.depositProcessRepository = depositProcessRepository;
+        this.dispositionObligationRepository = dispositionObligationRepository;
     }
 
     /**
@@ -502,7 +511,7 @@ public class ReservationService {
                         .map(selection -> new ReservationTemporaryMenuHoldSelection(
                                 selection.menuId(), selection.quantity()))
                         .toList();
-        var hold = holdCreationPrimitive.create(
+        var hold = holdCreationPrimitive.createDeposit(
                 new ReservationHoldCreationPrimitive.Command(
                         consumerAccountId,
                         store,
@@ -762,7 +771,8 @@ public class ReservationService {
                     consumerAccountId,
                     reason,
                     requestedAt,
-                    correlationId
+                    correlationId,
+                    command.idempotencyKey()
             );
         });
         return cancellationResult(outcome);
@@ -799,7 +809,8 @@ public class ReservationService {
                     operatorAccountId,
                     reason,
                     requestedAt,
-                    correlationId
+                    correlationId,
+                    command.idempotencyKey()
             );
         });
         return cancellationResult(outcome);
@@ -811,7 +822,8 @@ public class ReservationService {
             long actorId,
             String reason,
             Instant requestedAt,
-            String correlationId
+            String correlationId,
+            String cancellationIdempotencyKey
     ) {
         requireCancellationDependencies();
         if (reservation.getStatus() != ReservationStatus.CONFIRMED) {
@@ -838,6 +850,14 @@ public class ReservationService {
         if (decision != ReservationCancellationDecision.ALLOWED) {
             throw new IllegalStateException("cancellation policy decision is required");
         }
+        DepositDispositionPlan dispositionPlan = depositDispositionPlan(
+                reservation,
+                actorType,
+                cancellationPolicyVersion,
+                requestedAt,
+                correlationId,
+                cancellationIdempotencyKey
+        );
 
         ReservationMenuHoldTerminationPresence menuHoldPresence =
                 menuHoldPort.lockForTermination(reservation.getId());
@@ -941,11 +961,14 @@ public class ReservationService {
         if (menuSnapshots == null) {
             throw new IllegalStateException("menu hold snapshots are required");
         }
+        ReservationDepositDispositionResponse depositDisposition =
+                persistDispositionObligation(dispositionPlan, occurredAt);
         ReservationDetailResponse response = ReservationDetailResponse.from(
                 managedReservation,
                 menuSnapshots,
                 audit.getActorType(),
-                audit.getCancellationReason()
+                audit.getCancellationReason(),
+                depositDisposition
         );
         notificationPublisher.recordCancelled(
                 managedReservation, occurredAt, correlationId
@@ -967,6 +990,85 @@ public class ReservationService {
                 || notificationPublisher == null) {
             throw new IllegalStateException("reservation cancellation dependencies are required");
         }
+    }
+
+    private DepositDispositionPlan depositDispositionPlan(
+            Reservation reservation,
+            ReservationCancellationActorType actorType,
+            long policyVersion,
+            Instant requestedAt,
+            String sourceEventId,
+            String cancellationIdempotencyKey
+    ) {
+        if (policyVersion != 2L) {
+            return null;
+        }
+        if (depositProcessRepository == null || dispositionObligationRepository == null) {
+            throw new IllegalStateException(
+                    "reservation deposit disposition dependencies are required");
+        }
+        ReservationDepositProcessRepository.DepositProcessLink link =
+                depositProcessRepository
+                        .findDepositProcessLinkByFinalReservationId(reservation.getId())
+                        .orElseThrow(() -> new ServiceException(
+                                ReservationErrorCode.CANCELLATION_NOT_ALLOWED));
+        if (link.getProcessId() <= 0
+                || link.getStatus() != ReservationDepositProcessStatus.COMPLETED
+                || link.getFinalReservationId() == null
+                || !Objects.equals(link.getFinalReservationId(), reservation.getId())
+                || link.getPaymentId() == null
+                || !link.getPaymentId().matches("^[1-9][0-9]{0,18}$")) {
+            throw new ServiceException(ReservationErrorCode.CANCELLATION_NOT_ALLOWED);
+        }
+        ReservationDepositDispositionDecision.Responsibility responsibility =
+                switch (actorType) {
+                    case CONSUMER ->
+                            ReservationDepositDispositionDecision.Responsibility.CONSUMER;
+                    case STORE_OPERATOR ->
+                            ReservationDepositDispositionDecision.Responsibility.STORE_RESPONSIBLE;
+                };
+        ReservationDepositDispositionDecision disposition =
+                cancellationPolicyEvaluator.evaluateDepositDisposition(
+                        policyVersion,
+                        responsibility,
+                        reservation.getCreatedAt(),
+                        reservation.getStartAt(),
+                        requestedAt
+                );
+        return new DepositDispositionPlan(
+                link.getProcessId(),
+                reservation.getId(),
+                link.getPaymentId(),
+                sourceEventId,
+                cancellationIdempotencyKey,
+                disposition
+        );
+    }
+
+    private ReservationDepositDispositionResponse persistDispositionObligation(
+            DepositDispositionPlan plan,
+            Instant now
+    ) {
+        if (plan == null) {
+            return null;
+        }
+        ReservationDepositDispositionObligation obligation =
+                ReservationDepositDispositionObligation.pending(
+                        plan.processId(),
+                        plan.reservationId(),
+                        plan.paymentId(),
+                        plan.sourceEventId(),
+                        "RESERVATION_CANCELLED",
+                        null,
+                        plan.decision().policyVersion(),
+                        plan.decision().responsibility().name(),
+                        plan.decision().targetRefundRateBasisPoints(),
+                        UUID.randomUUID().toString(),
+                        plan.cancellationIdempotencyKey(),
+                        now
+                );
+        return ReservationDepositDispositionResponse.from(
+                dispositionObligationRepository.saveAndFlush(obligation));
     }
 
     private static TreeSet<Long> validateOriginalAllocations(
@@ -1216,7 +1318,8 @@ public class ReservationService {
                 deserialized.menuSelections(),
                 storedOffsetDateTime(outcome.data(), "createdAt"),
                 deserialized.cancelledBy(),
-                deserialized.cancellationReason()
+                deserialized.cancellationReason(),
+                deserialized.depositDisposition()
         );
         return new ReservationFulfillmentCommandResult(outcome.httpStatus(), response);
     }
@@ -1243,7 +1346,8 @@ public class ReservationService {
                 deserialized.menuSelections(),
                 storedOffsetDateTime(outcome.data(), "createdAt"),
                 deserialized.cancelledBy(),
-                deserialized.cancellationReason()
+                deserialized.cancellationReason(),
+                deserialized.depositDisposition()
         );
         return new ReservationCancellationCommandResult(outcome.httpStatus(), response);
     }
@@ -1256,6 +1360,16 @@ public class ReservationService {
             LocalDate serviceDate,
             LocalTime startTime,
             LocalTime occupancyEndTime
+    ) {
+    }
+
+    private record DepositDispositionPlan(
+            long processId,
+            long reservationId,
+            String paymentId,
+            String sourceEventId,
+            String cancellationIdempotencyKey,
+            ReservationDepositDispositionDecision decision
     ) {
     }
 
@@ -1808,7 +1922,8 @@ public class ReservationService {
                 menuSnapshots,
                 cancellationAudit.map(ReservationCancellationAudit::getActorType).orElse(null),
                 cancellationAudit.map(ReservationCancellationAudit::getCancellationReason)
-                        .orElse(null)
+                        .orElse(null),
+                latestDepositDisposition(reservation)
         );
     }
 
@@ -1846,8 +1961,23 @@ public class ReservationService {
                 menuSnapshots,
                 cancellationAudit.map(ReservationCancellationAudit::getActorType).orElse(null),
                 cancellationAudit.map(ReservationCancellationAudit::getCancellationReason)
-                        .orElse(null)
+                        .orElse(null),
+                latestDepositDisposition(reservation)
         );
+    }
+
+    private ReservationDepositDispositionResponse latestDepositDisposition(
+            Reservation reservation
+    ) {
+        if (reservation.getCancellationPolicyVersion() == null
+                || reservation.getCancellationPolicyVersion() != 2L
+                || dispositionObligationRepository == null) {
+            return null;
+        }
+        return dispositionObligationRepository
+                .findFirstByReservationIdOrderByIdDesc(reservation.getId())
+                .map(ReservationDepositDispositionResponse::from)
+                .orElse(null);
     }
 
     private Optional<ReservationCancellationAudit> findCancellationAudit(Long reservationId) {

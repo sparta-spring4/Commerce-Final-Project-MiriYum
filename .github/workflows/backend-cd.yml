@@ -264,6 +264,9 @@ jobs:
           script_base64=$(base64 --wrap=0 deploy/deploy.sh)
           certbot_script_base64=$(base64 --wrap=0 deploy/certbot.sh)
           cloudwatch_base64=$(base64 --wrap=0 deploy/monitoring/cloudwatch-agent-config.json)
+          valkey_memory_metrics_base64=$(base64 --wrap=0 deploy/monitoring/publish-valkey-memory-metrics.sh)
+          valkey_memory_service_base64=$(base64 --wrap=0 deploy/monitoring/miriyum-valkey-memory-metrics.service)
+          valkey_memory_timer_base64=$(base64 --wrap=0 deploy/monitoring/miriyum-valkey-memory-metrics.timer)
           image_uri="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
           cat > ssm-command.json <<EOF
@@ -283,8 +286,15 @@ jobs:
                 "echo '$certbot_script_base64' | base64 --decode > /opt/miriyum/certbot.sh",
                 "install -d -m 0755 /opt/miriyum/monitoring",
                 "echo '$cloudwatch_base64' | base64 --decode > /opt/miriyum/monitoring/cloudwatch-agent.json",
+                "echo '$valkey_memory_metrics_base64' | base64 --decode > /opt/miriyum/monitoring/publish-valkey-memory-metrics.sh",
+                "echo '$valkey_memory_service_base64' | base64 --decode > /etc/systemd/system/miriyum-valkey-memory-metrics.service",
+                "echo '$valkey_memory_timer_base64' | base64 --decode > /etc/systemd/system/miriyum-valkey-memory-metrics.timer",
                 "if [ -x /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl ]; then /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/miriyum/monitoring/cloudwatch-agent.json -s; fi",
                 "chmod 700 /opt/miriyum/deploy.sh",
+                "chmod 700 /opt/miriyum/monitoring/publish-valkey-memory-metrics.sh",
+                "systemctl daemon-reload",
+                "systemd-analyze verify /etc/systemd/system/miriyum-valkey-memory-metrics.service /etc/systemd/system/miriyum-valkey-memory-metrics.timer",
+                "systemctl enable --now miriyum-valkey-memory-metrics.timer",
                 "chmod 700 /opt/miriyum/certbot.sh",
                 "chmod 755 /opt/miriyum/nginx/entrypoint/40-select-server-config.sh",
                 "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' /opt/miriyum/deploy.sh"

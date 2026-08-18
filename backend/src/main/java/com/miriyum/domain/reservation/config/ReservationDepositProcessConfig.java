@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.config;
 
 import com.miriyum.domain.reservation.service.ReservationDepositProcessJob;
 import com.miriyum.domain.reservation.service.ReservationDepositRefundJob;
+import com.miriyum.domain.reservation.service.ReservationDepositDispositionJob;
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -15,6 +16,11 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 @Configuration
 @EnableScheduling
 public class ReservationDepositProcessConfig {
+
+    @Bean("reservationDepositDispositionLeaseDuration")
+    public Duration reservationDepositDispositionLeaseDuration() {
+        return Duration.ofSeconds(30);
+    }
 
     @Bean("reservationDepositRefundLeaseDuration")
     public Duration reservationDepositRefundLeaseDuration() {
@@ -45,6 +51,14 @@ public class ReservationDepositProcessConfig {
         return requirePositive(value, "refund-batch-size");
     }
 
+    @Bean("reservationDepositDispositionBatchSize")
+    Integer reservationDepositDispositionBatchSize(
+            @Value("${miriyum.reservation.deposit-worker.disposition-batch-size:100}")
+            int value
+    ) {
+        return requirePositive(value, "disposition-batch-size");
+    }
+
     @Bean("reservationDepositProcessPollDelayMs")
     Long reservationDepositProcessPollDelayMs(
             @Value("${miriyum.reservation.deposit-worker.process-poll-delay-ms:5000}") long value
@@ -57,6 +71,14 @@ public class ReservationDepositProcessConfig {
             @Value("${miriyum.reservation.deposit-worker.refund-poll-delay-ms:5000}") long value
     ) {
         return requirePositive(value, "refund-poll-delay-ms");
+    }
+
+    @Bean("reservationDepositDispositionPollDelayMs")
+    Long reservationDepositDispositionPollDelayMs(
+            @Value("${miriyum.reservation.deposit-worker.disposition-poll-delay-ms:5000}")
+            long value
+    ) {
+        return requirePositive(value, "disposition-poll-delay-ms");
     }
 
     @Bean
@@ -81,6 +103,17 @@ public class ReservationDepositProcessConfig {
         return new RefundScheduledWorker(job);
     }
 
+    @Bean
+    @ConditionalOnProperty(
+            name = "miriyum.reservation.deposit-worker.enabled",
+            havingValue = "true",
+            matchIfMissing = false)
+    DispositionScheduledWorker reservationDepositDispositionScheduledWorker(
+            ReservationDepositDispositionJob job
+    ) {
+        return new DispositionScheduledWorker(job);
+    }
+
     @Bean(
             name = "reservationDepositProcessScheduler",
             destroyMethod = "shutdown",
@@ -103,6 +136,18 @@ public class ReservationDepositProcessConfig {
             matchIfMissing = false)
     ThreadPoolTaskScheduler reservationDepositRefundScheduler() {
         return scheduler("reservation-deposit-refund-");
+    }
+
+    @Bean(
+            name = "reservationDepositDispositionScheduler",
+            destroyMethod = "shutdown",
+            defaultCandidate = false)
+    @ConditionalOnProperty(
+            name = "miriyum.reservation.deposit-worker.enabled",
+            havingValue = "true",
+            matchIfMissing = false)
+    ThreadPoolTaskScheduler reservationDepositDispositionScheduler() {
+        return scheduler("reservation-deposit-disposition-");
     }
 
     private static ThreadPoolTaskScheduler scheduler(String threadNamePrefix) {
@@ -159,6 +204,24 @@ public class ReservationDepositProcessConfig {
                 scheduler = "reservationDepositRefundScheduler",
                 fixedDelayString = "#{@reservationDepositRefundPollDelayMs}",
                 initialDelayString = "#{@reservationDepositRefundPollDelayMs}")
+        public void runScheduled() {
+            job.runScheduled();
+        }
+    }
+
+    /** Conditional scheduling adapter; the disposition job remains directly callable. */
+    public static final class DispositionScheduledWorker {
+
+        private final ReservationDepositDispositionJob job;
+
+        public DispositionScheduledWorker(ReservationDepositDispositionJob job) {
+            this.job = job;
+        }
+
+        @Scheduled(
+                scheduler = "reservationDepositDispositionScheduler",
+                fixedDelayString = "#{@reservationDepositDispositionPollDelayMs}",
+                initialDelayString = "#{@reservationDepositDispositionPollDelayMs}")
         public void runScheduled() {
             job.runScheduled();
         }

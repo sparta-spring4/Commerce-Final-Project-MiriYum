@@ -279,11 +279,12 @@ class ReservationDepositCreationRuntimeIT {
                 .containsEntry("published_version_number", 4)
                 .containsEntry("base_price", 40_000);
         assertThat(jdbcTemplate.queryForMap("""
-                SELECT status, creation_command_id
+                SELECT status, creation_command_id, cancellation_policy_version
                   FROM reservation_holds
                  WHERE reservation_hold_id = ?
                 """, holdId))
                 .containsEntry("status", "ACTIVE")
+                .containsEntry("cancellation_policy_version", 2L)
                 .containsEntry("creation_command_id",
                         "reservation-deposit-create:" + CREATION_KEY.value());
         assertThat(jdbcTemplate.queryForMap("""

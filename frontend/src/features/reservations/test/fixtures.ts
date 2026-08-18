@@ -79,6 +79,7 @@ export function reservationDetail(
     menuSelections: [],
     cancelledBy: null,
     cancellationReason: null,
+    depositDisposition: null,
     createdAt: '2026-08-11T10:00:00+09:00',
     ...overrides,
   }

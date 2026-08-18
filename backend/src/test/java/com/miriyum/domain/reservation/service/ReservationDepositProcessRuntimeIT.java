@@ -489,6 +489,9 @@ class ReservationDepositProcessRuntimeIT {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM reservations", Integer.class)).isOne();
         assertThat(jdbcTemplate.queryForObject(
+                "SELECT cancellation_policy_version FROM reservations",
+                Long.class)).isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM reservation_capacity_allocations",
                 Integer.class)).isOne();
         assertThat(jdbcTemplate.queryForObject(
@@ -592,7 +595,7 @@ class ReservationDepositProcessRuntimeIT {
                     '2026-08-21 09:00:00.000000', '2026-08-21 10:00:00.000000',
                     '2026-08-21 10:10:00.000000', 'UTC', 0, 0,
                     0, 10, 60, 10, 30077, 9, 2, 0, 0,
-                    'consumer:10077:channel:primary', TRUE, 7, 8, 'ACTIVE', 0,
+                    'consumer:10077:channel:primary', TRUE, 7, 2, 'ACTIVE', 0,
                     'deposit-runtime-hold-77',
                     '2026-08-20 09:00:00.000000',
                     '2026-08-20 09:10:00.000000'
