@@ -188,50 +188,39 @@ class ReservationDepositDispositionJobTest {
 
     @Test
     void malformedResultRequeuesClaimAndContinuesBatch() {
+        ReservationDepositDispositionObligationRepository repository = mock(
+                ReservationDepositDispositionObligationRepository.class);
+        ReservationDepositDispositionObligation malformedObligation =
+                pendingObligation(501L);
+        ReservationDepositDispositionObligation completedObligation =
+                pendingObligation(502L);
+        given(repository.findClaimableForUpdate(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+                .willReturn(List.of(malformedObligation, completedObligation));
+        given(repository.findByIdForUpdate(501L))
+                .willReturn(Optional.of(malformedObligation));
+        given(repository.findByIdForUpdate(502L))
+                .willReturn(Optional.of(completedObligation));
         ReservationDepositDispositionService service =
-                mock(ReservationDepositDispositionService.class);
+                new ReservationDepositDispositionService(
+                        repository,
+                        Clock.fixed(NOW, ZoneOffset.UTC),
+                        Duration.ofSeconds(30));
         PaymentService paymentService = mock(PaymentService.class);
-        ReservationDepositDispositionService.Claim malformed = claim(
-                ReservationDepositDispositionObligation.Operation.APPLY);
-        ReservationDepositDispositionService.Claim completedClaim = new
-                ReservationDepositDispositionService.Claim(
-                        malformed.obligationId() + 1,
-                        malformed.processId() + 1,
-                        malformed.reservationId() + 1,
-                        "52",
-                        malformed.sourceEventId() + "-next",
-                        malformed.sourceEventType(),
-                        null,
-                        2L,
-                        "STORE_RESPONSIBLE",
-                        10_000,
-                        "550e8400-e29b-41d4-a716-446655440241",
-                        ReservationDepositDispositionObligation.Operation.APPLY,
-                        "worker-a",
-                        1L,
-                        1);
-        DispositionResult result = completed();
-        given(service.claimDue("worker-a", 10))
-                .willReturn(List.of(malformed, completedClaim));
         given(paymentService.applyReservationDepositDisposition(
-                malformed.toApplyCommand())).willReturn(result);
-        given(service.recordResult(
-                malformed, result, RETRY_DELAY, QUERY_DELAY, 3))
-                .willThrow(new IllegalStateException(
-                        "payment disposition result identity mismatch"));
-        given(paymentService.applyReservationDepositDisposition(
-                completedClaim.toApplyCommand())).willReturn(result);
-        given(service.recordResult(
-                completedClaim, result, RETRY_DELAY, QUERY_DELAY, 3))
-                .willReturn(true);
+                applyCommand())).willReturn(malformedCurrency(), completed());
         ReservationDepositDispositionJob job = new ReservationDepositDispositionJob(
                 service, paymentService);
 
         assertThat(job.runOnce("worker-a", 10)).isOne();
 
-        then(service).should().recordRetryableFailure(malformed, RETRY_DELAY, 3);
-        then(service).should().recordResult(
-                completedClaim, result, RETRY_DELAY, QUERY_DELAY, 3);
+        assertThat(malformedObligation.getStatus())
+                .isEqualTo(ReservationDepositDispositionObligation.Status.PENDING);
+        assertThat(malformedObligation.getNextAttemptAt())
+                .isEqualTo(NOW.plus(RETRY_DELAY));
+        assertThat(completedObligation.getStatus())
+                .isEqualTo(ReservationDepositDispositionObligation.Status.COMPLETED);
     }
 
     @Test
@@ -343,6 +332,49 @@ class ReservationDepositDispositionJobTest {
                         NOW.minusSeconds(90),
                         null));
         return obligation;
+    }
+
+    private static ReservationDepositDispositionObligation pendingObligation(long id) {
+        ReservationDepositDispositionObligation obligation =
+                ReservationDepositDispositionObligation.pending(
+                        31L,
+                        41L,
+                        "51",
+                        "reservation-cancel:41:550e8400-e29b-41d4-a716-446655440240",
+                        "RESERVATION_CANCELLED",
+                        null,
+                        2L,
+                        "CONSUMER",
+                        5_000,
+                        "550e8400-e29b-41d4-a716-446655440239",
+                        "550e8400-e29b-41d4-a716-446655440240",
+                        NOW.minusSeconds(120));
+        ReflectionTestUtils.setField(obligation, "id", id);
+        return obligation;
+    }
+
+    private static DispositionResult malformedCurrency() {
+        return new DispositionResult(
+                "550e8400-e29b-41d4-a716-446655440239",
+                "51",
+                "reservation-cancel:41:550e8400-e29b-41d4-a716-446655440240",
+                "RESERVATION_CANCELLED",
+                null,
+                2L,
+                "CONSUMER",
+                5_000,
+                10_001L,
+                5_000L,
+                5_000L,
+                5_000L,
+                5_001L,
+                "krw",
+                "71",
+                DispositionStatus.COMPLETED,
+                null,
+                NOW.minusSeconds(1),
+                NOW,
+                NOW);
     }
 
     private static DispositionResult completed() {

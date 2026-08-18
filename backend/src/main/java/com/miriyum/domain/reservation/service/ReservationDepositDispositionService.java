@@ -206,34 +206,40 @@ public class ReservationDepositDispositionService {
             Claim claim,
             DispositionResult result
     ) {
-        if (!claim.obligationKey().equals(result.dispositionId())
-                || !claim.paymentId().equals(result.paymentId())
-                || !claim.sourceEventId().equals(result.sourceEventId())
-                || !claim.sourceEventType().equals(result.sourceEventType())
-                || !java.util.Objects.equals(
-                        claim.correctsSourceEventId(), result.correctsSourceEventId())
-                || claim.policyVersion() != result.policyVersion()
-                || !claim.responsibilityCode().equals(result.responsibilityCode())
-                || claim.targetRefundRateBasisPoints()
-                    != result.targetRefundRateBasisPoints()) {
-            throw new IllegalStateException("payment disposition result identity mismatch");
+        try {
+            if (!claim.obligationKey().equals(result.dispositionId())
+                    || !claim.paymentId().equals(result.paymentId())
+                    || !claim.sourceEventId().equals(result.sourceEventId())
+                    || !claim.sourceEventType().equals(result.sourceEventType())
+                    || !java.util.Objects.equals(
+                            claim.correctsSourceEventId(), result.correctsSourceEventId())
+                    || claim.policyVersion() != result.policyVersion()
+                    || !claim.responsibilityCode().equals(result.responsibilityCode())
+                    || claim.targetRefundRateBasisPoints()
+                        != result.targetRefundRateBasisPoints()) {
+                throw new IllegalStateException(
+                        "payment disposition result identity mismatch");
+            }
+            return new ReservationDepositDispositionObligation.PaymentSnapshot(
+                    result.dispositionId(),
+                    result.refundId(),
+                    result.originalAmountMinor(),
+                    result.targetRefundAmountMinor(),
+                    result.incrementalRefundAmountMinor(),
+                    result.completedRefundAmountMinor(),
+                    result.withheldAmountMinor(),
+                    result.currency(),
+                    result.status().name(),
+                    result.failureClassification() == null
+                            ? null
+                            : result.failureClassification().name(),
+                    result.requestedAt(),
+                    result.updatedAt(),
+                    result.completedAt());
+        } catch (IllegalArgumentException | NullPointerException failure) {
+            throw new IllegalStateException(
+                    "payment disposition result is malformed", failure);
         }
-        return new ReservationDepositDispositionObligation.PaymentSnapshot(
-                result.dispositionId(),
-                result.refundId(),
-                result.originalAmountMinor(),
-                result.targetRefundAmountMinor(),
-                result.incrementalRefundAmountMinor(),
-                result.completedRefundAmountMinor(),
-                result.withheldAmountMinor(),
-                result.currency(),
-                result.status().name(),
-                result.failureClassification() == null
-                        ? null
-                        : result.failureClassification().name(),
-                result.requestedAt(),
-                result.updatedAt(),
-                result.completedAt());
     }
 
     private static void requireResultArguments(
