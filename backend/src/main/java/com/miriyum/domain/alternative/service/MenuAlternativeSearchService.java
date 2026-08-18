@@ -8,6 +8,7 @@ import com.miriyum.domain.alternative.model.MenuAlternativeMode;
 import com.miriyum.domain.alternative.model.MenuAlternativeResult;
 import com.miriyum.domain.alternative.model.MenuAlternativeSearchCommand;
 import com.miriyum.domain.alternative.model.ResolvedAlternativeItem;
+import com.miriyum.domain.alternative.model.ScoredAlternative;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery;
 import com.miriyum.domain.menuhold.service.MenuInventoryTransactionService;
@@ -51,17 +52,20 @@ public class MenuAlternativeSearchService {
     private final ReservationTimeResolutionService reservationTimeResolutionService;
     private final MenuInventoryTransactionService inventoryService;
     private final MenuAlternativeEligibility eligibility;
+    private final MenuAlternativeScorer scorer;
 
     public MenuAlternativeSearchService(MenuAlternativeCandidateQueryService candidateQuery,
             ReservationService reservationService,
             ReservationTimeResolutionService reservationTimeResolutionService,
             MenuInventoryTransactionService inventoryService,
-            MenuAlternativeEligibility eligibility) {
+            MenuAlternativeEligibility eligibility,
+            MenuAlternativeScorer scorer) {
         this.candidateQuery = candidateQuery;
         this.reservationService = reservationService;
         this.reservationTimeResolutionService = reservationTimeResolutionService;
         this.inventoryService = inventoryService;
         this.eligibility = eligibility;
+        this.scorer = scorer;
     }
 
     @Transactional(readOnly = true)
@@ -72,13 +76,13 @@ public class MenuAlternativeSearchService {
         AlternativeMenuSource source = new AlternativeMenuSource(storeId, menuId,
                 sourceView.unitPrice(), sourceView.primaryCategoryCode(),
                 sourceView.secondaryCategoryCodes());
-        List<EligibleAlternative> same = eligible(source,
+        List<ScoredAlternative> same = eligible(source,
                 candidateQuery.findSameStoreCandidates(sourceView), command.excludedAllergenCodes());
         List<ResolvedAlternativeItem> sameItems = same.isEmpty()
                 || !availableStores(List.of(storeId), command).contains(storeId)
                 ? List.of()
                 : inStock(same, sourceWindow, command.quantity()).stream()
-                        .sorted(itemComparator(MenuAlternativeOrdering.sameStoreComparator()))
+                        .sorted(itemComparator(MenuAlternativeOrdering.sameStoreScoreComparator()))
                         .limit(command.size()).toList();
         if (!sameItems.isEmpty()) {
             return result(sourceView, command, sourceWindow, MenuAlternativeMode.SAME_STORE, sameItems);
@@ -101,11 +105,13 @@ public class MenuAlternativeSearchService {
                 .filter(value -> value.distanceMeters().doubleValue()
                         <= StoreDistanceEligibility.MAX_DISTANCE_METERS)
                 .toList();
-        List<EligibleAlternative> nearbyEligible = nearbyCandidates.stream()
+        List<ScoredAlternative> nearbyEligible = nearbyCandidates.stream()
                 .map(value -> eligibility.evaluate(source, value,
-                        command.excludedAllergenCodes()).orElse(null))
+                        command.excludedAllergenCodes())
+                        .map(eligible -> scored(source, eligible)).orElse(null))
                 .filter(Objects::nonNull).toList();
-        List<Long> storeIds = nearbyEligible.stream().map(value -> value.candidate().storeId())
+        List<Long> storeIds = nearbyEligible.stream()
+                .map(value -> value.eligible().candidate().storeId())
                 .distinct().sorted().toList();
         Set<Long> availableStores = availableStores(storeIds, command);
         List<Long> availableStoreIds = storeIds.stream()
@@ -114,13 +120,14 @@ public class MenuAlternativeSearchService {
         Map<Long, ResolvedWindow> windows = resolveWindows(
                 availableStoreIds, command, false);
         List<ResolvedAlternativeItem> nearbyItems = new ArrayList<>();
-        nearbyEligible.stream().filter(value -> windows.containsKey(value.candidate().storeId()))
+        nearbyEligible.stream().filter(value -> windows.containsKey(
+                        value.eligible().candidate().storeId()))
                 .collect(Collectors.groupingBy(
-                        value -> windows.get(value.candidate().storeId()),
+                        value -> windows.get(value.eligible().candidate().storeId()),
                         LinkedHashMap::new, Collectors.toList()))
                 .forEach((window, values) -> nearbyItems.addAll(
                         inStock(values, window, command.quantity())));
-        nearbyItems.sort(itemComparator(MenuAlternativeOrdering.nearbyStoreComparator()));
+        nearbyItems.sort(itemComparator(MenuAlternativeOrdering.nearbyStoreScoreComparator()));
         List<ResolvedAlternativeItem> page = nearbyItems.stream().limit(command.size()).toList();
         return result(sourceView, command, sourceWindow, page.isEmpty()
                 ? MenuAlternativeMode.NO_ALTERNATIVE : MenuAlternativeMode.NEARBY_STORE, page);
@@ -142,18 +149,27 @@ public class MenuAlternativeSearchService {
                 .map(ReservationAvailabilityResult::storeId).collect(Collectors.toUnmodifiableSet());
     }
 
-    private List<EligibleAlternative> eligible(AlternativeMenuSource source,
+    private List<ScoredAlternative> eligible(AlternativeMenuSource source,
             List<MenuAlternativeCandidateView> values, Set<String> excluded) {
-        return values.stream().map(this::candidate)
-                .map(value -> eligibility.evaluate(source, value, excluded).orElse(null))
+        return values.stream().map(this::candidate).map(value ->
+                        eligibility.evaluate(source, value, excluded)
+                                .map(eligible -> scored(source, eligible)).orElse(null))
                 .filter(Objects::nonNull).toList();
+    }
+
+    private ScoredAlternative scored(
+            AlternativeMenuSource source,
+            EligibleAlternative eligible
+    ) {
+        return new ScoredAlternative(eligible, scorer.score(source, eligible.candidate()));
     }
 
     private AlternativeMenuCandidate candidate(MenuAlternativeCandidateView value) {
         return new AlternativeMenuCandidate(value.storeId(), value.storeName(), value.menuId(),
                 value.menuName(), value.unitPrice(), value.primaryCategoryCode(),
                 value.secondaryCategoryCodes(), value.allergenInformationStatus(),
-                value.allergens(), value.latitude(), value.longitude(), null);
+                value.allergens(), value.latitude(), value.longitude(), null,
+                value.conceptScore());
     }
 
     private AlternativeMenuCandidate withDistance(AlternativeMenuCandidate value,
@@ -163,13 +179,15 @@ public class MenuAlternativeSearchService {
         return new AlternativeMenuCandidate(value.storeId(), value.storeName(), value.menuId(),
                 value.menuName(), value.unitPrice(), value.primaryCategoryCode(),
                 value.secondaryCategoryCodes(), value.allergenInformationStatus(), value.allergens(),
-                value.latitude(), value.longitude(), BigDecimal.valueOf(meters));
+                value.latitude(), value.longitude(), BigDecimal.valueOf(meters),
+                value.conceptScore());
     }
 
-    private List<ResolvedAlternativeItem> inStock(List<EligibleAlternative> values,
+    private List<ResolvedAlternativeItem> inStock(List<ScoredAlternative> values,
             ResolvedWindow window, int quantity) {
         if (values.isEmpty()) return List.of();
-        List<Long> menuIds = values.stream().map(value -> value.candidate().menuId())
+        List<Long> menuIds = values.stream()
+                .map(value -> value.eligible().candidate().menuId())
                 .distinct().sorted().toList();
         List<MenuInventoryAvailability> buckets = inventoryService.findExistingOnlineAvailability(
                 new MenuInventoryAvailabilityQuery(menuIds, window.start().toLocalDate(),
@@ -185,24 +203,25 @@ public class MenuAlternativeSearchService {
                     || !window.end().toLocalDateTime().equals(LocalDateTime.of(
                             bucket.endDate(), bucket.endTime()))) unavailable();
         }
-        Map<Long, EligibleAlternative> eligibleById = values.stream().collect(Collectors.toMap(
-                value -> value.candidate().menuId(), Function.identity()));
+        Map<Long, ScoredAlternative> eligibleById = values.stream().collect(Collectors.toMap(
+                value -> value.eligible().candidate().menuId(), Function.identity()));
         return buckets.stream().filter(bucket -> bucket.availabilityStatus()
                         == MenuInventoryAvailability.AvailabilityStatus.AVAILABLE
                         && bucket.availableOnlineQuantity() >= quantity)
                 .map(bucket -> item(eligibleById.get(bucket.menuId()), bucket)).toList();
     }
 
-    private ResolvedAlternativeItem item(EligibleAlternative value,
+    private ResolvedAlternativeItem item(ScoredAlternative value,
             MenuInventoryAvailability bucket) {
-        var candidate = value.candidate();
-        List<AlternativeReasonCode> reasons = new ArrayList<>(value.reasonCodes());
+        var eligible = value.eligible();
+        var candidate = eligible.candidate();
+        List<AlternativeReasonCode> reasons = new ArrayList<>(eligible.reasonCodes());
         reasons.add(AlternativeReasonCode.IN_STOCK);
         return new ResolvedAlternativeItem(candidate.storeId(), candidate.storeName(),
                 candidate.menuId(), candidate.menuName(), candidate.unitPrice(),
-                bucket.availableOnlineQuantity(), value.secondaryCategoryMatchCount(),
-                value.absolutePriceDifference(),
-                candidate.distanceMeters(), candidate.latitude(), candidate.longitude(), reasons);
+                bucket.availableOnlineQuantity(), eligible.secondaryCategoryMatchCount(),
+                eligible.absolutePriceDifference(), candidate.distanceMeters(), candidate.latitude(),
+                candidate.longitude(), reasons, value.score());
     }
 
     private ResolvedWindow resolveWindow(long storeId, MenuAlternativeSearchCommand command,
@@ -255,16 +274,18 @@ public class MenuAlternativeSearchService {
     }
 
     private static java.util.Comparator<ResolvedAlternativeItem> itemComparator(
-            java.util.Comparator<EligibleAlternative> policyComparator) {
-        return (left, right) -> policyComparator.compare(asEligible(left), asEligible(right));
+            java.util.Comparator<ScoredAlternative> policyComparator) {
+        return (left, right) -> policyComparator.compare(asScored(left), asScored(right));
     }
 
-    private static EligibleAlternative asEligible(ResolvedAlternativeItem item) {
-        return new EligibleAlternative(new AlternativeMenuCandidate(item.storeId(), item.storeName(),
+    private static ScoredAlternative asScored(ResolvedAlternativeItem item) {
+        EligibleAlternative eligible = new EligibleAlternative(new AlternativeMenuCandidate(
+                item.storeId(), item.storeName(),
                 item.menuId(), item.menuName(), item.unitPrice(), "", List.of(), "REGISTERED",
                 List.of(), item.latitude(), item.longitude(), item.distanceMeters()),
                 item.secondaryCategoryMatchCount(), item.absolutePriceDifference(),
                 item.reasonCodes());
+        return new ScoredAlternative(eligible, item.score());
     }
 
     private static MenuAlternativeResult result(MenuAlternativeSourceView source,
