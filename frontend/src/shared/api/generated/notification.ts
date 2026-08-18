@@ -15,8 +15,13 @@ export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
-    /** @enum {string} */
-    NotificationPurpose: "RESERVATION_CONFIRMED" | "RESERVATION_CHANGED" | "RESERVATION_REJECTED" | "RESERVATION_CANCELLED" | "RESERVATION_EXPIRED" | "RESERVATION_VISIT_REMINDER" | "RESERVATION_COORDINATION_REQUIRED" | "PICKUP_RESERVATION_CONFIRMED" | "PICKUP_RESERVATION_CANCELLED" | "MENU_HOLD_FULFILLMENT_AT_RISK" | "MENU_SUBSTITUTION_PROPOSED" | "MENU_SUBSTITUTION_ACCEPTED" | "MENU_SUBSTITUTION_REJECTED" | "MENU_SUBSTITUTION_EXPIRED" | "WAITING_ENTRY_IMMINENT" | "WAITING_CALLED" | "WAITING_CANCELLED" | "WAITING_NO_SHOW" | "WAITING_CHECKED_IN" | "WAITING_CLOSED_BY_STORE";
+    /**
+     * @description RESERVATION_VISIT_COMPLETED와 RESERVATION_NO_SHOW는 예약 종결 상태를 설명하며 결제 결과를 뜻하지 않고 보호된 상세 route 활성화 전 action은 null이다.
+     * @enum {string}
+     */
+    NotificationPurpose: "RESERVATION_CONFIRMED" | "RESERVATION_CHANGED" | "RESERVATION_REJECTED" | "RESERVATION_CANCELLED" | "RESERVATION_EXPIRED" | "RESERVATION_VISIT_REMINDER" | "RESERVATION_COORDINATION_REQUIRED" | "RESERVATION_VISIT_COMPLETED" | "RESERVATION_NO_SHOW" | "PICKUP_RESERVATION_CONFIRMED" | "PICKUP_RESERVATION_CANCELLED" | "MENU_HOLD_FULFILLMENT_AT_RISK" | "MENU_SUBSTITUTION_PROPOSED" | "MENU_SUBSTITUTION_ACCEPTED" | "MENU_SUBSTITUTION_REJECTED" | "MENU_SUBSTITUTION_EXPIRED" | "WAITING_ENTRY_IMMINENT" | "WAITING_CALLED" | "WAITING_CANCELLED" | "WAITING_NO_SHOW" | "WAITING_CHECKED_IN" | "WAITING_CLOSED_BY_STORE";
+    NonTerminalNotificationPurpose: components["schemas"]["NotificationPurpose"] & ("RESERVATION_CONFIRMED" | "RESERVATION_CHANGED" | "RESERVATION_REJECTED" | "RESERVATION_CANCELLED" | "RESERVATION_EXPIRED" | "RESERVATION_VISIT_REMINDER" | "RESERVATION_COORDINATION_REQUIRED" | "PICKUP_RESERVATION_CONFIRMED" | "PICKUP_RESERVATION_CANCELLED" | "MENU_HOLD_FULFILLMENT_AT_RISK" | "MENU_SUBSTITUTION_PROPOSED" | "MENU_SUBSTITUTION_ACCEPTED" | "MENU_SUBSTITUTION_REJECTED" | "MENU_SUBSTITUTION_EXPIRED" | "WAITING_ENTRY_IMMINENT" | "WAITING_CALLED" | "WAITING_CANCELLED" | "WAITING_NO_SHOW" | "WAITING_CHECKED_IN" | "WAITING_CLOSED_BY_STORE");
+    ReservationTerminalNotificationPurpose: components["schemas"]["NotificationPurpose"] & ("RESERVATION_VISIT_COMPLETED" | "RESERVATION_NO_SHOW");
     /** @enum {string} */
     NotificationResourceType: "RESERVATION" | "MENU_HOLD" | "PICKUP_RESERVATION" | "MENU_SUBSTITUTION_PROPOSAL" | "WAITING_TEAM";
     /** @enum {string} */
@@ -62,7 +67,7 @@ export interface components {
       /** @description 행동 자체의 중앙 만료 시각. null은 별도 시간 만료가 없음을 뜻한다. */
       expiresAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"] | null;
     };
-    NotificationHistoryItem: {
+    NotificationHistoryItem: ({
       notificationId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
       purpose: components["schemas"]["NotificationPurpose"];
       /** @description 승인된 field allowlist로 렌더링한 안전한 제목 */
@@ -74,6 +79,16 @@ export interface components {
       deliveredAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
       /** @description 안전한 행동 대상이 없으면 null */
       action: components["schemas"]["NotificationAction"] | null;
+    }) & (components["schemas"]["NonTerminalNotificationHistoryItem"] | components["schemas"]["ReservationTerminalNotificationHistoryItem"]);
+    NonTerminalNotificationHistoryItem: {
+      purpose: components["schemas"]["NonTerminalNotificationPurpose"];
+      /** @description 안전한 행동 대상이 없으면 null */
+      action: components["schemas"]["NotificationAction"] | null;
+    };
+    ReservationTerminalNotificationHistoryItem: {
+      purpose: components["schemas"]["ReservationTerminalNotificationPurpose"];
+      /** @description 예약 방문 완료·노쇼 목적은 보호된 상세 route 활성화 전 항상 null */
+      action: null;
     };
     NotificationHistoryPageData: {
       items: components["schemas"]["NotificationHistoryItem"][];
