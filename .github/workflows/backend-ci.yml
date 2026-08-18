@@ -115,8 +115,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.test_scope == 'full'
     runs-on: ubuntu-24.04
-    # 4-shard 구조는 유지한다. B shard가 30분 상한에 취소된 실측이 있어,
-    # 별도 재분배 전까지 runner 편차와 Testcontainers 기동 시간을 포함해 40분을 허용한다.
+    # 4-shard 구조는 유지한다. Testcontainers 기동 시간과 runner 편차를 고려해
+    # 모든 shard에 동일한 40분 상한을 적용한다.
     timeout-minutes: 40
     strategy:
       fail-fast: false

@@ -22,6 +22,14 @@ class WaitingOpenApiContractTest {
     private static final String SETTINGS_PATH =
             "/api/v1/store-operators/stores/{storeId}/waiting-settings";
     private static final String DISABLE_IMPACT_PATH = SETTINGS_PATH + "/deactivation-impact";
+    private static final String CONSUMER_AVAILABILITY_PATH =
+            "/api/v1/consumers/me/stores/{storeId}/waiting-availabilities";
+    private static final String CONSUMER_CREATE_PATH =
+            "/api/v1/consumers/me/stores/{storeId}/waiting-teams";
+    private static final String CONSUMER_CURRENT_PATH =
+            "/api/v1/consumers/me/waiting-teams/current";
+    private static final String CONSUMER_CANCEL_PATH =
+            "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations";
     private static final String IDEMPOTENCY_KEY =
             "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey";
     private static final Map<String, Set<String>> LEDGER_OPERATIONS = Map.of(
@@ -70,7 +78,11 @@ class WaitingOpenApiContractTest {
                         "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrivals",
                         "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-ins",
                         "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations",
-                        "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}");
+                        "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}",
+                        CONSUMER_AVAILABILITY_PATH,
+                        CONSUMER_CREATE_PATH,
+                        CONSUMER_CURRENT_PATH,
+                        CONSUMER_CANCEL_PATH);
 
         Map<String, Object> settingsPath = map(paths.get(SETTINGS_PATH));
         assertThat(settingsPath).containsOnlyKeys("get", "put");
@@ -123,6 +135,114 @@ class WaitingOpenApiContractTest {
         String serialized = new Yaml().dump(document);
         assertThat(serialized)
                 .doesNotContain("radiusMeters", "radiusKilometers", "1000", "5000");
+    }
+
+    @Test
+    void consumerOperationsExposeProtectedRegistrationCurrentAndCancellationContract()
+            throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> paths = map(document.get("paths"));
+
+        assertThat(map(paths.get(CONSUMER_AVAILABILITY_PATH))).containsOnlyKeys("get");
+        assertThat(map(paths.get(CONSUMER_CREATE_PATH))).containsOnlyKeys("post");
+        assertThat(map(paths.get(CONSUMER_CURRENT_PATH))).containsOnlyKeys("get");
+        assertThat(map(paths.get(CONSUMER_CANCEL_PATH))).containsOnlyKeys("post");
+
+        for (String path : List.of(
+                CONSUMER_AVAILABILITY_PATH,
+                CONSUMER_CREATE_PATH,
+                CONSUMER_CURRENT_PATH,
+                CONSUMER_CANCEL_PATH)) {
+            Map<String, Object> pathItem = map(paths.get(path));
+            Map<String, Object> operation = map(pathItem.values().iterator().next());
+            assertThat(list(operation.get("security")))
+                    .containsExactly(Map.of("bearerAuth", List.of()));
+        }
+
+        Map<String, Object> availability = map(map(paths.get(CONSUMER_AVAILABILITY_PATH)).get("get"));
+        assertThat(map(availability.get("responses")).keySet())
+                .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "429");
+
+        Map<String, Object> create = map(map(paths.get(CONSUMER_CREATE_PATH)).get("post"));
+        assertThat(create)
+                .containsEntry("x-runtime-default", "disabled")
+                .containsEntry("x-activation-owner-issue", 409)
+                .containsEntry("x-location-proof-required", true);
+        assertThat(map(create.get("responses")).keySet())
+                .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "409", "429");
+        assertThat(list(create.get("parameters"))).anySatisfy(parameter ->
+                assertThat(map(parameter)).containsEntry("$ref", IDEMPOTENCY_KEY));
+        assertThat(map(map(map(create.get("requestBody")).get("content"))
+                .get("application/json")))
+                .extracting("schema")
+                .isEqualTo(Map.of("$ref", "#/components/schemas/WaitingConsumerCreateRequest"));
+
+        Map<String, Object> cancel = map(map(paths.get(CONSUMER_CANCEL_PATH)).get("post"));
+        Map<String, Object> current = map(map(paths.get(CONSUMER_CURRENT_PATH)).get("get"));
+        assertThat(map(current.get("responses")).keySet())
+                .containsExactlyInAnyOrder("200", "401", "403", "404", "429");
+        assertThat(map(cancel.get("responses")).keySet())
+                .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "409", "429");
+        assertThat(list(cancel.get("parameters"))).anySatisfy(parameter ->
+                assertThat(map(parameter)).containsEntry("$ref", IDEMPOTENCY_KEY));
+        assertThat(map(map(map(cancel.get("requestBody")).get("content"))
+                .get("application/json")))
+                .extracting("schema")
+                .isEqualTo(Map.of("$ref", "#/components/schemas/WaitingTeamTransitionRequest"));
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> createRequest = map(schemas.get("WaitingConsumerCreateRequest"));
+        assertThat(list(createRequest.get("required")))
+                .containsExactly("businessDate", "partySize");
+        assertThat(map(createRequest.get("properties")))
+                .containsOnlyKeys("businessDate", "partySize");
+
+        Map<String, Object> snapshot = map(schemas.get("WaitingConsumerSnapshot"));
+        assertThat(map(snapshot.get("properties"))).containsOnlyKeys(
+                "waitingTeamId", "storeId", "businessDate", "status", "queueSequence",
+                "teamsAhead", "partySize", "createdAt", "calledAt", "arrivalDeadline",
+                "arrivedAt", "cancelledAt", "version");
+        assertThat(snapshot.toString()).doesNotContain(
+                "consumerAccountId", "phone", "contact", "audit", "failure");
+
+        assertResponseReference(availability, "404",
+                "#/components/responses/WaitingConsumerStoreNotFound");
+        assertResponseReference(availability, "403",
+                "#/components/responses/WaitingConsumerAccountForbidden");
+        assertResponseReference(create, "403",
+                "#/components/responses/WaitingConsumerCreateForbidden");
+        assertResponseReference(create, "404",
+                "#/components/responses/WaitingConsumerStoreNotFound");
+        assertResponseReference(create, "409",
+                "#/components/responses/WaitingConsumerCreateConflict");
+        assertResponseReference(current, "404",
+                "#/components/responses/WaitingConsumerTeamNotFound");
+        assertResponseReference(current, "403",
+                "#/components/responses/WaitingConsumerAccountForbidden");
+        assertResponseReference(cancel, "404",
+                "#/components/responses/WaitingConsumerTeamNotFound");
+        assertResponseReference(cancel, "403",
+                "#/components/responses/WaitingConsumerAccountForbidden");
+        assertResponseReference(cancel, "409",
+                "#/components/responses/WaitingConsumerCancelConflict");
+
+        Map<String, Object> responses = map(map(document.get("components")).get("responses"));
+        assertThat(responseExampleCodes(map(responses.get("WaitingConsumerStoreNotFound"))))
+                .containsExactly("STORE_001");
+        assertThat(responseExampleCodes(map(responses.get("WaitingConsumerTeamNotFound"))))
+                .containsExactly("WAITING_003");
+        assertThat(responseExampleCodes(map(responses.get("WaitingConsumerAccountForbidden"))))
+                .containsExactly("AUTH_011");
+        assertThat(responseExampleCodes(map(responses.get("WaitingConsumerCreateForbidden"))))
+                .containsExactlyInAnyOrder("AUTH_011", "STORE_015");
+        assertThat(responseExampleCodes(map(responses.get("WaitingConsumerCreateConflict"))))
+                .containsExactlyInAnyOrder(
+                        "STORE_005", "STORE_007", "WAITING_011", "WAITING_012",
+                        "COMMON_007", "COMMON_008");
+        assertThat(responseExampleCodes(map(responses.get("WaitingConsumerCancelConflict"))))
+                .containsExactlyInAnyOrder(
+                        "WAITING_005", "WAITING_006", "WAITING_008",
+                        "COMMON_007", "COMMON_008");
     }
 
     @Test
