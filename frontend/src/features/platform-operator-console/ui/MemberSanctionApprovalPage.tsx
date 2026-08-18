@@ -15,6 +15,7 @@ import {
   type AccountType,
 } from '../api/memberSupportApi'
 import { accountTargetType } from '../api/reauthenticationApi'
+import { useLogicalCommandAttempt } from './OperatorCommandFields'
 import { ReauthenticationDialog } from './ReauthenticationDialog'
 import './page.css'
 
@@ -48,8 +49,20 @@ export function MemberSanctionApprovalPage() {
   const [submitting, setSubmitting] = useState(false)
   const [awaitingReauthentication, setAwaitingReauthentication] =
     useState(false)
-  const [idempotencyKey, setIdempotencyKey] = useState(() =>
-    createIdempotencyKey(),
+  const {
+    attempt,
+    beginAttempt,
+    clearAttempt,
+    isAttemptCurrent,
+  } = useLogicalCommandAttempt(
+    () => ({ idempotencyKey: createIdempotencyKey() }),
+    JSON.stringify({
+      accountType,
+      accountId,
+      sanctionId,
+      sanctionVersion,
+      reasonCode,
+    }),
   )
 
   const decision = decideCapability(
@@ -97,10 +110,19 @@ export function MemberSanctionApprovalPage() {
     if (Object.keys(next).length > 0) {
       return
     }
+    beginAttempt()
     setAwaitingReauthentication(true)
   }
 
   async function handleApproved(approval: string) {
+    if (attempt === null || !isAttemptCurrent()) {
+      setAwaitingReauthentication(false)
+      clearAttempt()
+      setFormError(
+        '재인증 중 명령 입력이 변경됐습니다. 변경된 내용으로 다시 제출해 주세요.',
+      )
+      return
+    }
     setAwaitingReauthentication(false)
     setSubmitting(true)
     setFormError(null)
@@ -109,14 +131,14 @@ export function MemberSanctionApprovalPage() {
         sanctionId: sanctionId.trim(),
         version: Number(sanctionVersion),
         reauthenticationApproval: approval,
-        idempotencyKey,
+        idempotencyKey: attempt.idempotencyKey,
         body: { decision: 'APPROVE', reasonCode: reasonCode.trim() },
       })
       // 서버가 준 status를 그대로 전한다. 화면이 "적용됨"으로 단정하지 않는다.
       setResult(
         `제재 ${sanction.sanctionId}가 ${sanction.status} 상태가 됐습니다.`,
       )
-      setIdempotencyKey(createIdempotencyKey())
+      clearAttempt()
       setAccountType('CONSUMER')
       setAccountId('')
       setSanctionId('')
@@ -156,6 +178,7 @@ export function MemberSanctionApprovalPage() {
         className="po-form"
         onSubmit={handleRequestReauthentication}
         aria-label="영구 정지 추가 승인"
+        inert={awaitingReauthentication}
         noValidate
       >
         <SelectField
@@ -212,7 +235,7 @@ export function MemberSanctionApprovalPage() {
         </Button>
       </form>
 
-      {awaitingReauthentication && (
+      {awaitingReauthentication && attempt !== null && (
         <ReauthenticationDialog
           purpose="PERMANENT_ACCOUNT_SANCTION_APPROVAL"
           targetType={accountTargetType(accountType)}

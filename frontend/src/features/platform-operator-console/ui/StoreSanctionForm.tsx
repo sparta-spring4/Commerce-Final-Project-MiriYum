@@ -21,6 +21,7 @@ import {
   STORE_SANCTION_TYPE_LABEL,
   isHighRiskStoreSanction,
 } from '../model/storeLabels'
+import { useLogicalCommandAttempt } from './OperatorCommandFields'
 import { ReauthenticationDialog } from './ReauthenticationDialog'
 import { StoreSanctionImpactPreviewView } from './StoreSanctionImpactPreview'
 import './page.css'
@@ -64,8 +65,26 @@ export function StoreSanctionForm({
   const [submitting, setSubmitting] = useState(false)
   const [awaitingReauthentication, setAwaitingReauthentication] =
     useState(false)
-  const [idempotencyKey, setIdempotencyKey] = useState(() =>
-    createIdempotencyKey(),
+  const {
+    attempt,
+    beginAttempt,
+    clearAttempt,
+    isAttemptCurrent,
+  } = useLogicalCommandAttempt(
+    () => ({ idempotencyKey: createIdempotencyKey() }),
+    JSON.stringify({
+      storeId,
+      context,
+      type,
+      features,
+      startsAt,
+      endsAt,
+      reason,
+      previewId: preview?.previewId,
+      previewDigest: preview?.digest,
+      previewCaseVersion: preview?.caseVersion,
+      previewEnforcementVersion: preview?.storeEnforcementVersion,
+    }),
   )
 
   const highRisk = isHighRiskStoreSanction(type, features)
@@ -131,15 +150,31 @@ export function StoreSanctionForm({
       return
     }
     setFormError(null)
+    const commandAttempt = beginAttempt()
     if (highRisk) {
       setAwaitingReauthentication(true)
       return
     }
     // 고위험이 아니면 서버가 재인증을 요구하지 않는다.
-    void execute(undefined)
+    void execute(undefined, commandAttempt)
   }
 
-  async function execute(approval: string | undefined) {
+  function handleApproved(approval: string) {
+    if (attempt === null || !isAttemptCurrent()) {
+      setAwaitingReauthentication(false)
+      clearAttempt()
+      setFormError(
+        '재인증 중 명령 입력이 변경됐습니다. 변경된 내용으로 다시 제출해 주세요.',
+      )
+      return
+    }
+    void execute(approval, attempt)
+  }
+
+  async function execute(
+    approval: string | undefined,
+    commandAttempt: { idempotencyKey: string },
+  ) {
     setAwaitingReauthentication(false)
     if (preview === null) {
       return
@@ -150,7 +185,7 @@ export function StoreSanctionForm({
       const sanction = await createStoreSanction(apiClient, {
         storeId,
         context,
-        idempotencyKey,
+        idempotencyKey: commandAttempt.idempotencyKey,
         reauthenticationApproval: approval,
         body: {
           ...shape(),
@@ -169,7 +204,7 @@ export function StoreSanctionForm({
           ? `제재 ${sanction.sanctionId}를 제안했습니다. 다른 슈퍼관리자의 승인 후 적용됩니다.`
           : `제재 ${sanction.sanctionId}가 ${sanction.status} 상태로 기록됐습니다.`,
       )
-      setIdempotencyKey(createIdempotencyKey())
+      clearAttempt()
       setPreview(null)
       setReason('')
     } catch (error) {
@@ -211,6 +246,7 @@ export function StoreSanctionForm({
         className="po-form"
         onSubmit={handlePreview}
         aria-label="제재 조건"
+        inert={awaitingReauthentication}
         noValidate
       >
         <SelectField
@@ -303,13 +339,13 @@ export function StoreSanctionForm({
         </>
       )}
 
-      {awaitingReauthentication && (
+      {awaitingReauthentication && attempt !== null && (
         <ReauthenticationDialog
           purpose="STORE_SANCTION"
           targetType="STORE"
           targetId={String(storeId)}
           description={`${STORE_SANCTION_TYPE_LABEL[type]} 제재를 제안합니다. 본인 확인이 필요합니다.`}
-          onApproved={(approval) => void execute(approval)}
+          onApproved={handleApproved}
           onCancel={() => setAwaitingReauthentication(false)}
         />
       )}

@@ -21,6 +21,7 @@ import {
 } from '../api/auditApi'
 import { AuditReviewContextForm } from './AuditReviewContextForm'
 import { OUTCOME_LABEL, OUTCOME_TONE, REASON_LABEL, SOURCE_LABEL } from './auditLabels'
+import { useLogicalCommandAttempt } from './OperatorCommandFields'
 import { ReauthenticationDialog } from './ReauthenticationDialog'
 import './page.css'
 
@@ -270,8 +271,20 @@ function CorrectionForm({
   const [submitting, setSubmitting] = useState(false)
   const [awaitingReauthentication, setAwaitingReauthentication] =
     useState(false)
-  const [idempotencyKey, setIdempotencyKey] = useState(() =>
-    createIdempotencyKey(),
+  const {
+    attempt,
+    beginAttempt,
+    clearAttempt,
+    isAttemptCurrent,
+  } = useLogicalCommandAttempt(
+    () => ({ idempotencyKey: createIdempotencyKey() }),
+    JSON.stringify({
+      eventKey: event.eventKey,
+      context,
+      correctedOutcome,
+      correctedAction,
+      correctedTargetId,
+    }),
   )
 
   const hasCorrection =
@@ -287,10 +300,19 @@ function CorrectionForm({
       return
     }
     setFormError(null)
+    beginAttempt()
     setAwaitingReauthentication(true)
   }
 
   async function handleApproved(approval: string) {
+    if (attempt === null || !isAttemptCurrent()) {
+      setAwaitingReauthentication(false)
+      clearAttempt()
+      setFormError(
+        '재인증 중 명령 입력이 변경됐습니다. 변경된 내용으로 다시 제출해 주세요.',
+      )
+      return
+    }
     setAwaitingReauthentication(false)
     setSubmitting(true)
     setFormError(null)
@@ -299,7 +321,7 @@ function CorrectionForm({
         eventKey: event.eventKey,
         context,
         reauthenticationApproval: approval,
-        idempotencyKey,
+        idempotencyKey: attempt.idempotencyKey,
         body: {
           reason: 'RECORD_CORRECTION',
           ...(correctedOutcome !== '' ? { correctedOutcome } : {}),
@@ -310,7 +332,7 @@ function CorrectionForm({
       setResult(
         `보정 사건 ${created.eventKey}가 추가됐습니다. 원 사건은 그대로 보존됩니다.`,
       )
-      setIdempotencyKey(createIdempotencyKey())
+      clearAttempt()
       setCorrectedOutcome('')
       setCorrectedAction('')
       setCorrectedTargetId('')
@@ -340,6 +362,7 @@ function CorrectionForm({
         className="po-form"
         onSubmit={handleRequestReauthentication}
         aria-label="보정 사건 추가"
+        inert={awaitingReauthentication}
         noValidate
       >
         <SelectField
@@ -379,7 +402,7 @@ function CorrectionForm({
         </Button>
       </form>
 
-      {awaitingReauthentication && (
+      {awaitingReauthentication && attempt !== null && (
         <ReauthenticationDialog
           purpose="AUDIT_CORRECTION"
           targetType="AUDIT_EVENT"

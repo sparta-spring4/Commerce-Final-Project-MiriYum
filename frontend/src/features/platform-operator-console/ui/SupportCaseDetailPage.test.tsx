@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { http } from 'msw'
+import { HttpResponse, http } from 'msw'
 import { beforeEach, describe, expect, test } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { successResponse } from '../../../test/msw/envelope'
@@ -110,6 +110,58 @@ describe('회원지원 사건 결정', () => {
         reducedLevel: 'FEATURE_RESTRICTION',
         restrictedFeatures: ['RESERVATION'],
       }),
+    )
+  })
+
+  test('재인증 중 결정 입력이 바뀌면 이전 멱등 시도로 명령을 보내지 않는다', async () => {
+    let decisionRequests = 0
+    server.use(
+      http.get(DETAIL_PATH, () =>
+        successResponse(supportCase('ACCOUNT_APPEAL')),
+      ),
+      http.post(REAUTH_PATH, () =>
+        successResponse({
+          approval: 'approval-1001',
+          expiresAt: '2026-08-18T10:05:00+09:00',
+        }),
+      ),
+      http.post(DECISION_PATH, () => {
+        decisionRequests += 1
+        return HttpResponse.error()
+      }),
+    )
+    renderPage()
+
+    const reasonCode = await screen.findByLabelText('사유 코드')
+    fireEvent.change(reasonCode, { target: { value: 'ORIGINAL_REASON' } })
+    fireEvent.click(screen.getByRole('button', { name: '결정 기록' }))
+    await screen.findByRole('dialog', { name: '재인증이 필요합니다' })
+    fireEvent.change(screen.getByLabelText('현재 비밀번호'), {
+      target: { value: 'Miriyum1!' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '확인' }))
+
+    await screen.findByText(/서버에 연결하지 못했습니다/)
+    expect(decisionRequests).toBe(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '결정 기록' }))
+    await screen.findByRole('dialog', { name: '재인증이 필요합니다' })
+    expect(screen.getByRole('form', { name: '사건 결정' })).toHaveAttribute(
+      'inert',
+    )
+
+    // jsdom에서는 inert의 사용자 입력 차단을 구현하지 않으므로 강제로 변경해
+    // 승인 경계의 revision 검사가 별도로 동작하는지 검증한다.
+    fireEvent.change(reasonCode, { target: { value: 'CHANGED_REASON' } })
+    fireEvent.change(screen.getByLabelText('현재 비밀번호'), {
+      target: { value: 'Miriyum1!' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '확인' }))
+
+    await screen.findByText(/재인증 중 명령 입력이 변경됐습니다/)
+    expect(decisionRequests).toBe(1)
+    expect(screen.getByRole('form', { name: '사건 결정' })).not.toHaveAttribute(
+      'inert',
     )
   })
 })

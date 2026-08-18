@@ -20,6 +20,7 @@ import {
   STORE_SANCTION_TYPE_TONE,
   isReleasableSanction,
 } from '../model/storeLabels'
+import { useLogicalCommandAttempt } from './OperatorCommandFields'
 import { ReauthenticationDialog } from './ReauthenticationDialog'
 import { sanctionErrorMessage } from './StoreSanctionForm'
 import './page.css'
@@ -91,14 +92,30 @@ function SanctionCard({
   const [releaseReason, setReleaseReason] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [idempotencyKey, setIdempotencyKey] = useState(() =>
-    createIdempotencyKey(),
+  const approveAttempt = useLogicalCommandAttempt(
+    () => ({ idempotencyKey: createIdempotencyKey() }),
+    JSON.stringify({ storeId, context, sanction }),
+  )
+  const releaseAttempt = useLogicalCommandAttempt(
+    () => ({ idempotencyKey: createIdempotencyKey() }),
+    JSON.stringify({ storeId, context, sanction, releaseReason }),
   )
 
   const releasable = isReleasableSanction(sanction.type, sanction.status)
   const approvable = sanction.status === 'PENDING_APPROVAL'
 
   async function handleApprove(approval: string) {
+    if (
+      approveAttempt.attempt === null ||
+      !approveAttempt.isAttemptCurrent()
+    ) {
+      setAction(null)
+      approveAttempt.clearAttempt()
+      setError(
+        '재인증 중 명령 입력이 변경됐습니다. 변경된 내용으로 다시 제출해 주세요.',
+      )
+      return
+    }
     setAction(null)
     setBusy(true)
     setError(null)
@@ -121,7 +138,7 @@ function SanctionCard({
         storeId,
         context,
         sanctionId: sanction.sanctionId,
-        idempotencyKey,
+        idempotencyKey: approveAttempt.attempt.idempotencyKey,
         reauthenticationApproval: approval,
         body: {
           expectedSanctionVersion: sanction.sanctionVersion,
@@ -133,7 +150,7 @@ function SanctionCard({
           },
         },
       })
-      setIdempotencyKey(createIdempotencyKey())
+      approveAttempt.clearAttempt()
     } catch (caught) {
       setError(sanctionErrorMessage(caught))
     } finally {
@@ -143,6 +160,17 @@ function SanctionCard({
   }
 
   async function handleRelease(approval: string) {
+    if (
+      releaseAttempt.attempt === null ||
+      !releaseAttempt.isAttemptCurrent()
+    ) {
+      setAction(null)
+      releaseAttempt.clearAttempt()
+      setError(
+        '재인증 중 명령 입력이 변경됐습니다. 변경된 내용으로 다시 제출해 주세요.',
+      )
+      return
+    }
     setAction(null)
     setBusy(true)
     setError(null)
@@ -151,14 +179,14 @@ function SanctionCard({
         storeId,
         context,
         sanctionId: sanction.sanctionId,
-        idempotencyKey,
+        idempotencyKey: releaseAttempt.attempt.idempotencyKey,
         reauthenticationApproval: approval,
         body: {
           expectedSanctionVersion: sanction.sanctionVersion,
           reason: releaseReason.trim(),
         },
       })
-      setIdempotencyKey(createIdempotencyKey())
+      releaseAttempt.clearAttempt()
       setReleaseReason('')
     } catch (caught) {
       setError(sanctionErrorMessage(caught))
@@ -221,7 +249,7 @@ function SanctionCard({
       )}
 
       {canSanction && approvable && (
-        <div className="po-card__actions">
+        <div className="po-card__actions" inert={action !== null}>
           <p className="po-form__notice">
             제안자와 다른 슈퍼관리자만 승인할 수 있습니다. 승인 직전에 최신 영향을
             다시 계산합니다.
@@ -230,7 +258,10 @@ function SanctionCard({
             type="button"
             variant="primary"
             loading={busy}
-            onClick={() => setAction('approve')}
+            onClick={() => {
+              approveAttempt.beginAttempt()
+              setAction('approve')
+            }}
           >
             제재 승인
           </Button>
@@ -238,7 +269,7 @@ function SanctionCard({
       )}
 
       {canSanction && releasable && (
-        <div className="po-card__actions">
+        <div className="po-card__actions" inert={action !== null}>
           <TextField
             label="해제 사유"
             name={`releaseReason-${sanction.sanctionId}`}
@@ -250,14 +281,19 @@ function SanctionCard({
             variant="secondary"
             loading={busy}
             disabled={releaseReason.trim().length === 0}
-            onClick={() => setAction('release')}
+            onClick={() => {
+              releaseAttempt.beginAttempt()
+              setAction('release')
+            }}
           >
             제재 해제
           </Button>
         </div>
       )}
 
-      {action !== null && (
+      {action !== null &&
+        ((action === 'approve' && approveAttempt.attempt !== null) ||
+          (action === 'release' && releaseAttempt.attempt !== null)) && (
         <ReauthenticationDialog
           purpose="STORE_SANCTION"
           targetType="STORE"
