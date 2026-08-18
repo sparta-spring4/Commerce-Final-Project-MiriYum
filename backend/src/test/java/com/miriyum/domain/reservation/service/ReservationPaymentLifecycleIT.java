@@ -23,9 +23,12 @@ import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderCancellatio
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderPayment;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderStatus;
 import com.miriyum.domain.payment.service.PaymentService;
+import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationFulfillmentRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationNoShowRequest;
+import com.miriyum.domain.reservation.dto.request.ReservationPartyRequest;
 import com.miriyum.domain.reservation.dto.request.StoreCancellationRequest;
+import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
@@ -39,6 +42,11 @@ import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
+import com.miriyum.domain.schedule.dto.contract.StoreReservationWindowResult;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
+import com.miriyum.domain.schedule.service.StoreScheduleService;
+import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
@@ -143,6 +151,12 @@ class ReservationPaymentLifecycleIT {
     private ReservationDepositDispositionJob dispositionJob;
 
     @Autowired
+    private ReservationCreationCommandFacade creationFacade;
+
+    @Autowired
+    private ReservationDepositProcessCommandFacade processCommandFacade;
+
+    @Autowired
     private PaymentService paymentService;
 
     @Autowired
@@ -175,6 +189,12 @@ class ReservationPaymentLifecycleIT {
     @MockitoBean
     private PaymentProviderClient providerClient;
 
+    @MockitoBean
+    private StoreScheduleService storeScheduleService;
+
+    @MockitoBean
+    private StoreServiceIntervalValidationService intervalValidationService;
+
     @BeforeEach
     void resetExternalBoundaryAndClock() {
         reset(providerClient);
@@ -184,7 +204,7 @@ class ReservationPaymentLifecycleIT {
     @Test
     @DisplayName("방문 완료 obligation 누락이나 replay 중복은 실제 환불 수렴에서 검출한다")
     void fulfillmentLifecycleRejectsMissingOrDuplicateRefundConvergence() {
-        FinancialScenario scenario = paidV2Scenario(false);
+        FinancialScenario scenario = paidV2ScenarioFromPublicCommands();
         stubSuccessfulFullRefund();
         clock.set(START_AT.plusSeconds(60));
         IdempotencyKey key = key("fulfill", scenario.reservationId());
@@ -486,6 +506,222 @@ class ReservationPaymentLifecycleIT {
                 Arguments.of(
                         ReservationNoShowReason.UNCLEAR,
                         null, -1, PaymentStatus.PAID, 0L));
+    }
+
+    private FinancialScenario paidV2ScenarioFromPublicCommands() {
+        DepositCreationInputs inputs = seedDepositCreationInputs();
+        LocalDateTime localStart = LocalDateTime.of(SERVICE_DATE, START_TIME);
+        when(storeScheduleService.resolveReservationWindows(
+                List.of(inputs.storeId()), SERVICE_DATE, START_TIME)).thenReturn(List.of(
+                        StoreReservationWindowResult.accepting(
+                                inputs.storeId(),
+                                "Asia/Seoul",
+                                localStart.minusHours(1),
+                                localStart.plusHours(8))));
+        StoreServiceIntervalRequest interval = new StoreServiceIntervalRequest(
+                inputs.storeId(), START_AT, START_AT.plusSeconds(3_600));
+        when(intervalValidationService.validateServiceIntervals(List.of(interval)))
+                .thenReturn(List.of(StoreServiceIntervalResult.of(interval, true)));
+
+        IdempotencyKey creationKey = key("deposit-create", inputs.consumerId());
+        ReservationCreationCommandResult creation = creationFacade.create(
+                inputs.consumerId(),
+                creationKey,
+                new ReservationCreateRequest(
+                        String.valueOf(inputs.storeId()),
+                        SERVICE_DATE,
+                        START_TIME,
+                        null,
+                        new ReservationPartyRequest(2, 0, 0),
+                        List.of()));
+
+        assertThat(creation.httpStatus()).isEqualTo(202);
+        assertThat(creation.responseData()).isInstanceOf(ReservationRequestResponse.class);
+        ReservationRequestResponse request =
+                (ReservationRequestResponse) creation.responseData();
+        assertThat(request.status().name()).isEqualTo("AWAITING_PAYMENT");
+        assertThat(request.reservation()).isNull();
+        assertThat(request.paymentPreparation().amountMinor()).isEqualTo(AMOUNT_MINOR);
+        assertThat(request.paymentPreparation().currency()).isEqualTo("KRW");
+        long processId = Long.parseLong(request.reservationRequestId());
+        String paymentId = request.paymentPreparation().paymentId();
+        String portOnePaymentId = request.paymentPreparation().portOnePaymentId();
+
+        when(providerClient.getPayment(portOnePaymentId)).thenReturn(new ProviderPayment(
+                portOnePaymentId,
+                "transaction-public-path-" + processId,
+                ProviderStatus.PAID,
+                AMOUNT_MINOR,
+                "KRW"));
+        assertThat(paymentService.confirmPayment(new ConfirmPaymentCommand(
+                paymentId,
+                inputs.consumerId(),
+                portOnePaymentId,
+                uuid("confirm-public-path:" + processId))).status())
+                .isEqualTo(PaymentStatus.PAID);
+        clearInvocations(providerClient);
+
+        ReservationDepositCommandResult finalization = processCommandFacade.finalizeRequest(
+                inputs.consumerId(),
+                processId,
+                key("deposit-finalize", processId));
+        assertThat(finalization.httpStatus()).isEqualTo(200);
+        assertThat(finalization.reservation().status()).isEqualTo("CONFIRMED");
+        long reservationId = Long.parseLong(finalization.reservation().reservationId());
+        long holdId = jdbcTemplate.queryForObject(
+                "SELECT reservation_hold_id FROM reservation_deposit_processes "
+                        + "WHERE reservation_deposit_process_id = ?",
+                Long.class,
+                processId);
+
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT status, reservation_hold_id, payment_id, final_reservation_id
+                  FROM reservation_deposit_processes
+                 WHERE reservation_deposit_process_id = ?
+                """, processId))
+                .containsEntry("status", "COMPLETED")
+                .containsEntry("reservation_hold_id", holdId)
+                .containsEntry("payment_id", paymentId)
+                .containsEntry("final_reservation_id", reservationId);
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT status, cancellation_policy_version, creation_command_id
+                  FROM reservation_holds
+                 WHERE reservation_hold_id = ?
+                """, holdId))
+                .containsEntry("status", "CONFIRMED")
+                .containsEntry("cancellation_policy_version", 2L)
+                .containsEntry(
+                        "creation_command_id",
+                        "reservation-deposit-create:" + creationKey.value());
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT source_type, source_reference_id, status
+                  FROM payments
+                 WHERE payment_id = ?
+                """, paymentId))
+                .containsEntry("source_type", "RESERVATION_DEPOSIT")
+                .containsEntry("source_reference_id", String.valueOf(holdId))
+                .containsEntry("status", "PAID");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM idempotency_commands
+                 WHERE principal_id = ?
+                   AND command_type = 'RESERVATION_CREATE'
+                   AND processing_status = 'SUCCEEDED'
+                   AND result_http_status = 202
+                """, Long.class, inputs.consumerId())).isOne();
+
+        return new FinancialScenario(
+                inputs.operatorId(),
+                inputs.storeId(),
+                inputs.consumerId(),
+                reservationId,
+                paymentId,
+                portOnePaymentId);
+    }
+
+    private DepositCreationInputs seedDepositCreationInputs() {
+        return transactions.execute(status -> {
+            int sequence = SEQUENCE.incrementAndGet();
+            StoreOperatorAccount operator = operatorRepository.saveAndFlush(
+                    StoreOperatorAccount.create(
+                            "lifecycle-public-owner-" + sequence + "@example.com",
+                            "hashed-password",
+                            "owner"));
+            Store store = storeRepository.saveAndFlush(Store.create(
+                    operator.getId(),
+                    Long.toString(8_200_000_000L + sequence),
+                    BusinessType.CAFE,
+                    "Lifecycle Public Store " + sequence,
+                    "",
+                    Region.SEOUL,
+                    "fixture-address",
+                    "CAFE_BAKERY",
+                    Set.of(),
+                    true,
+                    true,
+                    false,
+                    "Asia/Seoul",
+                    LocalDateTime.of(2026, 8, 1, 9, 0),
+                    "STORE_ONBOARDING_REQUIRED_TERMS_V1"));
+            ConsumerAccount consumer = consumerRepository.saveAndFlush(
+                    ConsumerAccount.createWithContact(
+                            "lifecycle-public-consumer-" + sequence + "@example.com",
+                            "hashed-password",
+                            "consumer",
+                            String.format(Locale.ROOT, "011%08d", sequence),
+                            "opaque-lifecycle-public-contact-" + sequence));
+
+            long menuId = 9_100_000L + sequence;
+            long menuVersionId = 9_200_000L + sequence;
+            long timePolicyId = 9_300_000L + sequence;
+            long capacityBucketId = 9_400_000L + sequence;
+            jdbcTemplate.update(
+                    "UPDATE stores SET verification_status = 'APPROVED', "
+                            + "operation_status = 'OPEN' WHERE store_id = ?",
+                    store.getId());
+            jdbcTemplate.update("""
+                    INSERT INTO store_reservation_deposit_policies (
+                        store_id, enabled, rate_percent, policy_version, lock_version,
+                        created_at, updated_at
+                    ) VALUES (?, TRUE, 20, 1, 0, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                    """, store.getId());
+            jdbcTemplate.update("""
+                    INSERT INTO menus (
+                        menu_id, store_id, next_version_number, published_version_number,
+                        visibility, selling_status, retired, lock_version,
+                        created_at, updated_at
+                    ) VALUES (?, ?, 2, 1, 'VISIBLE', 'SELLING', FALSE, 0,
+                              UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                    """, menuId, store.getId());
+            jdbcTemplate.update("""
+                    INSERT INTO menu_versions (
+                        menu_version_id, menu_id, version_number, status, name,
+                        description, price, representative, primary_category_code,
+                        hold_selection_allowed, pickup_selection_allowed,
+                        allergen_information_status, origin_information_status,
+                        alcoholic, created_by_operator_id, created_at, effective_at
+                    ) VALUES (?, ?, 1, 'PUBLISHED', '대표 메뉴', '', 75000, TRUE,
+                              'BEVERAGE', TRUE, TRUE, 'NOT_REGISTERED',
+                              'NOT_APPLICABLE', FALSE, ?,
+                              '2026-08-01 00:00:00.000000',
+                              '2026-08-01 00:00:00.000000')
+                    """, menuVersionId, menuId, operator.getId());
+            jdbcTemplate.update("""
+                    INSERT INTO representative_menu_settings (
+                        store_id, version, status, lock_version, created_at, updated_at
+                    ) VALUES (?, 1, 'CONFIGURED', 0,
+                              UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                    """, store.getId());
+            jdbcTemplate.update("""
+                    INSERT INTO representative_menu_entries (store_id, display_order, menu_id)
+                    VALUES (?, 1, ?)
+                    """, store.getId(), menuId);
+            jdbcTemplate.update("""
+                    INSERT INTO reservation_time_policy_versions (
+                        reservation_time_policy_version_id, store_id, version_number,
+                        slot_interval_minutes, service_duration_minutes,
+                        turnover_duration_minutes, status, effective_at, activated_at,
+                        publication_requested_at, change_reason, created_at, updated_at
+                    ) VALUES (?, ?, 1, 10, 60, 0, 'ACTIVE',
+                              '2026-08-01 00:00:00.000000',
+                              '2026-08-01 00:00:00.000000',
+                              '2026-08-01 00:00:00.000000',
+                              'lifecycle public path',
+                              '2026-08-01 00:00:00.000000',
+                              '2026-08-01 00:00:00.000000')
+                    """, timePolicyId, store.getId());
+            jdbcTemplate.update("""
+                    INSERT INTO reservation_capacity_buckets (
+                        reservation_capacity_bucket_id, store_id, service_date,
+                        start_time, end_time, max_people, max_teams,
+                        occupied_people, occupied_teams, min_party_size,
+                        max_party_size, infants_allowed, policy_version
+                    ) VALUES (?, ?, '2026-08-16', '10:00:00.000000',
+                              '11:00:00.000000', 10, 5, 0, 0, 1, 10, TRUE, 1)
+                    """, capacityBucketId, store.getId());
+            return new DepositCreationInputs(
+                    operator.getId(), store.getId(), consumer.getId());
+        });
     }
 
     private FinancialScenario paidV2Scenario(boolean withCapacity) {
@@ -931,6 +1167,13 @@ class ReservationPaymentLifecycleIT {
             long reservationId,
             String paymentId,
             String portOnePaymentId
+    ) {
+    }
+
+    private record DepositCreationInputs(
+            long operatorId,
+            long storeId,
+            long consumerId
     ) {
     }
 
