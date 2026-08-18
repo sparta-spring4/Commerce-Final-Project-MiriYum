@@ -1163,6 +1163,96 @@ components:
         quantity:
           type: integer
           minimum: 1
+    ReservationDepositDisposition:
+      type: object
+      additionalProperties: false
+      required:
+        - policyVersion
+        - responsibilityCode
+        - targetRefundRateBasisPoints
+        - originalAmountMinor
+        - targetRefundAmountMinor
+        - completedRefundAmountMinor
+        - withheldAmountMinor
+        - currency
+        - dispositionId
+        - refundId
+        - status
+        - paymentDispositionStatus
+        - failureClassification
+        - createdAt
+        - updatedAt
+        - completedAt
+        - paymentRequestedAt
+        - paymentUpdatedAt
+      properties:
+        policyVersion:
+          type: integer
+          format: int64
+          enum: [2]
+        responsibilityCode:
+          type: string
+          enum: [CONSUMER, STORE_RESPONSIBLE, PLATFORM_RESPONSIBLE]
+        targetRefundRateBasisPoints:
+          type: integer
+          enum: [0, 5000, 10000]
+          description: 이번 환불 비율이 아닌 원승인 대비 목표 누적 환불 자격률
+        originalAmountMinor:
+          type: [integer, "null"]
+          format: int64
+          minimum: 1
+        targetRefundAmountMinor:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+        completedRefundAmountMinor:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+        withheldAmountMinor:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+        currency:
+          type: [string, "null"]
+          pattern: "^[A-Z]{3}$"
+        dispositionId:
+          type: [string, "null"]
+          format: uuid
+        refundId:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+            - type: "null"
+        status:
+          type: string
+          enum:
+            - PENDING
+            - PROCESSING
+            - COMPLETED
+            - RECONCILIATION_REQUIRED
+            - RECOVERY_REQUIRED
+        paymentDispositionStatus:
+          type: [string, "null"]
+          enum: [PROCESSING, COMPLETED, FAILED, RECONCILIATION_REQUIRED, null]
+        failureClassification:
+          type: [string, "null"]
+          enum: [RETRYABLE, PERMANENT, UNKNOWN, null]
+        createdAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        updatedAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        completedAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+        paymentRequestedAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+        paymentUpdatedAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
     ReservationDetail:
       type: object
       additionalProperties: false
@@ -1181,6 +1271,7 @@ components:
         - createdAt
         - cancelledBy
         - cancellationReason
+        - depositDisposition
       properties:
         reservationId:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
@@ -1229,6 +1320,13 @@ components:
             - string
             - "null"
           maxLength: 500
+        depositDisposition:
+          oneOf:
+            - $ref: "#/components/schemas/ReservationDepositDisposition"
+            - type: "null"
+          description: >-
+            V1/null/unknown 정책은 null. V2 취소 POST는 저장된 최초 PENDING을 replay하고,
+            예약 상세 GET은 Reservation obligation의 최신 projection을 반환한다.
         createdAt:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
     ReservationSummary:

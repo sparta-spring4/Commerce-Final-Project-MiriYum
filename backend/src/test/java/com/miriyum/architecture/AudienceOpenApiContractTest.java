@@ -52,12 +52,15 @@ class AudienceOpenApiContractTest {
             "/api/v1/consumers/me/notifications";
     private static final String REPRESENTATIVE_MENUS_PATH =
             "/api/v1/store-operators/stores/{storeId}/representative-menus";
+    private static final String STORE_DASHBOARD_ANALYTICS_PATH =
+            "/api/v1/store-operators/stores/{storeId}/dashboard-statistics";
     private static final Set<String> POST_MVP1_AUDIENCE_PATHS =
             Stream.concat(
                     Stream.of(
                             MENU_ALTERNATIVE_SEARCH_PATH,
                             NOTIFICATION_HISTORY_PATH,
                             REPRESENTATIVE_MENUS_PATH,
+                            STORE_DASHBOARD_ANALYTICS_PATH,
                             "/api/v1/store-operators/stores/{storeId}/images",
                             "/api/v1/store-operators/stores/{storeId}/images/{imageId}",
                             "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images",

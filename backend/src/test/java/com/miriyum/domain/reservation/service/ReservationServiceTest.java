@@ -14,6 +14,7 @@ import static org.mockito.BDDMockito.willAnswer;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
@@ -45,6 +46,7 @@ import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
+import com.miriyum.domain.reservation.dto.response.ReservationDepositDispositionResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationHistoryPageResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionResult;
@@ -61,6 +63,7 @@ import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationFulfillmentAudit;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcessStatus;
+import com.miriyum.domain.reservation.entity.ReservationDepositDispositionObligation;
 import com.miriyum.domain.reservation.entity.ReservationHold;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
@@ -79,6 +82,7 @@ import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRe
 import com.miriyum.domain.reservation.repository.ReservationCancellationAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationFulfillmentAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositDispositionObligationRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
@@ -224,6 +228,9 @@ class ReservationServiceTest {
     private ReservationDepositProcessRepository depositProcessRepository;
 
     @Mock
+    private ReservationDepositDispositionObligationRepository dispositionObligationRepository;
+
+    @Mock
     private ReservationHold depositHold;
 
     @Mock
@@ -299,7 +306,8 @@ class ReservationServiceTest {
                 new ReservationDepositCalculator(),
                 holdCreationPrimitive,
                 paymentService,
-                depositProcessRepository
+                depositProcessRepository,
+                dispositionObligationRepository
         );
     }
 
@@ -582,7 +590,7 @@ class ReservationServiceTest {
                                         MenuSellingStatus.SOLD_OUT))));
         given(depositHold.getId()).willReturn(77L);
         given(depositHold.getExpiresAt()).willReturn(expiresAt);
-        given(holdCreationPrimitive.create(any())).willReturn(depositHold);
+        given(holdCreationPrimitive.createDeposit(any())).willReturn(depositHold);
         PaymentPreparation preparation = new PaymentPreparation(
                 "pay_77",
                 "portone_77",
@@ -631,7 +639,7 @@ class ReservationServiceTest {
                 .isEqualTo(91L);
         InOrder order = inOrder(
                 holdCreationPrimitive, paymentService, depositProcessRepository);
-        order.verify(holdCreationPrimitive).create(any());
+        order.verify(holdCreationPrimitive).createDeposit(any());
         order.verify(paymentService).prepareReservationDeposit(any());
         order.verify(depositProcessRepository).saveAndFlush(any());
         then(reservationRepository).shouldHaveNoInteractions();
@@ -2262,6 +2270,185 @@ class ReservationServiceTest {
         assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
         then(cancellationPolicyEvaluator).shouldHaveNoInteractions();
         then(capacityAllocationRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("V2 소비자 취소는 process scalar를 먼저 검증하고 PENDING 처분 의무를 원자 저장한다")
+    void v2CancellationCreatesPendingDispositionAfterResourceRecovery() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        CancellationFixture fixture = stubSuccessfulCancellation(
+                command, ReservationMenuHoldTerminationPresence.NO_HOLD);
+        ReflectionTestUtils.setField(
+                fixture.reservation(), "cancellationPolicyVersion", 2L);
+        given(cancellationPolicyEvaluator.evaluate(
+                2L,
+                ReservationCancellationActorType.CONSUMER,
+                ReservationStatus.CONFIRMED,
+                fixture.reservation().getStartAt(),
+                REQUESTED_AT
+        )).willReturn(ReservationCancellationDecision.ALLOWED);
+        ReservationDepositDispositionDecision decision =
+                new ReservationDepositDispositionDecision(
+                        2L,
+                        ReservationDepositDispositionDecision.Responsibility.CONSUMER,
+                        0);
+        given(cancellationPolicyEvaluator.evaluateDepositDisposition(
+                2L,
+                ReservationDepositDispositionDecision.Responsibility.CONSUMER,
+                fixture.reservation().getCreatedAt(),
+                fixture.reservation().getStartAt(),
+                REQUESTED_AT
+        )).willReturn(decision);
+        ReservationDepositProcessRepository.DepositProcessLink link =
+                mock(ReservationDepositProcessRepository.DepositProcessLink.class);
+        given(link.getProcessId()).willReturn(31L);
+        given(link.getStatus()).willReturn(ReservationDepositProcessStatus.COMPLETED);
+        given(link.getFinalReservationId()).willReturn(77L);
+        given(link.getPaymentId()).willReturn("51");
+        given(depositProcessRepository.findDepositProcessLinkByFinalReservationId(77L))
+                .willReturn(Optional.of(link));
+        given(dispositionObligationRepository.saveAndFlush(
+                any(ReservationDepositDispositionObligation.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+
+        Object result = invokeConsumerCancellation(
+                command,
+                null,
+                REQUESTED_AT,
+                CONSUMER_CANCELLATION_CORRELATION);
+
+        ReservationDepositDispositionResponse projection =
+                cancellationData(result).depositDisposition();
+        assertThat(projection).isNotNull();
+        assertThat(projection.policyVersion()).isEqualTo(2L);
+        assertThat(projection.responsibilityCode()).isEqualTo("CONSUMER");
+        assertThat(projection.targetRefundRateBasisPoints()).isZero();
+        assertThat(projection.status()).isEqualTo("PENDING");
+        assertThat(projection.originalAmountMinor()).isNull();
+        assertThat(projection.completedRefundAmountMinor()).isNull();
+
+        ArgumentCaptor<ReservationDepositDispositionObligation> obligationCaptor =
+                ArgumentCaptor.forClass(ReservationDepositDispositionObligation.class);
+        then(dispositionObligationRepository).should()
+                .saveAndFlush(obligationCaptor.capture());
+        ReservationDepositDispositionObligation obligation = obligationCaptor.getValue();
+        assertThat(obligation.getReservationDepositProcessId()).isEqualTo(31L);
+        assertThat(obligation.getReservationId()).isEqualTo(77L);
+        assertThat(obligation.getPaymentId()).isEqualTo("51");
+        assertThat(obligation.getSourceEventId())
+                .isEqualTo(CONSUMER_CANCELLATION_CORRELATION);
+        assertThat(obligation.getCancellationIdempotencyKey())
+                .isEqualTo(CANCELLATION_KEY);
+        assertThat(obligation.getObligationKey()).matches(
+                "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+
+        InOrder order = inOrder(
+                depositProcessRepository,
+                menuHoldPort,
+                cancellationAuditRepository,
+                dispositionObligationRepository);
+        order.verify(depositProcessRepository)
+                .findDepositProcessLinkByFinalReservationId(77L);
+        order.verify(menuHoldPort).lockForTermination(77L);
+        order.verify(cancellationAuditRepository)
+                .saveAndFlush(any(ReservationCancellationAudit.class));
+        order.verify(dispositionObligationRepository)
+                .saveAndFlush(any(ReservationDepositDispositionObligation.class));
+        then(paymentService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("V2 취소 POST replay는 저장 PENDING을 반환하고 최신 obligation을 조회하지 않는다")
+    void v2CancellationReplayKeepsFrozenPendingProjection() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        Reservation cancelled = reservation(77L, 11L);
+        ReflectionTestUtils.setField(cancelled, "cancellationPolicyVersion", 2L);
+        cancelled.cancel(NOW.minusSeconds(1));
+        ReservationDepositDispositionObligation pending = pendingDispositionObligation();
+        ReservationDetailResponse stored = ReservationDetailResponse.from(
+                cancelled,
+                List.of(),
+                ReservationCancellationActorType.CONSUMER,
+                null,
+                ReservationDepositDispositionResponse.from(pending));
+        given(idempotencyExecutor.execute(eq(command), any())).willReturn(
+                new IdempotentOutcome(
+                        true,
+                        200,
+                        "SUCCESS",
+                        "RESERVATION",
+                        "77",
+                        new ObjectMapper().valueToTree(stored)));
+
+        Object replay = invokeConsumerCancellation(
+                command,
+                null,
+                REQUESTED_AT,
+                CONSUMER_CANCELLATION_CORRELATION);
+
+        assertThat(cancellationData(replay).depositDisposition().status())
+                .isEqualTo("PENDING");
+        then(dispositionObligationRepository).shouldHaveNoInteractions();
+        then(paymentService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("V2 GET detail은 저장된 최신 COMPLETED projection만 반환한다")
+    void v2DetailReadsLatestCompletedDispositionWithoutPaymentCall() {
+        Reservation reservation = reservation(77L, 11L);
+        ReflectionTestUtils.setField(reservation, "cancellationPolicyVersion", 2L);
+        ReservationDepositDispositionObligation completed = pendingDispositionObligation();
+        completed.claim("worker", NOW, NOW.plusSeconds(30));
+        completed.complete(
+                "worker",
+                1L,
+                NOW.plusSeconds(1),
+                new ReservationDepositDispositionObligation.PaymentSnapshot(
+                        "550e8400-e29b-41d4-a716-446655440239",
+                        null,
+                        10_001L,
+                        0L,
+                        0L,
+                        0L,
+                        10_001L,
+                        "KRW",
+                        "COMPLETED",
+                        null,
+                        NOW,
+                        NOW.plusSeconds(1),
+                        NOW.plusSeconds(1)));
+        given(reservationRepository.findByIdAndConsumerAccountId(77L, 11L))
+                .willReturn(Optional.of(reservation));
+        given(menuHoldPort.findSnapshots(77L)).willReturn(List.of());
+        given(cancellationAuditRepository.findByReservationId(77L))
+                .willReturn(Optional.empty());
+        given(dispositionObligationRepository.findFirstByReservationIdOrderByIdDesc(77L))
+                .willReturn(Optional.of(completed));
+
+        ReservationDetailResponse response =
+                reservationService.getConsumerReservation(11L, 77L);
+
+        assertThat(response.depositDisposition().status()).isEqualTo("COMPLETED");
+        assertThat(response.depositDisposition().originalAmountMinor()).isEqualTo(10_001L);
+        assertThat(response.depositDisposition().completedRefundAmountMinor()).isZero();
+        assertThat(response.depositDisposition().withheldAmountMinor()).isEqualTo(10_001L);
+        then(paymentService).shouldHaveNoInteractions();
+    }
+
+    private static ReservationDepositDispositionObligation pendingDispositionObligation() {
+        return ReservationDepositDispositionObligation.pending(
+                31L,
+                77L,
+                "51",
+                CONSUMER_CANCELLATION_CORRELATION,
+                "RESERVATION_CANCELLED",
+                null,
+                2L,
+                "CONSUMER",
+                0,
+                "550e8400-e29b-41d4-a716-446655440239",
+                CANCELLATION_KEY,
+                NOW);
     }
 
     @Test
@@ -4264,13 +4451,13 @@ class ReservationServiceTest {
             given(reservationRepository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
                     .willReturn(Optional.of(reservation));
         }
-        given(cancellationPolicyEvaluator.evaluate(
+        lenient().when(cancellationPolicyEvaluator.evaluate(
                 1L,
                 actorType,
                 ReservationStatus.CONFIRMED,
                 reservation.getStartAt(),
                 NOW.minusSeconds(10)
-        )).willReturn(ReservationCancellationDecision.ALLOWED);
+        )).thenReturn(ReservationCancellationDecision.ALLOWED);
         given(menuHoldPort.lockForTermination(77L)).willReturn(presence);
         given(capacityAllocationRepository
                 .findAllByReservationIdOrderByCapacityBucketIdAsc(77L))

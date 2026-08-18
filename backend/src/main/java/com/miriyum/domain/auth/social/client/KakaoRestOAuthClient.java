@@ -75,6 +75,7 @@ public class KakaoRestOAuthClient implements KakaoOAuthClient {
             }
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         } catch (RestClientException | IllegalArgumentException | JacksonException exception) {
+            logTransportFailure(exception);
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
     }
@@ -82,6 +83,12 @@ public class KakaoRestOAuthClient implements KakaoOAuthClient {
     private void logProviderRejection(RestClientResponseException exception) {
         log.warn("event=kakao_oauth_provider_rejected provider_status={} provider_error={}",
                 exception.getStatusCode().value(), providerErrorCode(exception));
+    }
+
+    private void logTransportFailure(Exception exception) {
+        // Exception messages can contain provider payloads, so retain only the safe type name.
+        log.warn("event=kakao_oauth_transport_failed exception_type={}",
+                exception.getClass().getSimpleName());
     }
 
     private String providerErrorCode(RestClientResponseException exception) {
