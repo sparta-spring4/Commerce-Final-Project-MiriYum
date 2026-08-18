@@ -41,12 +41,24 @@ curl.exe https://api.miriyum.click/actuator/health
 
 ## 롤백 절차
 
-다음 중 하나면 롤백한다: 배포 회로 차단기 롤백, 새 task 반복 종료, 5분 이상 `Healthy 2`를 회복하지 못함, health endpoint가 `UP`이 아님.
+다음 중 하나면 롤백을 검토한다: 배포 회로 차단기 롤백, 새 task 반복 종료, 5분 이상 `Healthy 2`를 회복하지 못함, health endpoint가 `UP`이 아님.
+
+### 롤백 호환성 확인
+
+직전 task definition이 이전에는 정상이어도, 현재 배포가 Flyway 스키마 변경이나 secret·환경 설정 변경을 이미 적용했을 수 있다. 이전 revision 선택 전 다음을 확인한다.
+
+1. 이번 release의 Flyway 변경이 expand → migrate → contract 순서를 지켜 이전 애플리케이션과 현재 스키마가 하위 호환되는지 확인한다.
+2. 현재 Secrets Manager JSON key와 환경 변수 참조가 이전 task definition에도 존재하고, 이전 revision이 새 필수 설정을 요구하지 않는지 확인한다.
+3. 해당 release에서 이전 revision으로의 rollback 검증 증거가 있으면 링크·실행 시각·결과만 확인한다. 비밀값과 고객 데이터는 기록하지 않는다.
+
+셋 중 하나라도 확인할 수 없으면 task definition을 자동으로 되돌리지 않는다. 배포·DB 소유자가 현재 schema와 설정에서의 수동 복구 방법을 결정한 뒤에만 후속 조치를 수행한다.
+
+### 호환성이 확인된 롤백 실행
 
 1. **ECS > 클러스터 > miriyum-prod-cluster > 서비스 > miriyum-prod-backend-service**로 이동한다.
 2. **배포** 탭에서 마지막으로 성공한 배포의 task definition revision을 확인한다.
 3. 오른쪽 위 **서비스 업데이트**를 누른다.
-4. **task definition**에서 직전 정상 revision을 선택한다.
+4. **task definition**에서 호환성 확인을 통과한 직전 정상 revision을 선택한다.
 5. desired count는 `2`로 유지한다.
 6. 배포 설정의 minimum healthy `100`, maximum `200`이 유지되는지 확인한다.
 7. **업데이트**를 눌러 롤백 배포를 시작한다.
