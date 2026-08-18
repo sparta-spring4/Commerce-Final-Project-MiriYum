@@ -18,6 +18,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.ConfirmPaymentCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDepositCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.PrepareWaitingReservationDepositCommand;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderCancellation;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderPayment;
@@ -442,6 +443,10 @@ class ReservationPaymentLifecycleIT {
         Scenario nullNoShow = scenario(false);
         Scenario unknownNoShow = scenario(false);
         Scenario nonDepositCancellation = scenario(true);
+        FinancialScenario v1Payment = paidLinkedScenario(v1Fulfillment, true);
+        FinancialScenario nullPayment = paidLinkedScenario(nullNoShow, true);
+        FinancialScenario unknownPayment = paidLinkedScenario(unknownNoShow, true);
+        FinancialScenario nonDepositPayment = paidLinkedScenario(nonDepositCancellation, false);
         jdbcTemplate.update(
                 "UPDATE reservations SET cancellation_policy_version = NULL "
                         + "WHERE reservation_id = ?",
@@ -487,7 +492,16 @@ class ReservationPaymentLifecycleIT {
                   FROM payments
                  WHERE source_reference_id IN (?, ?, ?, ?)
                 """, Long.class, reservationIds.stream().map(String::valueOf).toArray()))
-                .isZero();
+                .isEqualTo(4L);
+        assertThat(paymentSourceType(v1Payment.paymentId())).isEqualTo("RESERVATION_DEPOSIT");
+        assertThat(paymentSourceType(nullPayment.paymentId())).isEqualTo("RESERVATION_DEPOSIT");
+        assertThat(paymentSourceType(unknownPayment.paymentId())).isEqualTo("RESERVATION_DEPOSIT");
+        assertThat(paymentSourceType(nonDepositPayment.paymentId()))
+                .isEqualTo("WAITING_RESERVATION_DEPOSIT");
+        assertNoFinancialDisposition(v1Payment);
+        assertNoFinancialDisposition(nullPayment);
+        assertNoFinancialDisposition(unknownPayment);
+        assertNoFinancialDisposition(nonDepositPayment);
         verify(providerClient, never()).cancelPayment(
                 anyString(), anyString(), anyLong(), anyString(), anyString());
     }
@@ -722,6 +736,48 @@ class ReservationPaymentLifecycleIT {
             return new DepositCreationInputs(
                     operator.getId(), store.getId(), consumer.getId());
         });
+    }
+
+    private FinancialScenario paidLinkedScenario(Scenario scenario, boolean reservationDeposit) {
+        PaymentPreparation preparation = reservationDeposit
+                ? paymentService.prepareReservationDeposit(
+                        new PrepareReservationDepositCommand(
+                                String.valueOf(scenario.reservationId()),
+                                scenario.consumerId(),
+                                AMOUNT_MINOR,
+                                "KRW",
+                                PAYMENT_AT.plusSeconds(3_600),
+                                1L,
+                                uuid("prepare-boundary:" + scenario.reservationId())))
+                : paymentService.prepareWaitingReservationDeposit(
+                        new PrepareWaitingReservationDepositCommand(
+                                String.valueOf(scenario.reservationId()),
+                                scenario.consumerId(),
+                                AMOUNT_MINOR,
+                                "KRW",
+                                PAYMENT_AT.plusSeconds(3_600),
+                                1L,
+                                uuid("prepare-boundary:" + scenario.reservationId())));
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenReturn(
+                new ProviderPayment(
+                        preparation.portOnePaymentId(),
+                        "transaction-boundary-" + scenario.reservationId(),
+                        ProviderStatus.PAID,
+                        AMOUNT_MINOR,
+                        "KRW"));
+        assertThat(paymentService.confirmPayment(new ConfirmPaymentCommand(
+                preparation.paymentId(),
+                scenario.consumerId(),
+                preparation.portOnePaymentId(),
+                uuid("confirm-boundary:" + scenario.reservationId()))).status())
+                .isEqualTo(PaymentStatus.PAID);
+        return new FinancialScenario(
+                scenario.operatorId(),
+                scenario.storeId(),
+                scenario.consumerId(),
+                scenario.reservationId(),
+                preparation.paymentId(),
+                preparation.portOnePaymentId());
     }
 
     private FinancialScenario paidV2Scenario(boolean withCapacity) {
@@ -1058,6 +1114,13 @@ class ReservationPaymentLifecycleIT {
     private String paymentStatus(String paymentId) {
         return jdbcTemplate.queryForObject(
                 "SELECT status FROM payments WHERE payment_id = ?",
+                String.class,
+                paymentId);
+    }
+
+    private String paymentSourceType(String paymentId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT source_type FROM payments WHERE payment_id = ?",
                 String.class,
                 paymentId);
     }
