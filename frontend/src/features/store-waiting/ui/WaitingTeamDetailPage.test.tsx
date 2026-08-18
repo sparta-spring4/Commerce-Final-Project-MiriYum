@@ -28,18 +28,35 @@ function renderPage() {
   })
 }
 
-/** 이 팀이 FIFO 선두라고 알려 주는 목록 응답. */
-function headIsThisTeam() {
-  return http.get(WAITING_TEAMS_PATH, () =>
-    successResponse(teamPage([teamItem({ waitingTeamId: TEAM_ID })])),
-  )
+/**
+ * 상태 필터를 계약대로 지키는 목록 핸들러.
+ *
+ * 화면은 이 endpoint를 두 번 쓴다 — 대기 중 선두 한 건과 호출된 팀 존재 여부.
+ * 핸들러가 `status`를 무시하면 두 조회가 같은 답을 받아, 실제 서버에서는
+ * 나뉘는 두 조건이 테스트에서 하나로 뭉개진다.
+ */
+function teamsHandler({
+  waiting = [] as readonly ReturnType<typeof teamItem>[],
+  called = [] as readonly ReturnType<typeof teamItem>[],
+} = {}) {
+  return http.get(WAITING_TEAMS_PATH, ({ request }) => {
+    const status = new URL(request.url).searchParams.get('status')
+    if (status === 'WAITING') return successResponse(teamPage(waiting))
+    if (status === 'CALLED') return successResponse(teamPage(called))
+    return successResponse(teamPage([...waiting, ...called]))
+  })
 }
 
-/** 앞에 다른 팀이 있는 목록 응답. */
+/** 이 팀이 FIFO 선두이고 호출된 팀이 없는 상태. */
+function headIsThisTeam() {
+  return teamsHandler({ waiting: [teamItem({ waitingTeamId: TEAM_ID })] })
+}
+
+/** 앞에 다른 대기 팀이 있는 상태. */
 function headIsAnotherTeam() {
-  return http.get(WAITING_TEAMS_PATH, () =>
-    successResponse(teamPage([teamItem({ waitingTeamId: '10', queueSequence: 1 })])),
-  )
+  return teamsHandler({
+    waiting: [teamItem({ waitingTeamId: '10', queueSequence: 1 })],
+  })
 }
 
 describe('웨이팅 팀 상세 화면', () => {
@@ -226,6 +243,48 @@ describe('웨이팅 팀 상세 화면', () => {
     expect(
       await screen.findByText('대기 순서상 맨 앞 팀만 호출할 수 있습니다.'),
     ).toBeInTheDocument()
+  })
+
+  it('이미 호출한 팀이 있으면 선두여도 호출을 열지 않는다', async () => {
+    server.use(
+      authenticatedOperator(),
+      // 서버는 선두 판정 전에 CALLED 존재부터 보고 WAITING_007로 막는다.
+      teamsHandler({
+        waiting: [teamItem({ waitingTeamId: TEAM_ID })],
+        called: [teamItem({ waitingTeamId: '9', status: 'CALLED', queueSequence: 1 })],
+      }),
+      http.get(waitingTeamPath(TEAM_ID), () =>
+        successResponse(teamDetail({ status: 'WAITING' })),
+      ),
+    )
+
+    renderPage()
+
+    expect(await screen.findByRole('button', { name: '호출' })).toBeDisabled()
+    expect(
+      screen.getByText(/이미 호출한 팀이 있습니다/),
+    ).toBeInTheDocument()
+  })
+
+  it('호출된 팀 조회가 실패하면 호출을 열지 않는다', async () => {
+    server.use(
+      authenticatedOperator(),
+      http.get(WAITING_TEAMS_PATH, ({ request }) => {
+        const status = new URL(request.url).searchParams.get('status')
+        if (status === 'CALLED') {
+          return errorResponse(503, 'COMMON_012', '일시적으로 이용할 수 없습니다.')
+        }
+        return successResponse(teamPage([teamItem({ waitingTeamId: TEAM_ID })]))
+      }),
+      http.get(waitingTeamPath(TEAM_ID), () =>
+        successResponse(teamDetail({ status: 'WAITING' })),
+      ),
+    )
+
+    renderPage()
+
+    // 모르는 상태에서 열면 서버가 거절할 행동을 약속하게 된다.
+    expect(await screen.findByRole('button', { name: '호출' })).toBeDisabled()
   })
 
   it('계약에 없는 값을 지어내지 않는다', async () => {

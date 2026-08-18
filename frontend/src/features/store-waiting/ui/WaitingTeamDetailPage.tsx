@@ -14,7 +14,8 @@ import { TEAM_STATUS_LABEL, type WaitingTeamDetail } from '../model/types'
 import { WaitingCommandPanel } from './WaitingCommandPanel'
 import { formatDateTime, statusTone } from './WaitingTeamsPage'
 
-const HEAD_PAGE_SIZE = 1
+/** 선두·호출 여부 판정에는 존재만 알면 된다. 목록을 더 읽지 않는다. */
+const PROBE_PAGE_SIZE = 1
 
 /**
  * 웨이팅 팀 상세와 처리.
@@ -40,9 +41,23 @@ export function WaitingTeamDetailPage() {
    */
   const head = useWaitingTeams(storeId, {
     status: 'WAITING',
-    size: HEAD_PAGE_SIZE,
+    size: PROBE_PAGE_SIZE,
   })
   const headTeamId = head.data?.items[0]?.waitingTeamId ?? null
+
+  /*
+   * 이미 호출된 팀이 있는지.
+   *
+   * 서버는 선두 판정 전에 매장·영업일의 `CALLED` 존재부터 확인하고, 하나라도
+   * 있으면 다음 호출을 `WAITING_007`로 막는다(동시 호출 1팀). 상세 계약에
+   * "현재 호출된 팀"이 없으므로 목록을 상태로 걸러 존재만 확인한다.
+   *
+   * 이걸 빼면 선두 팀에서 호출 버튼이 열리지만 누르는 순간 반드시 거절된다.
+   */
+  const called = useWaitingTeams(storeId, {
+    status: 'CALLED',
+    size: PROBE_PAGE_SIZE,
+  })
 
   return (
     <>
@@ -73,11 +88,13 @@ export function WaitingTeamDetailPage() {
         <TeamFacts
           storeId={storeId}
           team={query.data}
-          // 선두 조회가 끝나기 전에는 호출을 열지 않는다. 모르는 상태에서 열면
+          // 두 조회가 끝나기 전에는 호출을 열지 않는다. 모르는 상태에서 열면
           // 서버가 WAITING_007로 거절할 행동을 약속하게 된다.
           isQueueHead={
             head.isSuccess && headTeamId === query.data.waitingTeamId
           }
+          // 알 수 없는 동안은 "있다"로 본다. 없다고 가정하면 버튼이 먼저 열린다.
+          hasCalledTeam={!called.isSuccess || called.data.items.length > 0}
         />
       )}
     </>
@@ -88,10 +105,12 @@ function TeamFacts({
   storeId,
   team,
   isQueueHead,
+  hasCalledTeam,
 }: {
   storeId: string
   team: WaitingTeamDetail
   isQueueHead: boolean
+  hasCalledTeam: boolean
 }) {
   return (
     <div className="op-stack">
@@ -143,6 +162,7 @@ function TeamFacts({
         storeId={storeId}
         team={team}
         isQueueHead={isQueueHead}
+        hasCalledTeam={hasCalledTeam}
       />
     </div>
   )
