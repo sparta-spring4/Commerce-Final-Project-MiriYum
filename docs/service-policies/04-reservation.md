@@ -22,14 +22,14 @@
 | 확정 | 권장 | `RES-012` |
 
 - `RES-001`: 1차 MVP는 즉시 확정 예약만 지원한다. 매장 승인제는 `향후 고도화`이며 현재 예약 상태나 권한으로 활성화하지 않는다.
-- `RES-009`: 1·2차 MVP의 비금전 취소 V1(양수 BIGINT `1`)은 예약에 저장된 정책 버전과 서버 중앙 `requestedAt`으로 판정하며, 소비자·매장 운영자에게 `startAt` 기준 시간 cutoff를 추가 적용하지 않는다. 환불·`PAY-009` 연결은 `고도화` 전용이다.
+- `RES-009`: 1·2차 MVP의 비금전 취소 V1(양수 BIGINT `1`)은 예약에 저장된 정책 버전과 서버 중앙 `requestedAt`으로 판정하며 시간 cutoff를 추가 적용하지 않는다. 고도화 V2(양수 BIGINT `2`)는 신규 예약금 Hold에만 저장해 최종 Reservation이 승계하고, 저장된 귀책·10분·48시간·24시간 경계로 Payment 목표 누적 환불률을 결정한다.
 - `RES-006` (`고도화`): 임시 선점은 10분이며 만료 2분 전에 경고한다. 사용자 임의 연장은 허용하지 않는다.
 
 ## 단계 경계
 
 - `1차 MVP`: 결제·예약금·보증금·환불과 체크인·노쇼 없이 예약 자원과 선택 메뉴 수량을 확정·반환한다. 예약 상태와 API 계약에 결제 상태 또는 `PAY-*` 참조를 넣지 않는다.
 - `1·2차 MVP 공통`: `RES-009`의 비금전 취소 V1은 소유권 또는 매장 관리 권한과 `CONFIRMED` 조건을 통과한 `CONSUMER`·`STORE_OPERATOR`에 동일하게 적용한다. `requestedAt`이 `startAt` 전·정각·후인 이유만으로 추가 거절하지 않는다.
-- `고도화`: 예약금·결제·환불을 활성화할 때 PAY 정책과 결제 상태를 연결하고, 체크인·노쇼를 활성화할 때 CHECK 정책과 후속 상태를 연결한다.
+- `고도화`: Issue #239의 신규 예약금 거래만 취소 V2와 Payment 처분 obligation을 연결한다. 기존 V1/null/unknown은 backfill·fallback·소급 해석하지 않는다. 체크인·노쇼를 활성화할 때는 CHECK 정책과 후속 상태를 별도로 연결한다.
 - 아래 정책에 보존된 결제·환불·체크인·노쇼 세부 규칙은 해당 단계가 별도로 승인·활성화되기 전까지 1차 MVP 구현 계약이 아니다.
 
 ## RES-001 즉시 확정·승인제 지원 범위
@@ -301,6 +301,16 @@
 - V1에서 취소 주체와 서버가 얻은 `requestedAt`은 판정 입력으로 사용하되, 금전 비율·금액·시간 구간·cutoff 또는 `PAY-*` 참조를 MVP 알림·감사·공개 응답에 넣지 않는다.
 - 기존 환불 구간과 귀책별 금전 처리 기록은 역사적 결정으로만 보존한다. 해당 규칙을 활성화하려면 고도화 정책 버전과 결제 계약을 별도로 승인해야 한다.
 
+### 고도화 예약금 취소 V2와 처분 의무
+
+- 예약금 필요로 판정된 신규 `ReservationHold`만 selector의 `cancellationPolicyVersion=2`를 저장하고 최종 Reservation이 같은 값을 승계한다. 비예약금 직접 Reservation은 V1을 유지하며 finalization에서 V1을 V2로 바꾸지 않는다.
+- V2 evaluator는 저장 version, `responsibilityCode`, 최종 Reservation의 `createdAt`인 `confirmedAt`, `startAt`, 명령 facade가 한 번 얻은 `requestedAt`만 입력으로 받는 순수 계산이다. `STORE_RESPONSIBLE`·`PLATFORM_RESPONSIBLE`은 10000 bps다. `CONSUMER`는 시작 전 확인 10분 이내 또는 시작 48시간 전까지 10000 bps, 48시간 초과 24시간 전까지 5000 bps, 시작 24시간 전을 초과하면 0 bps다. 정확히 10분·48시간·24시간인 포함 경계는 Issue #239의 승인식을 따른다.
+- 목표율은 이번 환불률이 아니라 원승인 대비 목표 누적 환불 자격률이다. Reservation은 Payment의 공개 scalar/record Service 계약만 사용하며 Payment Entity·Repository·provider adapter를 참조하지 않는다.
+- V2 취소는 Reservation 잠금 뒤 완료된 예약금 process의 scalar link를 비잠금 조회해 `COMPLETED`, 같은 final Reservation, 유효 `paymentId`를 실패 폐쇄 검증한다. `CANCELLED`, 수용량·메뉴 수량 복구, 감사, `ReservationDepositDispositionObligation(PENDING)` insert는 하나의 transaction에서 확정하고 Payment 외부 호출은 하지 않는다.
+- worker는 짧은 claim transaction을 commit한 뒤 transaction 밖에서 Payment `apply` 또는 `query`를 호출하고, 별도 결과 transaction에서 obligation과 fencing token만 잠근다. Payment가 환불 처리 임대 안의 `PROCESSING`을 반환한 QUERY poll은 실제 provider 대사 시도로 계산하지 않고 QUERY 상태를 유지한다. 임대 만료 후 `RECONCILIATION_REQUIRED`는 새 처분·환불 없이 `QUERY`만 유한 재시도하며, 이 대사 retry 한도를 넘거나 영구 실패면 `RECOVERY_REQUIRED`로 실패 폐쇄한다.
+- cancellation POST replay는 최초 저장 projection을 그대로 반환하고 Reservation detail GET은 최신 obligation projection만 읽는다. GET마다 Payment를 동기 호출하지 않으며 V1/null/unknown의 `depositDisposition`은 null이다.
+- disposition scheduler는 `miriyum.reservation.deposit-worker.enabled=true`일 때만 등록하며 누락·false는 비활성이다. V59는 obligation·lease·fencing·Payment snapshot을 추가하고 기존 행을 V2로 backfill하지 않는다.
+
 ## RES-010 중복 예약과 예약·웨이팅 충돌 판정
 
 > 정책 상태: 확정
@@ -425,14 +435,14 @@
 
 ### 확정 규칙·행위자·권한·사전 조건
 
-- 공통 예약 상태는 `요청 중`, `수용량 선점`, `확정`, `변경 대기`, `취소 대기`, `취소`, `거절`, `만료`, `이행 완료`, `노쇼`로 구분한다. 1차 MVP에서는 매장 승인을 기다리는 `확정 대기`를 사용하지 않으며, 1·2차 MVP V1의 취소는 `CONFIRMED`에서만 직접 `CANCELLED`로 전이한다. 고도화 Issue #240은 `CONFIRMED`에서 `FULFILLED` 또는 `NO_SHOW`로 직접 종결한다. `취소 대기`는 외부 결제·비동기 복구가 별도로 승인된 고도화 전까지 V1에 활성화하지 않는다.
+- 공통 예약 상태는 `요청 중`, `수용량 선점`, `확정`, `변경 대기`, `취소 대기`, `취소`, `거절`, `만료`, `이행 완료`, `노쇼`로 구분한다. 1·2차 MVP V1과 고도화 V2 취소는 모두 `CONFIRMED`에서 직접 `CANCELLED`로 전이하며, V2의 미완료 금전 처분은 Reservation 상태가 아니라 별도 obligation 상태로 표시한다. 고도화 Issue #240은 `CONFIRMED`에서 `FULFILLED` 또는 `NO_SHOW`로 직접 종결한다.
 - 사용자·매장 운영자·플랫폼 운영자는 각 정책이 허용한 명령만 제출하고 상태를 직접 덮어쓰지 않는다. 모든 전이는 현재 상태·예약 버전·권한·사전 조건을 검증한 서버 명령으로만 수행한다.
 - 중간 상태는 확정으로 표시하지 않고, 각 예약은 적용된 영업·슬롯·인원·수용량·가격·확정·취소 정책 버전을 참조한다. 취소 정책 버전은 시간·수용량 정책 버전과 분리해 저장하고 기존 예약은 저장된 버전 의미를 보존한다.
 
 ### 정상 흐름·변경·취소·만료
 
 - 1차 MVP의 유효 요청은 `요청 중` → `수용량 선점` → `확정`으로 간다. 메뉴를 선택한 경우 예약 자원과 메뉴 수량의 전체 검증·확정이 같은 트랜잭션에서 성공해야 한다. `수용량 선점`과 `확정`은 관련 구간의 인원과 팀 수를 점유하며 결제 또는 매장 승인·거절 전이를 생성하지 않는다.
-- 변경은 `확정` → `변경 대기` → `확정`의 새 버전 또는 철회·실패 후 원래 `확정`으로 복귀한다. 1·2차 MVP V1의 취소는 `RES-009`가 허용한 `CONSUMER` 또는 `STORE_OPERATOR` 명령에만 `CONFIRMED` → `CANCELLED`로 직접 전이하며, `startAt` 전·정각·후는 추가 거절 조건이 아니다. 고도화 QR 방문 완료는 `[startAt, startAt + 5분)`에, 운영자 직접 노쇼는 `now >= startAt + 5분`에만 허용하며 시간 경과만으로 자동 전이하지 않는다.
+- 변경은 `확정` → `변경 대기` → `확정`의 새 버전 또는 철회·실패 후 원래 `확정`으로 복귀한다. V1 취소는 `startAt` 시간만으로 추가 거절하지 않고, V2 취소는 `RES-009`의 목표율을 obligation에 저장한 뒤 금전 결과와 독립적으로 `CONFIRMED` → `CANCELLED`로 직접 전이한다. 고도화 QR 방문 완료는 `[startAt, startAt + 5분)`에, 운영자 직접 노쇼는 `now >= startAt + 5분`에만 허용하며 시간 경과만으로 자동 전이하지 않는다.
 - 변경 대기 중에는 기존 예약의 점유를 유지하고 인원 증가분 또는 새 구간만 추가 선점한다. 선점 기한이 지나면 요청 시점에도 `만료`로 판정하고 관련 구간의 인원·팀 수를 해제한다. `취소`, `거절`, `만료`, `이행 완료`, `노쇼`는 종결 상태이며 플랫폼 운영자도 과거 상태를 되돌리지 않고 새 보정 사건을 만든다.
 
 ### 동시성·실패·복구·알림·감사·개인정보
@@ -521,3 +531,4 @@
 | 2026-07-23 | RES-010·WAIT-017 | 같은 매장·영업 구간의 예약·웨이팅 충돌에 비용 확인과 원 거래 보존 조건부 전환 추가 | 확정 | 사용자 직접 운영 결정 |
 | 2026-08-06 | RES-009·RES-014 | 1·2차 MVP는 저장된 `cancellationPolicyVersion=1`과 서버 중앙 `requestedAt`으로 비금전 취소를 판정하고, 권한·소유 및 `CONFIRMED` 조건을 통과한 양 actor에게 `startAt` 시간 cutoff를 적용하지 않음 | 개정 확정 | Issue #168; 금전·환불·시간 구간·cutoff·`PAY-*` 연결은 고도화로 유예하고 기존 예약의 저장 버전 의미를 보존 |
 | 2026-08-16 | RES-014 | 고도화 Issue #240에서 `CONFIRMED` → `FULFILLED | NO_SHOW` 종결, 공통 5분 경계, MenuHold 무복구 종결과 최소 감사 계약 활성화 | 확정 하위 경계 | CHECK 정책·Issue #240 및 MenuHold FORFEITED 선행 계약 정렬 |
+| 2026-08-18 | RES-009·RES-014 | Issue #239에서 신규 예약금 Hold의 취소 V2, 목표 누적 환불률, 원자적 disposition obligation과 QUERY-only 대사 worker를 활성화 | 확정 하위 경계 | Payment V58 공개 처분 계약과 Reservation V59 obligation 분리, 기존 V1 의미 보존 |

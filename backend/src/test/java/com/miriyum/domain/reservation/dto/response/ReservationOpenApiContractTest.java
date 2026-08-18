@@ -886,10 +886,41 @@ class ReservationOpenApiContractTest {
 
         Map<String, Object> detail = map(map(components.get("schemas")).get("ReservationDetail"));
         assertThat(list(detail.get("required")))
-                .contains("cancelledBy", "cancellationReason");
+                .contains("cancelledBy", "cancellationReason", "depositDisposition");
         assertThat(map(detail.get("properties")))
-                .containsKeys("cancelledBy", "cancellationReason")
+                .containsKeys("cancelledBy", "cancellationReason", "depositDisposition")
                 .doesNotContainKey("cancelledAt");
+        Map<String, Object> disposition = map(
+                map(components.get("schemas")).get("ReservationDepositDisposition"));
+        assertThat(list(disposition.get("required"))).containsExactlyInAnyOrder(
+                "policyVersion",
+                "responsibilityCode",
+                "targetRefundRateBasisPoints",
+                "originalAmountMinor",
+                "targetRefundAmountMinor",
+                "completedRefundAmountMinor",
+                "withheldAmountMinor",
+                "currency",
+                "dispositionId",
+                "refundId",
+                "status",
+                "paymentDispositionStatus",
+                "failureClassification",
+                "createdAt",
+                "updatedAt",
+                "completedAt",
+                "paymentRequestedAt",
+                "paymentUpdatedAt");
+        Map<String, Object> dispositionProperties = map(disposition.get("properties"));
+        assertThat(list(map(dispositionProperties.get("responsibilityCode")).get("enum")))
+                .containsExactly("CONSUMER", "STORE_RESPONSIBLE", "PLATFORM_RESPONSIBLE");
+        assertThat(list(map(dispositionProperties.get("status")).get("enum")))
+                .containsExactly(
+                        "PENDING",
+                        "PROCESSING",
+                        "COMPLETED",
+                        "RECONCILIATION_REQUIRED",
+                        "RECOVERY_REQUIRED");
     }
 
     @Test
