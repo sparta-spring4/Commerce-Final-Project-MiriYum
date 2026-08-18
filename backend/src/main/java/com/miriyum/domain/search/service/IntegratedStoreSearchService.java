@@ -18,7 +18,12 @@ import com.miriyum.domain.search.dto.publicapi.NormalizedSearchCondition;
 import com.miriyum.domain.search.dto.publicapi.PublicStoreCoordinates;
 import com.miriyum.domain.search.dto.publicapi.PublicStoreModes;
 import com.miriyum.domain.search.dto.publicapi.ReservationAvailability;
+import com.miriyum.domain.search.config.OpenAiSearchInterpretationProperties;
 import com.miriyum.domain.search.config.StoreSearchCandidateLimit;
+import com.miriyum.domain.search.expansion.SearchConceptExpansion;
+import com.miriyum.domain.search.expansion.SearchConceptExpansionService;
+import com.miriyum.domain.search.expansion.SearchConceptPurpose;
+import com.miriyum.domain.search.expansion.SearchConceptRequest;
 import com.miriyum.domain.search.interpreter.InterpretationResult;
 import com.miriyum.domain.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.search.interpreter.PriceRange;
@@ -28,7 +33,6 @@ import com.miriyum.domain.search.query.IntegratedStoreSearchSort;
 import com.miriyum.domain.search.repository.IntegratedStoreSearchCandidate;
 import com.miriyum.domain.search.repository.IntegratedStoreSearchRepository;
 import com.miriyum.domain.search.repository.IntegratedStoreSearchSlice;
-import com.miriyum.domain.search.semantic.SemanticMenuSearchService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
@@ -36,6 +40,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,7 +56,8 @@ public class IntegratedStoreSearchService {
     private final StoreSearchCandidateLimit candidateLimit;
     private final IntegratedSearchCursorCodec cursorCodec;
     private final StoreRecommendationService recommendationService;
-    private final SemanticMenuSearchService semanticSearchService;
+    private final SearchConceptExpansionService expansionService;
+    private final OpenAiSearchInterpretationProperties llmProperties;
     private final Clock clock;
 
     public IntegratedStoreSearchService(
@@ -60,7 +67,8 @@ public class IntegratedStoreSearchService {
             StoreSearchCandidateLimit candidateLimit,
             IntegratedSearchCursorCodec cursorCodec,
             StoreRecommendationService recommendationService,
-            SemanticMenuSearchService semanticSearchService,
+            SearchConceptExpansionService expansionService,
+            OpenAiSearchInterpretationProperties llmProperties,
             Clock clock
     ) {
         this.interpreter = interpreter;
@@ -69,7 +77,8 @@ public class IntegratedStoreSearchService {
         this.candidateLimit = candidateLimit;
         this.cursorCodec = cursorCodec;
         this.recommendationService = recommendationService;
-        this.semanticSearchService = semanticSearchService;
+        this.expansionService = expansionService;
+        this.llmProperties = llmProperties;
         this.clock = clock;
     }
 
@@ -135,6 +144,7 @@ public class IntegratedStoreSearchService {
         String scanCursor = cursor;
         String responseCursor = null;
         boolean finished = false;
+        boolean exactExhausted = false;
         int scannedCandidates = 0;
         int scanLimit = candidateLimit.value();
         while (!finished
@@ -149,9 +159,7 @@ public class IntegratedStoreSearchService {
                     scanCursor,
                     requestedSize,
                     cursorCodec);
-            CandidateBatch batch = supplementWithSemanticCandidates(
-                    query, repository.search(query), scanLimit);
-            IntegratedStoreSearchSlice slice = batch.slice();
+            IntegratedStoreSearchSlice slice = repository.search(query);
             List<IntegratedStoreSearchCandidate> original = slice.content();
             List<IntegratedStoreSearchCandidate> before =
                     repository.refreshCurrentlyPublic(original);
@@ -191,8 +199,7 @@ public class IntegratedStoreSearchService {
                 }
                 items.add(toItem(current, candidateAvailability));
                 if (items.size() == requestedSize) {
-                    boolean hasMore = !batch.semanticSupplemented()
-                            && scannedCandidates < scanLimit
+                    boolean hasMore = scannedCandidates < scanLimit
                             && (!originalCandidate.equals(original.getLast())
                             || slice.nextCursor() != null);
                     responseCursor = hasMore
@@ -213,10 +220,24 @@ public class IntegratedStoreSearchService {
             scanCursor = slice.nextCursor();
             if (scanCursor == null || original.isEmpty()) {
                 responseCursor = null;
+                exactExhausted = true;
                 finished = true;
             } else if (lastProcessed != null) {
                 responseCursor = scanCursor;
             }
+        }
+
+        if (cursor == null
+                && exactExhausted
+                && items.size() < requestedSize
+                && !condition.remainingKeyword().isBlank()) {
+            appendExpandedCandidates(
+                    items,
+                    requestQuery,
+                    condition,
+                    includesInfants,
+                    availableOnly,
+                    requestedSize);
         }
 
         return new IntegratedStoreSearchData(
@@ -257,9 +278,7 @@ public class IntegratedStoreSearchService {
                     scanCursor,
                     scanPageSize,
                     cursorCodec);
-            CandidateBatch batch = supplementWithSemanticCandidates(
-                    scanQuery, repository.search(scanQuery), scanLimit);
-            IntegratedStoreSearchSlice slice = batch.slice();
+            IntegratedStoreSearchSlice slice = repository.search(scanQuery);
             List<IntegratedStoreSearchCandidate> original = slice.content();
             List<IntegratedStoreSearchCandidate> before =
                     repository.refreshCurrentlyPublic(original);
@@ -411,28 +430,63 @@ public class IntegratedStoreSearchService {
         return new AvailabilityBatch(true, byId);
     }
 
-    private CandidateBatch supplementWithSemanticCandidates(
+    private void appendExpandedCandidates(
+            List<IntegratedStoreSearchItem> items,
             IntegratedStoreSearchQuery query,
-            IntegratedStoreSearchSlice exact,
-            int scanLimit
+            InterpretedSearchCondition condition,
+            boolean includesInfants,
+            boolean availableOnly,
+            int requestedSize
     ) {
-        if (query.cursor().isPresent()
-                || exact.nextCursor() != null
-                || exact.content().size() >= query.size()
-                || query.remainingKeyword().isBlank()) {
-            return new CandidateBatch(exact, false);
+        SearchConceptExpansion expansion = expansionService.expand(new SearchConceptRequest(
+                condition.remainingKeyword(), SearchConceptPurpose.STORE_SEARCH));
+        if (expansion == null || expansion.concepts().isEmpty()) {
+            return;
         }
-        var hits = semanticSearchService.search(query.remainingKeyword(), scanLimit);
-        if (hits.isEmpty()) {
-            return new CandidateBatch(exact, false);
+        Set<Long> existingIds = items.stream()
+                .map(IntegratedStoreSearchItem::storeId)
+                .map(Long::parseLong)
+                .collect(Collectors.toSet());
+        List<IntegratedStoreSearchCandidate> expanded = repository.searchExpanded(
+                        query,
+                        expansion.concepts(),
+                        llmProperties.supplementCandidateLimit())
+                .stream()
+                .filter(candidate -> !existingIds.contains(candidate.storeId()))
+                .toList();
+        List<IntegratedStoreSearchCandidate> before =
+                repository.refreshCurrentlyPublic(expanded);
+        AvailabilityBatch availability = availabilityById(
+                before, condition, includesInfants);
+        if (!availability.valid()) {
+            return;
         }
-        IntegratedStoreSearchSlice semantic = repository.searchSemantic(query, hits);
-        Map<Long, IntegratedStoreSearchCandidate> merged = new LinkedHashMap<>();
-        exact.content().forEach(candidate -> merged.put(candidate.storeId(), candidate));
-        semantic.content().forEach(candidate -> merged.putIfAbsent(
-                candidate.storeId(), candidate));
-        return new CandidateBatch(new IntegratedStoreSearchSlice(
-                List.copyOf(merged.values()), null), true);
+        List<IntegratedStoreSearchCandidate> after =
+                repository.refreshCurrentlyPublic(before);
+        Map<Long, IntegratedStoreSearchCandidate> currentById = new LinkedHashMap<>();
+        after.forEach(candidate -> currentById.put(candidate.storeId(), candidate));
+        for (IntegratedStoreSearchCandidate original : expanded) {
+            if (items.size() >= requestedSize) {
+                return;
+            }
+            IntegratedStoreSearchCandidate current = currentById.get(original.storeId());
+            if (current == null) {
+                continue;
+            }
+            ReservationAvailability candidateAvailability =
+                    availability.values().getOrDefault(
+                            current.storeId(),
+                            hasReservationDate(condition)
+                                    ? ReservationAvailability.UNAVAILABLE
+                                    : ReservationAvailability.NOT_REQUESTED);
+            candidateAvailability = reconcileCurrentState(
+                    current, candidateAvailability, hasReservationDate(condition));
+            if (availableOnly
+                    && candidateAvailability != ReservationAvailability.AVAILABLE) {
+                continue;
+            }
+            items.add(toItem(current, candidateAvailability));
+        }
     }
 
     private static boolean matches(
@@ -547,9 +601,4 @@ public class IntegratedStoreSearchService {
     ) {
     }
 
-    private record CandidateBatch(
-            IntegratedStoreSearchSlice slice,
-            boolean semanticSupplemented
-    ) {
-    }
 }

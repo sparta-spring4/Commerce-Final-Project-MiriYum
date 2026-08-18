@@ -21,7 +21,11 @@ import com.miriyum.domain.recommendation.ranking.RecommendationSearchCandidate;
 import com.miriyum.domain.recommendation.ranking.RecommendationSearchSignals;
 import com.miriyum.domain.recommendation.ranking.StoreRecommendationService;
 import com.miriyum.domain.search.dto.publicapi.ReservationAvailability;
+import com.miriyum.domain.search.config.OpenAiSearchInterpretationProperties;
 import com.miriyum.domain.search.config.StoreSearchCandidateLimit;
+import com.miriyum.domain.search.expansion.SearchConceptExpansion;
+import com.miriyum.domain.search.expansion.SearchConceptExpansionService;
+import com.miriyum.domain.search.expansion.SearchConceptRequest;
 import com.miriyum.domain.search.interpreter.InterpretationResult;
 import com.miriyum.domain.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.search.query.IntegratedSearchCursorCodec;
@@ -29,8 +33,6 @@ import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
 import com.miriyum.domain.search.repository.IntegratedStoreSearchCandidate;
 import com.miriyum.domain.search.repository.IntegratedStoreSearchRepository;
 import com.miriyum.domain.search.repository.IntegratedStoreSearchSlice;
-import com.miriyum.domain.search.semantic.SemanticMenuHit;
-import com.miriyum.domain.search.semantic.SemanticMenuSearchService;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -58,7 +60,7 @@ class IntegratedStoreSearchServiceTest {
     @Mock ReservationSearchAvailabilityService reservationService;
     @Mock StoreSearchCandidateLimit candidateLimit;
     @Mock StoreRecommendationService recommendationService;
-    @Mock SemanticMenuSearchService semanticSearchService;
+    @Mock SearchConceptExpansionService expansionService;
 
     private final Clock clock = Clock.fixed(
             Instant.parse("2026-08-06T06:00:00Z"), ZoneOffset.UTC);
@@ -66,6 +68,8 @@ class IntegratedStoreSearchServiceTest {
     @BeforeEach
     void useProductionCandidateLimit() {
         given(candidateLimit.value()).willReturn(5_000);
+        org.mockito.Mockito.lenient().when(expansionService.expand(any()))
+                .thenReturn(SearchConceptExpansion.empty());
     }
 
     @Test
@@ -146,18 +150,23 @@ class IntegratedStoreSearchServiceTest {
     }
 
     @Test
-    void usesMySqlRevalidatedSemanticCandidatesWhenExactSearchIsEmpty() {
+    void usesMySqlRevalidatedExpandedCandidatesWhenExactSearchIsEmpty() {
         InterpretedSearchCondition condition = condition(null, null, null, "얼큰한 국물");
         given(interpreter.interpret("서울 얼큰한 국물")).willReturn(result(condition));
-        SemanticMenuHit hit = new SemanticMenuHit(11L, 2L, 3, 0.91);
         IntegratedStoreSearchCandidate candidate = candidate(2L, "김치찌개집");
         given(repository.search(any())).willReturn(
                 new IntegratedStoreSearchSlice(List.of(), null));
-        given(semanticSearchService.search("얼큰한 국물", 5_000))
-                .willReturn(List.of(hit));
-        given(repository.searchSemantic(any(), org.mockito.ArgumentMatchers.eq(List.of(hit))))
-                .willReturn(
-                new IntegratedStoreSearchSlice(List.of(candidate), null));
+        given(expansionService.expand(new SearchConceptRequest(
+                "얼큰한 국물",
+                com.miriyum.domain.search.expansion.SearchConceptPurpose.STORE_SEARCH)))
+                .willReturn(new SearchConceptExpansion(
+                        List.of("김치찌개", "찌개"), 130, 20));
+        given(repository.searchExpanded(
+                any(),
+                org.mockito.ArgumentMatchers.eq(List.of("김치찌개", "찌개")),
+                org.mockito.ArgumentMatchers.eq(200)))
+                .willReturn(List.of(candidate));
+        given(repository.refreshCurrentlyPublic(List.of())).willReturn(List.of());
         given(repository.refreshCurrentlyPublic(List.of(candidate)))
                 .willReturn(List.of(candidate));
 
@@ -170,22 +179,18 @@ class IntegratedStoreSearchServiceTest {
     }
 
     @Test
-    void availableOnlyKeepsScanningSemanticPoolAfterEarlierCandidatesAreUnavailable() {
+    void availableOnlyKeepsScanningExpandedPoolAfterEarlierCandidatesAreUnavailable() {
         InterpretedSearchCondition condition = condition(
                 LocalDate.of(2026, 8, 8), null, null, "얼큰한 국물");
         given(interpreter.interpret("서울 내일 얼큰한 국물")).willReturn(result(condition));
-        SemanticMenuHit firstHit = new SemanticMenuHit(11L, 1L, 1, 0.99);
-        SemanticMenuHit secondHit = new SemanticMenuHit(12L, 2L, 1, 0.98);
         IntegratedStoreSearchCandidate unavailable = candidate(1L, "품절 후보");
         IntegratedStoreSearchCandidate available = candidate(2L, "김치찌개집");
         given(repository.search(any())).willReturn(
                 new IntegratedStoreSearchSlice(List.of(), null));
-        given(semanticSearchService.search("얼큰한 국물", 5_000))
-                .willReturn(List.of(firstHit, secondHit));
-        given(repository.searchSemantic(any(), org.mockito.ArgumentMatchers.eq(
-                List.of(firstHit, secondHit))))
-                .willReturn(new IntegratedStoreSearchSlice(
-                        List.of(unavailable, available), null));
+        given(expansionService.expand(any())).willReturn(new SearchConceptExpansion(
+                List.of("김치찌개", "찌개"), 130, 20));
+        given(repository.searchExpanded(any(), any(), org.mockito.ArgumentMatchers.eq(200)))
+                .willReturn(List.of(unavailable, available));
         given(repository.refreshCurrentlyPublic(any()))
                 .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
         given(reservationService.getAvailabilities(any(), any())).willReturn(List.of(
@@ -348,8 +353,45 @@ class IntegratedStoreSearchServiceTest {
                 candidateLimit,
                 CURSOR_CODEC,
                 recommendationService,
-                semanticSearchService,
+                expansionService,
+                llmProperties(),
                 clock);
+    }
+
+    @Test
+    void expandsAfterAFullRawExactSliceBecomesEmptyDuringCurrentStateRefresh() {
+        InterpretedSearchCondition condition = condition(null, null, null, "얼큰한 국물");
+        given(interpreter.interpret("서울 얼큰한 국물")).willReturn(result(condition));
+        IntegratedStoreSearchCandidate staleExact = candidate(1L, "종료된 정확 후보");
+        IntegratedStoreSearchCandidate expanded = candidate(2L, "김치찌개집");
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(staleExact), null));
+        given(repository.refreshCurrentlyPublic(List.of())).willReturn(List.of());
+        given(repository.refreshCurrentlyPublic(List.of(staleExact))).willReturn(List.of());
+        given(expansionService.expand(any())).willReturn(new SearchConceptExpansion(
+                List.of("김치찌개"), 130, 20));
+        given(repository.searchExpanded(any(), any(), org.mockito.ArgumentMatchers.eq(200)))
+                .willReturn(List.of(expanded));
+        given(repository.refreshCurrentlyPublic(List.of(expanded)))
+                .willReturn(List.of(expanded));
+
+        var data = service().search(
+                "서울 얼큰한 국물", false, false, null, null, 1);
+
+        assertThat(data.items()).extracting(item -> item.storeId()).containsExactly("2");
+    }
+
+    private static OpenAiSearchInterpretationProperties llmProperties() {
+        return new OpenAiSearchInterpretationProperties(
+                true,
+                "https://api.openai.test",
+                "test-secret",
+                "gpt-4o-mini",
+                1_000,
+                2_000,
+                100,
+                8,
+                200);
     }
 
     private void assertPartialReservationCondition(
