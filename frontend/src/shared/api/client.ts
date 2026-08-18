@@ -6,6 +6,7 @@ import type {
   CsrfOf,
   IdempotencyOf,
   MethodOf,
+  MultipartOf,
   OperationOf,
   PathParamsOf,
   RequestBodyOf,
@@ -32,7 +33,6 @@ export interface ApiClientDependencies {
 /** OpenAPI가 타이핑하지 않는 부수 입력. */
 interface CommonRequestOptions {
   query?: Record<string, string | number | boolean | undefined>
-  multipart?: FormData
   signal?: AbortSignal
 }
 
@@ -44,6 +44,7 @@ export type RequestOptions<P extends ApiPath, M extends MethodOf<P>> = {
   method: M
 } & PathParamsOf<P> &
   RequestBodyOf<OperationOf<P, M>> &
+  MultipartOf<OperationOf<P, M>> &
   IdempotencyOf<OperationOf<P, M>> &
   CsrfOf<OperationOf<P, M>> &
   NoContentOf<OperationOf<P, M>> &

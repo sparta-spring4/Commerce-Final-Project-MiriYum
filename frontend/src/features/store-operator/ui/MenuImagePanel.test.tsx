@@ -167,6 +167,43 @@ describe('메뉴 대표 이미지 패널', () => {
     expect(idempotencyKeys[0]).toBe(idempotencyKeys[1])
   })
 
+  it('삭제를 시작하면 이전 업로드 재시도 action을 제거한다', async () => {
+    server.use(
+      authenticatedOperator(),
+      http.put(IMAGE_PATH, () =>
+        HttpResponse.json(
+          { code: 'COMMON_012', message: '잠시 후 다시 시도해 주세요.' },
+          { status: 503 },
+        ),
+      ),
+      http.delete(IMAGE_PATH, () =>
+        HttpResponse.json(
+          { code: 'COMMON_012', message: '잠시 후 다시 시도해 주세요.' },
+          { status: 503 },
+        ),
+      ),
+    )
+
+    renderPanel()
+    fireEvent.change(screen.getByLabelText('이미지 등록'), {
+      target: {
+        files: [new File(['image'], 'menu.webp', { type: 'image/webp' })],
+      },
+    })
+    await screen.findByRole('button', { name: '다시 업로드' })
+
+    fireEvent.click(screen.getByRole('button', { name: '이미지 삭제' }))
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          '서비스를 일시적으로 이용할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+        ),
+      ).toBeInTheDocument()
+    })
+    expect(screen.queryByRole('button', { name: '다시 업로드' })).not.toBeInTheDocument()
+  })
+
   it('업로드 중에는 파일 입력과 삭제를 잠근다', async () => {
     let releaseUpload!: () => void
     server.use(

@@ -52,6 +52,7 @@ export function MenuImagePanel({
           createUploadKey(file, uploadKeys.current),
       })
       setImageUrl(url)
+      setMessage(null)
       deleteKey.current = null
       setRetryFile(null)
     } catch (error) {
@@ -62,6 +63,7 @@ export function MenuImagePanel({
 
   async function handleDelete() {
     setMessage(null)
+    setRetryFile(null)
     try {
       const key =
         deleteKey.current ?? (deleteKey.current = createIdempotencyKey())
