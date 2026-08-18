@@ -8,8 +8,8 @@ import { ProfileSection } from './ProfileSection'
 /**
  * 마이페이지.
  *
- * 1차 MVP 계약에 있는 항목만 둔다. 결제·환불 내역, 알림, 웨이팅 이력은
- * 고도화 범위이므로 진입점도 만들지 않는다.
+ * 현재 연결된 소비자 계정 기능만 진입점으로 노출한다. 결제·환불 내역과
+ * 웨이팅 이력은 소비자용 계약과 화면이 준비될 때까지 노출하지 않는다.
  */
 export function MyPage() {
   const account = useConsumerAccount()
@@ -45,6 +45,21 @@ export function MyPage() {
             <span className="mypage__link-title">내 예약 내역</span>
             <span className="mypage__link-text">
               다가오는 다이닝 일정과 지난 방문 기록을 확인하세요.
+            </span>
+          </span>
+          <span className="mypage__link-go">
+            자세히 보기
+            <Icon name="arrowRight" className="mi-icon--sm" />
+          </span>
+        </Link>
+        <Link className="mypage__link-card" to={ROUTES.notificationHistory}>
+          <span className="mypage__link-art" aria-hidden="true">
+            <Icon name="alert" />
+          </span>
+          <span className="mypage__link-body">
+            <span className="mypage__link-title">알림 이력</span>
+            <span className="mypage__link-text">
+              예약과 매장 이용 관련 알림을 다시 확인하세요.
             </span>
           </span>
           <span className="mypage__link-go">
