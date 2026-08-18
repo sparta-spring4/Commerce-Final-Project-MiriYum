@@ -90,13 +90,13 @@ V43은 `SUPER_ADMIN` role grant의 singleton 제약과 수정·삭제를 trigger
 
 ## `2차 MVP` 검색·추천 계약
 
-검색 입력은 하나의 검색창에서 받되 `RuleInterpreter`가 정규화, 명시적 시간대·가격·승인 코드·남은 키워드를 결정적으로 해석한다. 모호한 값은 추측하지 않고 경고와 남은 키워드를 반환한다.
+검색 입력은 하나의 검색창에서 받되 `RuleInterpreter`가 정규화, 명시적 날짜·시각·인원·가격·승인 코드·남은 키워드를 결정적으로 해석한다. 날짜·시각·인원은 독립 조건이며 날짜가 없을 때는 예약 가능성을 판정하지 않는다. 모호한 값은 추측하지 않고 경고와 남은 키워드를 반환한다.
 
 QueryDSL은 선택 조합과 projection을 만들고 최종 후보는 MySQL에서 읽는다. 유효한 과거 예약과 확정 메뉴 선택만 이력 신호이며 취소·실패·단순 조회와 노쇼는 선호 신호가 아니다. Java 점수 계산은 같은 스냅샷에 같은 순위·설명을 만들어야 한다.
 
-`1차 MVP` 매장 목록·검색의 `availableOnly`·`reservationAvailability`는 기존 `ReservationService` 공개 일괄 가용성 조회 계약을 사용한다. 품절 또는 마지막 수량 경합 실패 뒤 같은 매장 메뉴를 검증하는 `2차 추천 전용` 신규 `BulkAvailabilityPort` 또는 신규 batch 계약만 1차에서 선구현하지 않으며, `2차 MVP` 진입 전 별도 contract-first Issue/PR에서 기존 1차 계약의 재사용·확장 여부와 함께 확정한다. 같은 매장 후보가 없을 때만 원 매장의 검증된 저장 좌표를 기준으로 bounding box와 Java Haversine을 적용하며, 거리가 **3km 이내**인 후보만 허용하고 3km를 초과하면 거부한다. 사용자 현재 위치는 요청·저장·사용하지 않는다. Kakao Local REST는 입점·주소 변경 시 좌표 변환 포트 뒤에서만 호출하고 추천 요청 중에는 호출하지 않는다.
+매장 목록·검색의 `availableOnly`·`reservationAvailability`는 날짜가 있을 때 `ReservationSearchAvailabilityService` 부분 조건 공개 계약을 사용한다. 같은 매장 대체 메뉴 후보가 없을 때만 원 매장의 검증된 저장 좌표를 기준으로 bounding box와 Java Haversine을 적용하며, 거리가 **3km 이내**인 후보만 허용하고 3km를 초과하면 거부한다. 사용자 현재 위치는 요청·저장·사용하지 않는다. Kakao Local REST는 입점·주소 변경 시 좌표 변환 포트 뒤에서만 호출하고 추천 요청 중에는 호출하지 않는다.
 
-AI/LLM, Spring AI, 벡터 DB와 검색 클러스터는 `2차 MVP` 계약에 없다. 정확한 사전·가중치·동률 규칙은 고정 평가셋 검증과 승인 전 추측하지 않는다.
+OpenAI `gpt-4o-mini` Structured Outputs는 규칙 해석과 MySQL 정확 검색 뒤, 최초 응답이 부족할 때 잔여 표현을 최대 8개의 음식 개념으로 바꾸는 데만 사용한다. 개념은 허용된 QueryDSL 조건으로 현재 MySQL 게시 메뉴에 대조하며 외부 벡터 저장소·색인·캐시는 두지 않는다. 외부 장애에는 정확 검색 또는 일반 대체 후보로 폴백하고 모든 후보는 MySQL 현재 상태와 예약·재고·알레르기 계약을 다시 통과해야 한다. LLM은 후보 ID·순위·가용성·안전 판단을 직접 만들지 않는다.
 
 ## `고도화` 외부 어댑터 계약
 
