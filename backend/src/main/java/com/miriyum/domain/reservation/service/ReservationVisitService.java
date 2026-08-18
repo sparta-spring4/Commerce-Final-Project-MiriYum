@@ -285,9 +285,15 @@ public class ReservationVisitService {
             ReservationNoShowReason reason,
             String sourceEventId
     ) {
+        if (!Long.valueOf(2L).equals(reservation.getCancellationPolicyVersion())) {
+            return null;
+        }
+        ReservationDepositProcessRepository.DepositProcessLink link =
+                requireCompletedDepositProcessLink(reservation);
         return switch (reason) {
             case USER_CAUSE_CANDIDATE -> dispositionPlan(
                     reservation,
+                    link,
                     sourceEventId,
                     "RESERVATION_NO_SHOW",
                     "CONSUMER",
@@ -295,6 +301,7 @@ public class ReservationVisitService {
             );
             case STORE_CAUSE_CANDIDATE -> dispositionPlan(
                     reservation,
+                    link,
                     sourceEventId,
                     "RESERVATION_NO_SHOW",
                     "STORE_RESPONSIBLE",
@@ -302,6 +309,7 @@ public class ReservationVisitService {
             );
             case PLATFORM_EXTERNAL_CAUSE_CANDIDATE -> dispositionPlan(
                     reservation,
+                    link,
                     sourceEventId,
                     "RESERVATION_NO_SHOW",
                     "PLATFORM_RESPONSIBLE",
@@ -321,7 +329,43 @@ public class ReservationVisitService {
         if (!Long.valueOf(2L).equals(reservation.getCancellationPolicyVersion())) {
             return null;
         }
-        if (depositProcessRepository == null || dispositionObligationRepository == null) {
+        return dispositionPlan(
+                reservation,
+                requireCompletedDepositProcessLink(reservation),
+                sourceEventId,
+                sourceEventType,
+                responsibilityCode,
+                targetRefundRateBasisPoints
+        );
+    }
+
+    private VisitDispositionPlan dispositionPlan(
+            Reservation reservation,
+            ReservationDepositProcessRepository.DepositProcessLink link,
+            String sourceEventId,
+            String sourceEventType,
+            String responsibilityCode,
+            int targetRefundRateBasisPoints
+    ) {
+        if (dispositionObligationRepository == null) {
+            throw new IllegalStateException(
+                    "reservation deposit disposition dependencies are required");
+        }
+        return new VisitDispositionPlan(
+                link.getProcessId(),
+                reservation.getId(),
+                link.getPaymentId(),
+                sourceEventId,
+                sourceEventType,
+                responsibilityCode,
+                targetRefundRateBasisPoints,
+                UUID.randomUUID().toString()
+        );
+    }
+
+    private ReservationDepositProcessRepository.DepositProcessLink
+            requireCompletedDepositProcessLink(Reservation reservation) {
+        if (depositProcessRepository == null) {
             throw new IllegalStateException(
                     "reservation deposit disposition dependencies are required");
         }
@@ -339,16 +383,7 @@ public class ReservationVisitService {
             throw new IllegalStateException(
                     "completed reservation deposit process link is required");
         }
-        return new VisitDispositionPlan(
-                link.getProcessId(),
-                reservation.getId(),
-                link.getPaymentId(),
-                sourceEventId,
-                sourceEventType,
-                responsibilityCode,
-                targetRefundRateBasisPoints,
-                UUID.randomUUID().toString()
-        );
+        return link;
     }
 
     private ReservationDepositDispositionResponse persistDispositionObligation(

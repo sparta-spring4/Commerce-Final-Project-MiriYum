@@ -144,6 +144,7 @@ class ReservationVisitServiceTest {
         given(menuHoldPort.lockForTermination(DEPOSIT_RESERVATION_ID))
                 .willReturn(ReservationMenuHoldTerminationPresence.NO_HOLD);
         stubDepositProcessLink();
+        stubDispositionObligationSave();
 
         ReservationVisitCommandResult result = serviceAt(REQUESTED_AT).checkIn(
                 33L, 22L, DIGEST, checkInCommand(), REQUESTED_AT,
@@ -175,8 +176,9 @@ class ReservationVisitServiceTest {
                 .willReturn(ReservationMenuHoldTerminationPresence.NO_HOLD);
         given(noShowAuditRepository.save(any()))
                 .willAnswer(invocation -> invocation.getArgument(0));
+        stubDepositProcessLink();
         if (responsibilityCode != null) {
-            stubDepositProcessLink();
+            stubDispositionObligationSave();
         }
 
         ReservationVisitCommandResult result = serviceAt(START_AT.plusSeconds(300)).markNoShow(
@@ -191,7 +193,6 @@ class ReservationVisitServiceTest {
 
         if (responsibilityCode == null) {
             assertThat(result.data().depositDisposition()).isNull();
-            then(depositProcessRepository).shouldHaveNoInteractions();
             then(dispositionObligationRepository).shouldHaveNoInteractions();
             return;
         }
@@ -201,6 +202,32 @@ class ReservationVisitServiceTest {
         assertThat(result.data().depositDisposition().targetRefundRateBasisPoints())
                 .isEqualTo(targetRefundRateBasisPoints);
         assertThat(result.data().depositDisposition().status()).isEqualTo("PENDING");
+    }
+
+    @Test
+    @DisplayName("V2 UNCLEAR 노쇼는 completed deposit process link가 없으면 종결하지 않는다")
+    void v2UnclearNoShowRejectsMissingDepositProcessLinkBeforeTermination() {
+        Reservation reservation = depositReservation();
+        stubFreshExecutor();
+        given(reservationRepository.findByIdAndStoreIdForUpdate(
+                DEPOSIT_RESERVATION_ID,
+                22L
+        )).willReturn(Optional.of(reservation));
+
+        assertThatThrownBy(() -> serviceAt(START_AT.plusSeconds(300)).markNoShow(
+                33L,
+                22L,
+                DEPOSIT_RESERVATION_ID,
+                ReservationNoShowReason.UNCLEAR,
+                noShowCommand(),
+                START_AT.plusSeconds(300),
+                "reservation-no-show:store-operator:33:" + KEY
+        ))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("completed reservation deposit process link is required");
+
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        assertThat(reservation.getNoShowAt()).isNull();
     }
 
     @Test
@@ -295,6 +322,9 @@ class ReservationVisitServiceTest {
         given(depositProcessRepository.findDepositProcessLinkByFinalReservationId(
                 DEPOSIT_RESERVATION_ID))
                 .willReturn(Optional.of(link));
+    }
+
+    private void stubDispositionObligationSave() {
         given(dispositionObligationRepository.saveAndFlush(
                 any(ReservationDepositDispositionObligation.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
