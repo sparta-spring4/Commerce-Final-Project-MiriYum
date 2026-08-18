@@ -4013,6 +4013,63 @@ class ReservationServiceTest {
     }
 
     @Test
+    @DisplayName("V2 직접 방문 완료는 Long 캐시 밖 ID의 전액 환불 obligation을 함께 저장한다")
+    void v2FulfillmentCreatesPendingFullRefundDisposition() {
+        long reservationId = 1_000L;
+        Reservation reservation = confirmedReservation();
+        ReflectionTestUtils.setField(reservation, "id", reservationId);
+        ReflectionTestUtils.setField(reservation, "cancellationPolicyVersion", 2L);
+        stubFreshIdempotency(fulfillmentCommand(), null);
+        given(reservationRepository.findByIdAndStoreIdForUpdate(
+                reservationId,
+                STORE_ID
+        )).willReturn(Optional.of(reservation));
+        given(menuHoldPort.lockForTermination(reservationId))
+                .willReturn(ReservationMenuHoldTerminationPresence.NO_HOLD);
+        given(fulfillmentAuditRepository.saveAndFlush(any()))
+                .willAnswer(invocation -> invocation.getArgument(0));
+        ReservationDepositProcessRepository.DepositProcessLink link =
+                mock(ReservationDepositProcessRepository.DepositProcessLink.class);
+        given(link.getProcessId()).willReturn(31L);
+        given(link.getStatus()).willReturn(ReservationDepositProcessStatus.COMPLETED);
+        given(link.getFinalReservationId()).willReturn(reservationId);
+        given(link.getPaymentId()).willReturn("51");
+        given(depositProcessRepository.findDepositProcessLinkByFinalReservationId(
+                reservationId
+        )).willReturn(Optional.of(link));
+        given(dispositionObligationRepository.saveAndFlush(any()))
+                .willAnswer(invocation -> invocation.getArgument(0));
+
+        ReservationFulfillmentCommandResult result =
+                reservationService.fulfillStoreReservation(
+                        OPERATOR_ID,
+                        STORE_ID,
+                        reservationId,
+                        fulfillmentCommand(),
+                        REQUESTED_AT,
+                        FULFILLMENT_CORRELATION
+                );
+
+        assertThat(result.data().depositDisposition()).isNotNull();
+        assertThat(result.data().depositDisposition().policyVersion()).isEqualTo(2L);
+        assertThat(result.data().depositDisposition().responsibilityCode())
+                .isEqualTo("CONSUMER");
+        assertThat(result.data().depositDisposition().targetRefundRateBasisPoints())
+                .isEqualTo(10_000);
+        assertThat(result.data().depositDisposition().status()).isEqualTo("PENDING");
+
+        ArgumentCaptor<ReservationDepositDispositionObligation> obligationCaptor =
+                ArgumentCaptor.forClass(ReservationDepositDispositionObligation.class);
+        then(dispositionObligationRepository).should()
+                .saveAndFlush(obligationCaptor.capture());
+        ReservationDepositDispositionObligation obligation = obligationCaptor.getValue();
+        assertThat(obligation.getSourceEventId()).isEqualTo(FULFILLMENT_CORRELATION);
+        assertThat(obligation.getSourceEventType()).isEqualTo("RESERVATION_FULFILLED");
+        assertThat(obligation.getPaymentId()).isEqualTo("51");
+        then(paymentService).shouldHaveNoInteractions();
+    }
+
+    @Test
     void fulfillmentUsesOwnershipOnlyAndNeverChecksTransactionEligibility() {
         stubFreshIdempotency(fulfillmentCommand(), null);
         given(reservationRepository.findByIdAndStoreIdForUpdate(

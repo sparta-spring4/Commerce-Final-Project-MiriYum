@@ -250,6 +250,47 @@ class ReservationVisitIT {
     }
 
     @Test
+    void v2UserNoShowCommitsOnePendingDispositionAndReplaysIt() {
+        Scenario scenario = confirmedScenario();
+        seedCompletedDepositProcess(scenario);
+        clock.set(START_AT.plusSeconds(300));
+        IdempotencyKey key = key(6);
+        ReservationNoShowRequest request = new ReservationNoShowRequest(
+                ReservationNoShowReason.USER_CAUSE_CANDIDATE
+        );
+
+        ReservationVisitCommandResult fresh = visitFacade.markNoShow(
+                scenario.operatorId(), scenario.storeId(), scenario.reservationId(), key, request
+        );
+        ReservationVisitCommandResult replay = visitFacade.markNoShow(
+                scenario.operatorId(), scenario.storeId(), scenario.reservationId(), key, request
+        );
+
+        assertThat(fresh.data().status()).isEqualTo("NO_SHOW");
+        assertThat(fresh.data().depositDisposition().status()).isEqualTo("PENDING");
+        assertThat(fresh.data().depositDisposition().responsibilityCode())
+                .isEqualTo("CONSUMER");
+        assertThat(fresh.data().depositDisposition().targetRefundRateBasisPoints()).isZero();
+        assertThat(replay).isEqualTo(fresh);
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT source_event_type, responsibility_code,
+                       target_refund_rate_basis_points, status
+                  FROM reservation_deposit_disposition_obligations
+                 WHERE reservation_id = ?
+                """, scenario.reservationId()))
+                .containsEntry("source_event_type", "RESERVATION_NO_SHOW")
+                .containsEntry("responsibility_code", "CONSUMER")
+                .containsEntry("target_refund_rate_basis_points", 0)
+                .containsEntry("status", "PENDING");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_deposit_disposition_obligations "
+                        + "WHERE reservation_id = ?",
+                Integer.class,
+                scenario.reservationId()
+        )).isOne();
+    }
+
+    @Test
     void lateQrAuditFailureRollsBackReservationGrantAuditAndIdempotency() {
         Scenario scenario = confirmedScenario();
         clock.set(START_AT.plusSeconds(60));
@@ -291,8 +332,9 @@ class ReservationVisitIT {
     }
 
     @Test
-    void qrAndDirectFulfillmentRaceLeavesOneTerminalAudit() throws Exception {
+    void v2QrAndDirectFulfillmentRaceLeavesOneMatchingDisposition() throws Exception {
         Scenario scenario = confirmedScenario();
+        seedCompletedDepositProcess(scenario);
         clock.set(START_AT.plusSeconds(60));
         ReservationCheckInQrGrantResult issued = grantFacade.issue(
                 scenario.consumerId(), scenario.reservationId()
@@ -331,6 +373,22 @@ class ReservationVisitIT {
                 Integer.class,
                 scenario.reservationId()
         )).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT source_event_type, responsibility_code,
+                       target_refund_rate_basis_points, status
+                  FROM reservation_deposit_disposition_obligations
+                 WHERE reservation_id = ?
+                """, scenario.reservationId()))
+                .containsEntry("source_event_type", "RESERVATION_FULFILLED")
+                .containsEntry("responsibility_code", "CONSUMER")
+                .containsEntry("target_refund_rate_basis_points", 10_000)
+                .containsEntry("status", "PENDING");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_deposit_disposition_obligations "
+                        + "WHERE reservation_id = ?",
+                Integer.class,
+                scenario.reservationId()
+        )).isOne();
     }
 
     private Scenario confirmedScenario() {
@@ -392,6 +450,69 @@ class ReservationVisitIT {
                     operator.getId(), store.getId(), consumer.getId(), reservation.getId()
             );
         });
+    }
+
+    private void seedCompletedDepositProcess(Scenario scenario) {
+        long holdId = 1_000_000L + scenario.reservationId();
+        String paymentId = Long.toString(
+                8_000_000_000_000_000_000L + scenario.reservationId());
+        jdbcTemplate.update(
+                "UPDATE reservations SET cancellation_policy_version = 2 "
+                        + "WHERE reservation_id = ?",
+                scenario.reservationId());
+        jdbcTemplate.update("""
+                INSERT INTO reservation_holds (
+                    reservation_hold_id, consumer_account_id, store_id,
+                    store_name_snapshot, service_date, start_at, service_end_at,
+                    occupancy_end_at, time_zone_id_snapshot, start_offset_seconds,
+                    service_end_offset_seconds, occupancy_end_offset_seconds,
+                    slot_interval_minutes, service_duration_minutes,
+                    turnover_duration_minutes, reservation_time_policy_store_id,
+                    reservation_policy_version, adult_count, child_count, infant_count,
+                    notification_target_reference, contact_available_at_confirmation,
+                    capacity_policy_version, cancellation_policy_version, status,
+                    status_version, creation_command_id, created_at, expires_at
+                )
+                SELECT ?, consumer_account_id, store_id, store_name_snapshot,
+                       service_date, start_at, service_end_at, occupancy_end_at,
+                       time_zone_id_snapshot, start_offset_seconds,
+                       service_end_offset_seconds, occupancy_end_offset_seconds,
+                       slot_interval_minutes, service_duration_minutes,
+                       turnover_duration_minutes, reservation_time_policy_store_id,
+                       reservation_policy_version, adult_count, child_count, infant_count,
+                       notification_target_reference, contact_available_at_confirmation,
+                       capacity_policy_version, 2, 'CONFIRMED', 0,
+                       CONCAT('deposit-visit-it:', reservation_id),
+                       created_at, DATE_ADD(created_at, INTERVAL 10 MINUTE)
+                  FROM reservations
+                 WHERE reservation_id = ?
+                """, holdId, scenario.reservationId());
+        jdbcTemplate.update("""
+                INSERT INTO reservation_deposit_processes (
+                    reservation_hold_id, consumer_account_id, status, expires_at,
+                    payment_id, portone_payment_id, payment_order_name,
+                    payment_amount_minor, payment_currency, payment_source_expires_at,
+                    payment_preparation_status, store_deposit_policy_version,
+                    deposit_rate_percent, deposit_algorithm_version, deposit_party_size,
+                    deposit_amount_minor, deposit_currency, representative_menu_version,
+                    representative_menu_price_total, representative_menu_count,
+                    abandonment_requested, resources_protected, resources_protected_at,
+                    final_reservation_id, requested_at, completed_at
+                ) VALUES (
+                    ?, ?, 'COMPLETED', '2026-08-02 00:10:00.000000',
+                    ?, CONCAT('portone-', ?), 'V2 visit deposit',
+                    10001, 'KRW', '2026-08-02 00:10:00.000000',
+                    'READY', 1, 20, 1, 2, 10001, 'KRW', 1, 50005, 1,
+                    FALSE, TRUE, '2026-08-02 00:01:00.000000',
+                    ?, '2026-08-02 00:00:00.000000',
+                    '2026-08-02 00:02:00.000000'
+                )
+                """,
+                holdId,
+                scenario.consumerId(),
+                paymentId,
+                paymentId,
+                scenario.reservationId());
     }
 
     private static boolean attempt(
