@@ -61,6 +61,25 @@ export interface paths {
      */
     get: operations["getWaitingCloseJob"];
   };
+  "/api/v1/consumers/me/stores/{storeId}/waiting-availabilities": {
+    /** 현재 웨이팅 접수 가능 상태 조회 */
+    get: operations["getConsumerWaitingAvailability"];
+  };
+  "/api/v1/consumers/me/stores/{storeId}/waiting-teams": {
+    /**
+     * 웨이팅 등록
+     * @description 위치 증명 세션을 등록과 같은 원자 경계에서 소비하는 #409가 연결되기 전에는 기본 비활성 상태다. 신규 멱등 요청은 팀·순번·membership을 만들지 않고 409 WAITING_012를 반환하되, 이미 성공한 같은 키·지문은 최초 응답을 재생한다.
+     */
+    post: operations["createConsumerWaitingTeam"];
+  };
+  "/api/v1/consumers/me/waiting-teams/current": {
+    /** 본인 현재 활성 웨이팅 조회 */
+    get: operations["getCurrentConsumerWaitingTeam"];
+  };
+  "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations": {
+    /** 본인 활성 웨이팅 취소 */
+    post: operations["cancelCurrentConsumerWaitingTeam"];
+  };
 }
 
 export type webhooks = Record<string, never>;
@@ -134,6 +153,47 @@ export interface components {
        * @description 마지막으로 조회한 대상 웨이팅 팀의 원장 버전
        */
       expectedVersion: number;
+    };
+    WaitingConsumerCreateRequest: {
+      /**
+       * Format: date
+       * @description 직전 접수 가능 상태 조회에서 서버가 반환한 영업일
+       */
+      businessDate: string;
+      /** @description 대표자가 등록하는 팀 인원수 */
+      partySize: number;
+    };
+    WaitingReceptionAvailability: {
+      storeId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      accepting: boolean;
+      /**
+       * Format: date
+       * @description accepting=true일 때 등록 요청에 사용할 현재 영업일
+       */
+      businessDate: string | null;
+    };
+    WaitingConsumerSnapshot: {
+      waitingTeamId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      storeId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      /** Format: date */
+      businessDate: string;
+      status: components["schemas"]["WaitingTeamStatus"];
+      /** Format: int64 */
+      queueSequence: number;
+      /** Format: int64 */
+      teamsAhead: number;
+      partySize: number;
+      createdAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      /** Format: date-time */
+      calledAt: string | null;
+      /** Format: date-time */
+      arrivalDeadline: string | null;
+      /** Format: date-time */
+      arrivedAt: string | null;
+      /** Format: date-time */
+      cancelledAt: string | null;
+      /** Format: int64 */
+      version: number;
     };
     WaitingTeamListItem: {
       waitingTeamId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
@@ -210,6 +270,16 @@ export interface components {
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["WaitingClosureJob"];
     };
+    WaitingReceptionAvailabilitySuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["WaitingReceptionAvailability"];
+    };
+    WaitingConsumerSnapshotSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["WaitingConsumerSnapshot"];
+    };
   };
   responses: {
     /** @description storeId가 양의 정수 문자열 PublicId 형식이 아님 */
@@ -268,6 +338,42 @@ export interface components {
     };
     /** @description 웨이팅 팀의 현재 상태·버전·FIFO 선두 조건·활성 membership·종결 작업 결과 또는 Store 상태와 충돌했거나, 멱등 키가 다른 요청 지문에 재사용되었거나 동시 변경이 발생했다. */
     WaitingLedgerConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 대상 매장을 찾을 수 없음 */
+    WaitingConsumerStoreNotFound: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 본인 소유 웨이팅 팀을 찾을 수 없음 */
+    WaitingConsumerTeamNotFound: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 현재 소비자 계정 상태가 이용을 허용하지 않음 */
+    WaitingConsumerAccountForbidden: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 소비자 계정이 제한됐거나 매장 웨이팅 기능이 제재로 제한됨 */
+    WaitingConsumerCreateForbidden: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 매장·입점·접수 상태, 단일 활성 웨이팅, 멱등성 또는 동시 요청 충돌 */
+    WaitingConsumerCreateConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 팀 버전·상태, 활성 membership, 멱등성 또는 동시 요청 충돌 */
+    WaitingConsumerCancelConflict: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -693,6 +799,105 @@ export interface operations {
       403: components["responses"]["WaitingStoreForbidden"];
       404: components["responses"]["WaitingLedgerNotFound"];
       409: components["responses"]["WaitingLedgerConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 현재 웨이팅 접수 가능 상태 조회 */
+  getConsumerWaitingAvailability: {
+    parameters: {
+      path: {
+        storeId: components["parameters"]["StoreId"];
+      };
+    };
+    responses: {
+      /** @description 현재 중앙 시각 기준 접수 가능 여부와 접수 가능한 영업일 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingReceptionAvailabilitySuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingLedgerBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      404: components["responses"]["WaitingConsumerStoreNotFound"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /**
+   * 웨이팅 등록
+   * @description 위치 증명 세션을 등록과 같은 원자 경계에서 소비하는 #409가 연결되기 전에는 기본 비활성 상태다. 신규 멱등 요청은 팀·순번·membership을 만들지 않고 409 WAITING_012를 반환하되, 이미 성공한 같은 키·지문은 최초 응답을 재생한다.
+   */
+  createConsumerWaitingTeam: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        storeId: components["parameters"]["StoreId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WaitingConsumerCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description 생성되거나 같은 멱등 키로 재생된 본인 웨이팅 snapshot */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingConsumerSnapshotSuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingLedgerBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerCreateForbidden"];
+      404: components["responses"]["WaitingConsumerStoreNotFound"];
+      409: components["responses"]["WaitingConsumerCreateConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 본인 현재 활성 웨이팅 조회 */
+  getCurrentConsumerWaitingTeam: {
+    responses: {
+      /** @description 본인의 현재 활성 웨이팅 snapshot */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingConsumerSnapshotSuccessResponse"];
+        };
+      };
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      404: components["responses"]["WaitingConsumerTeamNotFound"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 본인 활성 웨이팅 취소 */
+  cancelCurrentConsumerWaitingTeam: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        waitingTeamId: components["parameters"]["WaitingTeamId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WaitingTeamTransitionRequest"];
+      };
+    };
+    responses: {
+      /** @description 취소되거나 같은 멱등 키로 재생된 본인 웨이팅 snapshot */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingConsumerSnapshotSuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingLedgerBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      404: components["responses"]["WaitingConsumerTeamNotFound"];
+      409: components["responses"]["WaitingConsumerCancelConflict"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
     };
   };
