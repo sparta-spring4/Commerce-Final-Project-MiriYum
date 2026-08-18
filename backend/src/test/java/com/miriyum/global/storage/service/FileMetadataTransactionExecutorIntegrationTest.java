@@ -231,6 +231,36 @@ class FileMetadataTransactionExecutorIntegrationTest {
         }
     }
 
+    @Test
+    @DisplayName("두 reconciliation worker가 같은 객체를 읽어도 하나만 cleanup lease를 획득한다")
+    void allowsOnlyOneWorkerToClaimObjectCleanup() throws Exception {
+        String fileId = UUID.randomUUID().toString();
+        transactionExecutor.savePending(createMetadata(fileId, 11L, "object-cleanup-claim-race"));
+        transactionExecutor.confirm(fileId);
+        transactionExecutor.deleteOrGetDeleted(fileId, Instant.parse("2026-08-15T00:00:00Z"));
+        Instant now = Instant.parse("2026-08-15T00:01:00Z");
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executorService = Executors.newFixedThreadPool(2);
+
+        try {
+            List<Future<Boolean>> futures = List.of(
+                    executorService.submit(() -> claimAfterStart(fileId, now, start)),
+                    executorService.submit(() -> claimAfterStart(fileId, now, start)));
+            start.countDown();
+
+            long claimedCount = 0;
+            for (Future<Boolean> future : futures) {
+                if (future.get(10, TimeUnit.SECONDS)) {
+                    claimedCount++;
+                }
+            }
+
+            assertThat(claimedCount).isEqualTo(1);
+        } finally {
+            executorService.shutdownNow();
+        }
+    }
+
     private FileStorageStatus transitionInTransaction(
             String fileId,
             FileStorageStatus nextStatus,
@@ -253,6 +283,11 @@ class FileMetadataTransactionExecutorIntegrationTest {
     private FileMetadata deleteAfterStart(String fileId, Instant deletedAt, CountDownLatch start) {
         await(start);
         return transactionExecutor.deleteOrGetDeleted(fileId, deletedAt);
+    }
+
+    private boolean claimAfterStart(String fileId, Instant now, CountDownLatch start) {
+        await(start);
+        return transactionExecutor.claimObjectCleanup(fileId, now, now.plusSeconds(300)).isPresent();
     }
 
     private void await(CountDownLatch latch) {
