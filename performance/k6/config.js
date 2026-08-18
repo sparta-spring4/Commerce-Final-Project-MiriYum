@@ -22,6 +22,13 @@ function requireText(name, rawValue) {
   return rawValue.trim()
 }
 
+function requireSecret(name, rawValue) {
+  if (typeof rawValue !== 'string' || rawValue === '') {
+    throw new Error(`${name} is required`)
+  }
+  return rawValue
+}
+
 function requireRunId(rawValue) {
   const runId = requireText('RUN_ID', rawValue)
   if (runId.length > 100 || !/^[A-Za-z0-9._-]+$/.test(runId)) {
@@ -30,12 +37,38 @@ function requireRunId(rawValue) {
   return runId
 }
 
-function requireCommitSha(rawValue) {
-  const commitSha = requireText('COMMIT_SHA', rawValue).toLowerCase()
+function requireCommitSha(name, rawValue) {
+  const commitSha = requireText(name, rawValue).toLowerCase()
   if (!/^[0-9a-f]{40}$/.test(commitSha)) {
-    throw new Error('COMMIT_SHA must be a full 40-character Git SHA')
+    throw new Error(`${name} must be a full 40-character Git SHA`)
   }
   return commitSha
+}
+
+export function validateShaEvidence({
+  targetEnv,
+  commitSha,
+  harnessCommitSha,
+  stagingSplitApproved,
+  harnessSourceVerified,
+}) {
+  const normalizedCommitSha = requireCommitSha('COMMIT_SHA', commitSha)
+  const normalizedHarnessCommitSha = requireCommitSha('HARNESS_COMMIT_SHA', harnessCommitSha)
+  if (targetEnv === 'local' && normalizedCommitSha !== normalizedHarnessCommitSha) {
+    throw new Error('local execution requires matching deployed and harness SHAs')
+  }
+  if (targetEnv === 'staging' && harnessSourceVerified !== true) {
+    throw new Error('staging execution requires STAGING_HARNESS_SOURCE_VERIFIED=true')
+  }
+  if (targetEnv === 'staging'
+    && normalizedCommitSha !== normalizedHarnessCommitSha
+    && stagingSplitApproved !== true) {
+    throw new Error('staging split SHA requires STAGING_SPLIT_SHA_APPROVED=true')
+  }
+  return Object.freeze({
+    commitSha: normalizedCommitSha,
+    harnessCommitSha: normalizedHarnessCommitSha,
+  })
 }
 
 function requireJsonPath(name, rawValue) {
@@ -101,7 +134,6 @@ export function loadConfig(env) {
   if (targetEnv === 'staging' && env.STAGING_APPROVED !== 'true') {
     throw new Error('staging execution requires STAGING_APPROVED=true')
   }
-  assertSafeTarget(targetEnv, baseUrl, allowedHosts)
   if (profile === 'local-baseline' && targetEnv !== 'local') {
     throw new Error('local-baseline requires TARGET_ENV=local')
   }
@@ -118,9 +150,22 @@ export function loadConfig(env) {
     : requireJsonPath('SMOKE_PROOF_PATH', env.SMOKE_PROOF_PATH)
 
   const fixturePath = requireJsonPath('FIXTURE_PATH', env.FIXTURE_PATH)
+  const shaEvidence = validateShaEvidence({
+    targetEnv,
+    commitSha: env.COMMIT_SHA,
+    harnessCommitSha: env.HARNESS_COMMIT_SHA,
+    stagingSplitApproved: env.STAGING_SPLIT_SHA_APPROVED === 'true',
+    harnessSourceVerified: env.STAGING_HARNESS_SOURCE_VERIFIED === 'true',
+  })
 
   const limits = loadLimits(profile, env)
   const scenarioNames = loadScenarioNames(env.SCENARIOS)
+  if (targetEnv === 'staging'
+    && scenarioNames.includes('reservationCreate')
+    && env.STAGING_RESERVATION_FIXTURE_APPROVED !== 'true') {
+    throw new Error('staging reservationCreate requires STAGING_RESERVATION_FIXTURE_APPROVED=true')
+  }
+  assertSafeTarget(targetEnv, baseUrl, allowedHosts)
   if (profile !== 'smoke' && limits.maxVus < scenarioNames.length) {
     throw new Error('MAX_VUS must cover every selected scenario')
   }
@@ -142,8 +187,51 @@ export function loadConfig(env) {
     runId: requireRunId(env.RUN_ID),
     prerequisiteSmokeRunId,
     smokeProofPath,
-    commitSha: requireCommitSha(env.COMMIT_SHA),
+    ...shaEvidence,
     limits,
     scenarioNames,
+  })
+}
+
+export function loadRecoveryConfig(env) {
+  const targetEnv = requireText('TARGET_ENV', env.TARGET_ENV)
+  if (targetEnv !== 'staging') {
+    throw new Error('rate-limit recovery verification requires TARGET_ENV=staging')
+  }
+  if (env.STAGING_APPROVED !== 'true') {
+    throw new Error('rate-limit recovery verification requires STAGING_APPROVED=true')
+  }
+  if (env.RECOVERY_VERIFICATION_APPROVED !== 'true') {
+    throw new Error('rate-limit recovery verification requires RECOVERY_VERIFICATION_APPROVED=true')
+  }
+  if (env.RATE_LIMIT_EXCEPTION_REMOVED !== 'true') {
+    throw new Error('rate-limit recovery verification requires RATE_LIMIT_EXCEPTION_REMOVED=true')
+  }
+  if (env.RATE_LIMIT_WINDOW_CONFIRMED !== 'true') {
+    throw new Error('rate-limit recovery verification requires a fresh confirmed rate-limit window')
+  }
+
+  const baseUrl = requireText('BASE_URL', env.BASE_URL).replace(/\/+$/, '')
+  const allowedHosts = parseAllowedHosts(env.ALLOWED_HOSTS)
+  const shaEvidence = validateShaEvidence({
+    targetEnv,
+    commitSha: env.COMMIT_SHA,
+    harnessCommitSha: env.HARNESS_COMMIT_SHA,
+    stagingSplitApproved: env.STAGING_SPLIT_SHA_APPROVED === 'true',
+    harnessSourceVerified: env.STAGING_HARNESS_SOURCE_VERIFIED === 'true',
+  })
+  const account = Object.freeze({
+    email: requireText('K6_RECOVERY_EMAIL', env.K6_RECOVERY_EMAIL),
+    password: requireSecret('K6_RECOVERY_PASSWORD', env.K6_RECOVERY_PASSWORD),
+  })
+  assertSafeTarget(targetEnv, baseUrl, allowedHosts)
+
+  return Object.freeze({
+    targetEnv,
+    baseUrl,
+    allowedHosts: Object.freeze(allowedHosts),
+    runId: requireRunId(env.RUN_ID),
+    ...shaEvidence,
+    account,
   })
 }
