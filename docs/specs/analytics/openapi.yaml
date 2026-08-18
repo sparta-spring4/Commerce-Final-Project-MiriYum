@@ -1,0 +1,513 @@
+openapi: 3.1.0
+info:
+  title: MiriYum Store Dashboard Analytics API
+  version: 1.0.0
+  description: Contract-first API for the Issue #270 store-operator dashboard snapshot.
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+servers:
+  - url: /
+security: []
+paths:
+  /api/v1/store-operators/stores/{storeId}/dashboard-statistics:
+    get:
+      tags: [Store Dashboard Analytics]
+      operationId: getStoreDashboardStatistics
+      summary: 매장 운영 대시보드 통계 snapshot 조회
+      parameters:
+        - name: storeId
+          in: path
+          required: true
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          $ref: "#/components/responses/DashboardSnapshotSuccess"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AnalyticsStoreForbidden"
+        "404":
+          $ref: "#/components/responses/AnalyticsStoreNotFound"
+        "409":
+          $ref: "#/components/responses/AnalyticsStoreAuthorityConflict"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: "../mvp1-common/openapi.yaml#/components/securitySchemes/bearerAuth"
+  schemas:
+    MetricCompleteness:
+      type: string
+      enum: [COMPLETE, DELAYED, PARTIAL, UNAVAILABLE]
+      description: 지표 하나의 입력 완전성 상태
+    MetricReasonCode:
+      type: [string, "null"]
+      enum:
+        - null
+        - SOURCE_CONTRACT_MISSING
+        - SOURCE_DELAYED
+        - SOURCE_FAILED
+        - SOURCE_QUARANTINED
+        - INVALID_DENOMINATOR
+      description: COMPLETE이면 null이고 그 밖의 상태에서는 공개 가능한 원인 코드
+    NullableDataThrough:
+      oneOf:
+        - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        - type: "null"
+      description: 해당 지표가 반영한 마지막 원본 사건 시각. 원본 계약이 없으면 null이다.
+    CountMetric:
+      type: object
+      additionalProperties: false
+      required:
+        - value
+        - definitionVersion
+        - aggregationVersion
+        - asOf
+        - dataThrough
+        - inputCheckpoint
+        - completeness
+        - corrected
+        - reasonCode
+      properties:
+        value:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+          description: 집계 가능한 고유 팀 수. UNAVAILABLE이면 null이며 0으로 가장하지 않는다.
+        definitionVersion:
+          type: string
+          minLength: 1
+        aggregationVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 같은 매장·영업일·지표의 대체 상태를 식별하는 단조 증가 버전이다.
+        asOf:
+          allOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+          description: 서버가 generatedAt을 UTC 1분 경계로 내린 공통 source 조회 시각이다.
+        dataThrough:
+          $ref: "#/components/schemas/NullableDataThrough"
+        inputCheckpoint:
+          type: [string, "null"]
+          minLength: 1
+        completeness:
+          $ref: "#/components/schemas/MetricCompleteness"
+        corrected:
+          type: boolean
+        reasonCode:
+          $ref: "#/components/schemas/MetricReasonCode"
+    RateValue:
+      type: object
+      additionalProperties: false
+      required: [numerator, denominator, ratio]
+      properties:
+        numerator:
+          type: integer
+          format: int64
+          minimum: 0
+        denominator:
+          type: integer
+          format: int64
+          minimum: 1
+        ratio:
+          type: number
+          format: double
+          minimum: 0
+          description: numerator / denominator의 합산 비율이며 구간별 비율을 더하지 않는다.
+    RateMetric:
+      type: object
+      additionalProperties: false
+      required:
+        - value
+        - definitionVersion
+        - aggregationVersion
+        - asOf
+        - dataThrough
+        - inputCheckpoint
+        - completeness
+        - corrected
+        - reasonCode
+      properties:
+        value:
+          oneOf:
+            - $ref: "#/components/schemas/RateValue"
+            - type: "null"
+          description: 유효한 분모가 없거나 원본을 읽지 못하면 null이다.
+        definitionVersion:
+          type: string
+          minLength: 1
+        aggregationVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 같은 매장·영업일·지표의 대체 상태를 식별하는 단조 증가 버전이다.
+        asOf:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        dataThrough:
+          $ref: "#/components/schemas/NullableDataThrough"
+        inputCheckpoint:
+          type: [string, "null"]
+          minLength: 1
+        completeness:
+          $ref: "#/components/schemas/MetricCompleteness"
+        corrected:
+          type: boolean
+        reasonCode:
+          $ref: "#/components/schemas/MetricReasonCode"
+    WaitingValue:
+      type: object
+      additionalProperties: false
+      required:
+        - waitingTeams
+        - calledTeams
+        - waitingPeople
+        - calledPeople
+        - longestWaitSeconds
+      properties:
+        waitingTeams:
+          type: integer
+          format: int64
+          minimum: 0
+        calledTeams:
+          type: integer
+          format: int64
+          minimum: 0
+        waitingPeople:
+          type: integer
+          format: int64
+          minimum: 0
+        calledPeople:
+          type: integer
+          format: int64
+          minimum: 0
+        longestWaitSeconds:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+          description: WAITING·CALLED 팀의 최초 등록 시각부터 asOf까지이며 활성 팀이 없으면 null이다.
+    WaitingMetric:
+      type: object
+      additionalProperties: false
+      required:
+        - value
+        - definitionVersion
+        - aggregationVersion
+        - asOf
+        - dataThrough
+        - inputCheckpoint
+        - completeness
+        - corrected
+        - reasonCode
+      properties:
+        value:
+          oneOf:
+            - $ref: "#/components/schemas/WaitingValue"
+            - type: "null"
+        definitionVersion:
+          type: string
+          minLength: 1
+        aggregationVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 같은 매장·영업일·지표의 대체 상태를 식별하는 단조 증가 버전이다.
+        asOf:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        dataThrough:
+          $ref: "#/components/schemas/NullableDataThrough"
+        inputCheckpoint:
+          type: [string, "null"]
+          minLength: 1
+        completeness:
+          $ref: "#/components/schemas/MetricCompleteness"
+        corrected:
+          type: boolean
+        reasonCode:
+          $ref: "#/components/schemas/MetricReasonCode"
+    NoShowValue:
+      type: object
+      additionalProperties: false
+      required: [reservationCandidate, reservationConfirmed, waitingConfirmed]
+      properties:
+        reservationCandidate:
+          $ref: "#/components/schemas/CountMetric"
+          description: 후보 판정 producer 계약이 없어 null/UNAVAILABLE로 유지한다.
+        reservationConfirmed:
+          $ref: "#/components/schemas/CountMetric"
+          description: 운영자가 확정한 Reservation NO_SHOW audit의 고유 예약 팀 수다.
+        waitingConfirmed:
+          $ref: "#/components/schemas/CountMetric"
+    NoShowMetric:
+      type: object
+      additionalProperties: false
+      required:
+        - value
+        - definitionVersion
+        - aggregationVersion
+        - asOf
+        - dataThrough
+        - inputCheckpoint
+        - completeness
+        - corrected
+        - reasonCode
+      properties:
+        value:
+          $ref: "#/components/schemas/NoShowValue"
+        definitionVersion:
+          type: string
+          minLength: 1
+        aggregationVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 같은 매장·영업일·지표의 대체 상태를 식별하는 단조 증가 버전이다.
+        asOf:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        dataThrough:
+          $ref: "#/components/schemas/NullableDataThrough"
+        inputCheckpoint:
+          type: [string, "null"]
+          minLength: 1
+        completeness:
+          $ref: "#/components/schemas/MetricCompleteness"
+        corrected:
+          type: boolean
+        reasonCode:
+          $ref: "#/components/schemas/MetricReasonCode"
+    DashboardSnapshotData:
+      type: object
+      additionalProperties: false
+      required:
+        - snapshotId
+        - storeId
+        - businessDate
+        - timeZoneId
+        - asOf
+        - generatedAt
+        - storeAuthorityVersion
+        - metrics
+      properties:
+        snapshotId:
+          type: string
+          format: uuid
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        businessDate:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+        timeZoneId:
+          type: string
+          const: Asia/Seoul
+        asOf:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        generatedAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        storeAuthorityVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 매장 관리 허용 상태가 실제 전환될 때 증가하며 snapshot identity를 분리한다.
+        metrics:
+          type: object
+          additionalProperties: false
+          required:
+            - todayReservationTeams
+            - reservationRate
+            - teamCapacityUsageRate
+            - cancellationRate
+            - waiting
+            - noShow
+          properties:
+            todayReservationTeams:
+              $ref: "#/components/schemas/CountMetric"
+            reservationRate:
+              $ref: "#/components/schemas/RateMetric"
+            teamCapacityUsageRate:
+              $ref: "#/components/schemas/RateMetric"
+            cancellationRate:
+              $ref: "#/components/schemas/RateMetric"
+            waiting:
+              $ref: "#/components/schemas/WaitingMetric"
+            noShow:
+              $ref: "#/components/schemas/NoShowMetric"
+    DashboardSnapshotSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/DashboardSnapshotData"
+  responses:
+    DashboardSnapshotSuccess:
+      description: 동일 기준 시각의 대시보드 통계 snapshot. 지표 실패는 지표별 완전성으로 반환한다.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/DashboardSnapshotSuccessResponse"
+          examples:
+            reservationNoShowPending:
+              summary: 예약 노쇼 계약은 없고 Waiting 확정 미응답만 집계된 부분 snapshot
+              value:
+                code: SUCCESS
+                message: 대시보드 통계를 조회했습니다.
+                data:
+                  snapshotId: 8db61ee7-2df6-4cbc-ab53-720ef1a79cc1
+                  storeId: "17"
+                  businessDate: "2026-08-16"
+                  timeZoneId: Asia/Seoul
+                  asOf: "2026-08-16T18:00:00+09:00"
+                  generatedAt: "2026-08-16T18:00:01+09:00"
+                  storeAuthorityVersion: 1
+                  metrics:
+                    todayReservationTeams:
+                      value: 12
+                      definitionVersion: ANALYTICS-001-v1
+                      aggregationVersion: 3
+                      asOf: "2026-08-16T18:00:00+09:00"
+                      dataThrough: "2026-08-16T17:59:40+09:00"
+                      inputCheckpoint: "reservation:481"
+                      completeness: COMPLETE
+                      corrected: false
+                      reasonCode: null
+                    reservationRate:
+                      value:
+                        numerator: 48
+                        denominator: 80
+                        ratio: 0.6
+                      definitionVersion: ANALYTICS-002-v1
+                      aggregationVersion: 3
+                      asOf: "2026-08-16T18:00:00+09:00"
+                      dataThrough: "2026-08-16T17:59:40+09:00"
+                      inputCheckpoint: "reservation:481"
+                      completeness: COMPLETE
+                      corrected: false
+                      reasonCode: null
+                    teamCapacityUsageRate:
+                      value:
+                        numerator: 12
+                        denominator: 20
+                        ratio: 0.6
+                      definitionVersion: ANALYTICS-002-v1
+                      aggregationVersion: 3
+                      asOf: "2026-08-16T18:00:00+09:00"
+                      dataThrough: "2026-08-16T17:59:40+09:00"
+                      inputCheckpoint: "reservation:481"
+                      completeness: COMPLETE
+                      corrected: false
+                      reasonCode: null
+                    cancellationRate:
+                      value:
+                        numerator: 2
+                        denominator: 14
+                        ratio: 0.142857142857
+                      definitionVersion: ANALYTICS-003-v1
+                      aggregationVersion: 3
+                      asOf: "2026-08-16T18:00:00+09:00"
+                      dataThrough: "2026-08-16T17:59:40+09:00"
+                      inputCheckpoint: "reservation:481"
+                      completeness: COMPLETE
+                      corrected: false
+                      reasonCode: null
+                    waiting:
+                      value:
+                        waitingTeams: 3
+                        calledTeams: 1
+                        waitingPeople: 8
+                        calledPeople: 2
+                        longestWaitSeconds: 1260
+                      definitionVersion: ANALYTICS-004-waiting-v1
+                      aggregationVersion: 2
+                      asOf: "2026-08-16T18:00:00+09:00"
+                      dataThrough: "2026-08-16T17:59:54+09:00"
+                      inputCheckpoint: "waiting:912"
+                      completeness: COMPLETE
+                      corrected: false
+                      reasonCode: null
+                    noShow:
+                      value:
+                        reservationCandidate:
+                          value: null
+                          definitionVersion: analytics-004-reservation-no-show-candidate-v1
+                          aggregationVersion: 1
+                          asOf: "2026-08-16T18:00:00+09:00"
+                          dataThrough: null
+                          inputCheckpoint: null
+                          completeness: UNAVAILABLE
+                          corrected: false
+                          reasonCode: SOURCE_CONTRACT_MISSING
+                        reservationConfirmed:
+                          value: 1
+                          definitionVersion: analytics-004-reservation-no-show-confirmed-v1
+                          aggregationVersion: 49
+                          asOf: "2026-08-16T18:00:00+09:00"
+                          dataThrough: "2026-08-16T17:58:00+09:00"
+                          inputCheckpoint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                          completeness: COMPLETE
+                          corrected: false
+                          reasonCode: null
+                        waitingConfirmed:
+                          value: 2
+                          definitionVersion: analytics-004-waiting-no-show-confirmed-v1
+                          aggregationVersion: 2
+                          asOf: "2026-08-16T18:00:00+09:00"
+                          dataThrough: "2026-08-16T17:59:54+09:00"
+                          inputCheckpoint: "waiting:912"
+                          completeness: COMPLETE
+                          corrected: false
+                          reasonCode: null
+                      definitionVersion: analytics-004-no-show-v2
+                      aggregationVersion: 49
+                      asOf: "2026-08-16T18:00:00+09:00"
+                      dataThrough: "2026-08-16T17:59:54+09:00"
+                      inputCheckpoint: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                      completeness: PARTIAL
+                      corrected: false
+                      reasonCode: SOURCE_CONTRACT_MISSING
+    AnalyticsStoreForbidden:
+      description: 현재 운영자 계정·매장 소유권·매장 관리 제한 상태에서 조회가 허용되지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            accountRestricted:
+              value:
+                code: AUTH_011
+                message: 현재 계정 상태에서는 요청할 수 없습니다.
+            storeOwnershipRequired:
+              value:
+                code: STORE_003
+                message: 대상 매장을 관리할 권한이 없습니다.
+            storeManagementRestricted:
+              value:
+                code: STORE_015
+                message: 제재로 제한된 매장 기능입니다.
+    AnalyticsStoreNotFound:
+      description: 대상 매장이 실제로 존재하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_001
+            message: 매장을 찾을 수 없습니다.
+    AnalyticsStoreAuthorityConflict:
+      description: source 조회 중 매장 관리 권한 version이 변경되어 stale snapshot 게시를 거부함
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_014
+            message: 매장 제재 상태 버전이 변경되었습니다.

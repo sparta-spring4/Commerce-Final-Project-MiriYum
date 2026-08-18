@@ -1,5 +1,6 @@
 package com.miriyum.domain.store.service;
 
+import com.miriyum.domain.store.dto.contract.StoreDashboardAuthority;
 import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
 import com.miriyum.domain.store.dto.contract.StoreWaitingReceptionProfile;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
@@ -252,6 +253,22 @@ public class StoreService {
     ) {
         operatorAccountService.getMe(operatorAccountId);
         requireStoreOwnership(operatorAccountId, storeId);
+    }
+
+    /**
+     * 대시보드 통계 조회에 필요한 소유권과 시간 경계를 공개 DTO로 반환한다.
+     */
+    @Transactional(readOnly = true)
+    public StoreDashboardAuthority requireDashboardAuthority(
+            long operatorAccountId,
+            long storeId
+    ) {
+        operatorAccountService.getMe(operatorAccountId);
+        Store store = loadManagedStore(operatorAccountId, storeId);
+        return new StoreDashboardAuthority(
+                store.getId(),
+                store.getTimeZoneId(),
+                store.getDashboardAuthorityVersion());
     }
 
     /**
