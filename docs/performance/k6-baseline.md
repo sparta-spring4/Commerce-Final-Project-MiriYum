@@ -70,7 +70,7 @@
 
 | 구간 | 상태 | 관찰 결과 |
 |---|---|---|
-| k6 계약 테스트 | PASS | 고정 k6 이미지에서 config 23, 공통 계약 27, runtime options 2, scenario 34, smoke proof 8, summary 6 — 총 100 checks가 성공했다. |
+| k6 계약 테스트 | PASS | 고정 k6 이미지에서 config 38, 공통 계약 27, recovery rate-limit 10, runtime options 2, scenario 45, smoke proof 9, summary 6 — 총 137 checks가 성공했다. |
 | k6 계약 CI workflow | PASS | `rhysd/actionlint:1.7.7`이 path-filtered workflow를 오류 없이 검증했으며 workflow는 `--network none`으로 외부·local API 접근을 차단한 고정 k6 이미지에서 계약 테스트만 실행한다. |
 | k6 smoke profile inspect | PASS | 인증 1 iteration, 검색 1, 예약 1, 알림은 명시한 2개 합성 계정에 대해 2 iterations로 해석됐다. |
 | k6 local-baseline profile inspect | PASS | 동일 target·commit·fixture의 smoke artifact를 전달했을 때 `storeSearch`, 1 VU·1 arrival/s·10초가 하나의 constant-arrival-rate executor로 해석됐다. commit이 다른 artifact는 init context에서 요청 전에 거부됐다. |
@@ -105,7 +105,7 @@ staging의 `NOT RUN`은 성공이 아니다. local 결과는 위 비식별 fixtu
 ### k6 계약 테스트
 
 ```powershell
-$tests = @('config-contract.js', 'contracts-contract.js', 'runtime-options-contract.js', 'scenario-contract.js', 'smoke-proof-contract.js', 'summary-contract.js')
+$tests = @('config-contract.js', 'contracts-contract.js', 'recovery-rate-limit-contract.js', 'runtime-options-contract.js', 'scenario-contract.js', 'smoke-proof-contract.js', 'summary-contract.js')
 foreach ($test in $tests) {
   docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 run --quiet "/scripts/tests/$test"
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -114,11 +114,12 @@ foreach ($test in $tests) {
 
 관찰 결과:
 
-- `config-contract.js`: 23/23 checks 성공
+- `config-contract.js`: 38/38 checks 성공
 - `contracts-contract.js`: 27/27 checks 성공
+- `recovery-rate-limit-contract.js`: 10/10 checks 성공
 - `runtime-options-contract.js`: 2/2 checks 성공
-- `scenario-contract.js`: 34/34 checks 성공
-- `smoke-proof-contract.js`: 8/8 checks 성공
+- `scenario-contract.js`: 45/45 checks 성공
+- `smoke-proof-contract.js`: 9/9 checks 성공
 - `summary-contract.js`: 6/6 checks 성공
 - 계약 테스트의 의도적 예약 conflict와 인증 rate-limit은 합계 `expected_4xx=2`, 공개 계약에 없는 `RESERVATION_004`와 notification invariant conflict는 `unexpected_4xx=2`로 분리됐다. 이는 실제 환경 오류율이 아니다.
 
