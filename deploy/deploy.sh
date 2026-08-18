@@ -105,6 +105,38 @@ verify_valkey() {
   fi
 }
 
+recover_nginx_http() {
+  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+
+  # A broken TLS configuration must not leave Nginx unavailable after a backend deployment.
+  MIRIYUM_STAGING_FORCE_HTTP=true "${compose[@]}" up -d --force-recreate nginx || true
+}
+
+verify_nginx() {
+  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+
+  if ! "${compose[@]}" ps --status running --services nginx | grep -qx nginx; then
+    echo "Nginx is not running after deployment." >&2
+    return 1
+  fi
+
+  if ! "${compose[@]}" exec -T nginx nginx -t; then
+    echo "Nginx configuration validation failed after deployment." >&2
+    return 1
+  fi
+
+  # TLS must either have both readable files or the selector must render HTTP-only.
+  if ! "${compose[@]}" exec -T nginx sh -ec '
+    if grep -Fqx "    listen 443 ssl;" /etc/nginx/conf.d/default.conf; then
+      test -r "/etc/letsencrypt/live/$STAGING_DOMAIN/fullchain.pem"
+      test -r "/etc/letsencrypt/live/$STAGING_DOMAIN/privkey.pem"
+    fi
+  '; then
+    echo "Nginx selected TLS without readable certificate and private key files." >&2
+    return 1
+  fi
+}
+
 # 구버전 롤백 중 생성된 marker까지 다음 전달 대상에서 누락되지 않게 매 배포 이관한다.
 backfill_pending_risk_event_index() {
   local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
@@ -285,6 +317,14 @@ main() {
   fi
 
   docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --remove-orphans
+
+  if ! verify_nginx; then
+    recover_nginx_http
+    publish_deployment_health 0
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 nginx || true
+    return 1
+  fi
 
   deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
   until curl --fail --silent --show-error "${HEALTH_URL}" >/dev/null; do
