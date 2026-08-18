@@ -123,7 +123,9 @@ Store는 공개 탐색 가능한 자원이므로 기존 authorized enumeration �
 - metric cell 유일 키는 `(dashboard_snapshot_id, metric_key)`다.
 - 동일 1분 버킷 replay는 source가 그 사이 바뀌어도 최초 저장 snapshot을 반환한다. 다른 input checkpoint나 보정 입력은 다음 분 snapshot에서 새 `aggregationVersion`으로 반영한다.
 - Analytics 게시 경계는 매장·영업일·지표별 직전 cell과 값·checkpoint·완전성 상태를 비교한다. 상태가 바뀌면 source version보다 작아지지 않으면서 직전 `aggregationVersion + 1` 이상을 부여하고, 상태가 같으면 직전 version보다 작아지지 않게 하여 source 실패·복구에서도 version 감소·재사용을 막는다.
+- `NO_SHOW_STATUS`의 최상위 metadata뿐 아니라 `reservationCandidate`, `reservationConfirmed`, `waitingConfirmed` 각 subcell에도 같은 내구성 version 규칙을 독립 적용한다. 한 source의 실패·복구가 해당 subcell version을 감소시키거나 과거 version으로 되돌리지 않는다.
 - `platformManagementAllowed`가 실제로 전환될 때만 `storeAuthorityVersion`을 증가시킨다. 제한 후 해제된 같은 1분 버킷은 제한 전 snapshot과 다른 identity로 다시 게시한다.
+- 게시 transaction은 `stores` 행을 잠근 뒤 현재 `platformManagementAllowed`와 `dashboardAuthorityVersion`을 draft와 다시 대조한다. 제한 중인 draft는 거부하고, version이 바뀐 stale draft는 현재 authority의 같은 버킷 canonical snapshot이 있으면 그것을 반환하며 없으면 `STORE_014` conflict로 게시를 중단한다. stale draft는 latest marker와 다음 version high-watermark를 바꾸지 않는다.
 - 최초 동시 발행은 안정적인 `stores` 행을 `SELECT ... FOR UPDATE`로 잠근 뒤 게시하여 business date별 최신 marker를 하나만 남긴다.
 - snapshot은 성공 후 제자리 덮어쓰지 않는다. 발행 transaction은 `stores` 행 잠금 안에서 header와 여섯 metric 삽입까지만 수행한다.
 - 31일을 초과한 header는 발행과 분리된 시간당 retention job이 `(generated_at, dashboard_snapshot_id)` 인덱스로 최대 1,000행씩 10개 transaction에서 정리하고, metric FK의 `ON DELETE CASCADE`로 함께 삭제한다. 삭제된 기간은 재조회 시 source에서 다시 계산할 수 있다.
@@ -142,7 +144,7 @@ Issue #270은 혼합 방식을 채택한다. 범용 Kafka/Outbox나 새 사용�
 
 ## Migration과 exact allowlist
 
-현재 `dev`의 마지막 migration은 #396으로 병합된 V55이다. 사용자 지정 재번호 결과 #270은 `V57__create_dashboard_analytics_snapshots.sql`을 사용한다. #270 병합 직전에 V57 충돌 여부와 전체 순서를 다시 검증한다.
+현재 `dev`의 마지막 migration은 #400으로 병합된 `V56__add_file_metadata_reconciliation_indexes.sql`이다. #270은 그 다음 번호인 `V57__create_dashboard_analytics_snapshots.sql`을 사용한다. #270 병합 직전에 V57 충돌 여부와 전체 순서를 다시 검증한다.
 
 ### 이번 contract-first 변경 허용 경로
 

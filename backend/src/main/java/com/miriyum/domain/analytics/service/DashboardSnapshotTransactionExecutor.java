@@ -16,6 +16,8 @@ import com.miriyum.domain.analytics.entity.DashboardMetricSnapshot;
 import com.miriyum.domain.analytics.entity.DashboardSnapshot;
 import com.miriyum.domain.analytics.repository.DashboardMetricSnapshotRepository;
 import com.miriyum.domain.analytics.repository.DashboardSnapshotRepository;
+import com.miriyum.domain.store.error.StoreErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.sql.PreparedStatement;
 import java.sql.Types;
 import java.time.Instant;
@@ -73,7 +75,19 @@ public class DashboardSnapshotTransactionExecutor {
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public DashboardSnapshotResponse publish(DashboardSnapshotDraft draft) {
-        lockStore(draft.storeId());
+        LockedStoreAuthority currentAuthority = lockStore(draft.storeId());
+        if (!currentAuthority.platformManagementAllowed()) {
+            throw new ServiceException(StoreErrorCode.STORE_FEATURE_RESTRICTED);
+        }
+        if (currentAuthority.dashboardAuthorityVersion() != draft.storeAuthorityVersion()) {
+            return snapshotRepository
+                    .findByStoreIdAndBusinessDateAndAsOfAndStoreAuthorityVersion(
+                            draft.storeId(), draft.businessDate(), draft.asOf(),
+                            currentAuthority.dashboardAuthorityVersion())
+                    .map(this::storedResponse)
+                    .orElseThrow(() -> new ServiceException(
+                            StoreErrorCode.STORE_ENFORCEMENT_VERSION_CONFLICT));
+        }
         DashboardSnapshot existing = snapshotRepository
                 .findByStoreIdAndBusinessDateAndAsOfAndStoreAuthorityVersion(
                         draft.storeId(), draft.businessDate(), draft.asOf(),
@@ -153,20 +167,81 @@ public class DashboardSnapshotTransactionExecutor {
         if (previous == null) {
             return incoming;
         }
+        DashboardMetricDraft versionedIncoming = withDurableNoShowSubcells(incoming, previous);
         long previousVersion = previous.metadata().aggregationVersion();
-        long durableVersion = sameAggregationState(incoming, previous)
-                ? Math.max(incoming.metadata().aggregationVersion(), previousVersion)
-                : Math.max(incoming.metadata().aggregationVersion(),
-                        Math.addExact(previousVersion, 1L));
-        if (durableVersion == incoming.metadata().aggregationVersion()) {
+        long durableVersion = durableAggregationVersion(
+                versionedIncoming.metadata().aggregationVersion(),
+                previousVersion,
+                sameAggregationState(versionedIncoming, previous));
+        if (durableVersion == versionedIncoming.metadata().aggregationVersion()) {
+            return versionedIncoming;
+        }
+        MetricMetadata metadata = versionedIncoming.metadata();
+        return new DashboardMetricDraft(
+                versionedIncoming.metricKey(), versionedIncoming.value(),
+                withAggregationVersion(metadata, durableVersion));
+    }
+
+    private DashboardMetricDraft withDurableNoShowSubcells(
+            DashboardMetricDraft incoming,
+            DashboardMetricDraft previous
+    ) {
+        if (!"NO_SHOW_STATUS".equals(incoming.metricKey())
+                || incoming.value() == null || previous.value() == null) {
             return incoming;
         }
-        MetricMetadata metadata = incoming.metadata();
-        return new DashboardMetricDraft(
-                incoming.metricKey(), incoming.value(), new MetricMetadata(
-                metadata.definitionVersion(), durableVersion, metadata.asOf(),
+        NoShowValue incomingValue = convert(incoming.value(), NoShowValue.class);
+        NoShowValue previousValue = convert(previous.value(), NoShowValue.class);
+        NoShowValue versionedValue = new NoShowValue(
+                withDurableAggregationVersion(
+                        incomingValue.reservationCandidate(),
+                        previousValue.reservationCandidate()),
+                withDurableAggregationVersion(
+                        incomingValue.reservationConfirmed(),
+                        previousValue.reservationConfirmed()),
+                withDurableAggregationVersion(
+                        incomingValue.waitingConfirmed(),
+                        previousValue.waitingConfirmed()));
+        JsonNode versionedJson = objectMapper.valueToTree(versionedValue);
+        return Objects.equals(versionedJson, incoming.value())
+                ? incoming
+                : new DashboardMetricDraft(
+                        incoming.metricKey(), versionedJson, incoming.metadata());
+    }
+
+    private CountMetricResponse withDurableAggregationVersion(
+            CountMetricResponse incoming,
+            CountMetricResponse previous
+    ) {
+        long durableVersion = durableAggregationVersion(
+                incoming.metadata().aggregationVersion(),
+                previous.metadata().aggregationVersion(),
+                sameAggregationState(incoming, previous));
+        return durableVersion == incoming.metadata().aggregationVersion()
+                ? incoming
+                : new CountMetricResponse(
+                        incoming.value(),
+                        withAggregationVersion(incoming.metadata(), durableVersion));
+    }
+
+    private static long durableAggregationVersion(
+            long incomingVersion,
+            long previousVersion,
+            boolean sameState
+    ) {
+        return sameState
+                ? Math.max(incomingVersion, previousVersion)
+                : Math.max(incomingVersion, Math.addExact(previousVersion, 1L));
+    }
+
+    private static MetricMetadata withAggregationVersion(
+            MetricMetadata metadata,
+            long aggregationVersion
+    ) {
+        return new MetricMetadata(
+                metadata.definitionVersion(), aggregationVersion, metadata.asOf(),
                 metadata.dataThrough(), metadata.inputCheckpoint(), metadata.completeness(),
-                metadata.corrected(), metadata.reasonCode()));
+                metadata.corrected(), metadata.reasonCode());
     }
 
     private static boolean sameAggregationState(
@@ -184,14 +259,42 @@ public class DashboardSnapshotTransactionExecutor {
                 && left.reasonCode() == right.reasonCode();
     }
 
-    private void lockStore(long storeId) {
-        Long lockedStoreId = jdbcTemplate.queryForObject(
-                "SELECT store_id FROM stores WHERE store_id = ? FOR UPDATE",
-                Long.class,
-                storeId);
-        if (lockedStoreId == null || lockedStoreId != storeId) {
+    private static boolean sameAggregationState(
+            CountMetricResponse incoming,
+            CountMetricResponse previous
+    ) {
+        MetricMetadata left = incoming.metadata();
+        MetricMetadata right = previous.metadata();
+        return Objects.equals(incoming.value(), previous.value())
+                && Objects.equals(left.definitionVersion(), right.definitionVersion())
+                && Objects.equals(left.dataThrough(), right.dataThrough())
+                && Objects.equals(left.inputCheckpoint(), right.inputCheckpoint())
+                && left.completeness() == right.completeness()
+                && left.corrected() == right.corrected()
+                && left.reasonCode() == right.reasonCode();
+    }
+
+    private LockedStoreAuthority lockStore(long storeId) {
+        LockedStoreAuthority locked = jdbcTemplate.queryForObject("""
+                SELECT store_id, dashboard_authority_version, platform_management_allowed
+                FROM stores
+                WHERE store_id = ?
+                FOR UPDATE
+                """, (resultSet, rowNumber) -> new LockedStoreAuthority(
+                resultSet.getLong("store_id"),
+                resultSet.getLong("dashboard_authority_version"),
+                resultSet.getBoolean("platform_management_allowed")), storeId);
+        if (locked == null || locked.storeId() != storeId) {
             throw new IllegalStateException("dashboard store lock invariant violated");
         }
+        return locked;
+    }
+
+    private record LockedStoreAuthority(
+            long storeId,
+            long dashboardAuthorityVersion,
+            boolean platformManagementAllowed
+    ) {
     }
 
     private void insertMetrics(long dashboardSnapshotId, List<DashboardMetricDraft> metrics) {

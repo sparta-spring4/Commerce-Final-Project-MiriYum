@@ -6,6 +6,7 @@ import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.Metri
 import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricReasonCode.SOURCE_CONTRACT_MISSING;
 import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricReasonCode.SOURCE_FAILED;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.CountMetricResponse;
@@ -19,6 +20,8 @@ import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.RateValue;
 import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.WaitingValue;
 import com.miriyum.domain.analytics.service.DashboardSnapshotRetentionJob;
 import com.miriyum.domain.analytics.service.DashboardSnapshotTransactionExecutor;
+import com.miriyum.domain.store.error.StoreErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -138,6 +141,66 @@ class DashboardSnapshotRepositoryIT {
     }
 
     @Test
+    void staleAuthorityDraftCannotReplaceTheCurrentAuthoritySnapshot() {
+        DashboardSnapshotDraft staleV1 = draftWithSixCells();
+        jdbc.update("""
+                UPDATE stores
+                SET platform_management_allowed = TRUE,
+                    dashboard_authority_version = 3
+                WHERE store_id = 17
+                """);
+        DashboardSnapshotDraft currentV3 = withAuthorityVersion(
+                draftWithReservationCount(5L, "current-v3"), 3L);
+        DashboardSnapshotResponse current = executor.publish(currentV3);
+
+        DashboardSnapshotResponse staleReplay = executor.publish(staleV1);
+
+        assertThat(staleReplay.snapshotId()).isEqualTo(current.snapshotId());
+        assertThat(staleReplay.storeAuthorityVersion()).isEqualTo(3L);
+        assertThat(staleReplay.metrics().todayReservationTeams().value()).isEqualTo(5L);
+        assertThat(snapshotRepository.count()).isEqualTo(1L);
+        assertThat(snapshotRepository.findByStoreIdAndBusinessDateAndLatestMarkerTrue(
+                17L, currentV3.businessDate()))
+                .get()
+                .extracting(snapshot -> snapshot.getStoreAuthorityVersion())
+                .isEqualTo(3L);
+    }
+
+    @Test
+    void staleAuthorityDraftWithoutCurrentSnapshotReturnsVersionConflict() {
+        DashboardSnapshotDraft staleV1 = draftWithSixCells();
+        jdbc.update("""
+                UPDATE stores
+                SET platform_management_allowed = TRUE,
+                    dashboard_authority_version = 3
+                WHERE store_id = 17
+                """);
+
+        assertThatThrownBy(() -> executor.publish(staleV1))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(StoreErrorCode.STORE_ENFORCEMENT_VERSION_CONFLICT));
+        assertThat(snapshotRepository.count()).isZero();
+    }
+
+    @Test
+    void draftCannotPublishWhileStoreManagementIsRestricted() {
+        DashboardSnapshotDraft staleV1 = draftWithSixCells();
+        jdbc.update("""
+                UPDATE stores
+                SET platform_management_allowed = FALSE,
+                    dashboard_authority_version = 2
+                WHERE store_id = 17
+                """);
+
+        assertThatThrownBy(() -> executor.publish(staleV1))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(StoreErrorCode.STORE_FEATURE_RESTRICTED));
+        assertThat(snapshotRepository.count()).isZero();
+    }
+
+    @Test
     void metricAggregationVersionRemainsMonotonicAcrossSourceFailureAndRecovery() {
         DashboardSnapshotResponse normal = executor.publish(draftWithMetricState(
                 AS_OF, 27L, 4L, "reservation:7|waiting:20", COMPLETE));
@@ -153,6 +216,55 @@ class DashboardSnapshotRepositoryIT {
                 .isEqualTo(28L);
         assertThat(recovered.metrics().todayReservationTeams().metadata().aggregationVersion())
                 .isEqualTo(29L);
+    }
+
+    @Test
+    void reservationNoShowSubcellVersionRemainsMonotonicAcrossFailureAndRecovery() {
+        DashboardSnapshotResponse normal = executor.publish(draftWithNoShowState(
+                AS_OF, true, true));
+        DashboardSnapshotResponse failed = executor.publish(draftWithNoShowState(
+                AS_OF.plusSeconds(60), false, true));
+        DashboardSnapshotResponse recovered = executor.publish(draftWithNoShowState(
+                AS_OF.plusSeconds(120), true, true));
+
+        assertThat(normal.metrics().noShow().value().reservationConfirmed()
+                .metadata().aggregationVersion()).isEqualTo(7L);
+        assertThat(failed.metrics().noShow().value().reservationConfirmed()
+                .metadata().aggregationVersion()).isEqualTo(8L);
+        assertThat(recovered.metrics().noShow().value().reservationConfirmed()
+                .metadata().aggregationVersion()).isEqualTo(9L);
+        assertThat(normal.metrics().noShow().value().waitingConfirmed()
+                .metadata().aggregationVersion()).isEqualTo(20L);
+        assertThat(failed.metrics().noShow().value().waitingConfirmed()
+                .metadata().aggregationVersion()).isEqualTo(20L);
+        assertThat(recovered.metrics().noShow().value().waitingConfirmed()
+                .metadata().aggregationVersion()).isEqualTo(20L);
+        assertThat(normal.metrics().noShow().metadata().aggregationVersion()).isEqualTo(27L);
+        assertThat(failed.metrics().noShow().metadata().aggregationVersion()).isEqualTo(28L);
+        assertThat(recovered.metrics().noShow().metadata().aggregationVersion()).isEqualTo(29L);
+    }
+
+    @Test
+    void waitingNoShowSubcellVersionRemainsMonotonicAcrossFailureAndRecovery() {
+        DashboardSnapshotResponse normal = executor.publish(draftWithNoShowState(
+                AS_OF, true, true));
+        DashboardSnapshotResponse failed = executor.publish(draftWithNoShowState(
+                AS_OF.plusSeconds(60), true, false));
+        DashboardSnapshotResponse recovered = executor.publish(draftWithNoShowState(
+                AS_OF.plusSeconds(120), true, true));
+
+        assertThat(normal.metrics().noShow().value().waitingConfirmed()
+                .metadata().aggregationVersion()).isEqualTo(20L);
+        assertThat(failed.metrics().noShow().value().waitingConfirmed()
+                .metadata().aggregationVersion()).isEqualTo(21L);
+        assertThat(recovered.metrics().noShow().value().waitingConfirmed()
+                .metadata().aggregationVersion()).isEqualTo(22L);
+        assertThat(normal.metrics().noShow().value().reservationConfirmed()
+                .metadata().aggregationVersion()).isEqualTo(7L);
+        assertThat(failed.metrics().noShow().value().reservationConfirmed()
+                .metadata().aggregationVersion()).isEqualTo(7L);
+        assertThat(recovered.metrics().noShow().value().reservationConfirmed()
+                .metadata().aggregationVersion()).isEqualTo(7L);
     }
 
     @Test
@@ -222,6 +334,15 @@ class DashboardSnapshotRepositoryIT {
         return draftAt(AS_OF, reservationCount, checkpoint);
     }
 
+    private static DashboardSnapshotDraft withAuthorityVersion(
+            DashboardSnapshotDraft draft,
+            long authorityVersion
+    ) {
+        return new DashboardSnapshotDraft(
+                draft.storeId(), draft.businessDate(), draft.timeZoneId(), draft.asOf(),
+                draft.generatedAt(), authorityVersion, draft.metrics());
+    }
+
     private DashboardSnapshotDraft draftWithMetricState(
             Instant asOf,
             long sourceVersion,
@@ -247,6 +368,70 @@ class DashboardSnapshotRepositoryIT {
         return new DashboardSnapshotDraft(
                 base.storeId(), base.businessDate(), base.timeZoneId(), asOf,
                 asOf.plusSeconds(1), base.storeAuthorityVersion(), metrics);
+    }
+
+    private DashboardSnapshotDraft draftWithNoShowState(
+            Instant asOf,
+            boolean reservationAvailable,
+            boolean waitingAvailable
+    ) {
+        DashboardSnapshotDraft base = draftAt(asOf, 4L, "base");
+        CountMetricResponse candidate = new CountMetricResponse(null, new MetricMetadata(
+                "analytics-004-reservation-no-show-candidate-v1", 1L, asOf,
+                null, null, UNAVAILABLE, false, SOURCE_CONTRACT_MISSING));
+        CountMetricResponse reservation = noShowCount(
+                "analytics-004-reservation-no-show-confirmed-v1",
+                reservationAvailable ? 7L : 1L,
+                reservationAvailable ? 1L : null,
+                reservationAvailable ? "reservation:7" : null,
+                asOf,
+                reservationAvailable);
+        CountMetricResponse waiting = noShowCount(
+                "analytics-004-waiting-no-show-confirmed-v1",
+                waitingAvailable ? 20L : 1L,
+                waitingAvailable ? 2L : null,
+                waitingAvailable ? "waiting:20" : null,
+                asOf,
+                waitingAvailable);
+        MetricMetadata top = new MetricMetadata(
+                "analytics-004-no-show-v2",
+                Math.addExact(reservation.metadata().aggregationVersion(),
+                        waiting.metadata().aggregationVersion()),
+                asOf,
+                reservationAvailable || waitingAvailable ? AS_OF.minusSeconds(1) : null,
+                "reservation:" + reservationAvailable + "|waiting:" + waitingAvailable,
+                PARTIAL,
+                false,
+                SOURCE_CONTRACT_MISSING);
+        NoShowValue value = new NoShowValue(candidate, reservation, waiting);
+        List<DashboardMetricDraft> metrics = base.metrics().stream()
+                .map(metric -> metric.metricKey().equals("NO_SHOW_STATUS")
+                        ? new DashboardMetricDraft(
+                                metric.metricKey(), objectMapper.valueToTree(value), top)
+                        : metric)
+                .toList();
+        return new DashboardSnapshotDraft(
+                base.storeId(), base.businessDate(), base.timeZoneId(), asOf,
+                asOf.plusSeconds(1), base.storeAuthorityVersion(), metrics);
+    }
+
+    private static CountMetricResponse noShowCount(
+            String definitionVersion,
+            long aggregationVersion,
+            Long value,
+            String checkpoint,
+            Instant asOf,
+            boolean available
+    ) {
+        return new CountMetricResponse(value, new MetricMetadata(
+                definitionVersion,
+                aggregationVersion,
+                asOf,
+                available ? AS_OF.minusSeconds(1) : null,
+                checkpoint,
+                available ? COMPLETE : UNAVAILABLE,
+                false,
+                available ? null : SOURCE_FAILED));
     }
 
     private DashboardSnapshotDraft draftAt(

@@ -34,6 +34,8 @@ paths:
           $ref: "#/components/responses/AnalyticsStoreForbidden"
         "404":
           $ref: "#/components/responses/AnalyticsStoreNotFound"
+        "409":
+          $ref: "#/components/responses/AnalyticsStoreAuthorityConflict"
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
 components:
@@ -473,7 +475,7 @@ components:
                       corrected: false
                       reasonCode: SOURCE_CONTRACT_MISSING
     AnalyticsStoreForbidden:
-      description: 현재 매장 운영자 계정 상태 또는 대상 매장 소유권이 허용되지 않음
+      description: 현재 운영자 계정·매장 소유권·매장 관리 제한 상태에서 조회가 허용되지 않음
       content:
         application/json:
           schema:
@@ -487,6 +489,10 @@ components:
               value:
                 code: STORE_003
                 message: 대상 매장을 관리할 권한이 없습니다.
+            storeManagementRestricted:
+              value:
+                code: STORE_015
+                message: 제재로 제한된 매장 기능입니다.
     AnalyticsStoreNotFound:
       description: 대상 매장이 실제로 존재하지 않음
       content:
@@ -496,3 +502,12 @@ components:
           example:
             code: STORE_001
             message: 매장을 찾을 수 없습니다.
+    AnalyticsStoreAuthorityConflict:
+      description: source 조회 중 매장 관리 권한 version이 변경되어 stale snapshot 게시를 거부함
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_014
+            message: 매장 제재 상태 버전이 변경되었습니다.

@@ -171,13 +171,17 @@ class AnalyticsOpenApiContractTest {
                 .containsEntry("$ref", "#/components/responses/AnalyticsStoreForbidden");
         assertThat(map(responses.get("404")))
                 .containsEntry("$ref", "#/components/responses/AnalyticsStoreNotFound");
+        assertThat(map(responses.get("409")))
+                .containsEntry("$ref", "#/components/responses/AnalyticsStoreAuthorityConflict");
 
         Map<String, Object> responseComponents = map(
                 map(document.get("components")).get("responses"));
         assertThat(exampleCodes(map(responseComponents.get("AnalyticsStoreForbidden"))))
-                .containsExactlyInAnyOrder("AUTH_011", "STORE_003");
+                .containsExactlyInAnyOrder("AUTH_011", "STORE_003", "STORE_015");
         assertThat(exampleCodes(map(responseComponents.get("AnalyticsStoreNotFound"))))
                 .containsExactly("STORE_001");
+        assertThat(exampleCodes(map(responseComponents.get("AnalyticsStoreAuthorityConflict"))))
+                .containsExactly("STORE_014");
     }
 
     private static void assertUnavailableBecauseContractMissing(Map<String, Object> metric) {
