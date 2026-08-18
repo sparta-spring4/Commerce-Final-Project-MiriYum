@@ -10,6 +10,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 
+import com.miriyum.domain.store.dto.contract.StoreDashboardAuthority;
 import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
 import com.miriyum.domain.store.dto.contract.StoreWaitingReceptionProfile;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
@@ -327,6 +328,45 @@ class StoreServiceTest {
         then(operatorAccountService).should().getMe(OPERATOR_ID);
         then(storeRepository).should().findOperatorAccountIdById(STORE_ID);
         then(storeRepository).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    void dashboardAuthorityReturnsOwnedStoreTimeZoneAndVersion() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+
+        StoreDashboardAuthority authority =
+                storeService.requireDashboardAuthority(OPERATOR_ID, STORE_ID);
+
+        assertThat(authority).isEqualTo(new StoreDashboardAuthority(
+                STORE_ID,
+                "Asia/Seoul",
+                1L));
+        then(operatorAccountService).should().getMe(OPERATOR_ID);
+        then(storeRepository).should().findById(STORE_ID);
+    }
+
+    @Test
+    void dashboardAuthorityRejectsForeignExistingStore() {
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(storeOwnedBy(12L)));
+
+        assertThatThrownBy(() ->
+                storeService.requireDashboardAuthority(OPERATOR_ID, STORE_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.ACCESS_DENIED);
+    }
+
+    @Test
+    void dashboardAuthorityHidesMissingStoreAsNotFound() {
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() ->
+                storeService.requireDashboardAuthority(OPERATOR_ID, STORE_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_NOT_FOUND);
     }
 
     @Test

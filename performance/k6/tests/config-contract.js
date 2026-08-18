@@ -68,6 +68,25 @@ export default function () {
       throws(() => assertSafeTarget('local', 'https://api.example.test', ['api.example.test'])),
     'unreviewed external host cannot be selected as staging': () =>
       throws(() => assertSafeTarget('staging', 'https://staging.example.test', ['staging.example.test'])),
+    'reviewed staging host requires HTTPS and an explicit caller allowlist': () =>
+      !throws(() => assertSafeTarget(
+        'staging',
+        'https://staging-api.miriyum.click',
+        ['staging-api.miriyum.click'],
+      )),
+    'approved staging configuration accepts only the reviewed HTTPS host': () => {
+      const staging = loadConfig({
+        ...LOCAL_SMOKE_ENV,
+        TARGET_ENV: 'staging',
+        BASE_URL: 'https://staging-api.miriyum.click',
+        ALLOWED_HOSTS: 'staging-api.miriyum.click',
+        STAGING_APPROVED: 'true',
+        STAGING_HARNESS_SOURCE_VERIFIED: 'true',
+        SCENARIOS: 'authRefresh,storeSearch,notificationHistory',
+      })
+      return staging.targetEnv === 'staging'
+        && staging.baseUrl === 'https://staging-api.miriyum.click'
+    },
     'zero load input is rejected': () =>
       throws(() => parsePositiveInt('MAX_VUS', '0', 100)),
     'load above its hard ceiling is rejected': () =>
@@ -200,7 +219,7 @@ export default function () {
       return errorMessage(() => loadRecoveryConfig(env))
         === 'rate-limit recovery verification requires a fresh confirmed rate-limit window'
     },
-    'recovery verification remains closed until a reviewed staging host exists': () =>
+    'recovery verification rejects an unreviewed staging host even with approvals': () =>
       errorMessage(() => loadRecoveryConfig(RECOVERY_ENV))
         === 'staging target host is not configured in the trusted repository allowlist',
     'staging reservation remains blocked until the #358 fixture contract is approved': () =>
