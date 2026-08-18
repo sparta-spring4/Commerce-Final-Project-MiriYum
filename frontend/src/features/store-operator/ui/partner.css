@@ -1,0 +1,1583 @@
+/*
+ * 매장 운영자 셸 스타일.
+ *
+ * 시안(`MiriYum Partner` / Professional Culinary Partner)은 소비자 화면과 다른
+ * 팔레트를 쓴다. Deep Navy와 Emerald 기반의 "Professional Minimalism"이다.
+ * 그래서 프리미티브를 새로 만들지 않고 **셸 루트에서 토큰만 다시 선언**한다.
+ * `.mi-*` 클래스는 모두 var()를 참조하므로 같은 컴포넌트가 이 안에서는 운영자
+ * 팔레트로 그려진다.
+ *
+ * 토큰 재선언은 명시도 싸움을 만들지 않는다. custom property는 상속으로 내려가고
+ * 규칙 순서와 무관하다. 반면 같은 요소에 붙는 클래스를 덮어써야 할 때는
+ * `.op-shell` 조상 선택자를 붙여 명시도를 올린다(번들 순서에 의존하지 않는다).
+ *
+ * 이 파일만으로 운영자 화면이 완성되도록 둔다. `theme.css`·`primitives.css`는
+ * 소비자 화면과 공유하므로 손대지 않는다.
+ */
+
+.op-shell {
+  /* Surface — Soft Gray-White 캔버스, 흰 카드, 1px 중립 테두리 */
+  --color-surface: #f8f9fa;
+  --color-surface-dim: #d9dadb;
+  --color-surface-bright: #f8f9fa;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f3f4f5;
+  --color-surface-container: #edeeef;
+  --color-surface-container-high: #e7e8e9;
+  --color-surface-container-highest: #e9ecef;
+  --color-surface-variant: #e9ecef;
+  --color-on-surface: #212121;
+  --color-on-surface-variant: #454652;
+  --color-inverse-surface: #2e3132;
+  --color-inverse-on-surface: #f0f1f2;
+
+  --color-outline: #767683;
+  --color-outline-variant: #c6c5d4;
+
+  /* Primary — Deep Navy */
+  --color-primary: #1a237e;
+  --color-on-primary: #ffffff;
+  /*
+   * 시안의 `primary-container`는 활성 내비와 행 hover에 쓰는 **밝은 틴트**다
+   * (DESIGN.md: "Hover states on list items should use the Primary-Container
+   * tint (#E8EAF6)"). 그 위에 얹는 글자색은 Deep Navy 자신이다.
+   */
+  --color-primary-container: #e8eaf6;
+  --color-on-primary-container: #1a237e;
+  --color-primary-fixed: #e0e0ff;
+  --color-primary-fixed-dim: #bdc2ff;
+  --color-on-primary-fixed: #000767;
+  --color-on-primary-fixed-variant: #343d96;
+  /* 짙은 네이비. 히어로 그라디언트와 hover 채움에 쓴다. */
+  --color-primary-deep: #000666;
+
+  /*
+   * Secondary — Emerald.
+   *
+   * 시안의 강조 에메랄드는 #00897b지만, 흰 글자를 얹으면 3.6:1로 AA에 못
+   * 미친다. 그래서 **글자가 올라가는 자리**에는 한 단계 짙은 #006b5f를 쓰고,
+   * 대비를 지지 않는 장식(점·게이지·액센트 바)에만 #00897b를 쓴다.
+   */
+  --color-secondary: #006b5f;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #8df5e4;
+  --color-on-secondary-container: #00443c;
+  --color-secondary-fixed: #8df5e4;
+  --color-secondary-fixed-dim: #70d8c8;
+  --color-on-secondary-fixed: #00201c;
+  --color-on-secondary-fixed-variant: #005048;
+  --color-accent-emerald: #00897b;
+
+  --color-tertiary: #1b1b1b;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-container: #303030;
+  --color-on-tertiary-container: #e5e2e1;
+
+  --color-error: #d32f2f;
+  --color-on-error: #ffffff;
+  --color-error-container: #ffdad6;
+  --color-on-error-container: #93000a;
+
+  --color-background: #f8f9fa;
+  --color-on-background: #191c1d;
+
+  /*
+   * 상태 칩 — 시안은 "10% 불투명도 배경 + 같은 계열 글자"로 정의한다.
+   * 배경은 시안 그대로 두고, 글자만 대비를 만족하는 짙은 값으로 잡는다.
+   * 12px 뱃지가 AA 4.5:1을 넘겨야 하기 때문이다.
+   */
+  --tint-emerald: rgba(0, 137, 123, 0.1);
+  --tint-charcoal: rgba(33, 33, 33, 0.08);
+  --tint-error: rgba(211, 47, 47, 0.1);
+  --tint-navy: rgba(26, 35, 126, 0.08);
+
+  /*
+   * Elevation — 시안의 "tonal layers + low-contrast outline". 무거운 그림자를
+   * 피하고, 떠 있는 요소만 Primary Navy 5% 기미의 확산 그림자를 쓴다.
+   */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-2: 0 4px 12px rgba(26, 35, 126, 0.08);
+  --shadow-3: 0 8px 24px rgba(26, 35, 126, 0.12);
+  --focus-ring: 0 0 0 3px rgba(26, 35, 126, 0.35);
+
+  /*
+   * Layout — 시안은 데스크톱 좌우 여백 32px, 본문 최대 1280px, 고정 사이드바
+   * 288px(w-72), 상단 바 64px(h-16)이다. 여백 토큰은 소비자 화면과 값이 달라
+   * 셸 안에서만 다시 선언한다.
+   */
+  --layout-margin-desktop: 2rem;
+  --op-sidebar-width: 18rem;
+  --op-topbar-height: 4rem;
+
+  min-height: 100vh;
+  background-color: var(--color-background);
+  color: var(--color-on-background);
+}
+
+/* ── 셸 안에서만 프리미티브 변형을 바꾼다 ─────────────────────────────────
+ *
+ * 조상 선택자를 붙여 명시도를 0,2,0 이상으로 올린다. 같은 명시도로 두면
+ * 번들 순서가 승자를 정하고, 소비자 화면 쪽 수정 하나로 여기가 조용히 바뀐다.
+ */
+
+/* 버튼 — Primary는 Deep Navy 솔리드, Secondary는 Emerald 솔리드, Ghost는 네이비 아웃라인 */
+.op-shell .mi-button {
+  min-height: 2.75rem;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-label-md);
+  letter-spacing: 0.01em;
+}
+
+.op-shell .mi-button--primary {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+  box-shadow: var(--shadow-1);
+}
+
+.op-shell .mi-button--primary:not(:disabled):hover {
+  background-color: var(--color-primary-deep);
+}
+
+.op-shell .mi-button--secondary {
+  background-color: var(--color-secondary);
+  color: var(--color-on-secondary);
+}
+
+.op-shell .mi-button--secondary:not(:disabled):hover {
+  background-color: var(--color-on-secondary-fixed-variant);
+}
+
+.op-shell .mi-button--ghost {
+  background-color: transparent;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.op-shell .mi-button--ghost:not(:disabled):hover {
+  background-color: var(--tint-navy);
+}
+
+.op-shell .mi-button--danger {
+  background-color: transparent;
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.op-shell .mi-button--danger:not(:disabled):hover {
+  background-color: var(--tint-error);
+}
+
+/* 칩 — 선택은 네이비 채움. 미선택은 흰 배경에 중립 테두리(시안 카테고리 칩) */
+.op-shell .mi-chip {
+  background-color: var(--color-surface-container-lowest);
+  border-color: var(--color-surface-variant);
+  color: var(--color-on-surface);
+}
+
+.op-shell .mi-chip:hover {
+  background-color: var(--color-surface-container);
+}
+
+.op-shell .mi-chip[aria-pressed='true'] {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+/* 카드 — 흰 배경, 1px 중립 테두리, 16px 라운드 */
+.op-shell .mi-card {
+  border-color: var(--color-surface-container-highest);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.op-shell .mi-card__body {
+  padding: var(--space-3);
+}
+
+/* 뱃지 — 상태 칩. 배경 10% 틴트에 같은 계열의 짙은 글자. */
+.op-shell .mi-badge {
+  padding: 0.1875rem 0.625rem;
+  font-size: var(--font-size-label-sm);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.op-shell .mi-badge--positive {
+  background-color: var(--tint-emerald);
+  color: var(--color-on-secondary-fixed-variant);
+}
+
+.op-shell .mi-badge--neutral {
+  background-color: var(--tint-charcoal);
+  color: var(--color-on-surface-variant);
+}
+
+.op-shell .mi-badge--negative {
+  background-color: var(--tint-error);
+  color: var(--color-on-error-container);
+}
+
+.op-shell .mi-badge--attention {
+  background-color: var(--tint-navy);
+  color: var(--color-primary);
+}
+
+/* 입력 — 흰 배경 1px 테두리. 포커스는 2px Deep Navy와 옅은 글로우. */
+.op-shell .mi-field__control,
+.op-shell .mi-field select,
+.op-shell .mi-field textarea {
+  border-color: var(--color-surface-variant);
+  border-radius: var(--radius-md);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.op-shell .mi-field__control:focus,
+.op-shell .mi-field select:focus,
+.op-shell .mi-field textarea:focus {
+  border-color: var(--color-primary);
+  box-shadow:
+    inset 0 0 0 1px var(--color-primary),
+    var(--focus-ring);
+  outline: none;
+}
+
+.op-shell .mi-field__control[aria-invalid='true'] {
+  border-color: var(--color-error);
+}
+
+.op-shell .mi-field__control[aria-invalid='true']:focus {
+  box-shadow:
+    inset 0 0 0 1px var(--color-error),
+    0 0 0 3px rgba(211, 47, 47, 0.25);
+}
+
+.op-shell .mi-field__label {
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+}
+
+/* 알림 배너 — 카드와 같은 층에 놓이므로 라운드를 맞춘다. */
+.op-shell .mi-alert {
+  border-radius: var(--radius-md);
+}
+
+.op-shell .mi-alert--info {
+  background-color: var(--tint-navy);
+  border-color: rgba(26, 35, 126, 0.2);
+  color: var(--color-on-surface);
+}
+
+.op-shell .mi-alert--warning {
+  background-color: var(--tint-emerald);
+  border-color: rgba(0, 137, 123, 0.25);
+  color: var(--color-on-secondary-fixed-variant);
+}
+
+.op-shell .mi-alert--error {
+  background-color: var(--tint-error);
+  border-color: var(--color-error);
+  color: var(--color-on-error-container);
+}
+
+/* ── 아이콘 ───────────────────────────────────────────────────────────── */
+
+.op-icon {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.op-icon--sm {
+  width: 1rem;
+  height: 1rem;
+}
+
+.op-icon--lg {
+  width: 2rem;
+  height: 2rem;
+}
+
+/* ── 셸 골격 ──────────────────────────────────────────────────────────── */
+
+/*
+ * 시안은 사이드바와 상단 바를 화면에 고정한다. 데스크톱에서만 그렇게 두고,
+ * 좁은 화면에서는 일반 흐름으로 되돌린다. 모바일에서 고정 요소를 쌓으면
+ * 확대 시 본문을 볼 자리가 사라진다.
+ */
+.op-shell__frame {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.op-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-block: var(--space-2);
+  padding-inline: var(--layout-margin-mobile);
+  background-color: var(--color-surface-container-lowest);
+  border-bottom: 1px solid var(--color-surface-container-highest);
+}
+
+.op-sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: var(--font-size-headline-md);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--color-primary);
+}
+
+.op-sidebar__brand:hover {
+  text-decoration: none;
+}
+
+/* 로고 자산이 없다. 이름의 머리글자를 네이비 사각형에 담아 자리를 지킨다. */
+.op-sidebar__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  background-color: var(--color-primary);
+  border-radius: var(--radius-md);
+  color: var(--color-on-primary);
+  font-size: var(--font-size-label-md);
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.op-sidebar__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+/* 좁은 화면에서만 나오는 내비 토글. */
+.op-nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2.5rem;
+  padding-inline: var(--space-1);
+  background-color: transparent;
+  border: 1px solid var(--color-surface-variant);
+  border-radius: var(--radius-md);
+  color: var(--color-on-surface-variant);
+  font-family: inherit;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* 좁은 화면에서는 토글을 눌러야 열린다. 데스크톱은 아래 미디어 질의가 되돌린다. */
+.op-sidebar__nav {
+  display: none;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.op-sidebar__nav--open {
+  display: flex;
+}
+
+.op-sidebar__link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-block: 0.75rem;
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+.op-sidebar__link:hover {
+  background-color: var(--color-surface-container);
+  color: var(--color-on-surface);
+  text-decoration: none;
+}
+
+/* 활성 항목은 색만으로 구분하지 않는다. aria-current가 보조기술에 전달한다. */
+.op-sidebar__link--active {
+  background-color: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  font-weight: 700;
+}
+
+.op-sidebar__link--active:hover {
+  background-color: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+}
+
+.op-sidebar__footer {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: auto;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-surface-container-highest);
+}
+
+.op-account {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.op-account__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  background-color: var(--color-primary);
+  border-radius: var(--radius-full);
+  color: var(--color-on-primary);
+}
+
+.op-account__name {
+  display: block;
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+.op-account__role {
+  display: block;
+  font-size: var(--font-size-label-sm);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-outline);
+}
+
+/* 사이드바가 아직 가로로 누워 있는 구간. 좌우 여백을 본문과 맞춘다. */
+@media (min-width: 48rem) {
+  .op-sidebar {
+    padding-inline: var(--layout-margin-desktop);
+  }
+}
+
+@media (min-width: 64rem) {
+  .op-sidebar {
+    position: fixed;
+    inset-block: 0;
+    inset-inline-start: 0;
+    z-index: 50;
+    width: var(--op-sidebar-width);
+    gap: var(--space-3);
+    padding-block: var(--space-3);
+    padding-inline: var(--space-2);
+    overflow-y: auto;
+    border-right: 1px solid var(--color-surface-container-highest);
+    border-bottom: none;
+    box-shadow: var(--shadow-1);
+  }
+
+  .op-sidebar__brand {
+    padding-inline: var(--space-1);
+  }
+
+  .op-nav-toggle {
+    display: none;
+  }
+
+  /* 토글 상태와 무관하게 데스크톱에서는 항상 펼쳐 둔다. */
+  .op-sidebar__nav {
+    display: flex;
+  }
+
+  .op-shell__main {
+    padding-inline-start: var(--op-sidebar-width);
+  }
+}
+
+/* ── 상단 바 ──────────────────────────────────────────────────────────── */
+
+.op-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--op-topbar-height);
+  padding-block: 0.625rem;
+  padding-inline: var(--layout-margin-mobile);
+  background-color: rgba(248, 249, 250, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--color-surface-container-highest);
+}
+
+.op-topbar__store {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  font-size: var(--font-size-body-lg);
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+.op-topbar__store-icon {
+  color: var(--color-on-surface-variant);
+}
+
+.op-topbar__spacer {
+  flex: 1 1 auto;
+}
+
+.op-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* 시안의 헤더 로그아웃. 위험 색은 hover에서만 드러난다. */
+.op-topbar__signout {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2.25rem;
+  padding-inline: var(--space-1);
+  background-color: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--color-on-surface-variant);
+  font-family: inherit;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 150ms ease;
+}
+
+.op-topbar__signout:not(:disabled):hover {
+  color: var(--color-error);
+}
+
+.op-topbar__signout:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@media (min-width: 48rem) {
+  .op-topbar {
+    padding-inline: var(--layout-margin-desktop);
+  }
+}
+
+@media (min-width: 64rem) {
+  .op-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    flex-wrap: nowrap;
+  }
+}
+
+/* ── 본문 ─────────────────────────────────────────────────────────────── */
+
+.op-content {
+  width: 100%;
+  max-width: var(--layout-container-max);
+  margin-inline: auto;
+  padding-block: var(--space-3);
+  padding-inline: var(--layout-margin-mobile);
+}
+
+@media (min-width: 48rem) {
+  .op-content {
+    padding-block: var(--space-4);
+    padding-inline: var(--layout-margin-desktop);
+  }
+}
+
+/* ── 페이지 머리말 ─────────────────────────────────────────────────────── */
+
+.op-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.op-page-header__text {
+  flex: 1 1 20rem;
+}
+
+.op-page-header__title {
+  font-size: var(--font-size-headline-lg);
+  line-height: var(--line-height-headline-lg);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--color-on-surface);
+}
+
+.op-page-header__description {
+  margin-top: 0.5rem;
+  font-size: var(--font-size-body-lg);
+  line-height: var(--line-height-body-lg);
+  color: var(--color-on-surface-variant);
+}
+
+.op-page-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* 모바일은 headline-lg-mobile(24/32)로 한 단계 줄인다. */
+@media (max-width: 47.999rem) {
+  .op-page-header__title {
+    font-size: var(--font-size-headline-md);
+    line-height: var(--line-height-headline-md);
+  }
+
+  .op-page-header__description {
+    font-size: var(--font-size-body-md);
+    line-height: var(--line-height-body-md);
+  }
+}
+
+/* ── 카드·섹션 ────────────────────────────────────────────────────────── */
+
+.op-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.op-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  align-items: start;
+}
+
+/* 시안의 12열 중 본문 8 / 곁 4 비율. */
+@media (min-width: 64rem) {
+  .op-grid--aside {
+    grid-template-columns: minmax(0, 2fr) minmax(19rem, 1fr);
+  }
+
+  /*
+   * 곁 열은 스크롤을 따라온다. 저장·게시 버튼이 긴 폼 아래에서 사라지지
+   * 않게 하려는 시안의 `sticky top-8`과 같은 의도다.
+   */
+  .op-grid--aside > .op-stack:last-child {
+    position: sticky;
+    top: calc(var(--op-topbar-height) + var(--space-2));
+  }
+
+  /* 안내가 왼쪽, 폼이 오른쪽인 배치(시안 16의 4/8 열). */
+  .op-grid--intro {
+    grid-template-columns: minmax(15rem, 1fr) minmax(0, 2.5fr);
+  }
+
+  .op-grid--intro > .op-steps {
+    position: sticky;
+    top: calc(var(--op-topbar-height) + var(--space-2));
+  }
+}
+
+/* ── 입력 구역 단계 표시 ──────────────────────────────────────────────── */
+
+.op-steps {
+  padding: var(--space-3);
+  background-color: var(--color-surface-container-lowest);
+  border: 1px solid var(--color-surface-container-highest);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+/* 세로 연결선. 항목 사이를 잇는 장식이라 보조기술에 남기지 않는다. */
+.op-steps__list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+/* 원의 지름이 2.25rem이므로 중심은 1.125rem이다. 선을 그 자리에 세운다. */
+.op-steps__list::before {
+  content: '';
+  position: absolute;
+  inset-block: 1.125rem;
+  inset-inline-start: 1.125rem;
+  width: 1px;
+  background-color: var(--color-surface-container-highest);
+}
+
+.op-step {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+/* 테두리는 카드 배경색이다. 뒤로 지나가는 연결선을 원 자리에서 끊어 준다. */
+.op-step__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  background-color: var(--color-primary-container);
+  border: 4px solid var(--color-surface-container-lowest);
+  border-radius: var(--radius-full);
+  color: var(--color-on-primary-container);
+  font-size: var(--font-size-label-sm);
+  font-weight: 700;
+}
+
+/*
+ * 섹션 제목은 아래 경계선으로 내용과 나뉜다.
+ * (DESIGN.md: "Use headers with a light-gray bottom border")
+ */
+.op-section__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: 0.75rem;
+  margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-surface-container-highest);
+}
+
+.op-section__heading {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.op-section__title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--font-size-headline-sm, 1.25rem);
+  line-height: 1.75rem;
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+.op-section__title-icon {
+  color: var(--color-primary);
+}
+
+.op-section__hint {
+  margin-top: 0.25rem;
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+.op-section__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+/*
+ * `fieldset`는 브라우저 기본 테두리(2px groove)와 여백을 가진다. 시안의 폼에는
+ * 그런 상자가 없다. 셸 안에서만 지운다. `min-width: 0`이 없으면 fieldset이
+ * grid·flex 안에서 줄어들지 않아 가로 스크롤을 만든다.
+ */
+.op-shell fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.op-shell legend {
+  padding: 0;
+}
+
+.op-form-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* 섹션 머리말이 이미 아래 여백을 만들었으면 두 번 벌리지 않는다. */
+.op-form-grid:first-child,
+.op-section__head + .op-form-grid,
+.op-summary:first-child,
+.op-section__head + .op-summary {
+  margin-top: 0;
+}
+
+@media (min-width: 48rem) {
+  .op-form-grid--two {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.op-field-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
+.op-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  padding-block: 0.375rem;
+  font-size: var(--font-size-body-md);
+}
+
+.op-check input[type='checkbox'] {
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: 0.1875rem;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.op-check__text {
+  display: block;
+}
+
+.op-check__hint {
+  display: block;
+  font-size: var(--font-size-label-sm);
+  color: var(--color-on-surface-variant);
+}
+
+.op-chip-set {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: 0.375rem;
+}
+
+.op-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+/* 읽기 전용 표시 필드. 시안은 회색 배경에 자물쇠를 둔다. */
+.op-readonly {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  min-height: 2.75rem;
+  padding-inline: var(--space-2);
+  background-color: var(--color-surface-container-low);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-body-md);
+  color: var(--color-on-surface-variant);
+}
+
+/* ── 도구 막대(검색·필터) ─────────────────────────────────────────────── */
+
+/*
+ * 시안의 표 머리 도구 막대. 카드 안쪽 위에 얹히므로 카드 padding을 상쇄하고
+ * 아래 경계선으로 표와 나눈다.
+ */
+.op-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-surface-container-highest);
+}
+
+.op-toolbar__search {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+/*
+ * 검색보다 넉넉한 basis를 준다. 남은 폭을 1:2로 나눠 받아야 선택 상자 두 개가
+ * 한 줄에 들어간다. 같은 basis로 두면 필터 열이 좁아져 세로로 접힌다.
+ */
+.op-toolbar__filters {
+  display: flex;
+  flex: 2 1 22rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.op-toolbar__field {
+  flex: 1 1 9rem;
+  min-width: 9rem;
+}
+
+/*
+ * 알약 필터를 담는 fieldset. `display: flex`를 걸면 legend가 flex 항목이 되어
+ * 브라우저마다 다르게 그려진다. 블록으로 두고 안쪽 줄만 flex로 만든다.
+ */
+.op-toolbar__fieldset {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+
+.op-toolbar__fieldset .op-filter-bar {
+  margin-top: 0.375rem;
+}
+
+/* 상태 필터 알약 줄. 좁은 화면에서는 가로로 밀어 본다. */
+.op-filter-bar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-1);
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+@media (min-width: 64rem) {
+  .op-filter-bar {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+}
+
+/* ── 주간 편집기 ──────────────────────────────────────────────────────── */
+
+/*
+ * 요일 카드. 시안은 카드 왼쪽에 4px 액센트 바를 세워 영업/휴무를 한눈에 나눈다.
+ * 색만으로 구분하지 않도록 카드 안의 상태 문구를 함께 남긴다.
+ */
+.op-day {
+  position: relative;
+  padding-block: var(--space-2);
+  padding-inline: var(--space-2);
+  border: 1px solid var(--color-surface-container-highest);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-container-lowest);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+
+.op-day::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 4px;
+  background-color: var(--color-outline-variant);
+}
+
+.op-day--open::before {
+  background-color: var(--color-primary);
+}
+
+/*
+ * 오류가 있는 요일은 액센트 바와 테두리를 error로 바꾼다(시안 12의 화요일 상태).
+ * 색만으로 알리지 않는다. 카드 안의 오류 문구가 같은 사실을 글로 전한다.
+ */
+.op-day--error {
+  border-color: rgba(211, 47, 47, 0.35);
+  background-color: rgba(211, 47, 47, 0.03);
+}
+
+.op-day--error::before {
+  background-color: var(--color-error);
+}
+
+.op-day__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.op-day__name {
+  font-size: var(--font-size-body-lg);
+  font-weight: 700;
+  min-width: 4.5rem;
+}
+
+.op-day__group {
+  margin-top: var(--space-2);
+}
+
+/*
+ * 넓은 화면에서는 시안처럼 요일·영업 여부를 왼쪽 패널로 빼고 구간 편집을
+ * 오른쪽에 둔다. 머리줄은 1열, 나머지 자식은 모두 2열이다.
+ */
+@media (min-width: 64rem) {
+  .op-day {
+    display: grid;
+    grid-template-columns: 13rem minmax(0, 1fr);
+    column-gap: var(--space-3);
+    padding-inline-start: var(--space-3);
+  }
+
+  .op-day__head {
+    grid-column: 1;
+    flex-direction: column;
+    align-items: flex-start;
+    align-self: start;
+    gap: var(--space-1);
+    padding-inline-end: var(--space-2);
+    border-right: 1px solid var(--color-surface-container-highest);
+  }
+
+  .op-day > *:not(.op-day__head) {
+    grid-column: 2;
+  }
+
+  /* 오른쪽 첫 블록은 머리줄과 같은 높이에서 시작한다. */
+  .op-day > .op-day__group:first-of-type {
+    margin-top: 0;
+  }
+}
+
+.op-day__group-title {
+  font-size: var(--font-size-label-sm);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-on-surface-variant);
+}
+
+.op-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-1);
+  padding-block: var(--space-1);
+  padding-inline: var(--space-1);
+  margin-top: 0.375rem;
+  background-color: var(--color-surface-container);
+  border-radius: var(--radius-md);
+}
+
+.op-range__field {
+  flex: 1 1 8rem;
+}
+
+.op-range__error {
+  flex: 1 1 100%;
+  font-size: var(--font-size-label-sm);
+  font-weight: 600;
+  color: var(--color-on-error-container);
+}
+
+.op-range__warning {
+  flex: 1 1 100%;
+  font-size: var(--font-size-label-sm);
+  font-weight: 600;
+  color: var(--color-on-secondary-fixed-variant);
+}
+
+/* ── 데이터 표 ────────────────────────────────────────────────────────── */
+
+/*
+ * 표는 카드 안쪽 여백을 넘어 가장자리까지 채운다. 시안의 표는 카드 폭 전체를
+ * 쓰고 머리·바닥만 회색으로 구분한다.
+ */
+.op-table-scroll {
+  overflow-x: auto;
+  margin-inline: calc(var(--space-3) * -1);
+  border-top: 1px solid var(--color-surface-container-highest);
+}
+
+.op-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-body-md);
+}
+
+.op-table th,
+.op-table td {
+  padding-block: 0.875rem;
+  padding-inline: var(--space-2);
+  text-align: left;
+  border-bottom: 1px solid var(--color-surface-container-highest);
+  vertical-align: middle;
+}
+
+.op-table thead th {
+  background-color: var(--color-surface-container-low);
+  font-size: var(--font-size-label-sm);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-on-surface-variant);
+  white-space: nowrap;
+}
+
+/* 행 hover는 Primary-Container 틴트. (DESIGN.md의 리스트 규칙) */
+.op-table tbody tr:hover {
+  background-color: var(--color-primary-container);
+}
+
+.op-table tbody tr:last-child th,
+.op-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/*
+ * 모바일에서 표를 가로로 밀 때 첫 열(주 식별자)을 붙잡아 둔다.
+ * (DESIGN.md: "keeping the primary identifier sticky to the left")
+ */
+.op-table tbody th[scope='row'] {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  background-color: var(--color-surface-container-lowest);
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+.op-table tbody tr:hover th[scope='row'] {
+  background-color: var(--color-primary-container);
+}
+
+/* 머리글도 같이 붙잡지 않으면 가로로 밀 때 첫 열의 제목만 사라진다. */
+.op-table thead th:first-child {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 2;
+}
+
+@media (min-width: 64rem) {
+  .op-table tbody th[scope='row'],
+  .op-table thead th:first-child {
+    position: static;
+  }
+}
+
+.op-table__numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 한 칸에 뱃지가 여러 개면 서로 붙어 한 단어처럼 읽힌다. */
+.op-badge-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+/* 노출 여부 같은 이진 상태의 점 표시. 반드시 옆 문구와 함께 쓴다. */
+.op-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+
+.op-dot::before {
+  content: '';
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--radius-full);
+  background-color: var(--color-outline);
+}
+
+.op-dot--on::before {
+  background-color: var(--color-accent-emerald);
+}
+
+/* 표 아래 요약·페이지 이동 줄 */
+.op-shell .mi-pagination {
+  justify-content: space-between;
+  padding-block: var(--space-2) 0;
+}
+
+/* ── 요약 정의 목록 ───────────────────────────────────────────────────── */
+
+.op-summary {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+@media (min-width: 48rem) {
+  .op-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.op-summary__term {
+  font-size: var(--font-size-label-sm);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-on-surface-variant);
+}
+
+/*
+ * `dd`는 브라우저 기본으로 왼쪽 들여쓰기(40px)가 붙는다. `theme.css`는 ul/ol만
+ * 초기화하므로 여기서 명시적으로 지운다. `margin` 단축 속성을 쓰면 아래 세로
+ * 여백까지 함께 덮으므로 논리 속성으로 따로 적는다.
+ */
+.op-summary__value {
+  margin-inline-start: 0;
+  margin-top: 0.25rem;
+  font-size: var(--font-size-body-md);
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+/* ── 인증 화면 ────────────────────────────────────────────────────────── */
+
+.op-auth {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: var(--layout-margin-mobile);
+}
+
+@media (min-width: 48rem) {
+  .op-auth {
+    padding: var(--layout-margin-desktop);
+  }
+}
+
+/* 시안의 카드 하나 안에 히어로와 폼을 나란히 둔다. */
+.op-auth__card {
+  display: grid;
+  grid-template-columns: 1fr;
+  width: 100%;
+  max-width: var(--layout-container-max);
+  overflow: hidden;
+  background-color: var(--color-surface-container-lowest);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-3);
+}
+
+@media (min-width: 64rem) {
+  .op-auth__card {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/*
+ * 히어로는 사진 필드가 없는 계약과 무관한 시각 표현이다.
+ * 그라디언트로만 그리므로 없는 데이터를 만들지 않는다.
+ * 좁은 화면에서는 폼이 먼저 보여야 하므로 감춘다.
+ */
+.op-auth__hero {
+  display: none;
+  position: relative;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-4);
+  background-image: linear-gradient(
+    160deg,
+    var(--color-primary) 0%,
+    var(--color-primary-deep) 60%,
+    #2a35a8 100%
+  );
+  color: var(--color-on-primary);
+  overflow: hidden;
+}
+
+@media (min-width: 64rem) {
+  .op-auth__hero {
+    display: flex;
+  }
+}
+
+/* 시안 우하단의 원형 장식. 순수 장식이라 보조기술에 남기지 않는다. */
+.op-auth__hero::after {
+  content: '';
+  position: absolute;
+  right: -6rem;
+  bottom: -6rem;
+  width: 20rem;
+  height: 20rem;
+  border-radius: var(--radius-full);
+  background-color: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+
+.op-auth__hero > * {
+  position: relative;
+  z-index: 1;
+}
+
+.op-auth__hero-title {
+  font-size: var(--font-size-headline-lg);
+  line-height: var(--line-height-headline-lg);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.op-auth__hero-text {
+  margin-top: var(--space-2);
+  font-size: var(--font-size-body-lg);
+  line-height: var(--line-height-body-lg);
+  color: var(--color-primary-fixed);
+}
+
+/* 히어로 하단의 두 칸 요약. 수치가 아니라 계약이 보장하는 동작을 적는다. */
+.op-auth__hero-points {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.op-auth__hero-point-title {
+  font-size: var(--font-size-body-lg);
+  font-weight: 700;
+  color: var(--color-secondary-container);
+}
+
+.op-auth__hero-point-text {
+  margin-top: 0.375rem;
+  font-size: var(--font-size-label-md);
+  color: var(--color-primary-fixed);
+}
+
+.op-auth__panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-block: var(--space-6);
+  padding-inline: var(--layout-margin-mobile);
+}
+
+@media (min-width: 48rem) {
+  .op-auth__panel {
+    padding-inline: var(--space-6);
+  }
+}
+
+.op-auth__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  max-width: 26rem;
+  margin-inline: auto;
+}
+
+.op-auth__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin-bottom: var(--space-1);
+  font-size: var(--font-size-body-lg);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--color-primary);
+}
+
+.op-auth__title {
+  font-size: var(--font-size-headline-lg);
+  line-height: var(--line-height-headline-lg);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+@media (max-width: 47.999rem) {
+  .op-auth__title {
+    font-size: var(--font-size-headline-md);
+    line-height: var(--line-height-headline-md);
+  }
+}
+
+.op-auth__subtitle {
+  margin-top: 0.5rem;
+  color: var(--color-on-surface-variant);
+}
+
+.op-auth__switch {
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+.op-auth__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-surface-container-highest);
+  font-size: var(--font-size-label-sm);
+  color: var(--color-outline);
+}
+
+/* ── 매장 없음 안내 ───────────────────────────────────────────────────── */
+
+.op-onboarding {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding-block: var(--space-4);
+  text-align: center;
+}
+
+/* 시안 중앙의 큰 매장 아이콘. 흰 원 위에 옅은 네이비 후광을 둔다. */
+.op-onboarding__figure {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 7.5rem;
+  height: 7.5rem;
+  margin-bottom: var(--space-1);
+  background-color: var(--color-surface-container-lowest);
+  border-radius: var(--radius-full);
+  box-shadow:
+    0 0 0 1rem var(--tint-navy),
+    var(--shadow-2);
+  color: var(--color-primary);
+}
+
+.op-onboarding__figure .op-icon {
+  width: 3.5rem;
+  height: 3.5rem;
+  stroke-width: 1.2;
+}
+
+.op-onboarding__title {
+  font-size: var(--font-size-headline-lg);
+  line-height: var(--line-height-headline-lg);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.op-onboarding__text {
+  max-width: 34rem;
+  font-size: var(--font-size-body-lg);
+  line-height: var(--line-height-body-lg);
+  color: var(--color-on-surface-variant);
+}
+
+/* 혜택 카드. 시안은 아이콘 원과 두 줄 문구를 나란히 둔다. */
+.op-benefit-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+  width: 100%;
+  max-width: 56rem;
+  margin-top: var(--space-2);
+  text-align: left;
+}
+
+@media (min-width: 48rem) {
+  .op-benefit-list {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.op-benefit {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.op-benefit__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  background-color: var(--color-primary-container);
+  border-radius: var(--radius-full);
+  color: var(--color-on-primary-container);
+}
+
+.op-benefit__title {
+  display: block;
+  font-size: var(--font-size-body-md);
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+.op-benefit__text {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+/* ── 관리 화면 바로가기 ───────────────────────────────────────────────── */
+
+.op-shortcut-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-1);
+}
+
+@media (min-width: 48rem) {
+  .op-shortcut-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 64rem) {
+  .op-shortcut-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.op-shortcut {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-block: 0.75rem;
+  padding-inline: var(--space-2);
+  border: 1px solid var(--color-surface-container-highest);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface);
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.op-shortcut:hover {
+  background-color: var(--color-primary-container);
+  border-color: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  text-decoration: none;
+}
+
+.op-shortcut__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  background-color: var(--tint-navy);
+  border-radius: var(--radius-md);
+  color: var(--color-primary);
+}
+
+/* 화살표는 오른쪽 끝으로 민다. hover에서만 살짝 나아간다. */
+.op-shortcut__chevron {
+  margin-inline-start: auto;
+  color: var(--color-outline);
+  transition: transform 150ms ease;
+}
+
+.op-shortcut:hover .op-shortcut__chevron {
+  transform: translateX(2px);
+  color: var(--color-primary);
+}

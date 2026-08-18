@@ -5,6 +5,7 @@ import com.miriyum.domain.auth.membersupport.MemberSearchCriteria;
 import com.miriyum.domain.auth.membersupport.MemberStatus;
 import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.MemberPageResponse;
 import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.MemberResponse;
+import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.SanctionResponse;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportAssignmentService;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportQueryService;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportDecisionService;
@@ -114,7 +115,7 @@ public class PlatformOperatorMemberSupportController {
     }
 
     @PostMapping("/members/{accountType}/{accountId}/sanctions")
-    public ApiResponse<Void> sanction(
+    public ApiResponse<SanctionResponse> sanction(
             @AuthenticationPrincipal PlatformOperatorPrincipal principal,
             @PathVariable MemberAccountType accountType,
             @PathVariable long accountId,
@@ -122,23 +123,23 @@ public class PlatformOperatorMemberSupportController {
             @RequestHeader("X-Admin-Reauthentication") String approval,
             @RequestHeader("Idempotency-Key") String correlationId,
             @Valid @RequestBody SanctionRequest request) {
-        sanctionCommands.createAndApply(principal, accountType, accountId, version(ifMatch),
+        var sanction = sanctionCommands.createAndApply(principal, accountType, accountId, version(ifMatch),
                 request.level(), request.restrictedFeatures(), request.reasonCode(), request.policyVersion(),
                 approval, correlationId);
-        return ApiResponse.success("제재를 처리했습니다.", null);
+        return ApiResponse.success("제재를 처리했습니다.", SanctionResponse.from(sanction));
     }
 
     @PostMapping("/member-sanctions/{sanctionId}/additional-approvals")
-    public ApiResponse<Void> approvePermanent(
+    public ApiResponse<SanctionResponse> approvePermanent(
             @AuthenticationPrincipal PlatformOperatorPrincipal principal,
             @PathVariable String sanctionId,
             @RequestHeader("If-Match") String ifMatch,
             @RequestHeader("X-Admin-Reauthentication") String approval,
             @RequestHeader("Idempotency-Key") String correlationId,
             @Valid @RequestBody AdditionalApprovalRequest request) {
-        sanctions.approvePermanent(principal, sanctionId, version(ifMatch),
+        var sanction = sanctions.approvePermanent(principal, sanctionId, version(ifMatch),
                 approval, correlationId, request.reasonCode());
-        return ApiResponse.success("영구 정지를 승인했습니다.", null);
+        return ApiResponse.success("영구 정지를 승인했습니다.", SanctionResponse.from(sanction));
     }
 
     private long version(String header) {

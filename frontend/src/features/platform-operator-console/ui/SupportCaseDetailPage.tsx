@@ -17,6 +17,8 @@ import {
   fetchSupportCase,
   supportCaseQueryKeys,
   type CaseDecisionRequest,
+  type RestrictedFeature,
+  type SanctionLevel,
   type SupportCase,
 } from '../api/memberSupportApi'
 import { accountTargetType } from '../api/reauthenticationApi'
@@ -42,7 +44,7 @@ const DECISIONS_BY_CASE_TYPE: Record<
   SupportCase['caseType'],
   readonly Decision[]
 > = {
-  ACCOUNT_RECOVERY: ['APPROVE', 'REJECT', 'CANCEL'],
+  ACCOUNT_RECOVERY: ['APPROVE', 'REJECT'],
   ACCOUNT_APPEAL: ['UPHOLD', 'REDUCE', 'CANCEL'],
 }
 
@@ -52,6 +54,23 @@ const DECISION_LABEL: Record<Decision, string> = {
   UPHOLD: '제재 유지',
   REDUCE: '제재 경감',
   CANCEL: '취소',
+}
+
+const REDUCED_LEVEL_LABEL: Record<
+  Exclude<SanctionLevel, 'PERMANENT_SUSPENSION'>,
+  string
+> = {
+  WARNING: '경고',
+  FEATURE_RESTRICTION: '기능 제한',
+  TEMPORARY_SUSPENSION: '기간 정지',
+}
+
+const RESTRICTED_FEATURE_LABEL: Record<RestrictedFeature, string> = {
+  RESERVATION: '예약',
+  WAITING: '웨이팅',
+  PICKUP: '픽업',
+  STORE_OPERATION: '매장 운영',
+  MENU_OPERATION: '메뉴 운영',
 }
 
 /** 결정을 내릴 수 있는 상태. 종결된 사건에는 명령을 보내지 않는다. */
@@ -254,6 +273,11 @@ function DecisionForm({
   const allowed = DECISIONS_BY_CASE_TYPE[supportCase.caseType]
   const [decision, setDecision] = useState<Decision>(allowed[0])
   const [reasonCode, setReasonCode] = useState('')
+  const [reducedLevel, setReducedLevel] =
+    useState<Exclude<SanctionLevel, 'PERMANENT_SUSPENSION'>>('WARNING')
+  const [restrictedFeatures, setRestrictedFeatures] = useState<
+    RestrictedFeature[]
+  >([])
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -271,6 +295,13 @@ function DecisionForm({
     } else if (!REASON_CODE_PATTERN.test(reasonCode)) {
       errors.reasonCode = '대문자·숫자·밑줄만 사용할 수 있습니다.'
     }
+    if (
+      decision === 'REDUCE' &&
+      reducedLevel === 'FEATURE_RESTRICTION' &&
+      restrictedFeatures.length === 0
+    ) {
+      errors.restrictedFeatures = '기능 제한은 하나 이상의 기능을 선택해야 합니다.'
+    }
     setFieldErrors(errors)
     setFormError(null)
     if (Object.keys(errors).length > 0) {
@@ -284,15 +315,29 @@ function DecisionForm({
     setSubmitting(true)
     setFormError(null)
     try {
+      const body: CaseDecisionRequest =
+        decision === 'REDUCE'
+          ? {
+              decision,
+              reasonCode,
+              reducedLevel,
+              restrictedFeatures:
+                reducedLevel === 'FEATURE_RESTRICTION'
+                  ? restrictedFeatures
+                  : [],
+            }
+          : { decision, reasonCode }
       await decideSupportCase(apiClient, {
         caseId: supportCase.caseId,
         version: supportCase.version,
         reauthenticationApproval: approval,
         idempotencyKey,
-        body: { decision, reasonCode },
+        body,
       })
       setIdempotencyKey(createIdempotencyKey())
       setReasonCode('')
+      setReducedLevel('WARNING')
+      setRestrictedFeatures([])
     } catch (error) {
       setFormError(commandErrorMessage(error))
     } finally {
@@ -319,7 +364,13 @@ function DecisionForm({
         <SelectField
           label="결정"
           value={decision}
-          onChange={(event) => setDecision(event.target.value as Decision)}
+          onChange={(event) => {
+            const nextDecision = event.target.value as Decision
+            setDecision(nextDecision)
+            if (nextDecision !== 'REDUCE') {
+              setRestrictedFeatures([])
+            }
+          }}
         >
           {allowed.map((value) => (
             <option key={value} value={value}>
@@ -327,6 +378,67 @@ function DecisionForm({
             </option>
           ))}
         </SelectField>
+
+        {decision === 'REDUCE' && (
+          <>
+            <SelectField
+              label="경감 수준"
+              value={reducedLevel}
+              onChange={(event) => {
+                const nextLevel = event.target.value as Exclude<
+                  SanctionLevel,
+                  'PERMANENT_SUSPENSION'
+                >
+                setReducedLevel(nextLevel)
+                if (nextLevel !== 'FEATURE_RESTRICTION') {
+                  setRestrictedFeatures([])
+                }
+              }}
+            >
+              {Object.entries(REDUCED_LEVEL_LABEL).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </SelectField>
+
+            {reducedLevel === 'FEATURE_RESTRICTION' && (
+              <fieldset className="po-fieldset">
+                <legend className="po-fieldset__legend">제한 기능</legend>
+                {fieldErrors.restrictedFeatures !== undefined && (
+                  <p className="po-fieldset__error" role="alert">
+                    {fieldErrors.restrictedFeatures}
+                  </p>
+                )}
+                {Object.entries(RESTRICTED_FEATURE_LABEL).map(
+                  ([value, label]) => (
+                    <label key={value} className="po-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={restrictedFeatures.includes(
+                          value as RestrictedFeature,
+                        )}
+                        onChange={() =>
+                          setRestrictedFeatures((current) =>
+                            current.includes(value as RestrictedFeature)
+                              ? current.filter((item) => item !== value)
+                              : [...current, value as RestrictedFeature],
+                          )
+                        }
+                      />
+                      {label}
+                    </label>
+                  ),
+                )}
+              </fieldset>
+            )}
+
+            <p className="po-form__notice">
+              원 제재보다 낮은 수준만 허용됩니다. 원 제재 수준은 사건 응답에 없어
+              서버가 최종 검증합니다.
+            </p>
+          </>
+        )}
 
         <TextField
           label="사유 코드"
