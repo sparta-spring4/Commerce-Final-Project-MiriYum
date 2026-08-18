@@ -57,6 +57,36 @@ class ReservationDepositDispositionTest {
     }
 
     @Test
+    @DisplayName("sibling 잔액 점유는 refund 없는 retryable 처분으로 보존한다")
+    void defersRetryablyWithoutRefundReference() {
+        ReservationDepositDisposition disposition =
+                ReservationDepositDisposition.deferRetryable(
+                        payment(),
+                        "550e8400-e29b-41d4-a716-446655440004",
+                        "reservation:124:cancelled",
+                        "RESERVATION_CANCELLED",
+                        null,
+                        2L,
+                        "CONSUMER",
+                        5000,
+                        15_000L,
+                        0L,
+                        "deferred-fingerprint",
+                        REQUESTED_AT);
+
+        assertThat(disposition.getStatus()).isEqualTo(DispositionStatus.FAILED);
+        assertThat(disposition.getFailureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+        assertThat(disposition.getRefundId()).isNull();
+        assertThat(disposition.getAttemptCount()).isZero();
+
+        disposition.retry(REQUESTED_AT.plusSeconds(1));
+
+        assertThat(disposition.getStatus()).isEqualTo(DispositionStatus.PROCESSING);
+        assertThat(disposition.getAttemptCount()).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("결과 불명 처분은 재시도하거나 완료로 가장하지 않는다")
     void keepsUnknownDispositionIsolated() {
         ReservationDepositDisposition disposition = fiftyPercentDisposition();

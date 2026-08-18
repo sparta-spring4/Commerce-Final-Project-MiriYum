@@ -214,6 +214,30 @@ public class ReservationDepositDisposition {
         return disposition;
     }
 
+    /** sibling 환불이 잔액을 임시 점유하면 provider 호출 없이 같은 처분의 재시도를 보존한다. */
+    public static ReservationDepositDisposition deferRetryable(
+            Payment payment,
+            String dispositionId,
+            String sourceEventId,
+            String sourceEventType,
+            String correctsSourceEventId,
+            long policyVersion,
+            String responsibilityCode,
+            int targetRefundRateBasisPoints,
+            long targetRefundAmountMinor,
+            long completedRefundAmountMinor,
+            String requestFingerprint,
+            Instant deferredAt
+    ) {
+        ReservationDepositDisposition disposition = new ReservationDepositDisposition(
+                payment, dispositionId, sourceEventId, sourceEventType,
+                correctsSourceEventId, policyVersion, responsibilityCode,
+                targetRefundRateBasisPoints, targetRefundAmountMinor,
+                completedRefundAmountMinor, requestFingerprint, deferredAt);
+        disposition.failRetryableWithoutRefund(deferredAt);
+        return disposition;
+    }
+
     public void failRetryable(String refundId, Instant failedAt) {
         requireProcessing();
         this.refundId = requireText(refundId, "refundId");
@@ -286,6 +310,53 @@ public class ReservationDepositDisposition {
         this.updatedAt = Objects.requireNonNull(failedAt, "failedAt must not be null");
     }
 
+    public void failRetryableWithoutRefund(Instant failedAt) {
+        requireProcessing();
+        if (refundId != null) {
+            throw new IllegalStateException("a refund is already attached to the disposition");
+        }
+        this.status = DispositionStatus.FAILED;
+        this.failureClassification = DispositionFailureClassification.RETRYABLE;
+        this.attemptCount = Math.max(0, attemptCount - 1);
+        this.updatedAt = Objects.requireNonNull(failedAt, "failedAt must not be null");
+    }
+
+    public void attachRetryableRefund(String refundId, Instant observedAt) {
+        requireRetryableFailure();
+        attachSameRefund(refundId);
+        this.attemptCount = Math.max(1, attemptCount);
+        this.updatedAt = Objects.requireNonNull(observedAt, "observedAt must not be null");
+    }
+
+    public void resumeRetryableRefund(String refundId, Instant observedAt) {
+        requireRetryableFailure();
+        attachSameRefund(refundId);
+        this.status = DispositionStatus.PROCESSING;
+        this.failureClassification = null;
+        this.attemptCount++;
+        this.updatedAt = Objects.requireNonNull(observedAt, "observedAt must not be null");
+    }
+
+    public void requireReconciliationFromRetryable(String refundId, Instant detectedAt) {
+        requireRetryableFailure();
+        attachSameRefund(refundId);
+        this.status = DispositionStatus.RECONCILIATION_REQUIRED;
+        this.failureClassification = DispositionFailureClassification.UNKNOWN;
+        this.attemptCount = Math.max(1, attemptCount);
+        this.updatedAt = Objects.requireNonNull(detectedAt, "detectedAt must not be null");
+    }
+
+    public void completeRetryableRefund(
+            String refundId,
+            long completedDeltaAmountMinor,
+            Instant at
+    ) {
+        requireRetryableFailure();
+        attachSameRefund(refundId);
+        this.attemptCount = Math.max(1, attemptCount);
+        completeRefundInternal(refundId, completedDeltaAmountMinor, at);
+    }
+
     private void completeRefundInternal(
             String refundId,
             long completedDeltaAmountMinor,
@@ -309,6 +380,21 @@ public class ReservationDepositDisposition {
                 || failureClassification != DispositionFailureClassification.UNKNOWN) {
             throw new IllegalStateException("disposition does not require reconciliation");
         }
+    }
+
+    private void requireRetryableFailure() {
+        if (status != DispositionStatus.FAILED
+                || failureClassification != DispositionFailureClassification.RETRYABLE) {
+            throw new IllegalStateException("disposition is not a retryable failure");
+        }
+    }
+
+    private void attachSameRefund(String observedRefundId) {
+        String validated = requireText(observedRefundId, "refundId");
+        if (refundId != null && !refundId.equals(validated)) {
+            throw new IllegalStateException("a different refund is already attached");
+        }
+        this.refundId = validated;
     }
 
     private void requireProcessing() {

@@ -202,6 +202,12 @@ public class PaymentTransactionService {
     private static final Duration CONFIRMATION_PROCESSING_LEASE = Duration.ofMinutes(5);
     private static final Duration REFUND_PROCESSING_LEASE = Duration.ofMinutes(5);
 
+    private enum DispositionAvailability {
+        AVAILABLE,
+        TEMPORARILY_BLOCKED,
+        PERMANENTLY_BLOCKED
+    }
+
     private final PaymentRepository payments;
     private final PaymentAttemptRepository attempts;
     private final PaymentRefundRepository refunds;
@@ -691,11 +697,14 @@ public class PaymentTransactionService {
             ProviderCancellation cancellation,
             Instant now
     ) {
+        Payment payment = paymentForUpdate(claim.paymentId());
         PaymentRefund refund = refundForUpdate(claim.refundId());
+        if (!refund.getPayment().getId().equals(payment.getId())) {
+            throw new ServiceException(PaymentErrorCode.INVALID_STATE_TRANSITION);
+        }
         if (refund.getStatus() == RefundStatus.COMPLETED) {
             return toRefundResult(refund);
         }
-        Payment payment = paymentForUpdate(refund.getPayment().getPaymentId());
         if (cancellation.amountMinor() != refund.getAmountMinor()
                 || !cancellation.currency().equals(refund.getCurrency())) {
             throw new ServiceException(PaymentErrorCode.PROVIDER_MAPPING_MISMATCH);
@@ -704,7 +713,7 @@ public class PaymentTransactionService {
             case CANCELLED, PARTIALLY_CANCELLED -> {
                 payment.applyCompletedRefund(refund.getAmountMinor(), now);
                 refund.complete(cancellation.cancellationId(), now);
-                if (hasUnresolvedRefund(payment)) {
+                if (shouldKeepPaymentReconciliationAfterRefundCompletion(payment, refund)) {
                     payment.markRefundReconciliationRequired(now);
                 }
                 ledger.save(PaymentLedgerEntry.record(
@@ -718,6 +727,10 @@ public class PaymentTransactionService {
             }
             case FAILED -> {
                 refund.fail(now);
+                if (payment.getStatus() == Payment.Status.RECONCILIATION_REQUIRED
+                        && canRestorePaymentAfterRefundFailure(payment, refund)) {
+                    payment.restoreRefundableStatusAfterReconciliation(now);
+                }
                 ledger.save(PaymentLedgerEntry.record(
                         payment,
                         refund,
@@ -735,9 +748,12 @@ public class PaymentTransactionService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public RefundResult markRefundUnknown(RefundClaim claim, Instant now) {
+        Payment payment = paymentForUpdate(claim.paymentId());
         PaymentRefund refund = refundForUpdate(claim.refundId());
+        if (!refund.getPayment().getId().equals(payment.getId())) {
+            throw new ServiceException(PaymentErrorCode.INVALID_STATE_TRANSITION);
+        }
         if (refund.getStatus() != RefundStatus.COMPLETED) {
-            Payment payment = paymentForUpdate(refund.getPayment().getPaymentId());
             markRefundReconciliation(refund, payment, now);
         }
         return toRefundResult(refund);
@@ -745,9 +761,12 @@ public class PaymentTransactionService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public RefundResult markRefundMismatch(RefundClaim claim, Instant now) {
+        Payment payment = paymentForUpdate(claim.paymentId());
         PaymentRefund refund = refundForUpdate(claim.refundId());
+        if (!refund.getPayment().getId().equals(payment.getId())) {
+            throw new ServiceException(PaymentErrorCode.INVALID_STATE_TRANSITION);
+        }
         if (refund.getStatus() != RefundStatus.COMPLETED) {
-            Payment payment = paymentForUpdate(refund.getPayment().getPaymentId());
             markRefundReconciliation(refund, payment, now);
         }
         return toRefundResult(refund);
@@ -770,8 +789,43 @@ public class PaymentTransactionService {
             if (existing.getStatus() == DispositionStatus.FAILED
                     && existing.getFailureClassification()
                     == DispositionFailureClassification.RETRYABLE) {
-                if (!canRetryDisposition(payment, existing)) {
+                PaymentRefund matchingRefund = refunds.findByPayment_IdAndIdempotencyKey(
+                        payment.getId(), existing.getIdempotencyKey()).orElse(null);
+                if (matchingRefund != null) {
+                    matchingRefund = refundForUpdate(matchingRefund.getRefundId());
+                    if (!matchesDispositionRefund(existing, matchingRefund)) {
+                        existing.rejectRetryPermanently(now);
+                        return DispositionClaim.completed(toDispositionResult(existing));
+                    }
+                    switch (matchingRefund.getStatus()) {
+                        case COMPLETED -> {
+                            existing.completeRetryableRefund(
+                                    matchingRefund.getRefundId(),
+                                    matchingRefund.getAmountMinor(),
+                                    now);
+                            return DispositionClaim.completed(toDispositionResult(existing));
+                        }
+                        case RECONCILIATION_REQUIRED -> {
+                            existing.requireReconciliationFromRetryable(
+                                    matchingRefund.getRefundId(), now);
+                            return DispositionClaim.completed(toDispositionResult(existing));
+                        }
+                        case REQUESTED, VALIDATING, PROCESSING -> {
+                            existing.resumeRetryableRefund(
+                                    matchingRefund.getRefundId(), now);
+                            return DispositionClaim.completed(toDispositionResult(existing));
+                        }
+                        case FAILED -> existing.attachRetryableRefund(
+                                matchingRefund.getRefundId(), now);
+                    }
+                }
+                DispositionAvailability availability = dispositionAvailability(
+                        payment, existing.getIncrementalRefundAmountMinor());
+                if (availability == DispositionAvailability.PERMANENTLY_BLOCKED) {
                     existing.rejectRetryPermanently(now);
+                    return DispositionClaim.completed(toDispositionResult(existing));
+                }
+                if (availability == DispositionAvailability.TEMPORARILY_BLOCKED) {
                     return DispositionClaim.completed(toDispositionResult(existing));
                 }
                 existing.retry(now);
@@ -815,28 +869,16 @@ public class PaymentTransactionService {
 
         long targetAmount = dispositionTargetAmount(
                 payment.getAmountMinor(), command.targetRefundRateBasisPoints());
+        long incrementalAmount = Math.max(0L, targetAmount - previouslyCompleted);
         boolean invalid = !RESERVATION_DEPOSIT.equals(payment.getSourceType())
-                || (payment.getStatus() != Payment.Status.PAID
-                && payment.getStatus() != Payment.Status.PARTIALLY_REFUNDED)
                 || invalidCorrection
                 || targetAmount < previouslyCompleted
-                || Math.max(0L, targetAmount - previouslyCompleted)
-                > payment.getRefundableAmountMinor();
-        ReservationDepositDisposition disposition = invalid
-                ? ReservationDepositDisposition.rejectPermanent(
-                        payment,
-                        command.idempotencyKey(),
-                        command.sourceEventId(),
-                        command.sourceEventType(),
-                        command.correctsSourceEventId(),
-                        command.policyVersion(),
-                        command.responsibilityCode(),
-                        command.targetRefundRateBasisPoints(),
-                        targetAmount,
-                        previouslyCompleted,
-                        fingerprint,
-                        now)
-                : ReservationDepositDisposition.create(
+                || incrementalAmount > payment.getRefundableAmountMinor();
+        DispositionAvailability availability = invalid
+                ? DispositionAvailability.PERMANENTLY_BLOCKED
+                : dispositionAvailability(payment, incrementalAmount);
+        ReservationDepositDisposition disposition = switch (availability) {
+            case PERMANENTLY_BLOCKED -> ReservationDepositDisposition.rejectPermanent(
                         payment,
                         command.idempotencyKey(),
                         command.sourceEventId(),
@@ -849,6 +891,33 @@ public class PaymentTransactionService {
                         previouslyCompleted,
                         fingerprint,
                         now);
+            case TEMPORARILY_BLOCKED -> ReservationDepositDisposition.deferRetryable(
+                        payment,
+                        command.idempotencyKey(),
+                        command.sourceEventId(),
+                        command.sourceEventType(),
+                        command.correctsSourceEventId(),
+                        command.policyVersion(),
+                        command.responsibilityCode(),
+                        command.targetRefundRateBasisPoints(),
+                        targetAmount,
+                        previouslyCompleted,
+                        fingerprint,
+                        now);
+            case AVAILABLE -> ReservationDepositDisposition.create(
+                        payment,
+                        command.idempotencyKey(),
+                        command.sourceEventId(),
+                        command.sourceEventType(),
+                        command.correctsSourceEventId(),
+                        command.policyVersion(),
+                        command.responsibilityCode(),
+                        command.targetRefundRateBasisPoints(),
+                        targetAmount,
+                        previouslyCompleted,
+                        fingerprint,
+                        now);
+        };
         dispositions.saveAndFlush(disposition);
         if (disposition.getStatus() != DispositionStatus.PROCESSING) {
             return DispositionClaim.completed(toDispositionResult(disposition));
@@ -863,6 +932,16 @@ public class PaymentTransactionService {
             Instant now
     ) {
         ReservationDepositDisposition disposition = dispositionForUpdate(dispositionId);
+        if (disposition.getStatus() == DispositionStatus.FAILED
+                && disposition.getFailureClassification()
+                == DispositionFailureClassification.RETRYABLE) {
+            if (refundResult.status() == RefundStatus.COMPLETED
+                    && matchesDispositionRefundResult(disposition, refundResult)) {
+                disposition.completeRetryableRefund(
+                        refundResult.refundId(), refundResult.completedAmountMinor(), now);
+            }
+            return toDispositionResult(disposition);
+        }
         if (disposition.getStatus() != DispositionStatus.PROCESSING) {
             return toDispositionResult(disposition);
         }
@@ -881,6 +960,7 @@ public class PaymentTransactionService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public DispositionResult resolveDispositionAfterRefundFailure(
             String dispositionId,
+            boolean retryableWithoutRefund,
             Instant now
     ) {
         ReservationDepositDisposition disposition = dispositionForUpdate(dispositionId);
@@ -890,7 +970,11 @@ public class PaymentTransactionService {
         PaymentRefund refund = refunds.findByPayment_IdAndIdempotencyKey(
                 disposition.getPayment().getId(), disposition.getIdempotencyKey()).orElse(null);
         if (refund == null || !matchesDispositionRefund(disposition, refund)) {
-            disposition.failPermanent(now);
+            if (refund == null && retryableWithoutRefund) {
+                disposition.failRetryableWithoutRefund(now);
+            } else {
+                disposition.failPermanent(now);
+            }
             return toDispositionResult(disposition);
         }
         switch (refund.getStatus()) {
@@ -907,7 +991,8 @@ public class PaymentTransactionService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public DispositionReconciliationClaim claimDispositionReconciliation(
-            GetReservationDepositDispositionQuery query
+            GetReservationDepositDispositionQuery query,
+            Instant now
     ) {
         Payment payment = paymentForUpdate(query.paymentId());
         ReservationDepositDisposition found = dispositions
@@ -915,6 +1000,68 @@ public class PaymentTransactionService {
                         query.paymentId(), query.sourceEventId())
                 .orElseThrow(() -> new ServiceException(PaymentErrorCode.PAYMENT_NOT_FOUND));
         ReservationDepositDisposition disposition = dispositionForUpdate(found.getDispositionId());
+        boolean retryableFailure = disposition.getStatus() == DispositionStatus.FAILED
+                && disposition.getFailureClassification()
+                == DispositionFailureClassification.RETRYABLE;
+        if ((disposition.getStatus() == DispositionStatus.PROCESSING
+                || disposition.getStatus() == DispositionStatus.RECONCILIATION_REQUIRED
+                || retryableFailure)
+                && disposition.getRefundId() != null) {
+            PaymentRefund processingRefund = refundForUpdate(disposition.getRefundId());
+            if (processingRefund.getPayment().getId().equals(payment.getId())
+                    && matchesDispositionRefund(disposition, processingRefund)) {
+                switch (processingRefund.getStatus()) {
+                    case COMPLETED -> {
+                        if (disposition.getStatus() == DispositionStatus.PROCESSING) {
+                            disposition.completeRefund(
+                                    processingRefund.getRefundId(),
+                                    processingRefund.getAmountMinor(),
+                                    now);
+                        } else if (disposition.getStatus()
+                                == DispositionStatus.RECONCILIATION_REQUIRED) {
+                            disposition.completeReconciledRefund(
+                                    processingRefund.getRefundId(),
+                                    processingRefund.getAmountMinor(),
+                                    now);
+                        } else {
+                            disposition.completeRetryableRefund(
+                                    processingRefund.getRefundId(),
+                                    processingRefund.getAmountMinor(),
+                                    now);
+                        }
+                    }
+                    case FAILED -> {
+                        if (disposition.getStatus() == DispositionStatus.PROCESSING) {
+                            disposition.failRetryable(processingRefund.getRefundId(), now);
+                        } else if (disposition.getStatus()
+                                == DispositionStatus.RECONCILIATION_REQUIRED) {
+                            disposition.failReconciledRetryable(
+                                    processingRefund.getRefundId(), now);
+                        }
+                    }
+                    case RECONCILIATION_REQUIRED -> {
+                        if (disposition.getStatus() == DispositionStatus.PROCESSING) {
+                            disposition.requireReconciliation(
+                                    processingRefund.getRefundId(), now);
+                        }
+                    }
+                    case PROCESSING -> {
+                        if (!retryableFailure
+                                && !now.isBefore(processingRefund.getProcessingStartedAt()
+                                .plus(REFUND_PROCESSING_LEASE))) {
+                            markRefundReconciliation(processingRefund, payment, now);
+                            if (disposition.getStatus() == DispositionStatus.PROCESSING) {
+                                disposition.requireReconciliation(
+                                        processingRefund.getRefundId(), now);
+                            }
+                        }
+                    }
+                    case REQUESTED, VALIDATING -> {
+                        // 저장 결과를 유지하고 아직 끝나지 않은 내부 단계는 다음 조회를 기다린다.
+                    }
+                }
+            }
+        }
         DispositionResult current = toDispositionResult(disposition);
         if (disposition.getStatus() != DispositionStatus.RECONCILIATION_REQUIRED
                 || disposition.getFailureClassification()
@@ -977,7 +1124,7 @@ public class PaymentTransactionService {
                         refund.getAmountMinor(),
                         now
                 ));
-                if (hasUnresolvedRefund(payment)) {
+                if (shouldKeepPaymentReconciliationAfterRefundCompletion(payment, refund)) {
                     payment.markRefundReconciliationRequired(now);
                 }
             }
@@ -985,7 +1132,7 @@ public class PaymentTransactionService {
                 refund.fail(now);
                 disposition.failReconciledRetryable(refund.getRefundId(), now);
                 if (payment.getStatus() == Payment.Status.RECONCILIATION_REQUIRED
-                        && !hasUnresolvedRefund(payment)) {
+                        && canRestorePaymentAfterRefundFailure(payment, refund)) {
                     payment.restoreRefundableStatusAfterReconciliation(now);
                 }
                 ledger.save(PaymentLedgerEntry.record(
@@ -1029,18 +1176,45 @@ public class PaymentTransactionService {
                 && "RESERVATION_DEPOSIT_DISPOSITION".equals(refund.getReasonCode());
     }
 
-    private boolean canRetryDisposition(
-            Payment payment,
-            ReservationDepositDisposition disposition
+    private boolean matchesDispositionRefundResult(
+            ReservationDepositDisposition disposition,
+            RefundResult refund
     ) {
+        return disposition.getRefundId() != null
+                && disposition.getRefundId().equals(refund.refundId())
+                && disposition.getPayment().getPaymentId().equals(refund.paymentId())
+                && disposition.getIncrementalRefundAmountMinor() == refund.requestedAmountMinor()
+                && disposition.getIncrementalRefundAmountMinor() == refund.completedAmountMinor();
+    }
+
+    private DispositionAvailability dispositionAvailability(
+            Payment payment,
+            long incrementalRefundAmountMinor
+    ) {
+        if (incrementalRefundAmountMinor > payment.getRefundableAmountMinor()) {
+            return DispositionAvailability.PERMANENTLY_BLOCKED;
+        }
+        if (incrementalRefundAmountMinor == 0L) {
+            return payment.getStatus() == Payment.Status.PAID
+                    || payment.getStatus() == Payment.Status.PARTIALLY_REFUNDED
+                    ? DispositionAvailability.AVAILABLE
+                    : DispositionAvailability.PERMANENTLY_BLOCKED;
+        }
+        if (payment.getStatus() == Payment.Status.RECONCILIATION_REQUIRED
+                && hasUnresolvedRefund(payment)) {
+            return DispositionAvailability.TEMPORARILY_BLOCKED;
+        }
         if (payment.getStatus() != Payment.Status.PAID
                 && payment.getStatus() != Payment.Status.PARTIALLY_REFUNDED) {
-            return false;
+            return DispositionAvailability.PERMANENTLY_BLOCKED;
         }
         long processingAmount = refunds.sumAmountMinorByPaymentIdAndStatus(
                 payment.getId(), RefundStatus.PROCESSING);
-        return disposition.getIncrementalRefundAmountMinor()
-                <= payment.getRefundableAmountMinor() - processingAmount;
+        long availableAmount = Math.max(
+                0L, payment.getRefundableAmountMinor() - processingAmount);
+        return incrementalRefundAmountMinor <= availableAmount
+                ? DispositionAvailability.AVAILABLE
+                : DispositionAvailability.TEMPORARILY_BLOCKED;
     }
 
     private void markRefundReconciliation(PaymentRefund refund, Payment payment, Instant now) {
@@ -1200,6 +1374,33 @@ public class PaymentTransactionService {
                 payment.getId(),
                 List.of(RefundStatus.PROCESSING, RefundStatus.RECONCILIATION_REQUIRED)
         );
+    }
+
+    private boolean canRestorePaymentAfterRefundFailure(
+            Payment payment,
+            PaymentRefund refund
+    ) {
+        return !hasUnresolvedRefund(payment)
+                && !hasIndependentPaymentReconciliationSince(payment, refund);
+    }
+
+    private boolean shouldKeepPaymentReconciliationAfterRefundCompletion(
+            Payment payment,
+            PaymentRefund refund
+    ) {
+        return hasUnresolvedRefund(payment)
+                || hasIndependentPaymentReconciliationSince(payment, refund);
+    }
+
+    private boolean hasIndependentPaymentReconciliationSince(
+            Payment payment,
+            PaymentRefund refund
+    ) {
+        return refunds.countPaymentLedgerEntriesAtOrAfter(
+                payment.getId(),
+                Type.PAYMENT_RECONCILIATION_REQUIRED,
+                refund.getProcessingStartedAt()
+        ) > 0L;
     }
 
     private boolean isRefundReconciliationRequired(Payment payment) {

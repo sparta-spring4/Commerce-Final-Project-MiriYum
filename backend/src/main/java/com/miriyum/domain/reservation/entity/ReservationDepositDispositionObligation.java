@@ -300,6 +300,10 @@ public class ReservationDepositDispositionObligation {
             throw new IllegalArgumentException("processing snapshot is required");
         }
         applySnapshot(validated);
+        if (attemptCount < 1) {
+            throw new IllegalStateException("a processing query requires a claimed attempt");
+        }
+        attemptCount--;
         status = Status.RECONCILIATION_REQUIRED;
         nextOperation = Operation.QUERY;
         nextAttemptAt = now.plus(delay);

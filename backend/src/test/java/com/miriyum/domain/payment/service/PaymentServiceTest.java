@@ -530,13 +530,43 @@ class PaymentServiceTest {
         when(transactions.claimRefund(refundCommand, NOW))
                 .thenThrow(new ServiceException(PaymentErrorCode.INVALID_STATE_TRANSITION));
         when(transactions.resolveDispositionAfterRefundFailure(
-                command.idempotencyKey(), NOW)).thenReturn(expected);
+                command.idempotencyKey(), false, NOW)).thenReturn(expected);
 
         DispositionResult result = paymentService.applyReservationDepositDisposition(command);
 
         assertThat(result).isEqualTo(expected);
         verify(transactions).resolveDispositionAfterRefundFailure(
-                command.idempotencyKey(), NOW);
+                command.idempotencyKey(), false, NOW);
+    }
+
+    @Test
+    @DisplayName("sibling PROCESSING 잔액 충돌은 refund 없는 retryable 처분으로 보존한다")
+    void preservesRetryableDispositionWhenRefundCapacityIsTemporarilyReserved() {
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(5000);
+        RequestRefundCommand refundCommand = dispositionRefundCommand(command);
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                PaymentTransactionService.DispositionClaim.requiresRefund(
+                        command.idempotencyKey(), refundCommand);
+        DispositionResult expected = dispositionResult(
+                5000, 15_000L, 0L, null,
+                DispositionStatus.FAILED, DispositionFailureClassification.RETRYABLE);
+        when(transactions.claimDisposition(command, NOW)).thenReturn(dispositionClaim);
+        when(transactions.claimRefund(refundCommand, NOW))
+                .thenThrow(new ServiceException(PaymentErrorCode.REFUND_AMOUNT_EXCEEDED));
+        when(transactions.resolveDispositionAfterRefundFailure(
+                command.idempotencyKey(), true, NOW)).thenReturn(expected);
+
+        DispositionResult result = paymentService.applyReservationDepositDisposition(command);
+
+        assertThat(result).isEqualTo(expected);
+        verify(transactions).resolveDispositionAfterRefundFailure(
+                command.idempotencyKey(), true, NOW);
+        verify(providerClient, never()).cancelPayment(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
@@ -548,7 +578,7 @@ class PaymentServiceTest {
         DispositionResult expected = dispositionResult(
                 5000, 15_000L, 15_000L, "910000000000000001",
                 DispositionStatus.COMPLETED, null);
-        when(transactions.claimDispositionReconciliation(query))
+        when(transactions.claimDispositionReconciliation(query, NOW))
                 .thenReturn(PaymentTransactionService.DispositionReconciliationClaim
                         .completed(expected));
 
@@ -601,7 +631,7 @@ class PaymentServiceTest {
         DispositionResult completed = dispositionResult(
                 5000, 15_000L, 15_000L, "910000000000000001",
                 DispositionStatus.COMPLETED, null);
-        when(transactions.claimDispositionReconciliation(query)).thenReturn(claim);
+        when(transactions.claimDispositionReconciliation(query, NOW)).thenReturn(claim);
         when(providerClient.getPayment(PORTONE_PAYMENT_ID)).thenReturn(providerPayment);
         when(transactions.finalizeDispositionReconciliation(claim, cancellation, NOW))
                 .thenReturn(completed);
@@ -647,7 +677,7 @@ class PaymentServiceTest {
                         new ProviderCancellation(
                                 "cancellation-2", ProviderStatus.PARTIALLY_CANCELLED,
                                 15_000L, "KRW", reason)));
-        when(transactions.claimDispositionReconciliation(query)).thenReturn(claim);
+        when(transactions.claimDispositionReconciliation(query, NOW)).thenReturn(claim);
         when(providerClient.getPayment(PORTONE_PAYMENT_ID)).thenReturn(providerPayment);
 
         DispositionResult result = paymentService.getReservationDepositDisposition(query);

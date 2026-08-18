@@ -94,6 +94,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
@@ -1014,7 +1015,7 @@ public class ReservationService {
         if (link.getProcessId() <= 0
                 || link.getStatus() != ReservationDepositProcessStatus.COMPLETED
                 || link.getFinalReservationId() == null
-                || link.getFinalReservationId() != reservation.getId()
+                || !Objects.equals(link.getFinalReservationId(), reservation.getId())
                 || link.getPaymentId() == null
                 || !link.getPaymentId().matches("^[1-9][0-9]{0,18}$")) {
             throw new ServiceException(ReservationErrorCode.CANCELLATION_NOT_ALLOWED);

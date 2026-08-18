@@ -297,7 +297,7 @@
 - V2 취소는 멱등 claim과 Reservation 잠금 뒤 `finalReservationId`로 예약금 process scalar link를 비잠금 조회한다. `COMPLETED`, 같은 final Reservation, 양수 문자열 `paymentId`가 아니면 실패 폐쇄한다. process를 잠그거나 변경하지 않는다.
 - `CANCELLED`, 수용량·MenuHold 수량 복구, 취소 감사, stable UUID와 Payment scalar를 가진 `ReservationDepositDispositionObligation(PENDING)`은 같은 transaction에서 commit한다. 이 transaction 안에서는 Payment를 호출하지 않는다.
 - obligation 상태는 `PENDING | PROCESSING | COMPLETED | RECONCILIATION_REQUIRED | RECOVERY_REQUIRED`, operation은 `APPLY | QUERY`다. claim과 결과 반영은 각각 `REQUIRES_NEW` 짧은 transaction이며 외부 Payment 공개 Service 호출은 그 사이 transaction 밖에서 실행한다. 결과 반영은 obligation과 fencing token만 잠그고 stale 결과를 무시한다.
-- `RECONCILIATION_REQUIRED`에서는 Payment 기존 source 결과를 `QUERY`만 하며 실패 후에도 `QUERY`를 유지한다. 새 apply·refund를 만들지 않고 유한 재시도 한도 뒤 `RECOVERY_REQUIRED`로 보낸다.
+- `RECONCILIATION_REQUIRED`에서는 Payment 기존 source 결과를 `QUERY`만 하며 실패 후에도 `QUERY`를 유지한다. Payment 환불 처리 임대 안의 `PROCESSING` poll은 provider 대사 시도 횟수를 소비하지 않는다. 임대 만료 뒤 결과 불명 조회만 유한 재시도 한도를 소비하며, 새 apply·refund를 만들지 않고 한도 소진 시 `RECOVERY_REQUIRED`로 보낸다.
 - 최초 cancellation POST와 같은 key·지문 replay는 저장된 최초 projection을 반환한다. Reservation detail GET은 최신 obligation projection만 읽고 Payment를 동기 호출하지 않는다. V1/null/unknown은 `depositDisposition: null`이다.
 - scheduler·worker는 `miriyum.reservation.deposit-worker.enabled=true`일 때만 등록되며 누락·false에서는 비활성이다.
 

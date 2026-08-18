@@ -172,7 +172,9 @@ public class PaymentService {
             return transactions.finalizeDisposition(claim.dispositionId(), refundResult, now());
         } catch (ServiceException exception) {
             return transactions.resolveDispositionAfterRefundFailure(
-                    claim.dispositionId(), now());
+                    claim.dispositionId(),
+                    exception.getErrorCode() == PaymentErrorCode.REFUND_AMOUNT_EXCEEDED,
+                    now());
         }
     }
 
@@ -182,7 +184,7 @@ public class PaymentService {
             GetReservationDepositDispositionQuery query
     ) {
         PaymentTransactionService.DispositionReconciliationClaim claim =
-                transactions.claimDispositionReconciliation(query);
+                transactions.claimDispositionReconciliation(query, now());
         if (!claim.requiresProviderLookup()) {
             return claim.completedResult();
         }

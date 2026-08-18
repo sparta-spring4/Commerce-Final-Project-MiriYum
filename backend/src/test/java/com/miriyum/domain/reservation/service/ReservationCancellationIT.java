@@ -295,6 +295,29 @@ class ReservationCancellationIT {
     }
 
     @Test
+    @DisplayName("V2 예약 ID가 Long 캐시 범위를 넘어도 같은 process link로 취소한다")
+    void v2CancellationAcceptsEqualReservationIdsOutsideLongCache() {
+        jdbcTemplate.execute("ALTER TABLE reservations AUTO_INCREMENT = 1000");
+        Scenario scenario = confirmedScenario(false, false, 1);
+        assertThat(scenario.reservationId()).isGreaterThan(127L);
+        seedCompletedDepositProcess(scenario);
+
+        ReservationCancellationCommandResult result = facade.cancelByConsumer(
+                scenario.consumerId(),
+                scenario.reservationId(),
+                key(93),
+                new ConsumerCancellationRequest(null));
+
+        assertThat(result.data().status()).isEqualTo("CANCELLED");
+        assertThat(result.data().depositDisposition()).isNotNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_deposit_disposition_obligations "
+                        + "WHERE reservation_id = ?",
+                Integer.class,
+                scenario.reservationId())).isOne();
+    }
+
+    @Test
     @DisplayName("V2 obligation 저장 실패는 취소·수용량·감사·멱등 효과를 전부 롤백한다")
     void v2DispositionPersistenceFailureRollsBackCancellationTransaction() {
         Scenario scenario = confirmedScenario(false, false, 1);

@@ -87,12 +87,8 @@ public class ReservationDepositDispositionService {
                 completed = true;
             }
             case PROCESSING -> {
-                if (claim.attemptCount() >= maxAttempts) {
-                    obligation.requireRecovery(claim.owner(), claim.token(), now, snapshot);
-                } else {
-                    obligation.scheduleQuery(
-                            claim.owner(), claim.token(), now, queryDelay, snapshot);
-                }
+                obligation.scheduleQuery(
+                        claim.owner(), claim.token(), now, queryDelay, snapshot);
             }
             case RECONCILIATION_REQUIRED -> {
                 if (claim.attemptCount() >= maxAttempts) {

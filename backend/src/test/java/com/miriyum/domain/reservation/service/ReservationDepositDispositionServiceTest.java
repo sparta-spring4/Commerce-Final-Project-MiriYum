@@ -168,7 +168,7 @@ class ReservationDepositDispositionServiceTest {
     }
 
     @Test
-    void processingQueryResultAtAttemptLimitRequiresRecovery() {
+    void processingQueryResultDoesNotConsumeReconciliationAttempt() {
         ReservationDepositDispositionObligationRepository repository = mock(
                 ReservationDepositDispositionObligationRepository.class);
         ReservationDepositDispositionObligation obligation = queryClaimedObligation();
@@ -180,8 +180,11 @@ class ReservationDepositDispositionServiceTest {
         assertThat(service.recordResult(
                 queryClaim, processing(), RETRY_DELAY, QUERY_DELAY, 2)).isFalse();
 
-        assertThat(obligation.getStatus())
-                .isEqualTo(ReservationDepositDispositionObligation.Status.RECOVERY_REQUIRED);
+        assertThat(obligation.getStatus()).isEqualTo(
+                ReservationDepositDispositionObligation.Status.RECONCILIATION_REQUIRED);
+        assertThat(obligation.getNextOperation())
+                .isEqualTo(ReservationDepositDispositionObligation.Operation.QUERY);
+        assertThat(obligation.getAttemptCount()).isEqualTo(1);
         assertThat(obligation.getPaymentDispositionStatus())
                 .isEqualTo(DispositionStatus.PROCESSING.name());
     }

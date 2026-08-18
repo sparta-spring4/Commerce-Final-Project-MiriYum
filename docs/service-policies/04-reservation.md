@@ -307,7 +307,7 @@
 - V2 evaluator는 저장 version, `responsibilityCode`, 최종 Reservation의 `createdAt`인 `confirmedAt`, `startAt`, 명령 facade가 한 번 얻은 `requestedAt`만 입력으로 받는 순수 계산이다. `STORE_RESPONSIBLE`·`PLATFORM_RESPONSIBLE`은 10000 bps다. `CONSUMER`는 시작 전 확인 10분 이내 또는 시작 48시간 전까지 10000 bps, 48시간 초과 24시간 전까지 5000 bps, 시작 24시간 전을 초과하면 0 bps다. 정확히 10분·48시간·24시간인 포함 경계는 Issue #239의 승인식을 따른다.
 - 목표율은 이번 환불률이 아니라 원승인 대비 목표 누적 환불 자격률이다. Reservation은 Payment의 공개 scalar/record Service 계약만 사용하며 Payment Entity·Repository·provider adapter를 참조하지 않는다.
 - V2 취소는 Reservation 잠금 뒤 완료된 예약금 process의 scalar link를 비잠금 조회해 `COMPLETED`, 같은 final Reservation, 유효 `paymentId`를 실패 폐쇄 검증한다. `CANCELLED`, 수용량·메뉴 수량 복구, 감사, `ReservationDepositDispositionObligation(PENDING)` insert는 하나의 transaction에서 확정하고 Payment 외부 호출은 하지 않는다.
-- worker는 짧은 claim transaction을 commit한 뒤 transaction 밖에서 Payment `apply` 또는 `query`를 호출하고, 별도 결과 transaction에서 obligation과 fencing token만 잠근다. `RECONCILIATION_REQUIRED`는 새 처분·환불 없이 `QUERY`만 재시도하며, retry 한도를 넘거나 영구 실패면 `RECOVERY_REQUIRED`로 실패 폐쇄한다.
+- worker는 짧은 claim transaction을 commit한 뒤 transaction 밖에서 Payment `apply` 또는 `query`를 호출하고, 별도 결과 transaction에서 obligation과 fencing token만 잠근다. Payment가 환불 처리 임대 안의 `PROCESSING`을 반환한 QUERY poll은 실제 provider 대사 시도로 계산하지 않고 QUERY 상태를 유지한다. 임대 만료 후 `RECONCILIATION_REQUIRED`는 새 처분·환불 없이 `QUERY`만 유한 재시도하며, 이 대사 retry 한도를 넘거나 영구 실패면 `RECOVERY_REQUIRED`로 실패 폐쇄한다.
 - cancellation POST replay는 최초 저장 projection을 그대로 반환하고 Reservation detail GET은 최신 obligation projection만 읽는다. GET마다 Payment를 동기 호출하지 않으며 V1/null/unknown의 `depositDisposition`은 null이다.
 - disposition scheduler는 `miriyum.reservation.deposit-worker.enabled=true`일 때만 등록하며 누락·false는 비활성이다. V59는 obligation·lease·fencing·Payment snapshot을 추가하고 기존 행을 V2로 backfill하지 않는다.
 

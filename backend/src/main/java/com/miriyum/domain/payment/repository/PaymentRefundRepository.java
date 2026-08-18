@@ -1,5 +1,6 @@
 package com.miriyum.domain.payment.repository;
 
+import com.miriyum.domain.payment.entity.PaymentLedgerEntry;
 import com.miriyum.domain.payment.entity.PaymentRefund;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
@@ -29,6 +30,19 @@ public interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Lo
     boolean existsByPayment_IdAndStatusIn(
             Long paymentId,
             Collection<com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus> statuses
+    );
+
+    @Query("""
+            select count(l)
+            from PaymentLedgerEntry l
+            where l.payment.id = :paymentId
+              and l.type = :type
+              and l.occurredAt >= :occurredAt
+            """)
+    long countPaymentLedgerEntriesAtOrAfter(
+            @Param("paymentId") Long paymentId,
+            @Param("type") PaymentLedgerEntry.Type type,
+            @Param("occurredAt") Instant occurredAt
     );
 
     @Query("""
