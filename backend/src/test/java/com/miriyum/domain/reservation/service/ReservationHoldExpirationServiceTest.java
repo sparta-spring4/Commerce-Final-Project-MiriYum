@@ -11,11 +11,13 @@ import com.miriyum.domain.reservation.dto.ReservationHoldContracts;
 import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
 import com.miriyum.domain.reservation.repository.ReservationHoldRepository;
 import com.miriyum.domain.reservation.repository.ReservationHoldTransitionAuditRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -39,6 +41,12 @@ class ReservationHoldExpirationServiceTest {
     @Mock
     private ReservationHoldCommandFacade commandFacade;
 
+    @Mock
+    private ReservationDepositProcessRepository processRepository;
+
+    @Mock
+    private ReservationDepositProcessCommandFacade depositCommandFacade;
+
     private ReservationHoldExpirationService service;
 
     @BeforeEach
@@ -47,6 +55,8 @@ class ReservationHoldExpirationServiceTest {
                 holdRepository,
                 auditRepository,
                 commandFacade,
+                processRepository,
+                depositCommandFacade,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -105,6 +115,23 @@ class ReservationHoldExpirationServiceTest {
                 .findActiveExpirationCandidatesAfter(NOW, 20L, page);
         then(holdRepository).should()
                 .findActiveExpirationCandidatesAfter(NOW, 30L, page);
+    }
+
+    @Test
+    @DisplayName("예약금 process가 연결된 선점은 Hold facade 대신 process-first 조정자에 위임한다")
+    void expireDueHoldsRoutesLinkedHoldToDepositCoordinator() {
+        PageRequest page = PageRequest.of(0, 10);
+        given(holdRepository.findActiveExpirationCandidatesAfter(NOW, 0L, page))
+                .willReturn(List.of(candidate(10L, NOW.minusSeconds(30))));
+        given(holdRepository.findActiveExpirationCandidatesAfter(NOW, 10L, page))
+                .willReturn(List.of());
+        given(processRepository.findProcessIdByReservationHoldId(10L))
+                .willReturn(Optional.of(99L));
+
+        assertThat(service.expireDueHolds(10)).isEqualTo(1);
+
+        then(depositCommandFacade).should().reconcileLinkedExpiration(99L);
+        then(commandFacade).shouldHaveNoInteractions();
     }
 
     @Test

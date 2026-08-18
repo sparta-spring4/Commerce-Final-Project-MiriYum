@@ -2,6 +2,8 @@ package com.miriyum.domain.reservation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.miriyum.domain.reservation.dto.ReservationHoldContracts;
+import com.miriyum.domain.reservation.config.ReservationDepositProcessConfig;
 import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.auth.qrepoch.ConsumerQrEpochService;
 import com.miriyum.domain.auth.qrepoch.ConsumerQrEpochSnapshot;
@@ -10,6 +12,10 @@ import com.miriyum.domain.reservation.repository.ReservationNoShowAuditRepositor
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldTerminationPresence;
 import com.miriyum.domain.reservation.repository.ReservationHoldTransitionAuditRepository;
+import com.miriyum.domain.reservation.service.ReservationDepositFinalizationPrimitive;
+import com.miriyum.domain.reservation.service.ReservationHoldCreationPrimitive;
+import com.miriyum.domain.reservation.service.ReservationHoldService;
+import com.miriyum.domain.reservation.service.ReservationHoldTransitionPrimitive;
 import com.miriyum.domain.reservation.waiting.service.WaitingStoreAuthority;
 import com.miriyum.domain.reservation.waiting.service.WaitingStoreAuthorityPort;
 import com.miriyum.domain.reservation.waiting.service.StoreScheduleWaitingOperatingIntervalAdapter;
@@ -32,8 +38,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 class ReservationProductionDependencyTest {
 
@@ -44,6 +53,61 @@ class ReservationProductionDependencyTest {
             "import com.miriyum.domain.notification.dto.source.NotificationResourceType;",
             "import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;"
     );
+
+    @Test
+    void reservationHoldCreationUsesTheMandatorySharedPrimitive()
+            throws NoSuchMethodException {
+        Transactional transaction = ReservationHoldCreationPrimitive.class
+                .getMethod(
+                        "create",
+                        ReservationHoldCreationPrimitive.Command.class)
+                .getAnnotation(Transactional.class);
+
+        assertThat(transaction).isNotNull();
+        assertThat(transaction.propagation()).isEqualTo(Propagation.MANDATORY);
+        assertThat(Stream.of(ReservationHoldService.class.getDeclaredFields())
+                .anyMatch(field -> field.getType()
+                        == ReservationHoldCreationPrimitive.class))
+                .isTrue();
+    }
+
+    @Test
+    void reservationHoldTransitionUsesTheMandatorySharedPrimitive()
+            throws NoSuchMethodException {
+        Transactional transaction = ReservationHoldTransitionPrimitive.class
+                .getMethod(
+                        "transition",
+                        ReservationHoldContracts.TransitionCommand.class)
+                .getAnnotation(Transactional.class);
+
+        assertThat(transaction).isNotNull();
+        assertThat(transaction.propagation()).isEqualTo(Propagation.MANDATORY);
+        assertThat(Stream.of(ReservationHoldService.class.getDeclaredFields())
+                .anyMatch(field -> field.getType()
+                        == ReservationHoldTransitionPrimitive.class))
+                .isTrue();
+    }
+
+    @Test
+    void reservationDepositFinalizationUsesTheMandatoryPrimitive()
+            throws NoSuchMethodException {
+        Transactional transaction = ReservationDepositFinalizationPrimitive.class
+                .getMethod(
+                        "finalizeResources",
+                        ReservationDepositFinalizationPrimitive.Command.class)
+                .getAnnotation(Transactional.class);
+
+        assertThat(transaction).isNotNull();
+        assertThat(transaction.propagation()).isEqualTo(Propagation.MANDATORY);
+    }
+
+    @Test
+    void reservationDepositRefundLeaseUsesOwnedConfiguration() {
+        Duration lease = new ReservationDepositProcessConfig()
+                .reservationDepositRefundLeaseDuration();
+
+        assertThat(lease).isEqualTo(Duration.ofSeconds(30));
+    }
 
     @Test
     void fulfillmentConsumesOnlyApprovedStoreAndReservationMenuHoldPortSignatures()
@@ -78,6 +142,9 @@ class ReservationProductionDependencyTest {
         assertThat(StoreService.class.getMethod(
                 "getManagedStore", long.class, long.class).getReturnType())
                 .isEqualTo(ManagedStoreResponse.class);
+        assertThat(StoreService.class.getMethod(
+                "findDisplayName", long.class).getReturnType())
+                .isEqualTo(Optional.class);
         assertThat(WaitingStoreAuthorityPort.class.getMethod(
                 "requireRead", long.class, long.class).getReturnType())
                 .isEqualTo(WaitingStoreAuthority.class);

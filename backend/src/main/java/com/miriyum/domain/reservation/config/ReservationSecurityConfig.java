@@ -31,6 +31,16 @@ public class ReservationSecurityConfig {
             RESERVATION_ROOT + "/*/check-in-qr-grants";
     private static final String RESERVATION_HISTORY =
             "/api/v1/consumers/me/reservations";
+    private static final String RESERVATION_REQUEST_ROOT =
+            "/api/v1/consumers/me/reservation-requests";
+    private static final String RESERVATION_REQUEST_FAMILY =
+            RESERVATION_REQUEST_ROOT + "/**";
+    private static final String RESERVATION_REQUEST_DETAIL =
+            RESERVATION_REQUEST_ROOT + "/*";
+    private static final String RESERVATION_REQUEST_FINALIZATION =
+            RESERVATION_REQUEST_ROOT + "/*/finalizations";
+    private static final String RESERVATION_REQUEST_ABANDONMENT =
+            RESERVATION_REQUEST_ROOT + "/*/abandonments";
     private static final String STORE_RESERVATION_ROOT =
             "/api/v1/store-operators/stores/*/reservations";
     private static final String STORE_RESERVATION_FAMILY = STORE_RESERVATION_ROOT + "/**";
@@ -128,7 +138,12 @@ public class ReservationSecurityConfig {
             ObjectMapper objectMapper
     ) throws Exception {
         http
-                .securityMatcher(RESERVATION_ROOT, RESERVATION_FAMILY, RESERVATION_HISTORY)
+                .securityMatcher(
+                        RESERVATION_ROOT,
+                        RESERVATION_FAMILY,
+                        RESERVATION_HISTORY,
+                        RESERVATION_REQUEST_ROOT,
+                        RESERVATION_REQUEST_FAMILY)
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -137,6 +152,11 @@ public class ReservationSecurityConfig {
                         .requestMatchers(HttpMethod.GET, RESERVATION_HISTORY).authenticated()
                         .requestMatchers(HttpMethod.GET, RESERVATION_DETAIL).authenticated()
                         .requestMatchers(HttpMethod.POST, RESERVATION_CANCELLATION).authenticated()
+                        .requestMatchers(HttpMethod.GET, RESERVATION_REQUEST_DETAIL).authenticated()
+                        .requestMatchers(HttpMethod.POST, RESERVATION_REQUEST_FINALIZATION)
+                        .authenticated()
+                        .requestMatchers(HttpMethod.POST, RESERVATION_REQUEST_ABANDONMENT)
+                        .authenticated()
                         .requestMatchers(HttpMethod.POST, RESERVATION_CHECK_IN_QR_GRANT).authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(exception -> exception
