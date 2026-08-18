@@ -181,6 +181,13 @@ class ReservationFulfillmentIT {
         assertThat(after.idempotency()).singleElement()
                 .satisfies(row -> assertThat(row.get("processing_status"))
                         .isEqualTo("SUCCEEDED"));
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT purpose, resource_version, source_state FROM notification_tasks "
+                        + "WHERE source_event_id = ?",
+                "reservation:" + scenario.reservationId() + ":visit-completed"
+        )).containsEntry("purpose", "RESERVATION_VISIT_COMPLETED")
+                .containsEntry("resource_version", 2L)
+                .containsEntry("source_state", "FULFILLED");
     }
 
     @Test
@@ -385,6 +392,18 @@ class ReservationFulfillmentIT {
                 assertThat(after.idempotency()).singleElement().satisfies(row ->
                         assertThat(row.get("processing_status")).isEqualTo("SUCCEEDED"));
             }
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM notification_tasks WHERE resource_id = ?",
+                    Integer.class,
+                    scenario.reservationId()
+            )).isOne();
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT purpose FROM notification_tasks WHERE resource_id = ?",
+                    String.class,
+                    scenario.reservationId()
+            )).isEqualTo("CANCELLED".equals(terminalStatus)
+                    ? "RESERVATION_CANCELLED"
+                    : "RESERVATION_VISIT_COMPLETED");
         } finally {
             workersReady.countDown();
             workersReady.countDown();
@@ -819,6 +838,11 @@ class ReservationFulfillmentIT {
                     + "BEFORE INSERT ON reservation_fulfillment_audits FOR EACH ROW "
                     + "SIGNAL SQLSTATE '45000' "
                     + "SET MESSAGE_TEXT = 'fulfillment audit failure'";
+            case NOTIFICATION_TASK_INSERT ->
+                    "CREATE TRIGGER trg_fulfill_notification_failure "
+                            + "BEFORE INSERT ON notification_tasks FOR EACH ROW "
+                            + "SIGNAL SQLSTATE '45000' "
+                            + "SET MESSAGE_TEXT = 'fulfillment notification failure'";
             case IDEMPOTENCY_SUCCEEDED_UPDATE ->
                     "CREATE TRIGGER trg_fulfill_idempotency_failure "
                             + "BEFORE UPDATE ON idempotency_commands FOR EACH ROW "
@@ -832,6 +856,7 @@ class ReservationFulfillmentIT {
         String name = switch (point) {
             case MENU_HOLD_UPDATE -> "trg_fulfill_hold_failure";
             case AUDIT_INSERT -> "trg_fulfill_audit_failure";
+            case NOTIFICATION_TASK_INSERT -> "trg_fulfill_notification_failure";
             case IDEMPOTENCY_SUCCEEDED_UPDATE -> "trg_fulfill_idempotency_failure";
         };
         jdbcTemplate.execute("DROP TRIGGER IF EXISTS " + name);
@@ -840,6 +865,7 @@ class ReservationFulfillmentIT {
     private enum FailurePoint {
         MENU_HOLD_UPDATE,
         AUDIT_INSERT,
+        NOTIFICATION_TASK_INSERT,
         IDEMPOTENCY_SUCCEEDED_UPDATE
     }
 

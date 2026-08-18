@@ -22,6 +22,7 @@ import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.notification.ReservationNotificationPublisher;
 import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldTerminationPresence;
@@ -82,6 +83,7 @@ class ReservationVisitServiceTest {
     @Mock private ReservationDepositProcessRepository depositProcessRepository;
     @Mock private ReservationDepositDispositionObligationRepository
             dispositionObligationRepository;
+    @Mock private ReservationNotificationPublisher notificationPublisher;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -121,6 +123,11 @@ class ReservationVisitServiceTest {
         then(epochService).should().requireCurrent(11L, EPOCH);
         then(fulfillmentAuditRepository).should().saveAndFlush(any());
         then(checkInAuditRepository).should().save(any());
+        then(notificationPublisher).should().recordVisitCompleted(
+                reservation,
+                REQUESTED_AT,
+                "reservation-qr-check-in:store-operator:33:" + KEY
+        );
     }
 
     @Test
@@ -276,6 +283,11 @@ class ReservationVisitServiceTest {
                 77L,
                 "reservation-no-show:store-operator:33:" + KEY
         );
+        then(notificationPublisher).should().recordNoShow(
+                noShowReservation,
+                boundary,
+                "reservation-no-show:store-operator:33:" + KEY
+        );
     }
 
     @Test
@@ -308,6 +320,7 @@ class ReservationVisitServiceTest {
                 epochService, menuHoldPort, fulfillmentAuditRepository,
                 checkInAuditRepository, noShowAuditRepository,
                 depositProcessRepository, dispositionObligationRepository,
+                notificationPublisher,
                 Clock.fixed(now, ZoneOffset.UTC), objectMapper
         );
     }
