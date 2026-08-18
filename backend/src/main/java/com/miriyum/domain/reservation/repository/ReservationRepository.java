@@ -141,4 +141,40 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             ReservationStatus status,
             Pageable pageable
     );
+
+    @Query(value = """
+            SELECT
+                COALESCE(SUM(CASE
+                    WHEN r.cancelled_at IS NULL OR r.cancelled_at > :asOf
+                    THEN 1 ELSE 0 END), 0) AS todayReservationTeams,
+                COALESCE(SUM(CASE
+                    WHEN r.cancelled_at IS NOT NULL AND r.cancelled_at <= :asOf
+                    THEN 1 ELSE 0 END), 0) AS cancelledTeams,
+                COUNT(*) AS everConfirmedTeams,
+                COALESCE(MAX(r.reservation_id), 0) AS maxReservationId,
+                COALESCE(MAX(r.capacity_policy_version), 0) AS maxCapacityPolicyVersion,
+                CAST(UNIX_TIMESTAMP(MAX(GREATEST(
+                    r.created_at,
+                    CASE WHEN r.cancelled_at <= :asOf THEN r.cancelled_at ELSE r.created_at END,
+                    CASE WHEN r.fulfilled_at <= :asOf THEN r.fulfilled_at ELSE r.created_at END
+                ))) * 1000000 AS SIGNED) AS dataThroughEpochMicros
+            FROM reservations r
+            WHERE r.store_id = :storeId
+              AND r.service_date = :businessDate
+              AND r.created_at <= :asOf
+            """, nativeQuery = true)
+    ReservationAnalyticsLifecycle aggregateDashboardLifecycle(
+            @Param("storeId") long storeId,
+            @Param("businessDate") LocalDate businessDate,
+            @Param("asOf") Instant asOf
+    );
+
+    interface ReservationAnalyticsLifecycle {
+        Long getTodayReservationTeams();
+        Long getCancelledTeams();
+        Long getEverConfirmedTeams();
+        Long getMaxReservationId();
+        Long getMaxCapacityPolicyVersion();
+        Long getDataThroughEpochMicros();
+    }
 }

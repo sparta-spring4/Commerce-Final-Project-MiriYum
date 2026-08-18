@@ -13,6 +13,8 @@ apis:
       no-unused-components: off
   member-support:
     root: docs/specs/member-support/openapi.yaml
+  analytics:
+    root: docs/specs/analytics/openapi.yaml
   platform-operator-management-audit:
     root: docs/specs/platform-operator-management-audit/openapi.yaml
   admin-store:
