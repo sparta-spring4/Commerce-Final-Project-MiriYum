@@ -244,7 +244,6 @@ class WaitingMigrationTest {
                 "waiting_reception_windows.opened_by_job_id->waiting_auto_open_jobs.waiting_auto_open_job_id",
                 "waiting_reception_windows.store_id->stores.store_id",
                 "waiting_representative_transfer_offers.from_consumer_account_id->consumer_accounts.consumer_account_id",
-                "waiting_representative_transfer_offers.target_membership_id->waiting_active_memberships.waiting_active_membership_id",
                 "waiting_representative_transfer_offers.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_setting_audits.store_id->stores.store_id",
                 "waiting_settings.store_id->stores.store_id",

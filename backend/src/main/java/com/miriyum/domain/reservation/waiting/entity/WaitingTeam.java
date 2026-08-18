@@ -252,6 +252,13 @@ public class WaitingTeam {
         version++;
     }
 
+    public void transferRepresentative(long expectedVersion, long nextRepresentativeAccountId) {
+        requirePartyMutable(expectedVersion);
+        consumerAccountId = requirePositive(
+                nextRepresentativeAccountId, "nextRepresentativeAccountId");
+        version++;
+    }
+
     /** 도착 제한 시각이 지난 호출 팀을 미응답으로 종결한다. */
     public void markNoShow(long expectedVersion, Instant occurredAt) {
         requireVersion(expectedVersion);

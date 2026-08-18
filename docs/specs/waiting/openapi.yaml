@@ -639,6 +639,113 @@ paths:
         "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
         "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
         "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers:
+    post:
+      tags: [Consumer Waiting]
+      summary: 대표자 이전 제안
+      operationId: proposeWaitingRepresentativeTransfer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingTransferProposalRequest" }
+      responses:
+        "200":
+          description: 5분 동안 유효한 대표자 이전 제안
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingTransferOfferSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/acceptances:
+    post:
+      tags: [Consumer Waiting]
+      summary: 대상 구성원의 대표자 이전 수락
+      operationId: acceptWaitingRepresentativeTransfer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "#/components/parameters/TransferOfferId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingExpectedVersionRequest" }
+      responses:
+        "200":
+          description: 대표자가 변경된 팀 snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingConsumerSnapshotSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/rejections:
+    post:
+      tags: [Consumer Waiting]
+      summary: 대상 구성원의 대표자 이전 거절
+      operationId: rejectWaitingRepresentativeTransfer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "#/components/parameters/TransferOfferId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingExpectedVersionRequest" }
+      responses:
+        "200":
+          description: 거절된 제안
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingTransferOfferSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations:
+    post:
+      tags: [Consumer Waiting]
+      summary: 기존 대표자의 대표자 이전 철회
+      operationId: revokeWaitingRepresentativeTransfer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "#/components/parameters/TransferOfferId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingExpectedVersionRequest" }
+      responses:
+        "200":
+          description: 철회된 제안
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingTransferOfferSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
 components:
   securitySchemes:
     bearerAuth:
@@ -670,6 +777,11 @@ components:
       schema: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
     MembershipId:
       name: membershipId
+      in: path
+      required: true
+      schema: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+    TransferOfferId:
+      name: offerId
       in: path
       required: true
       schema: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
@@ -1069,6 +1181,31 @@ components:
         code: { type: string, const: SUCCESS }
         message: { type: string }
         data: { $ref: "#/components/schemas/WaitingInvitation" }
+    WaitingTransferProposalRequest:
+      type: object
+      additionalProperties: false
+      required: [targetMembershipId, expectedVersion]
+      properties:
+        targetMembershipId: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+        expectedVersion: { type: integer, format: int64, minimum: 0 }
+    WaitingTransferOffer:
+      type: object
+      additionalProperties: false
+      required: [offerId, targetMembershipId, status, proposedAt, expiresAt]
+      properties:
+        offerId: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+        targetMembershipId: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+        status: { type: string, enum: [PROPOSED, ACCEPTED, REJECTED, REVOKED, EXPIRED] }
+        proposedAt: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime" }
+        expiresAt: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime" }
+    WaitingTransferOfferSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code: { type: string, const: SUCCESS }
+        message: { type: string }
+        data: { $ref: "#/components/schemas/WaitingTransferOffer" }
     WaitingTeamListItem:
       type: object
       additionalProperties: false

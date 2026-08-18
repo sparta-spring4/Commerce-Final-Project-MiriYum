@@ -90,7 +90,11 @@ class WaitingOpenApiContractTest {
                         "/api/v1/consumers/me/waiting-teams/{teamId}/invitations",
                         "/api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations",
                         "/api/v1/consumers/me/waiting-teams/{teamId}/membership-departures",
-                        "/api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals");
+                        "/api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals",
+                        "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers",
+                        "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/acceptances",
+                        "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/rejections",
+                        "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations");
 
         Map<String, Object> settingsPath = map(paths.get(SETTINGS_PATH));
         assertThat(settingsPath).containsOnlyKeys("get", "put");
@@ -292,7 +296,11 @@ class WaitingOpenApiContractTest {
                 "/api/v1/consumers/me/waiting-teams/{teamId}/invitations",
                 "/api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations",
                 "/api/v1/consumers/me/waiting-teams/{teamId}/membership-departures",
-                "/api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals")) {
+                "/api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals",
+                "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers",
+                "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/acceptances",
+                "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/rejections",
+                "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations")) {
             Map<String, Object> operation = map(map(paths.get(path)).get("post"));
             assertThat(list(operation.get("security")))
                     .containsExactly(Map.of("bearerAuth", List.of()));

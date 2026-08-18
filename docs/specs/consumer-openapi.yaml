@@ -66,6 +66,14 @@ paths:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1membership-departures"
   /api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1memberships~1{membershipId}~1removals"
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1representative-transfer-offers"
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/acceptances:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1representative-transfer-offers~1{offerId}~1acceptances"
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/rejections:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1representative-transfer-offers~1{offerId}~1rejections"
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1representative-transfer-offers~1{offerId}~1revocations"
   /api/v1/consumers/me/reservations:
     $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations"
   /api/v1/consumers/me/reservations/{reservationId}:

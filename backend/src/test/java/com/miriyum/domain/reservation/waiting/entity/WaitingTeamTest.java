@@ -19,6 +19,16 @@ import org.junit.jupiter.api.Test;
 
 class WaitingTeamTest {
 
+    @Test
+    void representativeChangesOnlyOnAcceptedTransferAndIncrementsVersionOnce() {
+        WaitingTeam team = newTeam();
+
+        team.transferRepresentative(0L, 201L);
+
+        assertThat(team.getConsumerAccountId()).isEqualTo(201L);
+        assertThat(team.getVersion()).isOne();
+    }
+
     private static final Instant CREATED_AT = Instant.parse("2026-08-12T03:00:00Z");
     private static final Instant CALLED_AT = Instant.parse("2026-08-12T03:01:00Z");
     private static final Instant ARRIVAL_DEADLINE = Instant.parse("2026-08-12T03:11:00Z");

@@ -127,6 +127,61 @@ public class WaitingConsumerController {
                 .body(ApiResponse.success("일행 구성원을 제거했습니다.", result.data()));
     }
 
+    @PostMapping("/waiting-teams/{teamId}/representative-transfer-offers")
+    public ResponseEntity<ApiResponse<WaitingPartyContracts.TransferOfferSnapshot>> proposeTransfer(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable @Positive long teamId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody WaitingPartyContracts.TransferProposalRequest request
+    ) {
+        var result = partyService.proposeTransfer(
+                principal.accountId(), teamId, IdempotencyKey.parse(rawKey), request);
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("대표자 이전을 제안했습니다.", result.data()));
+    }
+
+    @PostMapping("/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/acceptances")
+    public ResponseEntity<ApiResponse<WaitingConsumerSnapshot>> acceptTransfer(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable @Positive long teamId,
+            @PathVariable @Positive long offerId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody WaitingPartyContracts.ExpectedVersionRequest request
+    ) {
+        var result = partyService.acceptTransfer(
+                principal.accountId(), teamId, offerId, IdempotencyKey.parse(rawKey), request);
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("대표자 이전을 수락했습니다.", result.data()));
+    }
+
+    @PostMapping("/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/rejections")
+    public ResponseEntity<ApiResponse<WaitingPartyContracts.TransferOfferSnapshot>> rejectTransfer(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable @Positive long teamId,
+            @PathVariable @Positive long offerId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody WaitingPartyContracts.ExpectedVersionRequest request
+    ) {
+        var result = partyService.rejectTransfer(
+                principal.accountId(), teamId, offerId, IdempotencyKey.parse(rawKey), request);
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("대표자 이전을 거절했습니다.", result.data()));
+    }
+
+    @PostMapping("/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations")
+    public ResponseEntity<ApiResponse<WaitingPartyContracts.TransferOfferSnapshot>> revokeTransfer(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable @Positive long teamId,
+            @PathVariable @Positive long offerId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody WaitingPartyContracts.ExpectedVersionRequest request
+    ) {
+        var result = partyService.revokeTransfer(
+                principal.accountId(), teamId, offerId, IdempotencyKey.parse(rawKey), request);
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("대표자 이전 제안을 철회했습니다.", result.data()));
+    }
+
     @PostMapping("/stores/{storeId}/waiting-teams")
     public ResponseEntity<ApiResponse<WaitingConsumerSnapshot>> create(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,

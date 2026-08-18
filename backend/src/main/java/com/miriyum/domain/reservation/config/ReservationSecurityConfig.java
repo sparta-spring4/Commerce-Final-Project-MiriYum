@@ -195,6 +195,13 @@ public class ReservationSecurityConfig {
                                 CONSUMER_WAITING_ME_ROOT + "/*/memberships/*/removals")
                         .authenticated()
                         .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_ME_ROOT + "/*/representative-transfer-offers")
+                        .authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_ME_ROOT
+                                        + "/*/representative-transfer-offers/*/*")
+                        .authenticated()
+                        .requestMatchers(HttpMethod.POST,
                                 CONSUMER_WAITING_INVITATION_ACCEPTANCE).authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(exception -> exception

@@ -10,14 +10,17 @@ import static org.mockito.Mockito.when;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.ExpectedVersionRequest;
 import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.InvitationAcceptanceRequest;
+import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.TransferProposalRequest;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActiveMembership;
 import com.miriyum.domain.reservation.waiting.entity.WaitingPartyInvitation;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
+import com.miriyum.domain.reservation.waiting.entity.WaitingRepresentativeTransferOffer;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingPartyAuditRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingPartyInvitationRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingRepresentativeTransferOfferRepository;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
@@ -49,6 +52,8 @@ class WaitingPartyServiceTest {
     private final WaitingPartyInvitationRepository invitations =
             mock(WaitingPartyInvitationRepository.class);
     private final WaitingPartyAuditRepository audits = mock(WaitingPartyAuditRepository.class);
+    private final WaitingRepresentativeTransferOfferRepository transfers =
+            mock(WaitingRepresentativeTransferOfferRepository.class);
     private final IdempotencyExecutor idempotency = mock(IdempotencyExecutor.class);
     private final WaitingCreationTransactionExecutor transactions =
             mock(WaitingCreationTransactionExecutor.class);
@@ -66,7 +71,7 @@ class WaitingPartyServiceTest {
                     result.resourceId(), objectMapper.valueToTree(result.data()));
         });
         service = new WaitingPartyService(
-                accounts, teams, memberships, invitations, audits, idempotency,
+                accounts, teams, memberships, invitations, transfers, audits, idempotency,
                 transactions, objectMapper, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -123,6 +128,43 @@ class WaitingPartyServiceTest {
         assertThat(result.data().version()).isOne();
         assertThat(invitation.getStatus()).isEqualTo(WaitingPartyInvitation.Status.ACCEPTED);
         verify(teams, never()).save(any());
+    }
+
+    @Test
+    void proposalKeepsRepresentativeAndAcceptanceTransfersExactlyOnce() {
+        WaitingTeam team = team(2);
+        WaitingActiveMembership target = membership(402L, 201L, NOW.minusSeconds(30));
+        when(teams.findByIdForUpdate(300L)).thenReturn(Optional.of(team));
+        when(memberships.findByIdAndWaitingTeamId(402L, 300L)).thenReturn(Optional.of(target));
+        when(transfers.findByActiveTeamKey(300L)).thenReturn(Optional.empty());
+        AtomicReference<WaitingRepresentativeTransferOffer> saved = new AtomicReference<>();
+        when(transfers.save(any())).thenAnswer(invocation -> {
+            WaitingRepresentativeTransferOffer offer = invocation.getArgument(0);
+            ReflectionTestUtils.setField(offer, "id", 801L);
+            saved.set(offer);
+            return offer;
+        });
+
+        var proposed = service.proposeTransfer(200L, 300L, IdempotencyKey.parse(KEY),
+                new TransferProposalRequest(402L, 0L));
+
+        assertThat(team.getConsumerAccountId()).isEqualTo(200L);
+        assertThat(team.getVersion()).isZero();
+        assertThat(proposed.data().expiresAt()).isEqualTo(NOW.plusSeconds(300));
+
+        when(transfers.findByIdForUpdate(801L)).thenReturn(Optional.of(saved.get()));
+        when(memberships.findAllByWaitingTeamIdOrderById(300L)).thenReturn(List.of(
+                membership(401L, 200L, NOW.minusSeconds(60)), target));
+
+        var accepted = service.acceptTransfer(201L, 300L, 801L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440502"),
+                new ExpectedVersionRequest(0L));
+
+        assertThat(team.getConsumerAccountId()).isEqualTo(201L);
+        assertThat(team.getVersion()).isOne();
+        assertThat(accepted.data().memberships()).hasSize(2);
+        assertThat(saved.get().getStatus())
+                .isEqualTo(WaitingRepresentativeTransferOffer.Status.ACCEPTED);
     }
 
     private static WaitingTeam team(int partySize) {

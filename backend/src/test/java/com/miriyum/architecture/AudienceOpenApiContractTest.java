@@ -53,7 +53,11 @@ class AudienceOpenApiContractTest {
             "/api/v1/consumers/me/waiting-teams/{teamId}/invitations",
             "/api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations",
             "/api/v1/consumers/me/waiting-teams/{teamId}/membership-departures",
-            "/api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals");
+            "/api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/acceptances",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/rejections",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations");
     private static final String NOTIFICATION_HISTORY_PATH =
             "/api/v1/consumers/me/notifications";
     private static final String REPRESENTATIVE_MENUS_PATH =

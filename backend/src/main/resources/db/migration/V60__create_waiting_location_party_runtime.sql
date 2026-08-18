@@ -131,10 +131,6 @@ CREATE TABLE waiting_representative_transfer_offers (
         FOREIGN KEY (from_consumer_account_id)
         REFERENCES consumer_accounts (consumer_account_id)
         ON DELETE RESTRICT,
-    CONSTRAINT fk_waiting_transfer_offers_target_membership
-        FOREIGN KEY (target_membership_id)
-        REFERENCES waiting_active_memberships (waiting_active_membership_id)
-        ON DELETE RESTRICT,
     CONSTRAINT ck_waiting_transfer_offers_status
         CHECK (status IN ('PROPOSED', 'ACCEPTED', 'REJECTED', 'REVOKED', 'EXPIRED')),
     CONSTRAINT ck_waiting_transfer_offers_version

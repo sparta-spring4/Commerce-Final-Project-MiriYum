@@ -26,6 +26,19 @@ public final class WaitingPartyContracts {
         }
     }
 
+    public record TransferProposalRequest(
+            @NotNull @jakarta.validation.constraints.Positive Long targetMembershipId,
+            @NotNull @PositiveOrZero Long expectedVersion
+    ) { }
+
+    public record TransferOfferSnapshot(
+            String offerId,
+            String targetMembershipId,
+            String status,
+            Instant proposedAt,
+            Instant expiresAt
+    ) { }
+
     public record MemberSnapshot(
             String membershipId,
             MemberRole role,
@@ -44,5 +57,6 @@ public final class WaitingPartyContracts {
     }
 
     public record InvitationCommandResult(int httpStatus, InvitationSnapshot data) { }
+    public record TransferCommandResult(int httpStatus, TransferOfferSnapshot data) { }
     public record PartyCommandResult(int httpStatus, WaitingConsumerSnapshot data) { }
 }

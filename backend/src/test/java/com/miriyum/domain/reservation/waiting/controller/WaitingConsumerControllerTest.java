@@ -25,6 +25,8 @@ import com.miriyum.domain.reservation.waiting.dto.WaitingLocationProofContracts.
 import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.InvitationCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.InvitationSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.PartyCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.TransferCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.TransferOfferSnapshot;
 import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession.AccuracyCategory;
 import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession.ResultCategory;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
@@ -242,6 +244,33 @@ class WaitingConsumerControllerTest {
                 .andExpect(jsonPath("$.code").value("COMMON_003"));
 
         then(partyService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void representativeTransferProposalAndAcceptanceUseIdempotentConsumerRoutes() throws Exception {
+        authenticateConsumer(200L);
+        given(partyService.proposeTransfer(eq(200L), eq(300L), any(), any()))
+                .willReturn(new TransferCommandResult(200, new TransferOfferSnapshot(
+                        "801", "402", "PROPOSED", Instant.parse("2026-08-19T03:00:00Z"),
+                        Instant.parse("2026-08-19T03:05:00Z"))));
+        given(partyService.acceptTransfer(eq(200L), eq(300L), eq(801L), any(), any()))
+                .willReturn(new PartyCommandResult(200, snapshot(WaitingTeamStatus.WAITING, 1L)));
+
+        mockMvc.perform(post("/api/v1/consumers/me/waiting-teams/300/representative-transfer-offers")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetMembershipId\":402,\"expectedVersion\":0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.offerId").value("801"));
+
+        mockMvc.perform(post("/api/v1/consumers/me/waiting-teams/300/representative-transfer-offers/801/acceptances")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\":0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.version").value(1));
     }
 
     @Test

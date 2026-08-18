@@ -8,15 +8,20 @@ import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.Invitati
 import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.InvitationCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.InvitationSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.PartyCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.TransferCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.TransferOfferSnapshot;
+import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.TransferProposalRequest;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActiveMembership;
 import com.miriyum.domain.reservation.waiting.entity.WaitingPartyAudit;
 import com.miriyum.domain.reservation.waiting.entity.WaitingPartyAudit.EventType;
 import com.miriyum.domain.reservation.waiting.entity.WaitingPartyInvitation;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
+import com.miriyum.domain.reservation.waiting.entity.WaitingRepresentativeTransferOffer;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingPartyAuditRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingPartyInvitationRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingRepresentativeTransferOfferRepository;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -44,10 +49,12 @@ import tools.jackson.databind.ObjectMapper;
 public class WaitingPartyService {
 
     private static final Duration INVITATION_TTL = Duration.ofMinutes(15);
+    private static final Duration TRANSFER_TTL = Duration.ofMinutes(5);
     private final ConsumerAccountService accountService;
     private final WaitingTeamRepository teamRepository;
     private final WaitingActiveMembershipRepository membershipRepository;
     private final WaitingPartyInvitationRepository invitationRepository;
+    private final WaitingRepresentativeTransferOfferRepository transferRepository;
     private final WaitingPartyAuditRepository auditRepository;
     private final IdempotencyExecutor idempotencyExecutor;
     private final WaitingCreationTransactionExecutor transactionExecutor;
@@ -165,6 +172,114 @@ public class WaitingPartyService {
         return changeMembership(accountId, teamId, membershipId, key, request, true);
     }
 
+    public TransferCommandResult proposeTransfer(long accountId, long teamId, IdempotencyKey key,
+            TransferProposalRequest request) {
+        requireInputs(accountId, key, request);
+        accountService.requireActiveAccount(accountId);
+        IdempotencyCommand command = command(accountId, "WAITING_REPRESENTATIVE_TRANSFER_PROPOSE",
+                key, "teamId=" + teamId + "|targetMembershipId=" + request.targetMembershipId()
+                        + "|expectedVersion=" + request.expectedVersion());
+        IdempotentOutcome outcome = transactionExecutor.execute(() ->
+                idempotencyExecutor.execute(command, () -> {
+                    WaitingTeam team = lockTeam(teamId);
+                    requireRepresentative(team, accountId);
+                    team.requirePartyMutable(request.expectedVersion());
+                    WaitingActiveMembership target = membershipRepository
+                            .findByIdAndWaitingTeamId(request.targetMembershipId(), teamId)
+                            .filter(value -> !value.getConsumerAccountId()
+                                    .equals(team.getConsumerAccountId()))
+                            .orElseThrow(WaitingPartyService::invalidTransfer);
+                    if (transferRepository.findByActiveTeamKey(teamId).isPresent()) {
+                        throw invalidTransfer();
+                    }
+                    Instant now = clock.instant();
+                    WaitingRepresentativeTransferOffer offer = transferRepository.save(
+                            WaitingRepresentativeTransferOffer.propose(
+                                    teamId, accountId, target.getId(), team.getVersion(), now,
+                                    now.plus(TRANSFER_TTL)));
+                    audit(team, accountId, target.getId(),
+                            EventType.REPRESENTATIVE_TRANSFER_PROPOSED,
+                            team.getVersion(), team.getVersion(), "TRANSFER_PROPOSED", key, now);
+                    return success("WAITING_REPRESENTATIVE_TRANSFER", offer.getId(),
+                            transferSnapshot(offer));
+                }));
+        return transferResult(outcome);
+    }
+
+    public PartyCommandResult acceptTransfer(long accountId, long teamId, long offerId,
+            IdempotencyKey key, ExpectedVersionRequest request) {
+        requireInputs(accountId, key, request);
+        accountService.requireActiveAccount(accountId);
+        IdempotencyCommand command = command(accountId, "WAITING_REPRESENTATIVE_TRANSFER_ACCEPT",
+                key, transferFingerprint(teamId, offerId, request.expectedVersion()));
+        IdempotentOutcome outcome = transactionExecutor.execute(() ->
+                idempotencyExecutor.execute(command, () -> {
+                    WaitingTeam team = lockTeam(teamId);
+                    team.requirePartyMutable(request.expectedVersion());
+                    WaitingRepresentativeTransferOffer offer = lockTransfer(teamId, offerId);
+                    WaitingActiveMembership target = transferTarget(offer, teamId);
+                    if (target.getConsumerAccountId() != accountId
+                            || offer.getProposedTeamVersion() != request.expectedVersion()) {
+                        throw invalidTransfer();
+                    }
+                    Instant now = clock.instant();
+                    try { offer.requireAcceptable(now); }
+                    catch (IllegalStateException invalid) { throw invalidTransfer(); }
+                    long before = team.getVersion();
+                    team.transferRepresentative(before, accountId);
+                    offer.accept(now);
+                    audit(team, accountId, target.getId(),
+                            EventType.REPRESENTATIVE_TRANSFER_ACCEPTED,
+                            before, team.getVersion(), "TRANSFER_ACCEPTED", key, now);
+                    return success("WAITING_TEAM", team.getId(), snapshot(team, accountId));
+                }));
+        return partyResult(outcome);
+    }
+
+    public TransferCommandResult rejectTransfer(long accountId, long teamId, long offerId,
+            IdempotencyKey key, ExpectedVersionRequest request) {
+        return decideTransfer(accountId, teamId, offerId, key, request, false);
+    }
+
+    public TransferCommandResult revokeTransfer(long accountId, long teamId, long offerId,
+            IdempotencyKey key, ExpectedVersionRequest request) {
+        return decideTransfer(accountId, teamId, offerId, key, request, true);
+    }
+
+    private TransferCommandResult decideTransfer(long accountId, long teamId, long offerId,
+            IdempotencyKey key, ExpectedVersionRequest request, boolean revoke) {
+        requireInputs(accountId, key, request);
+        accountService.requireActiveAccount(accountId);
+        String type = revoke ? "WAITING_REPRESENTATIVE_TRANSFER_REVOKE"
+                : "WAITING_REPRESENTATIVE_TRANSFER_REJECT";
+        IdempotencyCommand command = command(accountId, type, key,
+                transferFingerprint(teamId, offerId, request.expectedVersion()));
+        IdempotentOutcome outcome = transactionExecutor.execute(() ->
+                idempotencyExecutor.execute(command, () -> {
+                    WaitingTeam team = lockTeam(teamId);
+                    team.requirePartyMutable(request.expectedVersion());
+                    WaitingRepresentativeTransferOffer offer = lockTransfer(teamId, offerId);
+                    WaitingActiveMembership target = transferTarget(offer, teamId);
+                    if (revoke) requireRepresentative(team, accountId);
+                    else if (target.getConsumerAccountId() != accountId) throw invalidTransfer();
+                    if (offer.getProposedTeamVersion() != request.expectedVersion()) {
+                        throw invalidTransfer();
+                    }
+                    Instant now = clock.instant();
+                    try {
+                        if (revoke) offer.revoke(now); else offer.reject(now);
+                    } catch (IllegalStateException invalid) { throw invalidTransfer(); }
+                    audit(team, accountId, target.getId(), revoke
+                                    ? EventType.REPRESENTATIVE_TRANSFER_REVOKED
+                                    : EventType.REPRESENTATIVE_TRANSFER_REJECTED,
+                            team.getVersion(), team.getVersion(),
+                            revoke ? "TRANSFER_REVOKED" : "TRANSFER_REJECTED", key, now);
+                    return success("WAITING_REPRESENTATIVE_TRANSFER", offer.getId(),
+                            transferSnapshot(offer));
+                }));
+        return transferResult(outcome);
+    }
+
     private PartyCommandResult changeMembership(long accountId, long teamId, Long targetMembershipId,
             IdempotencyKey key, ExpectedVersionRequest request, boolean removal) {
         requireInputs(accountId, key, request);
@@ -209,6 +324,35 @@ public class WaitingPartyService {
                 team.getStoreId(), team.getBusinessDate(), team.getQueueSequence());
         return WaitingConsumerSnapshot.from(team, ahead,
                 membershipRepository.findAllByWaitingTeamIdOrderById(team.getId()), viewerAccountId);
+    }
+
+    private WaitingRepresentativeTransferOffer lockTransfer(long teamId, long offerId) {
+        return transferRepository.findByIdForUpdate(offerId)
+                .filter(value -> value.getWaitingTeamId() == teamId)
+                .orElseThrow(WaitingPartyService::invalidTransfer);
+    }
+
+    private WaitingActiveMembership transferTarget(
+            WaitingRepresentativeTransferOffer offer, long teamId) {
+        return membershipRepository.findByIdAndWaitingTeamId(
+                        offer.getTargetMembershipId(), teamId)
+                .orElseThrow(WaitingPartyService::invalidTransfer);
+    }
+
+    private static String transferFingerprint(long teamId, long offerId, long version) {
+        return "teamId=" + teamId + "|offerId=" + offerId + "|expectedVersion=" + version;
+    }
+
+    private static TransferOfferSnapshot transferSnapshot(
+            WaitingRepresentativeTransferOffer offer) {
+        return new TransferOfferSnapshot(Long.toString(offer.getId()),
+                Long.toString(offer.getTargetMembershipId()), offer.getStatus().name(),
+                offer.getProposedAt(), offer.getExpiresAt());
+    }
+
+    private TransferCommandResult transferResult(IdempotentOutcome outcome) {
+        return new TransferCommandResult(outcome.httpStatus(), objectMapper.treeToValue(
+                outcome.data(), TransferOfferSnapshot.class));
     }
 
     private void audit(WaitingTeam team, long actorId, Long subjectMembershipId,
@@ -265,5 +409,9 @@ public class WaitingPartyService {
 
     private static ServiceException teamNotFound() {
         return new ServiceException(ReservationErrorCode.WAITING_TEAM_NOT_FOUND);
+    }
+
+    private static ServiceException invalidTransfer() {
+        return new ServiceException(ReservationErrorCode.REPRESENTATIVE_TRANSFER_INVALID);
     }
 }
