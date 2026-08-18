@@ -151,21 +151,24 @@ function reservationCapacityFixture(templateCount) {
   }
 }
 
-function reservationFixtureWithNormalizedDuplicate(templateCount) {
+function reservationFixtureWithPartyDifferenceAtSameSlot(templateCount) {
   const fixture = reservationCapacityFixture(templateCount)
   const originalIndex = templateCount - 2
   const duplicateIndex = templateCount - 1
-  fixture.reservationTemplates[originalIndex].menuSelections = [
-    { menuId: '701', quantity: 1 },
-    { menuId: '702', quantity: 2 },
-  ]
   fixture.reservationTemplates[duplicateIndex] = {
     ...fixture.reservationTemplates[originalIndex],
-    menuSelections: [
-      { menuId: '702', quantity: 1 },
-      { menuId: '701', quantity: 1 },
-      { menuId: '702', quantity: 1 },
-    ],
+    party: { adultCount: 3, childCount: 0, infantCount: 0 },
+  }
+  return fixture
+}
+
+function reservationFixtureWithMenuDifferenceAtSameSlot(templateCount) {
+  const fixture = reservationCapacityFixture(templateCount)
+  const originalIndex = templateCount - 2
+  const duplicateIndex = templateCount - 1
+  fixture.reservationTemplates[duplicateIndex] = {
+    ...fixture.reservationTemplates[originalIndex],
+    menuSelections: [{ menuId: '701', quantity: 1 }],
   }
   return fixture
 }
@@ -374,12 +377,20 @@ export default function () {
       fixtureContracts.validateFixture(reservationCapacityFixture(singleScenarioRequired)),
     )
     : null
-  const normalizedDuplicateFixtureRejected = typeof buildExecutionScenarios === 'function'
+  const partyDifferenceAtSameSlotRejected = typeof buildExecutionScenarios === 'function'
     && Number.isInteger(singleScenarioRequired)
     && throws(() => buildExecutionScenarios(
       singleScenarioConfig,
       fixtureContracts.validateFixture(
-        reservationFixtureWithNormalizedDuplicate(singleScenarioRequired),
+        reservationFixtureWithPartyDifferenceAtSameSlot(singleScenarioRequired),
+      ),
+    ))
+  const menuDifferenceAtSameSlotRejected = typeof buildExecutionScenarios === 'function'
+    && Number.isInteger(singleScenarioRequired)
+    && throws(() => buildExecutionScenarios(
+      singleScenarioConfig,
+      fixtureContracts.validateFixture(
+        reservationFixtureWithMenuDifferenceAtSameSlot(singleScenarioRequired),
       ),
     ))
   const zeroOffsetDuplicateFixtureRejected = typeof buildExecutionScenarios === 'function'
@@ -518,8 +529,10 @@ export default function () {
     'the exact boundary-inclusive reservation capacity is accepted': () =>
       sufficientScenarios?.reservationCreate.rate === 1
       && sufficientScenarios.reservationCreate.duration === '30s',
-    'normalized duplicate reservation templates are rejected before execution': () =>
-      normalizedDuplicateFixtureRejected,
+    'party differences do not bypass same-slot reservation conflict validation': () =>
+      partyDifferenceAtSameSlotRejected,
+    'menu differences do not bypass same-slot reservation conflict validation': () =>
+      menuDifferenceAtSameSlotRejected,
     'equivalent zero-offset reservation templates are rejected before execution': () =>
       zeroOffsetDuplicateFixtureRejected,
     'mixed scenario allocation includes the remainder and boundary guard': () =>

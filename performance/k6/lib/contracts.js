@@ -231,38 +231,18 @@ export function requiredReservationTemplateCount({
     * durationSeconds + 1
 }
 
-function comparePublicIds(left, right) {
-  if (left.length !== right.length) return left.length - right.length
-  if (left === right) return 0
-  return left < right ? -1 : 1
-}
-
 function canonicalStartOffset(startOffset) {
   if (startOffset === undefined) return ''
   return startOffset === '+00:00' || startOffset === '-00:00' ? 'Z' : startOffset
 }
 
 function reservationTemplateKey(template) {
-  const quantitiesByMenuId = new Map()
-  for (const selection of template.menuSelections ?? []) {
-    quantitiesByMenuId.set(
-      selection.menuId,
-      (quantitiesByMenuId.get(selection.menuId) ?? 0) + selection.quantity,
-    )
-  }
-  const menuSelections = [...quantitiesByMenuId.entries()]
-    .sort(([left], [right]) => comparePublicIds(left, right))
-
   return JSON.stringify([
     template.accountAlias,
     template.storeId,
     template.serviceDate,
     template.startTime,
     canonicalStartOffset(template.startOffset),
-    template.party.adultCount,
-    template.party.childCount,
-    template.party.infantCount,
-    menuSelections,
   ])
 }
 
