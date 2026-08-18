@@ -30,6 +30,10 @@ public class SearchConceptExpansionService {
             return SearchConceptExpansion.empty();
         }
         String purpose = request.purpose().metricValue();
+        if (!ExternalSearchTextPolicy.allowsExternalInterpretation(request.text())) {
+            outcome(purpose, SearchConceptFailureReason.SENSITIVE_INPUT.metricValue());
+            return SearchConceptExpansion.empty();
+        }
         meterRegistry.counter("miriyum.search.llm.calls", "purpose", purpose).increment();
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
@@ -49,6 +53,8 @@ public class SearchConceptExpansionService {
             return result;
         } catch (SearchConceptProviderException exception) {
             outcome(purpose, exception.reason().metricValue());
+            tokens(purpose, "input", exception.inputTokens());
+            tokens(purpose, "output", exception.outputTokens());
             return SearchConceptExpansion.empty();
         } catch (RuntimeException exception) {
             outcome(purpose, SearchConceptFailureReason.PROVIDER_ERROR.metricValue());

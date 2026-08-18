@@ -11,6 +11,8 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -60,6 +62,44 @@ class SearchConceptExpansionServiceTest {
         then(interpreter).shouldHaveNoInteractions();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "얼큰한 국물 user@example.com",
+            "김치찌개 010-1234-5678",
+            "알레르기 없는 찌개",
+            "서울 종로길 123 김치찌개",
+            "예약번호 R-1234 김치찌개",
+            "카드번호 1234 김치찌개",
+            "땅콩 못 먹어요",
+            "peanut allergy",
+            "+82-10-1234-5678 김치찌개",
+            "김치찌개 4111 1111 1111 1111",
+            "김치찌개 37.5665 126.9780",
+            "땅콩 함유 가능",
+            "내일 예약하고 싶은 김치찌개",
+            "사용자 ID abc 김치찌개",
+            "지난주 예약한 김치찌개",
+            "123 Main St 김치찌개",
+            "김치찌개 example.com/private",
+            "우유를 피하고 싶어요"
+    })
+    void sensitiveInputFallsBackWithoutCallingProvider(String text) {
+        var registry = new SimpleMeterRegistry();
+
+        SearchConceptExpansion result = service(true, registry).expand(
+                new SearchConceptRequest(text, STORE_SEARCH));
+
+        assertThat(result).isEqualTo(SearchConceptExpansion.empty());
+        then(interpreter).shouldHaveNoInteractions();
+        assertThat(registry.counter(
+                "miriyum.search.llm.calls", "purpose", "store_search").count())
+                .isZero();
+        assertThat(registry.counter(
+                "miriyum.search.llm.outcomes",
+                "purpose", "store_search",
+                "outcome", "sensitive_input").count()).isEqualTo(1.0);
+    }
+
     @Test
     void timeoutFallsBackToEmptyAndRecordsReason() {
         var registry = new SimpleMeterRegistry();
@@ -74,6 +114,27 @@ class SearchConceptExpansionServiceTest {
                 "miriyum.search.llm.outcomes",
                 "purpose", "store_search",
                 "outcome", "timeout").count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void providerFailureRecordsReturnedUsageWithoutExposingResponse() {
+        var registry = new SimpleMeterRegistry();
+        var request = new SearchConceptRequest("얼큰한 국물", STORE_SEARCH);
+        given(interpreter.interpret(request)).willThrow(
+                new SearchConceptProviderException(
+                        SearchConceptFailureReason.REFUSAL, 31, 4));
+
+        SearchConceptExpansion result = service(true, registry).expand(request);
+
+        assertThat(result).isEqualTo(SearchConceptExpansion.empty());
+        assertThat(registry.find("miriyum.search.llm.tokens")
+                .tag("purpose", "store_search")
+                .tag("type", "input")
+                .summary().totalAmount()).isEqualTo(31.0);
+        assertThat(registry.find("miriyum.search.llm.tokens")
+                .tag("purpose", "store_search")
+                .tag("type", "output")
+                .summary().totalAmount()).isEqualTo(4.0);
     }
 
     @Test

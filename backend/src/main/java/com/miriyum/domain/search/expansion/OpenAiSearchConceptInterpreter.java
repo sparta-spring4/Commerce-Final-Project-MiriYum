@@ -101,25 +101,32 @@ public class OpenAiSearchConceptInterpreter implements SearchConceptInterpreter 
                 || response.usage().completion_tokens() < 0) {
             throw failure(MALFORMED_RESPONSE);
         }
+        long inputTokens = response.usage().prompt_tokens();
+        long outputTokens = response.usage().completion_tokens();
         Choice choice = response.choices().getFirst();
         if (choice == null || choice.message() == null) {
-            throw failure(MALFORMED_RESPONSE);
+            throw failure(MALFORMED_RESPONSE, inputTokens, outputTokens);
         }
         if (choice.message().refusal() != null && !choice.message().refusal().isBlank()) {
-            throw failure(REFUSAL);
+            throw failure(REFUSAL, inputTokens, outputTokens);
         }
         if (!"stop".equals(choice.finish_reason())
                 || choice.message().content() == null
                 || choice.message().content().isBlank()) {
-            throw failure(MALFORMED_RESPONSE);
+            throw failure(MALFORMED_RESPONSE, inputTokens, outputTokens);
         }
-        ConceptDocument document = objectMapper.readValue(
-                choice.message().content(), ConceptDocument.class);
+        ConceptDocument document;
+        try {
+            document = objectMapper.readValue(
+                    choice.message().content(), ConceptDocument.class);
+        } catch (RuntimeException exception) {
+            throw failure(MALFORMED_RESPONSE, inputTokens, outputTokens);
+        }
         if (document == null
                 || document.concepts() == null
                 || document.concepts().size() > properties.maxConcepts()
                 || document.concepts().stream().anyMatch(value -> value == null)) {
-            throw failure(MALFORMED_RESPONSE);
+            throw failure(MALFORMED_RESPONSE, inputTokens, outputTokens);
         }
         return new SearchConceptExpansion(
                 document.concepts(),
@@ -143,6 +150,14 @@ public class OpenAiSearchConceptInterpreter implements SearchConceptInterpreter 
             SearchConceptFailureReason reason
     ) {
         return new SearchConceptProviderException(reason);
+    }
+
+    private static SearchConceptProviderException failure(
+            SearchConceptFailureReason reason,
+            long inputTokens,
+            long outputTokens
+    ) {
+        return new SearchConceptProviderException(reason, inputTokens, outputTokens);
     }
 
     private record CompletionRequest(

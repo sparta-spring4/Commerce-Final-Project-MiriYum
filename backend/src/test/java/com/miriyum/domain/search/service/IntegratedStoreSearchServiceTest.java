@@ -94,6 +94,42 @@ class IntegratedStoreSearchServiceTest {
     }
 
     @Test
+    void fullExactPageDoesNotCallLlm() {
+        InterpretedSearchCondition condition = condition(null, null, null, "라멘");
+        given(interpreter.interpret("라멘")).willReturn(result(condition));
+        IntegratedStoreSearchCandidate candidate = candidate(1L, "라멘집");
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(candidate), null));
+        given(repository.refreshCurrentlyPublic(List.of(candidate)))
+                .willReturn(List.of(candidate));
+
+        var data = service().search("라멘", false, false, null, null, 1);
+
+        assertThat(data.items()).extracting(item -> item.storeId()).containsExactly("1");
+        then(expansionService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void cursorPageDoesNotCallLlmWhenExactResultsAreExhausted() {
+        InterpretedSearchCondition condition = condition(null, null, null, "라멘");
+        given(interpreter.interpret("라멘")).willReturn(result(condition));
+        IntegratedStoreSearchCandidate previous = candidate(1L, "라멘집");
+        IntegratedStoreSearchQuery initial = IntegratedStoreSearchQuery.from(
+                condition, false, false, CURSOR_CODEC.principalScope(null),
+                null, null, 1, CURSOR_CODEC);
+        String cursor = CURSOR_CODEC.encode(
+                initial, previous.relevanceTier(), previous.name(), previous.storeId());
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(), null));
+        given(repository.refreshCurrentlyPublic(List.of())).willReturn(List.of());
+
+        var data = service().search("라멘", false, false, null, cursor, 1);
+
+        assertThat(data.items()).isEmpty();
+        then(expansionService).shouldHaveNoInteractions();
+    }
+
+    @Test
     void failsClosedWhenReservationBatchDoesNotMatchCandidateIds() {
         InterpretedSearchCondition condition = condition(
                 LocalDate.of(2026, 8, 8), LocalTime.of(18, 0), 2, "");

@@ -5,7 +5,8 @@ public enum SearchConceptFailureReason {
     TIMEOUT,
     MALFORMED_RESPONSE,
     HTTP_ERROR,
-    PROVIDER_ERROR;
+    PROVIDER_ERROR,
+    SENSITIVE_INPUT;
 
     public String metricValue() {
         return name().toLowerCase(java.util.Locale.ROOT);
