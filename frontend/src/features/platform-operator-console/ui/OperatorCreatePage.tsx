@@ -25,6 +25,7 @@ import {
 import {
   EMPTY_COMMAND_FORM,
   OperatorCommandFields,
+  useLogicalCommandAttempt,
   validateCommandFields,
   type OperatorCommandFormState,
 } from './OperatorCommandFields'
@@ -38,9 +39,8 @@ import './page.css'
  * 공개 가입이 없고 슈퍼관리자가 발급한다. 계약이 `SUPER_ADMIN` 역할과 핵심
  * 권한을 부여할 수 없게 하므로 선택지에도 넣지 않는다.
  *
- * `provisioningId`는 이 발급 시도를 식별하는 UUID다. 화면이 폼을 열 때 한 번
- * 만들고 성공할 때까지 유지한다. 재시도마다 새로 만들면 서버가 서로 다른
- * 발급으로 보고 계정이 중복 생성될 수 있다.
+ * `provisioningId`는 한 논리 발급 시도를 식별하는 UUID다. 같은 입력 재시도에는
+ * 유지하고, 실패 뒤 입력이 바뀌면 멱등 키와 함께 갱신한다.
  *
  * 임시 비밀번호는 요청에만 담고 응답에 오지 않는다. 발급 결과 화면에서 다시
  * 보여 주지 않으며 어디에도 저장하지 않는다.
@@ -64,13 +64,18 @@ export function OperatorCreatePage() {
   const [awaitingReauthentication, setAwaitingReauthentication] =
     useState(false)
 
-  // 발급 시도 식별자. 성공할 때까지 같은 값을 유지한다.
-  const [provisioningId] = useState(() => crypto.randomUUID())
-  const [idempotencyKey, setIdempotencyKey] = useState(() =>
-    createIdempotencyKey(),
-  )
+  const {
+    attempt,
+    beginAttempt,
+    clearAttempt,
+    markInputChanged,
+  } = useLogicalCommandAttempt(() => ({
+    provisioningId: crypto.randomUUID(),
+    idempotencyKey: createIdempotencyKey(),
+  }))
 
   function toggleRole(role: GrantableRole) {
+    markInputChanged()
     setRoles((current) =>
       current.includes(role)
         ? current.filter((item) => item !== role)
@@ -79,6 +84,7 @@ export function OperatorCreatePage() {
   }
 
   function togglePermission(permission: GrantablePermission) {
+    markInputChanged()
     setPermissions((current) =>
       current.includes(permission)
         ? current.filter((item) => item !== permission)
@@ -107,10 +113,15 @@ export function OperatorCreatePage() {
     if (Object.keys(nextErrors).length > 0) {
       return
     }
+    beginAttempt()
     setAwaitingReauthentication(true)
   }
 
   async function handleApproved(approval: string) {
+    if (attempt === null) {
+      setFormError('명령 입력을 다시 확인해 주세요.')
+      return
+    }
     setAwaitingReauthentication(false)
     setSubmitting(true)
     setFormError(null)
@@ -121,9 +132,9 @@ export function OperatorCreatePage() {
           caseVersion: Number(command.caseVersion),
         },
         reauthenticationApproval: approval,
-        idempotencyKey,
+        idempotencyKey: attempt.idempotencyKey,
         body: {
-          provisioningId,
+          provisioningId: attempt.provisioningId,
           email: email.trim(),
           displayName: displayName.trim(),
           temporaryPassword,
@@ -134,7 +145,7 @@ export function OperatorCreatePage() {
       })
       // 평문 임시 비밀번호를 즉시 비운다. 결과 화면에서 다시 보여 주지 않는다.
       setTemporaryPassword('')
-      setIdempotencyKey(createIdempotencyKey())
+      clearAttempt()
       void navigate(operatorDetailPath(created.operatorId), { replace: true })
     } catch (error) {
       setFormError(createErrorMessage(error))
@@ -195,7 +206,10 @@ export function OperatorCreatePage() {
           autoComplete="off"
           value={email}
           error={errors.email ?? null}
-          onChange={(event) => setEmail(event.target.value)}
+          onChange={(event) => {
+            markInputChanged()
+            setEmail(event.target.value)
+          }}
         />
 
         <TextField
@@ -203,7 +217,10 @@ export function OperatorCreatePage() {
           name="displayName"
           value={displayName}
           error={errors.displayName ?? null}
-          onChange={(event) => setDisplayName(event.target.value)}
+          onChange={(event) => {
+            markInputChanged()
+            setDisplayName(event.target.value)
+          }}
         />
 
         <PasswordField
@@ -213,7 +230,10 @@ export function OperatorCreatePage() {
           help="8~64자이며 대문자·소문자·숫자·특수문자 중 3종 이상을 포함합니다."
           value={temporaryPassword}
           error={errors.temporaryPassword ?? null}
-          onChange={(event) => setTemporaryPassword(event.target.value)}
+          onChange={(event) => {
+            markInputChanged()
+            setTemporaryPassword(event.target.value)
+          }}
         />
 
         <fieldset className="po-fieldset">
@@ -252,7 +272,10 @@ export function OperatorCreatePage() {
         <OperatorCommandFields
           state={command}
           errors={errors}
-          onChange={setCommand}
+          onChange={(next) => {
+            markInputChanged()
+            setCommand(next)
+          }}
         />
 
         <Button
@@ -266,11 +289,11 @@ export function OperatorCreatePage() {
         </Button>
       </form>
 
-      {awaitingReauthentication && (
+      {awaitingReauthentication && attempt !== null && (
         <ReauthenticationDialog
           purpose="OPERATOR_CREATION"
           targetType="PLATFORM_OPERATOR_ACCOUNT"
-          targetId={provisioningId}
+          targetId={attempt.provisioningId}
           description={`${displayName.trim()} 운영자 계정을 발급합니다. 본인 확인이 필요합니다.`}
           onApproved={handleApproved}
           onCancel={() => setAwaitingReauthentication(false)}

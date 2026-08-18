@@ -205,6 +205,50 @@ describe('회원 제재 적용', () => {
     expect(keys[0]).toBe(keys[1])
   })
 
+  it('실패 후 제재 입력을 바꾸면 새 멱등 키를 사용한다', async () => {
+    const keys: string[] = []
+    let approvalSequence = 0
+    server.use(
+      authenticatedPlatformOperator(),
+      http.post(REAUTH_PATH, () =>
+        successResponse({
+          approval: `approval-${(approvalSequence += 1)}`,
+          expiresAt: '2026-08-17T10:05:00Z',
+        }),
+      ),
+      http.post(SANCTION_PATH, ({ request }) => {
+        keys.push(request.headers.get('Idempotency-Key') ?? '')
+        return errorResponse(
+          503,
+          'COMMON_012',
+          '일시적으로 처리할 수 없습니다.',
+        )
+      }),
+    )
+    renderForm()
+
+    fillAndSubmit()
+    await screen.findByRole('dialog', { name: '재인증이 필요합니다' })
+    fireEvent.change(screen.getByLabelText('현재 비밀번호'), {
+      target: { value: 'Miriyum1!' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '확인' }))
+    await waitFor(() => expect(keys).toHaveLength(1))
+
+    fireEvent.change(screen.getByLabelText('사유 코드'), {
+      target: { value: 'FRAUD_REPORT' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '제재 적용' }))
+    await screen.findByRole('dialog', { name: '재인증이 필요합니다' })
+    fireEvent.change(screen.getByLabelText('현재 비밀번호'), {
+      target: { value: 'Miriyum1!' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '확인' }))
+    await waitFor(() => expect(keys).toHaveLength(2))
+
+    expect(keys[1]).not.toBe(keys[0])
+  })
+
   it('version 충돌이면 최신 상태를 다시 읽게 한다', async () => {
     server.use(
       authenticatedPlatformOperator(),

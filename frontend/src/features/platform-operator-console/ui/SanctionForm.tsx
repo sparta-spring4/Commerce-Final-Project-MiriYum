@@ -15,6 +15,7 @@ import {
   type SanctionRequest,
 } from '../api/memberSupportApi'
 import { accountTargetType } from '../api/reauthenticationApi'
+import { useLogicalCommandAttempt } from './OperatorCommandFields'
 import { ReauthenticationDialog } from './ReauthenticationDialog'
 import './page.css'
 
@@ -83,14 +84,14 @@ export function SanctionForm({
   const [awaitingReauthentication, setAwaitingReauthentication] =
     useState(false)
 
-  /**
-   * 멱등 키는 재인증 이전에 한 번 정한다.
-   *
-   * 시도마다 새로 만들면, 승인 실패나 네트워크 오류로 다시 보낼 때 서버가
-   * 같은 제재를 두 건으로 본다. 성공하면 새 키로 바꿔 다음 제재와 섞이지 않게 한다.
-   */
-  const [idempotencyKey, setIdempotencyKey] = useState(() =>
-    createIdempotencyKey(),
+  const {
+    attempt,
+    beginAttempt,
+    clearAttempt,
+    markInputChanged,
+  } = useLogicalCommandAttempt(
+    () => ({ idempotencyKey: createIdempotencyKey() }),
+    `${accountType}:${accountId}:${supportVersion}`,
   )
 
   function validate(): boolean {
@@ -117,10 +118,15 @@ export function SanctionForm({
     if (!validate()) {
       return
     }
+    beginAttempt()
     setAwaitingReauthentication(true)
   }
 
   async function handleApproved(approval: string) {
+    if (attempt === null) {
+      setFormError('제재 입력을 다시 확인해 주세요.')
+      return
+    }
     setAwaitingReauthentication(false)
     setSubmitting(true)
     setFormError(null)
@@ -136,7 +142,7 @@ export function SanctionForm({
         accountId,
         supportVersion,
         reauthenticationApproval: approval,
-        idempotencyKey,
+        idempotencyKey: attempt.idempotencyKey,
         body,
       })
       // 서버가 준 status를 그대로 전한다. 영구 정지는 여기서 APPLIED가 아니다.
@@ -155,7 +161,7 @@ export function SanctionForm({
             }
           : null,
       )
-      setIdempotencyKey(createIdempotencyKey())
+      clearAttempt()
       setReasonCode('')
       setPolicyVersion('')
       setRestrictedFeatures([])
@@ -172,6 +178,7 @@ export function SanctionForm({
   }
 
   function toggleFeature(feature: RestrictedFeature) {
+    markInputChanged()
     setRestrictedFeatures((current) =>
       current.includes(feature)
         ? current.filter((item) => item !== feature)
@@ -200,7 +207,10 @@ export function SanctionForm({
         <SelectField
           label="제재 수준"
           value={level}
-          onChange={(event) => setLevel(event.target.value as SanctionLevel)}
+          onChange={(event) => {
+            markInputChanged()
+            setLevel(event.target.value as SanctionLevel)
+          }}
         >
           {Object.entries(LEVEL_LABEL).map(([value, label]) => (
             <option key={value} value={value}>
@@ -215,7 +225,10 @@ export function SanctionForm({
           help="대문자·숫자·밑줄만 사용합니다. 예: ABUSE_REPORT"
           value={reasonCode}
           error={fieldErrors.reasonCode ?? null}
-          onChange={(event) => setReasonCode(event.target.value)}
+          onChange={(event) => {
+            markInputChanged()
+            setReasonCode(event.target.value)
+          }}
         />
 
         <TextField
@@ -223,7 +236,10 @@ export function SanctionForm({
           name="policyVersion"
           value={policyVersion}
           error={fieldErrors.policyVersion ?? null}
-          onChange={(event) => setPolicyVersion(event.target.value)}
+          onChange={(event) => {
+            markInputChanged()
+            setPolicyVersion(event.target.value)
+          }}
         />
 
         <fieldset className="po-fieldset">
@@ -263,7 +279,7 @@ export function SanctionForm({
         </Button>
       </form>
 
-      {awaitingReauthentication && (
+      {awaitingReauthentication && attempt !== null && (
         <ReauthenticationDialog
           purpose="ACCOUNT_SANCTION"
           targetType={accountTargetType(accountType)}

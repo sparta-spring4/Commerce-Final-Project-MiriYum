@@ -101,6 +101,7 @@ export function OperatorDetailPage() {
           <OperatorSummary account={accountQuery.data} />
           <OperatorAuthorityView account={accountQuery.data} />
           <OperatorAuthorityForm
+            key={`${accountQuery.data.operatorId}:${accountQuery.data.authorityVersion}`}
             account={accountQuery.data}
             onReplaced={() => void accountQuery.refetch()}
           />

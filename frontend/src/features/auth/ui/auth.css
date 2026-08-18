@@ -213,12 +213,109 @@
   border-top-color: var(--color-primary);
 }
 
-/* 헤더의 계정 영역. 두 shell의 상태를 합치지 않고 소비자 shell만 표시한다. */
+/*
+ * 헤더의 계정 영역. 두 shell의 상태를 합치지 않고 소비자 shell만 표시한다.
+ *
+ * position은 계정 드롭다운의 기준점이다. 헤더가 backdrop-filter를 쓰기 때문에
+ * 이미 절대 위치의 기준이 되지만, 패널은 헤더 전체가 아니라 계정 버튼에 붙어야
+ * 하므로 여기에 기준을 만든다.
+ */
 .app-header__account {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-1);
   margin-left: auto;
+}
+
+/*
+ * 시안의 원형 계정 버튼. 시안은 프로필 사진을 넣지만 1차 MVP 계약에 프로필
+ * 이미지가 없어 같은 크기의 원 안에 사람 아이콘을 둔다.
+ */
+.app-header__avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  background-color: var(--color-surface-container-high);
+  border: 0;
+  border-radius: var(--radius-full);
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.app-header__avatar:hover {
+  background-color: var(--color-surface-container-highest);
+  color: var(--color-on-surface);
+}
+
+/*
+ * 계정 드롭다운.
+ *
+ * 버튼 오른쪽 끝에 맞춘다. 계정 영역이 헤더 오른쪽 끝에 있어 왼쪽 정렬하면
+ * 좁은 화면에서 패널이 화면 밖으로 나간다.
+ */
+.app-header__account-panel {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: 1;
+  min-width: 11rem;
+  padding: var(--space-1);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+}
+
+.app-header__account-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-header__account-item {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  background-color: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-body-md);
+  color: var(--color-on-surface);
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.app-header__account-item:hover {
+  background-color: var(--color-surface-container);
+}
+
+.app-header__account-item:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.app-header__account-item .mi-icon {
+  flex-shrink: 0;
+  color: var(--color-on-surface-variant);
+}
+
+/* 이동이 아니라 상태를 바꾸는 항목이라 선으로 갈라 둔다. */
+.app-header__account-item--action {
+  margin-top: var(--space-1);
+  padding-top: calc(var(--space-1) + 0.125rem);
+  border-top: 1px solid var(--color-outline-variant);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 /*

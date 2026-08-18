@@ -20,6 +20,7 @@ import {
 import {
   EMPTY_COMMAND_FORM,
   OperatorCommandFields,
+  useLogicalCommandAttempt,
   validateCommandFields,
   type OperatorCommandFormState,
 } from './OperatorCommandFields'
@@ -65,8 +66,14 @@ export function OperatorAuthorityForm({
   const [submitting, setSubmitting] = useState(false)
   const [awaitingReauthentication, setAwaitingReauthentication] =
     useState(false)
-  const [idempotencyKey, setIdempotencyKey] = useState(() =>
-    createIdempotencyKey(),
+  const {
+    attempt,
+    beginAttempt,
+    clearAttempt,
+    markInputChanged,
+  } = useLogicalCommandAttempt(
+    () => ({ idempotencyKey: createIdempotencyKey() }),
+    `${account.operatorId}:${account.authorityVersion}`,
   )
 
   /** 이 API로 바꿀 수 없는 보유 권한. 표시만 하고 폼에 넣지 않는다. */
@@ -79,6 +86,7 @@ export function OperatorAuthorityForm({
   )
 
   function toggleRole(role: GrantableRole) {
+    markInputChanged()
     setRoles((current) =>
       current.includes(role)
         ? current.filter((item) => item !== role)
@@ -87,6 +95,7 @@ export function OperatorAuthorityForm({
   }
 
   function togglePermission(permission: GrantablePermission) {
+    markInputChanged()
     setPermissions((current) =>
       current.includes(permission)
         ? current.filter((item) => item !== permission)
@@ -103,10 +112,15 @@ export function OperatorAuthorityForm({
     if (Object.keys(nextErrors).length > 0) {
       return
     }
+    beginAttempt()
     setAwaitingReauthentication(true)
   }
 
   async function handleApproved(approval: string) {
+    if (attempt === null) {
+      setFormError('명령 입력을 다시 확인해 주세요.')
+      return
+    }
     setAwaitingReauthentication(false)
     setSubmitting(true)
     setFormError(null)
@@ -118,7 +132,7 @@ export function OperatorAuthorityForm({
           caseVersion: Number(command.caseVersion),
         },
         reauthenticationApproval: approval,
-        idempotencyKey,
+        idempotencyKey: attempt.idempotencyKey,
         body: {
           roles,
           directPermissions: permissions,
@@ -126,7 +140,7 @@ export function OperatorAuthorityForm({
         },
       })
       setResult('권한을 교체했습니다. 최신 상태를 다시 읽었습니다.')
-      setIdempotencyKey(createIdempotencyKey())
+      clearAttempt()
     } catch (error) {
       setFormError(commandErrorMessage(error))
     } finally {
@@ -206,7 +220,10 @@ export function OperatorAuthorityForm({
         <OperatorCommandFields
           state={command}
           errors={errors}
-          onChange={setCommand}
+          onChange={(next) => {
+            markInputChanged()
+            setCommand(next)
+          }}
         />
 
         <Button
@@ -220,7 +237,7 @@ export function OperatorAuthorityForm({
         </Button>
       </form>
 
-      {awaitingReauthentication && (
+      {awaitingReauthentication && attempt !== null && (
         <ReauthenticationDialog
           purpose="OPERATOR_AUTHORITY_CHANGE"
           targetType="PLATFORM_OPERATOR_ACCOUNT"

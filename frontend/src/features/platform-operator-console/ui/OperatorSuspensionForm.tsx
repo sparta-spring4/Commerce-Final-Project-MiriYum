@@ -13,6 +13,7 @@ import {
 import {
   EMPTY_COMMAND_FORM,
   OperatorCommandFields,
+  useLogicalCommandAttempt,
   validateCommandFields,
   type OperatorCommandFormState,
 } from './OperatorCommandFields'
@@ -45,8 +46,14 @@ export function OperatorSuspensionForm({
   const [submitting, setSubmitting] = useState(false)
   const [awaitingReauthentication, setAwaitingReauthentication] =
     useState(false)
-  const [idempotencyKey, setIdempotencyKey] = useState(() =>
-    createIdempotencyKey(),
+  const {
+    attempt,
+    beginAttempt,
+    clearAttempt,
+    markInputChanged,
+  } = useLogicalCommandAttempt(
+    () => ({ idempotencyKey: createIdempotencyKey() }),
+    `${account.operatorId}:${account.authorityVersion}`,
   )
 
   const confirmed = confirmation.trim() === account.displayName
@@ -76,10 +83,15 @@ export function OperatorSuspensionForm({
     if (Object.keys(nextErrors).length > 0) {
       return
     }
+    beginAttempt()
     setAwaitingReauthentication(true)
   }
 
   async function handleApproved(approval: string) {
+    if (attempt === null) {
+      setFormError('명령 입력을 다시 확인해 주세요.')
+      return
+    }
     setAwaitingReauthentication(false)
     setSubmitting(true)
     setFormError(null)
@@ -91,10 +103,10 @@ export function OperatorSuspensionForm({
           caseVersion: Number(command.caseVersion),
         },
         reauthenticationApproval: approval,
-        idempotencyKey,
+        idempotencyKey: attempt.idempotencyKey,
         body: { reason: command.reason },
       })
-      setIdempotencyKey(createIdempotencyKey())
+      clearAttempt()
       setConfirmation('')
     } catch (error) {
       setFormError(suspensionErrorMessage(error))
@@ -130,13 +142,19 @@ export function OperatorSuspensionForm({
           help={`중지하려면 "${account.displayName}"을 그대로 입력해 주세요.`}
           value={confirmation}
           error={errors.confirmation ?? null}
-          onChange={(event) => setConfirmation(event.target.value)}
+          onChange={(event) => {
+            markInputChanged()
+            setConfirmation(event.target.value)
+          }}
         />
 
         <OperatorCommandFields
           state={command}
           errors={errors}
-          onChange={setCommand}
+          onChange={(next) => {
+            markInputChanged()
+            setCommand(next)
+          }}
         />
 
         <Button
@@ -150,7 +168,7 @@ export function OperatorSuspensionForm({
         </Button>
       </form>
 
-      {awaitingReauthentication && (
+      {awaitingReauthentication && attempt !== null && (
         <ReauthenticationDialog
           purpose="OPERATOR_SUSPENSION"
           targetType="PLATFORM_OPERATOR_ACCOUNT"
