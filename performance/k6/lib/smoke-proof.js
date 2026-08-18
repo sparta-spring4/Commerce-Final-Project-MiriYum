@@ -43,6 +43,9 @@ export function validateSmokeProof(proofValue, expected) {
   if (proof.commitSha !== expectation.commitSha) {
     throw new Error('smoke proof commit does not match')
   }
+  if (proof.harnessCommitSha !== expectation.harnessCommitSha) {
+    throw new Error('smoke proof harness commit does not match')
+  }
   const expectedTarget = createTargetFingerprint(expectation.targetEnv, expectation.baseUrl)
   if (!SHA256_PATTERN.test(proof.targetFingerprint)
       || proof.targetFingerprint !== expectedTarget) {

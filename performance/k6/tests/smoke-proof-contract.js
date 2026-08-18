@@ -25,6 +25,7 @@ const EXPECTED = {
   targetEnv: 'local',
   baseUrl: 'https://loadtest-proxy:8443',
   commitSha: '0123456789abcdef0123456789abcdef01234567',
+  harnessCommitSha: 'fedcba9876543210fedcba9876543210fedcba98',
   fixtureText: '{"fixture":"synthetic"}',
   smokeRunId: 'local-smoke-approved',
   scenarioNames: ['storeSearch', 'reservationCreate'],
@@ -38,6 +39,7 @@ function proof(overrides = {}) {
     runId: EXPECTED.smokeRunId,
     prerequisiteSmokeRunId: null,
     commitSha: EXPECTED.commitSha,
+    harnessCommitSha: EXPECTED.harnessCommitSha,
     scenarioNames: ['authRefresh', 'storeSearch', 'reservationCreate', 'notificationHistory'],
     targetFingerprint: createTargetFingerprint(EXPECTED.targetEnv, EXPECTED.baseUrl),
     fixtureSha256: createFixtureFingerprint(EXPECTED.fixtureText),
@@ -62,6 +64,8 @@ export default function () {
       throws(() => validateSmokeProof(proof({ fixtureSha256: 'b'.repeat(64) }), EXPECTED)),
     'different commit is rejected': () =>
       throws(() => validateSmokeProof(proof({ commitSha: 'f'.repeat(40) }), EXPECTED)),
+    'different harness commit is rejected': () =>
+      throws(() => validateSmokeProof(proof({ harnessCommitSha: 'e'.repeat(40) }), EXPECTED)),
     'smoke must cover every baseline scenario': () =>
       throws(() => validateSmokeProof(proof({ scenarioNames: ['storeSearch'] }), EXPECTED)),
     'non-smoke artifact is rejected': () =>
