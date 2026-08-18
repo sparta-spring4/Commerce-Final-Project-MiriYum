@@ -122,6 +122,11 @@ export function useWaitingClosureJob(
       return response.data
     },
     refetchInterval: (query) => {
+      // 실패한 조회를 자동으로 계속 두드리면 영구 오류에서도 폴링이 끝나지
+      // 않는다. 화면에서 오류를 알리고 운영자가 명시적으로 다시 시도하게 한다.
+      if (query.state.error !== null) {
+        return false
+      }
       const job = query.state.data
       return job !== undefined && isClosureJobSettled(job)
         ? false

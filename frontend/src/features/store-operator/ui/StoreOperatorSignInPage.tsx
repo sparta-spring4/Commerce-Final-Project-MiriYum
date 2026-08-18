@@ -20,7 +20,7 @@ import { OperatorIcon } from './OperatorIcon'
  * 않는다. 운영 홈이 아는 매장이 있으면 관리 화면으로, 없으면 등록 안내를 보여 준다.
  */
 export function StoreOperatorSignInPage() {
-  const { status, signIn } = useStoreOperatorAuth()
+  const { status, signIn, signOut, signOutPending } = useStoreOperatorAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -29,6 +29,7 @@ export function StoreOperatorSignInPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [retryingSignOut, setRetryingSignOut] = useState(false)
 
   const destination = readReturnTo(location.search) ?? ROUTES.storeOperatorHome
 
@@ -133,6 +134,37 @@ export function StoreOperatorSignInPage() {
               </div>
 
               {formError !== null && <Alert tone="error" title={formError} />}
+
+              {signOutPending && (
+                <Alert
+                  tone="warning"
+                  title="이전 세션 로그아웃을 완료하지 못했습니다."
+                  actions={
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      loading={retryingSignOut}
+                      onClick={() => {
+                        setRetryingSignOut(true)
+                        void signOut()
+                          .catch(() => {
+                            setFormError(
+                              '서버 로그아웃을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+                            )
+                          })
+                          .finally(() => setRetryingSignOut(false))
+                      }}
+                    >
+                      로그아웃 다시 시도
+                    </Button>
+                  }
+                >
+                  <p>
+                    남아 있는 세션이 자동 복원되지 않도록 차단했습니다. 서버
+                    로그아웃을 다시 완료해 주세요.
+                  </p>
+                </Alert>
+              )}
 
               <TextField
                 label="이메일"

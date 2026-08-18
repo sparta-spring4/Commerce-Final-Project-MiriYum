@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react'
 import type { ReactNode } from 'react'
+import { useStoreOperatorAuth } from './StoreOperatorAuthProvider'
 import { storeOperatorKeys } from './api/queries'
 
 /**
@@ -64,6 +65,7 @@ function writeStoredStoreId(storeId: string | null): void {
 
 export function CurrentStoreProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
+  const { status: authStatus } = useStoreOperatorAuth()
   const [storeId, setStoreId] = useState<string | null>(readStoredStoreId)
 
   /**
@@ -115,6 +117,25 @@ export function CurrentStoreProvider({ children }: { children: ReactNode }) {
     writeStoredStoreId(null)
     setStoreId(null)
   }, [discardStore])
+
+  useEffect(() => {
+    if (authStatus !== 'unauthenticated') {
+      return
+    }
+
+    storeIdRef.current = null
+    writeStoredStoreId(null)
+    setStoreId(null)
+
+    /*
+     * 현재 매장만 지우면 이전 계정의 내 정보·카탈로그처럼 매장 밖 query가
+     * 남는다. 인증 경계가 닫힐 때는 운영자 namespace 전체를 취소한 뒤 제거해,
+     * 늦게 끝난 이전 세션 요청도 다음 계정 캐시에 들어오지 못하게 한다.
+     */
+    void queryClient
+      .cancelQueries({ queryKey: storeOperatorKeys.all })
+      .then(() => queryClient.removeQueries({ queryKey: storeOperatorKeys.all }))
+  }, [authStatus, queryClient])
 
   const value = useMemo(
     () => ({ storeId, selectStore, clearStore }),

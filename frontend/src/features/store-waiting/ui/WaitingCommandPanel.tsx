@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { startIdempotentAttempt } from '../../../shared/api/idempotencyKey'
+import { createIdempotencyKeyCache } from '../../../shared/api/idempotencyKey'
 import { Button } from '../../../shared/ui/Button'
 import { Alert } from '../../../shared/ui/Feedback'
 import { SectionCard } from '../../store-operator'
@@ -47,7 +47,7 @@ export function WaitingCommandPanel({
   hasCalledTeam: boolean
 }) {
   const command = useWaitingTeamCommand(storeId, team.waitingTeamId)
-  const attempt = useMemo(startIdempotentAttempt, [])
+  const idempotencyKeys = useMemo(createIdempotencyKeyCache, [])
   const [error, setError] = useState<string | null>(null)
   const [running, setRunning] = useState<WaitingCommand | null>(null)
 
@@ -71,17 +71,21 @@ export function WaitingCommandPanel({
     setError(null)
     setRunning(next)
     try {
+      const body = { expectedVersion: team.version }
       await command.mutateAsync({
         command: next,
         expectedVersion: team.version,
-        idempotencyKey: attempt.current,
+        idempotencyKey: idempotencyKeys.keyFor(
+          JSON.stringify({
+            method: 'POST',
+            path: 'waiting-team-command',
+            storeId,
+            waitingTeamId: team.waitingTeamId,
+            command: next,
+            body,
+          }),
+        ),
       })
-      /*
-       * 다음 명령은 다른 의도다. 같은 키를 유지하면 서버가 앞선 결과를 재생한다.
-       * 반대로 같은 명령을 다시 눌러 재시도하는 동안에는 키를 유지해야 하므로,
-       * 성공한 뒤에만 새로 발급한다.
-       */
-      attempt.renew()
     } catch (cause) {
       setError(waitingErrorMessage(cause))
     } finally {

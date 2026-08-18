@@ -1,8 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CurrentStoreProvider, useCurrentStore } from './CurrentStoreProvider'
 import { storeOperatorKeys } from './api/queries'
+
+let authStatus: 'authenticated' | 'unauthenticated' = 'authenticated'
+
+vi.mock('./StoreOperatorAuthProvider', () => ({
+  useStoreOperatorAuth: () => ({ status: authStatus }),
+}))
 
 function Probe() {
   const { storeId, selectStore, clearStore } = useCurrentStore()
@@ -35,6 +41,10 @@ function renderProvider(queryClient = new QueryClient()) {
 }
 
 describe('현재 매장 선택', () => {
+  beforeEach(() => {
+    authStatus = 'authenticated'
+  })
+
   it('아는 매장이 없으면 목록을 조회하지 않고 없음으로 둔다', () => {
     renderProvider()
 
@@ -100,5 +110,48 @@ describe('현재 매장 선택', () => {
     expect(
       queryClient.getQueryData(storeOperatorKeys.managedStore('7')),
     ).toBeUndefined()
+  })
+
+  it('인증이 만료되면 이전 계정의 매장 선택과 운영자 query를 모두 폐기한다', async () => {
+    const queryClient = new QueryClient()
+    const view = renderProvider(queryClient)
+
+    fireEvent.click(screen.getByRole('button', { name: '7번 선택' }))
+    queryClient.setQueryData(storeOperatorKeys.managedStore('7'), {
+      name: '이전 대표자 매장',
+    })
+    queryClient.setQueryData(
+      [...storeOperatorKeys.all, 'account'],
+      { email: 'previous@example.com' },
+    )
+
+    authStatus = 'unauthenticated'
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <CurrentStoreProvider>
+          <Probe />
+        </CurrentStoreProvider>
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('store')).toHaveTextContent('없음')
+    })
+    expect(
+      queryClient.getQueryData(storeOperatorKeys.managedStore('7')),
+    ).toBeUndefined()
+    expect(
+      queryClient.getQueryData([...storeOperatorKeys.all, 'account']),
+    ).toBeUndefined()
+
+    authStatus = 'authenticated'
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <CurrentStoreProvider>
+          <Probe />
+        </CurrentStoreProvider>
+      </QueryClientProvider>,
+    )
+    expect(screen.getByTestId('store')).toHaveTextContent('없음')
   })
 })

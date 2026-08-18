@@ -8,7 +8,9 @@ import { server } from '../../../test/msw/server'
 import { AuthErrorCode } from '../../auth/model/authErrors'
 import { StoreOperatorAuthProvider } from '../StoreOperatorAuthProvider'
 import {
+  OPERATOR_CSRF_PATH,
   OPERATOR_REFRESH_PATH,
+  OPERATOR_SESSION_CURRENT_PATH,
   OPERATOR_SESSIONS_PATH,
   tokenData,
   unauthenticatedOperator,
@@ -232,5 +234,39 @@ describe('식당 대표자 로그인 화면', () => {
       await screen.findByRole('link', { name: '일반 사용자 로그인' }),
     ).toHaveAttribute('href', ROUTES.consumerSignIn)
     expect(screen.queryByLabelText('계정 유형')).not.toBeInTheDocument()
+  })
+
+  it('완료되지 않은 로그아웃을 알리고 서버 정리를 다시 시도한다', async () => {
+    let deletes = 0
+    sessionStorage.setItem('MIRIYUM_STORE_OPERATOR_SIGN_OUT_PENDING', 'true')
+    document.cookie = 'MIRIYUM_STORE_OPERATOR_XSRF_TOKEN=operator-csrf'
+    server.use(
+      http.get(OPERATOR_CSRF_PATH, () =>
+        successResponse({
+          token: 'operator-csrf',
+          headerName: 'X-CSRF-TOKEN',
+        }),
+      ),
+      http.delete(OPERATOR_SESSION_CURRENT_PATH, () => {
+        deletes += 1
+        return successResponse(null)
+      }),
+    )
+
+    renderSignInAt()
+
+    expect(
+      await screen.findByText('이전 세션 로그아웃을 완료하지 못했습니다.'),
+    ).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: '로그아웃 다시 시도' }),
+    )
+
+    await waitFor(() => expect(deletes).toBe(1))
+    await waitFor(() =>
+      expect(
+        screen.queryByText('이전 세션 로그아웃을 완료하지 못했습니다.'),
+      ).not.toBeInTheDocument(),
+    )
   })
 })

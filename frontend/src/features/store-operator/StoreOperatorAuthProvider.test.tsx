@@ -24,7 +24,8 @@ import {
 } from './test/handlers'
 
 function Probe() {
-  const { status, apiClient, signIn, signOut } = useStoreOperatorAuth()
+  const { status, apiClient, signIn, signOut, signOutPending } =
+    useStoreOperatorAuth()
   const [signInSettled, setSignInSettled] = useState(false)
   const [signOutSettled, setSignOutSettled] = useState(false)
   const [protectedRequestSettled, setProtectedRequestSettled] = useState(false)
@@ -32,6 +33,7 @@ function Probe() {
   return (
     <div>
       <p data-testid="status">{status}</p>
+      <p data-testid="sign-out-pending">{String(signOutPending)}</p>
       <p data-testid="sign-in-settled">{String(signInSettled)}</p>
       <p data-testid="sign-out-settled">{String(signOutSettled)}</p>
       <p data-testid="protected-request-settled">
@@ -592,14 +594,18 @@ describe('매장 운영자 인증 shell', () => {
   })
 
   it('서버 정리에 실패해도 클라이언트 세션은 비운다', async () => {
+    let refreshCalls = 0
     server.use(
-      authenticatedOperator(),
+      http.post(OPERATOR_REFRESH_PATH, () => {
+        refreshCalls += 1
+        return successResponse(tokenData())
+      }),
       http.get(OPERATOR_CSRF_PATH, () =>
         errorResponse(401, 'AUTH_001', '인증이 필요합니다.'),
       ),
     )
 
-    renderProvider()
+    const view = renderProvider()
     await waitFor(() =>
       expect(screen.getByTestId('status')).toHaveTextContent('authenticated'),
     )
@@ -609,6 +615,16 @@ describe('매장 운영자 인증 shell', () => {
     await waitFor(() =>
       expect(screen.getByTestId('status')).toHaveTextContent('unauthenticated'),
     )
+    expect(screen.getByTestId('sign-out-pending')).toHaveTextContent('true')
+
+    view.unmount()
+    renderProvider()
+    await waitFor(() =>
+      expect(screen.getByTestId('status')).toHaveTextContent('unauthenticated'),
+    )
+    // 서버 로그아웃이 끝나지 않았다는 경계가 새로고침 뒤에도 남아, 남은
+    // Refresh 쿠키로 이전 세션을 자동 복원하지 않는다.
+    expect(refreshCalls).toBe(1)
   })
 
   it('로그아웃 실패 뒤 도착한 401이 세션을 되살리지 않는다', async () => {

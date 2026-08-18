@@ -200,16 +200,26 @@ describe('웨이팅 팀 상세 화면', () => {
 
   it('version 충돌은 최신 상태를 다시 읽도록 안내한다', async () => {
     let detailReads = 0
+    const requests: { body: unknown; key: string | null }[] = []
     server.use(
       authenticatedOperator(),
       headIsThisTeam(),
       http.get(waitingTeamPath(TEAM_ID), () => {
         detailReads += 1
-        return successResponse(teamDetail({ status: 'WAITING', version: 4 }))
+        return successResponse(
+          teamDetail({
+            status: 'WAITING',
+            version: detailReads === 1 ? 4 : 5,
+          }),
+        )
       }),
-      http.post(waitingCommandPath(TEAM_ID, 'calls'), () =>
-        errorResponse(409, 'WAITING_005', '웨이팅 팀이 변경되었습니다.'),
-      ),
+      http.post(waitingCommandPath(TEAM_ID, 'calls'), async ({ request }) => {
+        requests.push({
+          body: await request.json(),
+          key: request.headers.get('Idempotency-Key'),
+        })
+        return errorResponse(409, 'WAITING_005', '웨이팅 팀이 변경되었습니다.')
+      }),
     )
 
     renderPage()
@@ -223,6 +233,13 @@ describe('웨이팅 팀 상세 화면', () => {
     ).toBeInTheDocument()
     // 성공을 낙관 확정하지 않고 서버를 다시 읽는다.
     await waitFor(() => expect(detailReads).toBeGreaterThan(before))
+
+    fireEvent.click(screen.getByRole('button', { name: '호출' }))
+    await waitFor(() => expect(requests).toHaveLength(2))
+    expect(requests[0].body).toEqual({ expectedVersion: 4 })
+    expect(requests[1].body).toEqual({ expectedVersion: 5 })
+    // endpoint·명령·본문이 같은 논리적 요청일 때만 키를 재사용한다.
+    expect(requests[1].key).not.toBe(requests[0].key)
   })
 
   it('FIFO 선두가 아니라는 서버 거절을 그대로 옮긴다', async () => {

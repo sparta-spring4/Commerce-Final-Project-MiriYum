@@ -36,6 +36,8 @@ export type StoreOperatorAuthStatus =
 
 export interface StoreOperatorAuthContextValue {
   status: StoreOperatorAuthStatus
+  /** 서버 로그아웃이 끝나지 않아 자동 세션 복구를 막고 있는지. */
+  signOutPending: boolean
   /** 보호 API 호출용 client. Access Token과 401 재발급이 이미 걸려 있다. */
   apiClient: ApiClient
   signIn: (credentials: LoginRequest) => Promise<void>
@@ -44,6 +46,29 @@ export interface StoreOperatorAuthContextValue {
 
 const StoreOperatorAuthContext =
   createContext<StoreOperatorAuthContextValue | null>(null)
+
+const SIGN_OUT_PENDING_STORAGE_KEY =
+  'MIRIYUM_STORE_OPERATOR_SIGN_OUT_PENDING'
+
+function readSignOutPending(): boolean {
+  try {
+    return window.sessionStorage.getItem(SIGN_OUT_PENDING_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function writeSignOutPending(pending: boolean): void {
+  try {
+    if (pending) {
+      window.sessionStorage.setItem(SIGN_OUT_PENDING_STORAGE_KEY, 'true')
+    } else {
+      window.sessionStorage.removeItem(SIGN_OUT_PENDING_STORAGE_KEY)
+    }
+  } catch {
+    // 저장소가 막혀도 현재 탭의 메모리 경계는 유지한다.
+  }
+}
 
 export function useStoreOperatorAuth(): StoreOperatorAuthContextValue {
   const value = useContext(StoreOperatorAuthContext)
@@ -69,6 +94,13 @@ export function StoreOperatorAuthProvider({
 }) {
   const accessTokenRef = useRef<string | null>(null)
   const [status, setStatus] = useState<StoreOperatorAuthStatus>('restoring')
+  const pendingOnMount = useRef(readSignOutPending())
+  const [signOutPending, setSignOutPending] = useState(pendingOnMount.current)
+
+  const setSignOutBoundary = useCallback((pending: boolean) => {
+    writeSignOutPending(pending)
+    setSignOutPending(pending)
+  }, [])
 
   /**
    * 진행 중인 재발급을 공유한다. 보호 API 여러 개가 동시에 401을 받아 각자
@@ -81,7 +113,7 @@ export function StoreOperatorAuthProvider({
    * 로그아웃이나 실패한 로그인 뒤 늦게 도착한 401이 남아 있는
    * Refresh 쿠키로 세션을 되살리지 못하게 한다.
    */
-  const refreshEligible = useRef(true)
+  const refreshEligible = useRef(!pendingOnMount.current)
 
   /**
    * Refresh·로그인·로그아웃은 모두 HttpOnly Refresh 쿠키를 바꿀 수 있다.
@@ -179,8 +211,12 @@ export function StoreOperatorAuthProvider({
   )
 
   useEffect(() => {
+    if (pendingOnMount.current) {
+      clearSession()
+      return
+    }
     void refreshOnce()
-  }, [refreshOnce])
+  }, [clearSession, refreshOnce])
 
   const signIn = useCallback(async (credentials: LoginRequest) => {
     // 로그인 시도도 새 세션 경계다. 실패해도 restoring에 남지 않는다.
@@ -205,25 +241,36 @@ export function StoreOperatorAuthProvider({
     }
     refreshEligible.current = true
     accessTokenRef.current = token.accessToken
+    setSignOutBoundary(false)
     setStatus('authenticated')
-  }, [beginSessionTransition, clearSession, runServerSessionCommand])
+  }, [
+    beginSessionTransition,
+    clearSession,
+    runServerSessionCommand,
+    setSignOutBoundary,
+  ])
 
   const signOut = useCallback(async () => {
     // 서버 정리를 기다리는 동안에도 이전 재발급이 세션을 되살리지 못하게 한다.
+    setSignOutBoundary(true)
     const generation = clearSession()
-    await runServerSessionCommand(async () => {
+    const completed = await runServerSessionCommand(async () => {
       try {
         // 서버가 쿠키를 내려주므로 값을 읽기 전에 준비를 먼저 요청한다.
         await prepareStoreOperatorCsrfToken()
         const csrfToken = readCookie(STORE_OPERATOR_CSRF_COOKIE)
         if (csrfToken !== null) {
           await signOutStoreOperator(csrfToken)
+          return true
         }
+        return false
       } catch (error) {
-        // 서버 정리에 실패해도 클라이언트 메모리는 이미 비웠다.
+        // 서버 정리에 실패해도 클라이언트 메모리는 이미 비웠다. 다만 남은
+        // Refresh 쿠키로 새로고침 복구가 되지 않도록 pending 경계는 유지한다.
         if (!isApiError(error)) {
           throw error
         }
+        return false
       } finally {
         // 로그아웃 중 401이 시작한 재발급도 다음에 실행될 수 있다.
         // 더 최신의 로그인이 없을 때만 세대를 닫아 그 결과를 버린다.
@@ -232,11 +279,19 @@ export function StoreOperatorAuthProvider({
         }
       }
     })
-  }, [beginSessionTransition, clearSession, runServerSessionCommand])
+    if (completed) {
+      setSignOutBoundary(false)
+    }
+  }, [
+    beginSessionTransition,
+    clearSession,
+    runServerSessionCommand,
+    setSignOutBoundary,
+  ])
 
   const value = useMemo(
-    () => ({ status, apiClient, signIn, signOut }),
-    [status, apiClient, signIn, signOut],
+    () => ({ status, signOutPending, apiClient, signIn, signOut }),
+    [status, signOutPending, apiClient, signIn, signOut],
   )
 
   return (

@@ -89,6 +89,7 @@ describe('웨이팅 설정 화면', () => {
   it('충돌 뒤 재저장은 다시 읽은 최신 version으로 보낸다', async () => {
     let gets = 0
     const bodies: Record<string, unknown>[] = []
+    const keys: (string | null)[] = []
     server.use(
       authenticatedOperator(),
       http.get(WAITING_SETTINGS_PATH, () => {
@@ -98,6 +99,7 @@ describe('웨이팅 설정 화면', () => {
         )
       }),
       http.put(WAITING_SETTINGS_PATH, async ({ request }) => {
+        keys.push(request.headers.get('Idempotency-Key'))
         bodies.push((await request.json()) as Record<string, unknown>)
         return bodies.length === 1
           ? errorResponse(409, 'WAITING_001', '웨이팅 설정이 변경되었습니다.')
@@ -121,6 +123,9 @@ describe('웨이팅 설정 화면', () => {
     expect(bodies[0]).toMatchObject({ expectedVersion: 7 })
     // 옛 version으로 다시 보내면 같은 충돌이 반복된다.
     expect(bodies[1]).toMatchObject({ expectedVersion: 9, advanceOpenMinutes: 45 })
+    // expectedVersion까지 요청 지문의 일부다. 본문이 달라졌는데 같은 키를 쓰면
+    // 서버가 앞선 충돌 응답을 재생한다.
+    expect(keys[1]).not.toBe(keys[0])
   })
 
   it('끄는 변경은 영향을 확인하기 전에는 저장하지 않는다', async () => {
@@ -313,6 +318,41 @@ describe('웨이팅 설정 화면', () => {
     // 열어 둔 동안 같은 응답만 반복해서 받는다.
     await new Promise((resolve) => setTimeout(resolve, CLOSURE_JOB_POLL_MS + 300))
     expect(reads).toBe(settled)
+  })
+
+  it('종결 작업 조회가 실패하면 진행 스냅샷 대신 오류와 수동 재시도를 보여 준다', async () => {
+    let reads = 0
+    const started = closureJob({ status: 'PENDING' })
+    server.use(
+      ...disableFlow(started),
+      http.get(waitingClosureJobPath(started.jobId), () => {
+        reads += 1
+        return reads === 1
+          ? errorResponse(503, 'COMMON_012', '일시적으로 이용할 수 없습니다.')
+          : successResponse(closureJob({ status: 'COMPLETED' }))
+      }),
+    )
+
+    renderPage()
+    await startClosure()
+
+    expect(
+      await screen.findByText(
+        '서비스를 일시적으로 이용할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText('대기 팀 일괄 종결을 시작했습니다.'),
+    ).not.toBeInTheDocument()
+
+    const failedReads = reads
+    await new Promise((resolve) => setTimeout(resolve, CLOSURE_JOB_POLL_MS + 300))
+    expect(reads).toBe(failedReads)
+
+    fireEvent.click(screen.getByRole('button', { name: '상태 다시 확인' }))
+    expect(
+      await screen.findByText('대기 팀 일괄 종결을 마쳤습니다.'),
+    ).toBeInTheDocument()
   })
 
   it('활성 팀이 없으면 일괄 종결을 제시하지 않는다', async () => {

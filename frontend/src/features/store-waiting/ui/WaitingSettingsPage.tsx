@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useParams } from 'react-router'
-import { startIdempotentAttempt } from '../../../shared/api/idempotencyKey'
+import { createIdempotencyKeyCache } from '../../../shared/api/idempotencyKey'
 import { Badge } from '../../../shared/ui/Badge'
 import { Button } from '../../../shared/ui/Button'
 import { SelectField, TextField } from '../../../shared/ui/Field'
@@ -94,7 +94,7 @@ function WaitingSettingsForm({
   setting: WaitingSetting
 }) {
   const update = useUpdateWaitingSettings(storeId)
-  const attempt = useMemo(startIdempotentAttempt, [])
+  const idempotencyKeys = useMemo(createIdempotencyKeyCache, [])
 
   const [draft, setDraft] = useState<WaitingSettingsDraft>(() =>
     toDraft(setting),
@@ -121,9 +121,6 @@ function WaitingSettingsForm({
     setDraft(next)
     setSaved(false)
     setFormError(null)
-    // 값을 고치면 앞선 시도와 다른 요청이다. 같은 키를 재사용하면 서버가 이전
-    // 결과를 그대로 재생해 바뀐 값이 반영되지 않는다.
-    attempt.renew()
   }
 
   async function save(disableAction?: WaitingDisableAction) {
@@ -136,9 +133,17 @@ function WaitingSettingsForm({
 
     setFormError(null)
     try {
+      const body = toUpdateRequest(draft, setting.version, disableAction)
       const data = await update.mutateAsync({
-        body: toUpdateRequest(draft, setting.version, disableAction),
-        idempotencyKey: attempt.current,
+        body,
+        idempotencyKey: idempotencyKeys.keyFor(
+          JSON.stringify({
+            method: 'PUT',
+            path: 'waiting-settings',
+            storeId,
+            body,
+          }),
+        ),
       })
       setConfirming(false)
       if (isClosureJob(data)) {
@@ -196,7 +201,15 @@ function WaitingSettingsForm({
               <Alert tone="info" title="웨이팅 설정을 저장했습니다." />
             )}
 
-            {closureJob != null && <ClosureJobAlert job={closureJob} />}
+            {jobQuery.isError ? (
+              <ErrorState
+                error={jobQuery.error}
+                message={waitingErrorMessage(jobQuery.error)}
+                onRetry={() => void jobQuery.refetch()}
+              />
+            ) : (
+              closureJob != null && <ClosureJobAlert job={closureJob} />
+            )}
 
             {confirming && (
               <WaitingDisableDialog
