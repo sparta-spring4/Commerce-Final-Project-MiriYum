@@ -463,7 +463,7 @@
 - 모든 생성·합류·입장 임박·호출·취소·종결·조정은 대기열 버전과 팀 버전을 조건부 갱신하며 명확한 원장 또는 알림 사건을 만든다.
 - 캐시와 SSE는 조회·전달 최적화일 뿐 쓰기 권한이나 최종 순서를 결정하지 않는다. 오래된 클라이언트 명령은 최신 버전과 함께 충돌로 반환한다.
 - 소비자는 `GET /api/v1/consumers/me/waiting-events`, 매장 운영자는 `GET /api/v1/store-operators/stores/{storeId}/waiting-events`를 각 audience Bearer JWT와 Authorization header를 전달할 수 있는 fetch streaming으로 연결한다. `waiting.changed`는 상태 본문이 아니라 소유 HTTP snapshot을 다시 조회하라는 최소 변경 신호다.
-- SSE wire frame은 `event: waiting.changed`, opaque `id`, 고정 `data: {}`만 포함하고 계정·매장·팀·상태·순번을 싣지 않는다. `id`는 audience·인증 계정·필요한 store scope·계약 version에 결속된 무결성 보호 opaque cursor다. 다른 audience·계정·store의 `Last-Event-ID`를 재사용하거나 client가 값을 해석·수정할 수 없다.
+- SSE wire frame은 `event: waiting.changed`, opaque `id`, 고정 `data: {}`만 포함하고 계정·매장·팀·상태·순번을 싣지 않으며 필수 빈 줄을 두어 `\n\n`으로 종료한다. `id`는 audience·인증 계정·필요한 store scope·계약 version에 결속된 무결성 보호 opaque cursor다. 다른 audience·계정·store의 `Last-Event-ID`를 재사용하거나 client가 값을 해석·수정할 수 없다.
 - 같은 매장·같은 영업 구간의 활성 예약 보유자가 웨이팅을 신청하거나 활성 웨이팅 보유자가 예약을 요청하면 강제 차단만 하지 않고 기존 거래 유지 또는 기존 거래를 종결한 조건부 전환 선택지를 표시한다. 예약 취소가 필요한 경우 `RES-009`·`PAY-009`가 계산한 취소 수수료·환불 결과와 정책 버전을 먼저 표시하고 사용자의 명시적 확인을 받는다.
 
 ### 정상 흐름·변경·취소·만료

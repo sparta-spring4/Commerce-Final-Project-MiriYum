@@ -168,6 +168,8 @@ class WaitingOpenApiContractTest {
 
         Map<String, Object> invalidCursor =
                 map(map(components.get("responses")).get("WaitingEventCursorBadRequest"));
+        assertThat(invalidCursor.get("description").toString())
+                .contains("audience", "계정", "store", "결속");
         Map<String, Object> invalidCursorJson =
                 map(map(invalidCursor.get("content")).get("application/json"));
         assertThat(map(invalidCursorJson.get("example")))
@@ -175,6 +177,10 @@ class WaitingOpenApiContractTest {
 
         Map<String, Object> lastEventId =
                 map(map(components.get("parameters")).get("WaitingLastEventId"));
+        assertThat(lastEventId)
+                .containsEntry("name", "Last-Event-ID")
+                .containsEntry("in", "header")
+                .containsEntry("required", false);
         assertThat(lastEventId.get("description").toString())
                 .contains("audience", "인증 계정", "store scope", "계약 version", "최초 연결");
         assertThat(map(lastEventId.get("schema")))
@@ -189,13 +195,17 @@ class WaitingOpenApiContractTest {
                 .contains(
                         "waiting.changed",
                         "Last-Event-ID",
+                        "최초 연결·유효한 재연결",
+                        "현재 MySQL high-watermark",
+                        "한 번",
                         "GET /api/v1/consumers/me/waiting-teams/current",
                         "teamsAhead",
                         "keepalive");
         assertThat(map(schemas.get("WaitingConsumerChangedEventStream"))
                 .get("example").toString())
-                .contains("event: waiting.changed", "id: opaque-waiting-cursor", "data: {}")
-                .doesNotContain("accountId", "waitingTeamId", "storeId", "status", "teamsAhead");
+                .isEqualTo("id: opaque-waiting-cursor\n"
+                        + "event: waiting.changed\n"
+                        + "data: {}\n\n");
         assertThat(map(schemas.get("WaitingStoreOperatorChangedEventStream")))
                 .containsKey("example");
         assertThat(map(schemas.get("WaitingStoreOperatorChangedEventStream"))
@@ -203,13 +213,17 @@ class WaitingOpenApiContractTest {
                 .contains(
                         "waiting.changed",
                         "Last-Event-ID",
+                        "최초 연결·유효한 재연결",
+                        "현재 MySQL high-watermark",
+                        "한 번",
                         "해당 store",
                         "목록·상세",
                         "keepalive");
         assertThat(map(schemas.get("WaitingStoreOperatorChangedEventStream"))
                 .get("example").toString())
-                .contains("event: waiting.changed", "id: opaque-waiting-cursor", "data: {}")
-                .doesNotContain("accountId", "waitingTeamId", "storeId", "status");
+                .isEqualTo("id: opaque-waiting-cursor\n"
+                        + "event: waiting.changed\n"
+                        + "data: {}\n\n");
     }
 
     private static void assertWaitingEventStream(

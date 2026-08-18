@@ -42,7 +42,7 @@
 
 - 로그인한 일반 사용자는 `GET /api/v1/consumers/me/notification-events`를 consumer Bearer JWT와 Authorization header를 전달할 수 있는 fetch streaming으로 연결한다. `notifications.changed`는 상태 본문이 아니라 본인 알림 이력 HTTP API를 다시 조회하라는 최소 변경 신호다.
 - 연결 직후와 유효한 `Last-Event-ID` 재연결 뒤 현재 MySQL high-watermark에 결속된 신호를 한 번 보낸다. `id`는 consumer audience·인증 계정·계약 version에 결속된 무결성 보호 opaque cursor이며 client가 해석하거나 수정하지 않는다.
-- 최초 연결·재연결 수렴 신호 뒤의 high-watermark 신호는 새 `IN_APP DELIVERED`가 공개 이력에 보이게 된 경우만 나타낸다. wire frame은 `event: notifications.changed`, opaque `id`, 고정 `data: {}`만 포함하고 계정·알림·목적·상태를 싣지 않는다. 내부 `PENDING`·`FAILED`·`CANCELLED`, provider 상태와 재시도는 공개 신호가 아니다. keepalive comment도 업무 event나 성공 근거가 아니며 cursor를 전진시키지 않는다.
+- 최초 연결·재연결 수렴 신호 뒤의 high-watermark 신호는 새 `IN_APP DELIVERED`가 공개 이력에 보이게 된 경우만 나타낸다. wire frame은 `event: notifications.changed`, opaque `id`, 고정 `data: {}`만 포함하고 계정·알림·목적·상태를 싣지 않으며 필수 빈 줄을 두어 `\n\n`으로 종료한다. 내부 `PENDING`·`FAILED`·`CANCELLED`, provider 상태와 재시도는 공개 신호가 아니다. keepalive comment도 업무 event나 성공 근거가 아니며 cursor를 전진시키지 않는다.
 - Valkey Pub/Sub은 여러 인스턴스의 wake-up hint일 뿐 재생 원장이나 전달 성공의 근거가 아니다. 신호 중복·역순·유실과 재연결 뒤에도 MySQL 이력 조회로 수렴하며, SSE 실패가 알림 작업이나 원 거래 상태를 변경하지 않는다.
 - 형식이 잘못됐거나 다른 audience·계정에 결속된 `Last-Event-ID`는 공통 `400` JSON 오류 envelope로 거절한다. 연결 한도·heartbeat·timeout·correction interval의 운영 수치는 Runtime과 배포 부하 증거에서 별도로 확정한다.
 

@@ -114,14 +114,16 @@ components:
       description: >-
         UTF-8 SSE stream. 업무 event는 notifications.changed이고 id는 다음 Last-Event-ID로
         그대로 재사용할 opaque cursor다. 최초 연결·유효한 재연결의 수렴 신호는 이력 유무나
-        변경 여부와 관계없이 한 번 전송하고, 이후 high-watermark 신호는 공개 이력의 새 IN_APP
-        DELIVERED가 보이는 경우에만 발생한다. 신호는 상태 본문이나 전달 성공 근거가 아니며 수신
+        변경 여부와 관계없이 현재 MySQL high-watermark 기준으로 한 번 전송하고, 이후
+        high-watermark 신호는 공개 이력의 새 IN_APP DELIVERED가 보이는 경우에만 발생한다. 각
+        업무 frame은 빈 줄(\n\n)로 종료한다. 신호는 상태 본문이나 전달 성공 근거가 아니며 수신
         뒤 GET /api/v1/consumers/me/notifications를 다시 조회해야 한다. keepalive comment는 업무
         event가 아니며 cursor를 전진시키지 않는다. PENDING·실패·취소 작업은 신호 대상이 아니다.
-      example: |-
+      example: |+
         id: opaque-notification-cursor
         event: notifications.changed
         data: {}
+
     NotificationPurpose:
       type: string
       description: RESERVATION_VISIT_COMPLETED와 RESERVATION_NO_SHOW는 예약 종결 상태를 설명하며 결제 결과를 뜻하지 않고 보호된 상세 route 활성화 전 action은 null이다.

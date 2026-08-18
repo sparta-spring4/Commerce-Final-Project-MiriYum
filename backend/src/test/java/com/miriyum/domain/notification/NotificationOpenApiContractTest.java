@@ -104,19 +104,23 @@ class NotificationOpenApiContractTest {
                 .contains(
                         "notifications.changed",
                         "Last-Event-ID",
+                        "최초 연결·유효한 재연결",
+                        "현재 MySQL high-watermark",
+                        "한 번",
                         "GET /api/v1/consumers/me/notifications",
                         "keepalive",
                         "PENDING·실패·취소 작업은 신호 대상이 아니다");
-        assertThat(streamSchema).containsKey("example");
         assertThat(streamSchema.get("example").toString())
-                .contains(
-                        "event: notifications.changed",
-                        "id: opaque-notification-cursor",
-                        "data: {}")
-                .doesNotContain("accountId", "notificationId", "purpose", "status");
+                .isEqualTo("id: opaque-notification-cursor\n"
+                        + "event: notifications.changed\n"
+                        + "data: {}\n\n");
 
         Map<String, Object> lastEventId =
                 map(map(components.get("parameters")).get("NotificationLastEventId"));
+        assertThat(lastEventId)
+                .containsEntry("name", "Last-Event-ID")
+                .containsEntry("in", "header")
+                .containsEntry("required", false);
         assertThat(lastEventId.get("description").toString())
                 .contains("consumer audience", "인증 계정", "계약 version", "최초 연결");
         assertThat(map(lastEventId.get("schema")))
@@ -128,6 +132,8 @@ class NotificationOpenApiContractTest {
                 "$ref", "#/components/responses/InvalidEventCursor");
         Map<String, Object> invalidCursor =
                 map(map(components.get("responses")).get("InvalidEventCursor"));
+        assertThat(invalidCursor.get("description").toString())
+                .contains("consumer", "계정", "결속");
         Map<String, Object> invalidCursorJson =
                 map(map(invalidCursor.get("content")).get("application/json"));
         assertThat(map(invalidCursorJson.get("schema"))).containsEntry(

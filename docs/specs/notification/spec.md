@@ -262,7 +262,7 @@ Accept: text/event-stream
 - 브라우저는 Authorization header를 전달할 수 있는 fetch streaming을 사용한다. 성공 media type은 `text/event-stream`이며 이 계약 PR에서는 production route를 만들지 않고 path item에 `x-miriyum-runtime-status: contract-only`, `x-miriyum-owner-issue: 250`을 유지한다.
 - 업무 event 이름은 `notifications.changed` 하나다. event data는 알림 상태 본문이나 전달 성공의 근거가 아니며, client는 신호를 받으면 `GET /api/v1/consumers/me/notifications`를 다시 조회한다.
 - `Last-Event-ID`가 없으면 최초 연결이다. 연결 직후와 유효한 재연결 뒤 현재 MySQL high-watermark에 결속된 changed signal을 한 번 보내며 이후 신호는 중복 병합할 수 있다.
-- wire frame은 `event: notifications.changed`, opaque `id`, 고정 `data: {}` 세 줄만 사용한다. 빈 data 객체에 계정·알림·목적·자원·상태 필드를 추가하지 않는다.
+- wire frame은 `event: notifications.changed`, opaque `id`, 고정 `data: {}` 세 줄 뒤 필수 빈 줄을 두어 `\n\n`으로 종료한다. 빈 data 객체에 계정·알림·목적·자원·상태 필드를 추가하지 않는다.
 - `id`는 consumer audience·인증 계정·계약 version에 결속한 1~512자의 base64url 문자 집합 opaque cursor다. 형식·무결성이 잘못됐거나 다른 audience·계정 cursor면 `400 COMMON_001` JSON 오류 envelope로 거절한다.
 - 최초 연결·유효한 재연결의 수렴 신호는 이력이 비어 있거나 high-watermark가 바뀌지 않았어도 한 번 보낸다. 그 뒤에는 공개 이력에 새 `IN_APP DELIVERED`가 보이게 된 경우만 신호 대상이다. 내부 `PENDING`, `FAILED`, `CANCELLED`, channel attempt와 provider 결과는 제외한다. keepalive comment는 업무 event나 성공 근거가 아니며 cursor를 전진시키지 않는다.
 - Valkey Pub/Sub은 인스턴스 간 wake-up hint이고 MySQL이 유일한 재연결·보정 원본이다. 신호 유실·중복·역순과 구독 재시작 뒤에도 유한한 MySQL correction과 HTTP 재조회로 수렴한다.
