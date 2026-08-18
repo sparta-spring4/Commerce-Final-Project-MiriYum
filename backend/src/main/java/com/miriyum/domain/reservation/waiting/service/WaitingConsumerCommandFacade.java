@@ -1,7 +1,6 @@
 package com.miriyum.domain.reservation.waiting.service;
 
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
-import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
@@ -89,16 +88,14 @@ public class WaitingConsumerCommandFacade {
         Objects.requireNonNull(businessDate, "businessDate must not be null");
         Objects.requireNonNull(key, "key must not be null");
         accountService.requireActiveAccount(consumerAccountId);
-        if (!locationProofConnected) {
-            throw new ServiceException(ReservationErrorCode.WAITING_RECEPTION_CLOSED);
-        }
         return creationService.createForConsumer(
                 storeId,
                 consumerAccountId,
                 businessDate,
                 partySize,
                 WaitingSource.REMOTE,
-                key);
+                key,
+                locationProofConnected);
     }
 
     public WaitingConsumerCommandResult cancel(

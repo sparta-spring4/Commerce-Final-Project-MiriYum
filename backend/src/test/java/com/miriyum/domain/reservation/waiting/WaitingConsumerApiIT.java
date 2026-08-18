@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.when;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
@@ -26,6 +27,7 @@ import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepositor
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -91,9 +93,12 @@ class WaitingConsumerApiIT {
     }
 
     @Autowired WaitingCreationService creationService;
+    @Autowired ConsumerAccountService consumerAccountService;
     @Autowired WaitingConsumerCommandFacade consumerCommandFacade;
     @Autowired WaitingConsumerQueryService consumerQueryService;
     @Autowired WaitingCommandFacade operatorCommandFacade;
+    @Autowired WaitingLedgerService ledgerService;
+    @Autowired Clock clock;
     @Autowired WaitingTeamRepository teams;
     @Autowired WaitingActiveMembershipRepository memberships;
     @Autowired StoreRepository stores;
@@ -181,6 +186,33 @@ class WaitingConsumerApiIT {
         assertThat(firstData.path("version").asLong()).isZero();
         assertThat(teams.findById(teamId).orElseThrow().getStatus())
                 .isEqualTo(WaitingTeamStatus.CALLED);
+    }
+
+    @Test
+    void registrationReplayKeepsTheFirstSuccessAfterLocationProofGateIsDisabled() {
+        Fixture fixture = fixture();
+        IdempotencyKey createKey = key(32);
+        var first = consumerCommandFacade.create(
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, createKey);
+        WaitingConsumerCommandFacade disabledFacade = new WaitingConsumerCommandFacade(
+                consumerAccountService,
+                creationService,
+                ledgerService,
+                clock,
+                false,
+                attempt -> 0L,
+                millis -> { });
+
+        var replay = disabledFacade.create(
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, createKey);
+
+        JsonNode firstData = objectMapper.valueToTree(first.data());
+        JsonNode replayData = objectMapper.valueToTree(replay.data());
+        assertThat(replay.httpStatus()).isEqualTo(first.httpStatus());
+        assertThat(replayData).isEqualTo(firstData);
+        assertThat(count("waiting_teams")).isOne();
+        assertThat(count("waiting_active_memberships")).isOne();
+        assertThat(count("idempotency_commands")).isOne();
     }
 
     @Test

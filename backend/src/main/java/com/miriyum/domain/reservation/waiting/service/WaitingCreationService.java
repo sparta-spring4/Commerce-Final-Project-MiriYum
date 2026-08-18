@@ -169,7 +169,7 @@ public class WaitingCreationService {
         Instant occurredAt = clock.instant();
         IdempotentOutcome outcome = executeWithRetry(() -> createInTransaction(
                 storeId, consumerAccountId, businessDate, partySize, source, command, occurredAt,
-                WaitingTeamSnapshot::from));
+                WaitingTeamSnapshot::from, () -> { }));
         return new WaitingCommandResult(outcome.httpStatus(),
                 objectMapper.treeToValue(outcome.data(), WaitingTeamSnapshot.class));
     }
@@ -181,7 +181,8 @@ public class WaitingCreationService {
             LocalDate businessDate,
             int partySize,
             WaitingSource source,
-            IdempotencyKey key
+            IdempotencyKey key,
+            boolean locationProofConnected
     ) {
         Objects.requireNonNull(businessDate, "businessDate must not be null");
         Objects.requireNonNull(source, "source must not be null");
@@ -191,7 +192,8 @@ public class WaitingCreationService {
         Instant occurredAt = clock.instant();
         IdempotentOutcome outcome = executeWithRetry(() -> createInTransaction(
                 storeId, consumerAccountId, businessDate, partySize, source, command, occurredAt,
-                this::consumerSnapshot));
+                this::consumerSnapshot,
+                () -> requireLocationProofConnected(locationProofConnected)));
         return new WaitingConsumerCommandResult(outcome.httpStatus(),
                 objectMapper.treeToValue(outcome.data(), WaitingConsumerSnapshot.class));
     }
@@ -204,10 +206,12 @@ public class WaitingCreationService {
             WaitingSource source,
             IdempotencyCommand command,
             Instant occurredAt,
-            Function<WaitingTeam, T> snapshotFactory
+            Function<WaitingTeam, T> snapshotFactory,
+            Runnable firstExecutionGuard
     ) {
         return transactionExecutor.execute(() -> {
             return idempotencyExecutor.execute(command, () -> {
+                    firstExecutionGuard.run();
                     storeEligibility.requireWaitingTransactionEligibility(storeId);
                     Instant eligibilityAt = clock.instant();
                     receptionCheck.requireOpen(storeId, businessDate, eligibilityAt);
@@ -319,6 +323,12 @@ public class WaitingCreationService {
 
     private static ServiceException membershipConflict() {
         return new ServiceException(ReservationErrorCode.ACCOUNT_ACTIVE_WAITING_EXISTS);
+    }
+
+    private static void requireLocationProofConnected(boolean locationProofConnected) {
+        if (!locationProofConnected) {
+            throw new ServiceException(ReservationErrorCode.WAITING_RECEPTION_CLOSED);
+        }
     }
 
     private static ServiceException receptionClosed() {

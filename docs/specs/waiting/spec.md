@@ -484,10 +484,11 @@ version CAS는 Issue #380이 별도로 소유한다.
 
 #409가 계정·매장·목적에 결속된 단기 위치 증명 세션을 등록 트랜잭션에서 한 번만 소비하도록
 연결하기 전에는 `miriyum.waiting.consumer-registration.location-proof-connected`의 기본값을
-`false`로 유지한다. 이 상태의 등록 POST는 활성 계정만 재확인한 뒤 `409 WAITING_012`로 실패
-폐쇄하며 `WaitingCreationService`를 호출하지 않는다. 조회·availability·취소는 이 게이트의
-영향을 받지 않는다. 속성을 `true`로 바꾸는 배포 권한과 위치 증명-팀 생성 원자 결합 검증은
-#409가 소유한다.
+`false`로 유지한다. 이 상태의 신규 등록 POST는 활성 계정을 재확인하고 멱등 키를 선점한 최초
+실행 콜백에서 `409 WAITING_012`로 실패 폐쇄하며, Store/Schedule 검증이나 팀·순번·membership
+생성은 실행하지 않는다. 이미 성공한 같은 키·지문은 플래그가 `true`에서 `false`로 바뀐 뒤에도
+최초 HTTP 상태와 snapshot을 재생한다. 조회·availability·취소는 이 게이트의 영향을 받지 않는다.
+속성을 `true`로 바꾸는 배포 권한과 위치 증명-팀 생성 원자 결합 검증은 #409가 소유한다.
 
 availability는 Waiting 설정 유무를 접수 가능 여부로 해석하기 전에 Store 존재를 확인한다. 없는
 매장은 `404 STORE_001`, 설정이 없거나 접수가 닫힌 기존 매장은 `200 accepting=false`다. 등록의
