@@ -46,6 +46,7 @@ export default function () {
     runId: 'safe-run',
     prerequisiteSmokeRunId: 'local-smoke-approved',
     commitSha: '0123456789abcdef0123456789abcdef01234567',
+    harnessCommitSha: 'fedcba9876543210fedcba9876543210fedcba98',
     scenarioNames: ['notificationHistory'],
     targetFingerprint: 'a'.repeat(64),
     fixtureSha256: 'b'.repeat(64),
@@ -61,6 +62,8 @@ export default function () {
       && parsed.targetEnv === 'local'
       && parsed.prerequisiteSmokeRunId === 'local-smoke-approved'
       && parsed.schemaVersion === 'miriyum-k6-summary-v1'
+      && parsed.commitSha === '0123456789abcdef0123456789abcdef01234567'
+      && parsed.harnessCommitSha === 'fedcba9876543210fedcba9876543210fedcba98'
       && parsed.thresholdsPassed === true
       && parsed.targetFingerprint === 'a'.repeat(64)
       && parsed.fixtureSha256 === 'b'.repeat(64)
