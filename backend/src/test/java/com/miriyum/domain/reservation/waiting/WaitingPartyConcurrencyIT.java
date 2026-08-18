@@ -202,6 +202,12 @@ class WaitingPartyConcurrencyIT {
                 key(22 + index), new InvitationAcceptanceRequest(codes.get(index))));
 
         assertThat(attempts.stream().filter(Attempt::succeeded)).hasSize(1);
+        assertThat(attempts.stream().filter(attempt -> !attempt.succeeded())
+                .map(Attempt::failure)).singleElement()
+                .isInstanceOfSatisfying(com.miriyum.global.exception.ServiceException.class,
+                        failure -> assertThat(failure.getErrorCode()).isEqualTo(
+                                com.miriyum.domain.reservation.exception.ReservationErrorCode
+                                        .ACCOUNT_ACTIVE_WAITING_EXISTS));
         assertThat(memberships.findByConsumerAccountId(candidate)).isPresent();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM waiting_active_memberships "
                 + "WHERE consumer_account_id=?", Long.class, candidate)).isOne();

@@ -40,6 +40,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -99,8 +100,10 @@ public class WaitingPartyService {
         String tokenHash = hash(request.invitationCode());
         IdempotencyCommand command = command(accountId, "WAITING_PARTY_INVITATION_ACCEPT", key,
                 "tokenHash=" + tokenHash);
-        IdempotentOutcome outcome = transactionExecutor.execute(() ->
-                idempotencyExecutor.execute(command, () -> {
+        IdempotentOutcome outcome;
+        try {
+            outcome = transactionExecutor.execute(() ->
+                    idempotencyExecutor.execute(command, () -> {
                     WaitingPartyInvitation discovered = invitationRepository.findByTokenHash(tokenHash)
                             .orElseThrow(WaitingPartyService::invalidInvitation);
                     WaitingTeam team = lockTeam(discovered.getWaitingTeamId());
@@ -129,7 +132,13 @@ public class WaitingPartyService {
                     audit(team, accountId, membership.getId(), EventType.MEMBER_JOINED,
                             team.getVersion() - 1, team.getVersion(), "INVITATION_ACCEPTED", key, now);
                     return success("WAITING_TEAM", team.getId(), snapshot(team, accountId));
-                }));
+                    }));
+        } catch (DataIntegrityViolationException failure) {
+            if (WaitingCreationFailureClassifier.isMembershipConflict(failure)) {
+                throw new ServiceException(ReservationErrorCode.ACCOUNT_ACTIVE_WAITING_EXISTS);
+            }
+            throw failure;
+        }
         return partyResult(outcome);
     }
 

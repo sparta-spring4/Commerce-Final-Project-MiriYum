@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.waiting.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -16,6 +17,8 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingPartyInvitation;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingRepresentativeTransferOffer;
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingPartyAuditRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingPartyInvitationRepository;
@@ -39,6 +42,7 @@ import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.dao.DataIntegrityViolationException;
 import tools.jackson.databind.ObjectMapper;
 
 class WaitingPartyServiceTest {
@@ -165,6 +169,28 @@ class WaitingPartyServiceTest {
         assertThat(accepted.data().memberships()).hasSize(2);
         assertThat(saved.get().getStatus())
                 .isEqualTo(WaitingRepresentativeTransferOffer.Status.ACCEPTED);
+    }
+
+    @Test
+    void concurrentAccountMembershipUniqueViolationMapsToWaiting011() {
+        WaitingTeam team = team(2);
+        String rawCode = "concurrent-account-409";
+        WaitingPartyInvitation invitation = WaitingPartyInvitation.issue(
+                300L, 200L, sha256(rawCode), 0L, NOW.minusSeconds(1), NOW.plusSeconds(899));
+        ReflectionTestUtils.setField(invitation, "id", 701L);
+        when(invitations.findByTokenHash(sha256(rawCode))).thenReturn(Optional.of(invitation));
+        when(invitations.findByIdForUpdate(701L)).thenReturn(Optional.of(invitation));
+        when(teams.findByIdForUpdate(300L)).thenReturn(Optional.of(team));
+        when(memberships.findByConsumerAccountId(201L)).thenReturn(Optional.empty());
+        when(memberships.countByWaitingTeamId(300L)).thenReturn(1L);
+        when(memberships.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException(
+                "Duplicate entry for key 'uk_waiting_active_memberships_consumer_account'"));
+
+        assertThatThrownBy(() -> service.acceptInvitation(201L, IdempotencyKey.parse(KEY),
+                new InvitationAcceptanceRequest(rawCode)))
+                .isInstanceOfSatisfying(ServiceException.class, failure ->
+                        assertThat(failure.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.ACCOUNT_ACTIVE_WAITING_EXISTS));
     }
 
     private static WaitingTeam team(int partySize) {
