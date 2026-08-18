@@ -354,6 +354,46 @@ class WaitingConsumerApiIT {
                 "SELECT consumer_account_id FROM consumer_accounts WHERE email=?", Long.class, email);
     }
 
+    @Test
+    void sameProofAndIdempotencyKeyInParallelReplayOneAtomicRegistration() throws Exception {
+        Fixture fixture = fixture();
+        UUID proofId = verifiedProof(fixture.consumerId(), fixture.firstStoreId());
+        IdempotencyKey sameKey = key(60);
+
+        var attempts = runTogether(2, ignored -> consumerCommandFacade.create(
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, proofId, sameKey));
+
+        assertThat(attempts).allMatch(Attempt::succeeded);
+        assertThat(attempts).extracting(attempt -> attempt.result().data().waitingTeamId())
+                .containsOnly(attempts.getFirst().result().data().waitingTeamId());
+        assertThat(count("waiting_teams")).isOne();
+        assertThat(count("waiting_active_memberships")).isOne();
+        assertThat(count("idempotency_commands")).isOne();
+        assertThat(locationProofs.findById(proofId).orElseThrow().getConsumedWaitingTeamId())
+                .isNotNull();
+    }
+
+    @Test
+    void sameProofWithDifferentKeysInParallelConsumesOnce() throws Exception {
+        Fixture fixture = fixture();
+        UUID proofId = verifiedProof(fixture.consumerId(), fixture.firstStoreId());
+
+        var attempts = runTogether(2, index -> consumerCommandFacade.create(
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, proofId,
+                key(61 + index)));
+
+        assertThat(attempts.stream().filter(Attempt::succeeded)).hasSize(1);
+        assertThat(attempts.stream().filter(attempt -> !attempt.succeeded())
+                .map(Attempt::failure)).singleElement()
+                .isInstanceOfSatisfying(ServiceException.class, failure ->
+                        assertThat(failure.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.LOCATION_PROOF_INVALID));
+        assertThat(count("waiting_teams")).isOne();
+        assertThat(count("waiting_active_memberships")).isOne();
+        assertThat(locationProofs.findById(proofId).orElseThrow().getConsumedWaitingTeamId())
+                .isNotNull();
+    }
+
     private UUID verifiedProof(long consumerId, long storeId) {
         Instant now = clock.instant();
         WaitingLocationProofSession proof = locationProofs.saveAndFlush(
