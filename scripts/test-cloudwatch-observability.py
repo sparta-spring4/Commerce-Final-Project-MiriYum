@@ -20,6 +20,15 @@ NGINX_SELECTOR_PATH = (
 )
 OBSERVABILITY_DOCUMENT_PATH = ROOT / "docs" / "deployment" / "cloudwatch-staging-observability.md"
 DEPLOYMENT_DOCUMENT_PATH = ROOT / "docs" / "deployment" / "docker-ecr-ssm-cd.md"
+VALKEY_MEMORY_METRICS_SCRIPT_PATH = (
+    ROOT / "deploy" / "monitoring" / "publish-valkey-memory-metrics.sh"
+)
+VALKEY_MEMORY_SERVICE_PATH = (
+    ROOT / "deploy" / "monitoring" / "miriyum-valkey-memory-metrics.service"
+)
+VALKEY_MEMORY_TIMER_PATH = (
+    ROOT / "deploy" / "monitoring" / "miriyum-valkey-memory-metrics.timer"
+)
 RISK_EVENT_DELIVERY_PATH = (
     ROOT
     / "backend"
@@ -51,6 +60,11 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         cls.nginx_selector = NGINX_SELECTOR_PATH.read_text(encoding="utf-8")
         cls.observability_document = OBSERVABILITY_DOCUMENT_PATH.read_text(encoding="utf-8")
         cls.deployment_document = DEPLOYMENT_DOCUMENT_PATH.read_text(encoding="utf-8")
+        cls.valkey_memory_metrics_script = VALKEY_MEMORY_METRICS_SCRIPT_PATH.read_text(
+            encoding="utf-8"
+        )
+        cls.valkey_memory_service = VALKEY_MEMORY_SERVICE_PATH.read_text(encoding="utf-8")
+        cls.valkey_memory_timer = VALKEY_MEMORY_TIMER_PATH.read_text(encoding="utf-8")
         cls.risk_event_delivery = RISK_EVENT_DELIVERY_PATH.read_text(encoding="utf-8")
         cls.compose_config = cls.load_compose_config(ENV_EXAMPLE_PATH)
 
@@ -1219,6 +1233,175 @@ main
         self.assertIn("--statistic Sum", alarm)
         self.assertIn("--threshold 0", alarm)
         self.assertIn("--comparison-operator GreaterThanThreshold", alarm)
+
+    def test_auth_valkey_memory_timer_is_host_scoped_and_runs_every_minute(self):
+        self.assertIn("EnvironmentFile=/opt/miriyum/.env", self.valkey_memory_service)
+        self.assertIn(
+            "ExecStart=/opt/miriyum/monitoring/publish-valkey-memory-metrics.sh",
+            self.valkey_memory_service,
+        )
+        self.assertIn("OnUnitActiveSec=60s", self.valkey_memory_timer)
+        self.assertIn("Unit=miriyum-valkey-memory-metrics.service", self.valkey_memory_timer)
+        self.assertIn(
+            "systemctl enable --now miriyum-valkey-memory-metrics.timer",
+            self.workflow,
+        )
+        self.assertIn(
+            "systemd-analyze verify /etc/systemd/system/miriyum-valkey-memory-metrics.service /etc/systemd/system/miriyum-valkey-memory-metrics.timer",
+            self.workflow,
+        )
+
+    def test_auth_valkey_memory_success_publishes_bytes_and_utilization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            aws_arguments = temporary_path / "aws-arguments"
+            fake_aws = temporary_path / "aws"
+            fake_curl = temporary_path / "curl"
+            fake_docker = temporary_path / "docker"
+            fake_aws.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$TEST_AWS_ARGUMENTS"\n',
+                encoding="utf-8",
+            )
+            fake_curl.write_text(
+                '#!/usr/bin/env bash\nif [[ " $* " == *" --request PUT "* ]]; then echo token; else echo i-test; fi\n',
+                encoding="utf-8",
+            )
+            fake_docker.write_text(
+                '#!/usr/bin/env bash\nprintf "used_memory:1048576\\r\\nmaxmemory:8388608\\r\\n"\n',
+                encoding="utf-8",
+            )
+            for executable in (fake_aws, fake_curl, fake_docker):
+                executable.chmod(0o755)
+
+            result = subprocess.run(
+                [BASH_EXECUTABLE, str(VALKEY_MEMORY_METRICS_SCRIPT_PATH)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={
+                    **os.environ,
+                    "AWS_BIN": str(fake_aws),
+                    "CURL_BIN": str(fake_curl),
+                    "DOCKER_BIN": str(fake_docker),
+                    "AWS_REGION": "ap-northeast-2",
+                    "MIRIYUM_VALKEY_PASSWORD": "test-only-password",
+                    "TEST_AWS_ARGUMENTS": str(aws_arguments),
+                },
+            )
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("event=auth_valkey_memory_collected", result.stdout)
+            published = aws_arguments.read_text(encoding="utf-8")
+            self.assertIn("MetricName=AuthValkeyUsedMemoryBytes,Value=1048576", published)
+            self.assertIn("MetricName=AuthValkeyMaxMemoryBytes,Value=8388608", published)
+            self.assertIn(
+                "MetricName=AuthValkeyMemoryUtilizationPercent,Value=12.50", published
+            )
+            self.assertIn("MetricName=AuthValkeyMemoryCollectionHeartbeat,Value=1", published)
+            self.assertNotIn("test-only-password", result.stdout + result.stderr + published)
+
+    def test_auth_valkey_memory_invalid_maxmemory_publishes_failure_not_zero_percent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            aws_arguments = temporary_path / "aws-arguments"
+            fake_aws = temporary_path / "aws"
+            fake_curl = temporary_path / "curl"
+            fake_docker = temporary_path / "docker"
+            fake_aws.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$TEST_AWS_ARGUMENTS"\n',
+                encoding="utf-8",
+            )
+            fake_curl.write_text(
+                '#!/usr/bin/env bash\nif [[ " $* " == *" --request PUT "* ]]; then echo token; else echo i-test; fi\n',
+                encoding="utf-8",
+            )
+            fake_docker.write_text(
+                '#!/usr/bin/env bash\nprintf "used_memory:1048576\\nmaxmemory:0\\n"\n',
+                encoding="utf-8",
+            )
+            for executable in (fake_aws, fake_curl, fake_docker):
+                executable.chmod(0o755)
+
+            result = subprocess.run(
+                [BASH_EXECUTABLE, str(VALKEY_MEMORY_METRICS_SCRIPT_PATH)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={
+                    **os.environ,
+                    "AWS_BIN": str(fake_aws),
+                    "CURL_BIN": str(fake_curl),
+                    "DOCKER_BIN": str(fake_docker),
+                    "AWS_REGION": "ap-northeast-2",
+                    "MIRIYUM_VALKEY_PASSWORD": "test-only-password",
+                    "TEST_AWS_ARGUMENTS": str(aws_arguments),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("event=auth_valkey_memory_collection_failed", result.stderr)
+            published = aws_arguments.read_text(encoding="utf-8")
+            self.assertIn("MetricName=AuthValkeyMemoryCollectionFailure,Value=1", published)
+            self.assertNotIn("AuthValkeyMemoryUtilizationPercent", published)
+            self.assertNotIn("AuthValkeyMemoryCollectionHeartbeat", published)
+
+    def test_auth_valkey_memory_imds_failure_leaves_heartbeat_absent_for_dead_man_alarm(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            aws_arguments = temporary_path / "aws-arguments"
+            fake_aws = temporary_path / "aws"
+            fake_curl = temporary_path / "curl"
+            fake_aws.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$TEST_AWS_ARGUMENTS"\n',
+                encoding="utf-8",
+            )
+            fake_curl.write_text('#!/usr/bin/env bash\nexit 1\n', encoding="utf-8")
+            for executable in (fake_aws, fake_curl):
+                executable.chmod(0o755)
+
+            result = subprocess.run(
+                [BASH_EXECUTABLE, str(VALKEY_MEMORY_METRICS_SCRIPT_PATH)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={
+                    **os.environ,
+                    "AWS_BIN": str(fake_aws),
+                    "CURL_BIN": str(fake_curl),
+                    "AWS_REGION": "ap-northeast-2",
+                    "MIRIYUM_VALKEY_PASSWORD": "test-only-password",
+                    "TEST_AWS_ARGUMENTS": str(aws_arguments),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertFalse(aws_arguments.exists())
+
+    def test_auth_valkey_memory_collection_failure_alarm_and_dashboard_are_configured(self):
+        start = self.resource_script.index(
+            'put_alarm "miriyum-staging-auth-valkey-memory-collection-failed"'
+        )
+        alarm = self.resource_script[start:]
+        self.assertIn("--metric-name AuthValkeyMemoryCollectionFailure", alarm)
+        self.assertIn("--threshold 0", alarm)
+        missing_start = self.resource_script.index(
+            'put_missing_data_alarm "miriyum-staging-auth-valkey-memory-collection-missing"'
+        )
+        missing_alarm = self.resource_script[missing_start:]
+        self.assertIn("--metric-name AuthValkeyMemoryCollectionHeartbeat", missing_alarm)
+        self.assertIn("--threshold 0.5", missing_alarm)
+        self.assertIn("--comparison-operator LessThanThreshold", missing_alarm)
+        self.assertIn("--treat-missing-data breaching", self.resource_script)
+        self.assertIn("AuthValkeyUsedMemoryBytes", self.resource_script)
+        self.assertIn("AuthValkeyMaxMemoryBytes", self.resource_script)
+        self.assertIn("AuthValkeyMemoryUtilizationPercent", self.resource_script)
+        self.assertIn("AuthValkeyMemoryCollectionHeartbeat", self.resource_script)
 
 class ReservationHoldReconciliationAlarmTest(unittest.TestCase):
     @classmethod
