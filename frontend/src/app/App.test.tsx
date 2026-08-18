@@ -1,7 +1,10 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import { http } from 'msw'
 import { beforeEach, describe, expect, test } from 'vitest'
-import { unauthenticatedConsumer } from '../features/auth/test/handlers'
+import {
+  authenticatedConsumer,
+  unauthenticatedConsumer,
+} from '../features/auth/test/handlers'
 import { storePage } from '../features/store-search/test/fixtures'
 import { catalogHandlers } from '../features/store-search/test/handlers'
 import { successResponse } from '../test/msw/envelope'
@@ -73,6 +76,54 @@ describe('앱 셸', () => {
     expect(
       screen.getByRole('form', { name: '매장 검색 조건' }),
     ).toBeInTheDocument()
+  })
+
+  /*
+   * shell을 route 그룹으로 고정했을 때 생긴 구멍이다.
+   *
+   * 로그인 직후 도착하는 `/`가 공개 그룹이라, 로그인한 사용자가 공용 화면에
+   * 머무는 동안 주 메뉴·하단 탭·푸터가 전부 비로그인 화면처럼 보였다.
+   * 마이페이지로 갈 수 있는 링크가 어디에도 없어 URL을 직접 쳐야 했다.
+   */
+  test('로그인하면 공용 화면에서도 주 메뉴에 마이페이지가 있다', async () => {
+    server.use(authenticatedConsumer())
+    renderAt('/')
+
+    const nav = screen.getByRole('navigation', { name: '주 메뉴' })
+
+    await waitFor(() =>
+      expect(
+        within(nav).getByRole('link', { name: '마이페이지' }),
+      ).toBeInTheDocument(),
+    )
+    expect(within(nav).getByRole('link', { name: '내 예약' })).toBeInTheDocument()
+  })
+
+  test('로그인하면 푸터가 로그인·회원가입 대신 마이페이지를 보여 준다', async () => {
+    server.use(authenticatedConsumer())
+    renderAt('/')
+
+    const footer = within(screen.getByRole('contentinfo'))
+
+    await waitFor(() =>
+      expect(footer.getByRole('link', { name: '마이페이지' })).toBeInTheDocument(),
+    )
+    expect(footer.queryByRole('link', { name: '로그인' })).not.toBeInTheDocument()
+    expect(footer.queryByRole('link', { name: '회원가입' })).not.toBeInTheDocument()
+  })
+
+  test('비로그인 푸터는 로그인·회원가입을 유지한다', async () => {
+    renderAt('/')
+
+    const footer = within(screen.getByRole('contentinfo'))
+
+    await waitFor(() =>
+      expect(footer.getByRole('link', { name: '로그인' })).toBeInTheDocument(),
+    )
+    expect(footer.getByRole('link', { name: '회원가입' })).toBeInTheDocument()
+    expect(
+      footer.queryByRole('link', { name: '마이페이지' }),
+    ).not.toBeInTheDocument()
   })
 
   test('없는 경로는 404 화면을 보여 준다', () => {

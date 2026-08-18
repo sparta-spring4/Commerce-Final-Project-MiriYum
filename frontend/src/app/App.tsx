@@ -9,6 +9,7 @@ import {
   ConsumerSignInPage,
   ConsumerSignUpPage,
   RequireConsumerAuth,
+  useConsumerAuth,
 } from '../features/auth'
 import { MyPage, MyReservationsPage } from '../features/consumer-account'
 import {
@@ -35,6 +36,31 @@ import { ROUTES } from './routes'
 const queryClient = createQueryClient()
 
 /**
+ * 공용 route 그룹의 레이아웃.
+ *
+ * shell을 route 그룹으로 고정하면 로그인한 사용자가 공용 화면(`/`, `/stores` 등)에
+ * 머무는 동안 주 메뉴·하단 탭·푸터가 전부 비로그인 화면처럼 보인다. 로그인 직후
+ * 도착하는 곳이 `/`라서 사실상 로그인한 내내 그렇게 보였다. shell은 경로가 아니라
+ * 인증 상태로 정한다.
+ *
+ * 결정은 여기서 하고 `AppLayout`에는 결과만 넘긴다. 레이아웃이 특정 shell의 인증
+ * 상태를 직접 읽기 시작하면 매장 운영자 shell과 얽힌다.
+ *
+ * 복구 중에는 public으로 둔다. 결과가 나오기 전에 consumer 메뉴를 띄우면 비로그인
+ * 사용자에게 잠깐 보였다가 사라진다.
+ */
+function ConsumerShellLayout() {
+  const { status } = useConsumerAuth()
+
+  return (
+    <AppLayout
+      shell={status === 'authenticated' ? 'consumer' : 'public'}
+      accountSlot={<ConsumerAccountMenu />}
+    />
+  )
+}
+
+/**
  * 앱 셸. 화면 Issue는 routes.ts에 자기 route를 등록하고 여기에 element를 붙인다.
  * 1차 MVP에 없는 기능의 route는 만들지 않는다.
  *
@@ -48,14 +74,7 @@ export default function App() {
         <BrowserRouter>
           <ConsumerAuthProvider>
             <Routes>
-              <Route
-                element={
-                  <AppLayout
-                    shell="public"
-                    accountSlot={<ConsumerAccountMenu />}
-                  />
-                }
-              >
+              <Route element={<ConsumerShellLayout />}>
                 <Route path={ROUTES.home} element={<HomePage />} />
                 <Route path={ROUTES.stores} element={<StoreSearchPage />} />
                 <Route path={ROUTES.storeDetail} element={<StoreDetailPage />} />
