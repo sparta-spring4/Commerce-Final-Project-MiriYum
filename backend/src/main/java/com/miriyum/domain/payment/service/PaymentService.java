@@ -1,6 +1,9 @@
 package com.miriyum.domain.payment.service;
 
+import com.miriyum.domain.payment.dto.PaymentContracts.ApplyReservationDepositDispositionCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.ConfirmPaymentCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.DispositionResult;
+import com.miriyum.domain.payment.dto.PaymentContracts.GetReservationDepositDispositionQuery;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentHistoryQuery;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentHistorySlice;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
@@ -25,6 +28,8 @@ import java.util.Set;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Payment의 유일한 공개 use-case Service이며 외부 호출을 DB transaction 밖에서 수행한다. */
@@ -149,6 +154,62 @@ public class PaymentService {
             return transactions.finalizeRefund(claim, cancellation, now());
         } catch (PaymentProviderClient.ProviderUnavailableException exception) {
             return transactions.markRefundUnknown(claim, now());
+        }
+    }
+
+    /** 예약금 목표 누적 환불률을 Payment 원장과 기존 환불 machinery에 멱등 적용한다. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public DispositionResult applyReservationDepositDisposition(
+            ApplyReservationDepositDispositionCommand command
+    ) {
+        PaymentTransactionService.DispositionClaim claim =
+                transactions.claimDisposition(command, now());
+        if (!claim.requiresRefund()) {
+            return claim.completedResult();
+        }
+        try {
+            RefundResult refundResult = requestRefund(claim.refundCommand());
+            return transactions.finalizeDisposition(claim.dispositionId(), refundResult, now());
+        } catch (ServiceException exception) {
+            return transactions.resolveDispositionAfterRefundFailure(
+                    claim.dispositionId(),
+                    exception.getErrorCode() == PaymentErrorCode.REFUND_AMOUNT_EXCEEDED,
+                    now());
+        }
+    }
+
+    /** 새 외부 환불 없이 결과 불명인 처분만 provider 취소 조회로 대사한다. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public DispositionResult getReservationDepositDisposition(
+            GetReservationDepositDispositionQuery query
+    ) {
+        PaymentTransactionService.DispositionReconciliationClaim claim =
+                transactions.claimDispositionReconciliation(query, now());
+        if (!claim.requiresProviderLookup()) {
+            return claim.completedResult();
+        }
+        try {
+            ProviderPayment providerPayment = providerClient.getPayment(claim.portOnePaymentId());
+            if (!claim.portOnePaymentId().equals(providerPayment.portOnePaymentId())
+                    || claim.paymentAmountMinor() != providerPayment.amountMinor()
+                    || !claim.currency().equals(providerPayment.currency())) {
+                return claim.completedResult();
+            }
+            String expectedReason = PaymentProviderClient.cancellationReason(
+                    claim.reasonCode(), claim.refundId());
+            java.util.List<ProviderCancellation> matching = providerPayment.cancellations()
+                    .stream()
+                    .filter(cancellation -> expectedReason.equals(cancellation.reason()))
+                    .toList();
+            if (matching.size() != 1
+                    || matching.getFirst().amountMinor() != claim.refundAmountMinor()
+                    || !claim.currency().equals(matching.getFirst().currency())) {
+                return claim.completedResult();
+            }
+            return transactions.finalizeDispositionReconciliation(
+                    claim, matching.getFirst(), now());
+        } catch (PaymentProviderClient.ProviderUnavailableException exception) {
+            return claim.completedResult();
         }
     }
 

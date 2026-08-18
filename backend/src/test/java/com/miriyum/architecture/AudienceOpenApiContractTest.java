@@ -43,16 +43,24 @@ class AudienceOpenApiContractTest {
             "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-ins",
             "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations",
             "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}");
+    private static final Set<String> WAITING_CONSUMER_PATHS = Set.of(
+            "/api/v1/consumers/me/stores/{storeId}/waiting-availabilities",
+            "/api/v1/consumers/me/stores/{storeId}/waiting-teams",
+            "/api/v1/consumers/me/waiting-teams/current",
+            "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations");
     private static final String NOTIFICATION_HISTORY_PATH =
             "/api/v1/consumers/me/notifications";
     private static final String REPRESENTATIVE_MENUS_PATH =
             "/api/v1/store-operators/stores/{storeId}/representative-menus";
+    private static final String STORE_DASHBOARD_ANALYTICS_PATH =
+            "/api/v1/store-operators/stores/{storeId}/dashboard-statistics";
     private static final Set<String> POST_MVP1_AUDIENCE_PATHS =
             Stream.concat(
                     Stream.of(
                             MENU_ALTERNATIVE_SEARCH_PATH,
                             NOTIFICATION_HISTORY_PATH,
                             REPRESENTATIVE_MENUS_PATH,
+                            STORE_DASHBOARD_ANALYTICS_PATH,
                             "/api/v1/store-operators/stores/{storeId}/images",
                             "/api/v1/store-operators/stores/{storeId}/images/{imageId}",
                             "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images",
@@ -87,7 +95,9 @@ class AudienceOpenApiContractTest {
                                     RESERVATION_DEPOSIT_PATHS.stream(),
                                     Stream.concat(
                                             WAITING_SETTINGS_PATHS.stream(),
-                                            WAITING_LEDGER_PATHS.stream()))))
+                                            Stream.concat(
+                                                    WAITING_LEDGER_PATHS.stream(),
+                                                    WAITING_CONSUMER_PATHS.stream())))))
                     .collect(Collectors.toUnmodifiableSet());
     private static final Set<String> LEGACY_PREFIXES = Set.of(
             "/api/v1/consumer-auth",

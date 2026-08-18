@@ -64,6 +64,7 @@ class ReservationDetailResponseTest {
                 .isEqualTo(OffsetDateTime.parse("2026-08-01T09:00:00Z"));
         assertThat(response.cancelledBy()).isNull();
         assertThat(response.cancellationReason()).isNull();
+        assertThat(response.depositDisposition()).isNull();
     }
 
     @Test
@@ -138,7 +139,8 @@ class ReservationDetailResponseTest {
                 "menuSelections",
                 "createdAt",
                 "cancelledBy",
-                "cancellationReason"
+                "cancellationReason",
+                "depositDisposition"
         );
         assertThat(componentNames).doesNotContain(
                 "contactSnapshot",

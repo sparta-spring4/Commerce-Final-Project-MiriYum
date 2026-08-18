@@ -11,7 +11,7 @@ Prometheus·Grafana 컨테이너, X-Ray·OpenTelemetry, production ECS·RDS·Ela
 - AWS 기본 지표: `CPUUtilization`, `StatusCheckFailed`
 - CloudWatch Agent 지표: 루트 디스크 사용률, 메모리 사용률
 - CloudWatch Logs: Docker `awslogs` 드라이버로 서비스별 표준 출력 로그
-- 사용자 지정 지표: 배포 후 health 결과 `DeploymentHealth`, 위험 사건 전달 정체 `RefreshTokenRiskEventDeliveryStalled`, pending 인덱스 멤버 수 `RefreshTokenRiskEventPendingCount`, 1시간 이상 pending marker 존재 신호 `RefreshTokenRiskEventMarkerLongStay`, marker 무결성 실패 `RefreshTokenRiskEventMarkerMalformed`·`RefreshTokenRiskEventMarkerQuarantineFailed`·`RefreshTokenRiskEventStaleIndexCleanupFailed`, ReservationHold 대사 장기 체류 `ReservationHoldReconciliationStalled`
+- 사용자 지정 지표: 배포 후 health 결과 `DeploymentHealth`, Auth Valkey 메모리 bytes·사용률·수집 실패·heartbeat `AuthValkeyUsedMemoryBytes`·`AuthValkeyMaxMemoryBytes`·`AuthValkeyMemoryUtilizationPercent`·`AuthValkeyMemoryCollectionFailure`·`AuthValkeyMemoryCollectionHeartbeat`, 위험 사건 전달 정체 `RefreshTokenRiskEventDeliveryStalled`, pending 인덱스 멤버 수 `RefreshTokenRiskEventPendingCount`, 1시간 이상 pending marker 존재 신호 `RefreshTokenRiskEventMarkerLongStay`, marker 무결성 실패 `RefreshTokenRiskEventMarkerMalformed`·`RefreshTokenRiskEventMarkerQuarantineFailed`·`RefreshTokenRiskEventStaleIndexCleanupFailed`, ReservationHold 대사 장기 체류 `ReservationHoldReconciliationStalled`
 - 로그 보존: 7일
 
 CloudWatch Agent 설정은 [`cloudwatch-agent-config.json`](../../deploy/monitoring/cloudwatch-agent-config.json)에 있다. Agent는 메모리·디스크 지표를 수집하고, Docker 로그는 Compose의 `awslogs` 드라이버가 `/miriyum/staging/docker` 로그 그룹의 `mysql`, `backend`, `nginx`, `valkey` 스트림으로 직접 전송한다. CD가 배포 파일을 SSM으로 전송할 때 Agent 설정도 `/opt/miriyum/monitoring/cloudwatch-agent.json`에 복사한다.
@@ -65,6 +65,7 @@ deploy/monitoring/create-cloudwatch-resources.sh
 | 배포 health | 최근 배포 결과가 0 |
 | Refresh Token 위험 사건 전달 | 30초 주기 전달이 10회 연속 실패해 정체 로그가 발생하면 경보 |
 | Refresh Token 위험 marker 장기 체류 | 최초 위험 사건 생성 뒤 1시간 이상 pending marker가 있으면 경보 |
+| Auth Valkey 메모리 수집 실패 | 60초 수집이 `INFO memory` 또는 CloudWatch 게시를 완료하지 못하면 경보 |
 | ReservationHold 대사 장기 체류 | `RECONCILIATION_REQUIRED` 전이 감사의 `occurredAt` 후 10분부터 현재 장기 체류 집계 로그가 발생하면 경보 |
 
 SNS 이메일은 명령 실행 후 확인 메일의 `Confirm subscription` 링크를 눌러야 실제 알림을 받는다. 이메일 주소와 AWS 계정 ID는 블로그 캡처에 노출하지 않는다.
@@ -80,6 +81,20 @@ SNS 이메일은 명령 실행 후 확인 메일의 `Confirm subscription` 링�
 - pending marker Set 인덱스 backfill 실패: `DeploymentHealth=0`
 
 CloudWatch 전송 실패가 배포 자체를 실패시키지는 않는다. 배포 성공·실패의 최종 기준은 기존 SSM 결과와 loopback health check이며, CloudWatch는 이를 보조하는 관측 수단이다.
+
+## Auth Valkey 메모리 관측
+
+배포는 `/opt/miriyum/monitoring/publish-valkey-memory-metrics.sh`와 전용 systemd timer를 설치한다. timer는 60초마다 인증된 `INFO memory`에서 `used_memory`와 `maxmemory`를 읽고, 같은 `InstanceId` 차원으로 사용 bytes·상한 bytes·사용률을 게시한다. 비밀번호, Valkey key, 계정·family·token 식별자는 지표와 로그에 남기지 않는다.
+
+`INFO memory` 누락, 숫자 형식 오류, `maxmemory=0`, 인증 실패, CloudWatch 게시 실패는 정상 `0%`로 바꾸지 않는다. 대신 실행 중인 수집 실패는 `AuthValkeyMemoryCollectionFailure=1`을 게시하고 기존 SNS 주제의 알람으로 관측한다. 정상 수집 때만 `AuthValkeyMemoryCollectionHeartbeat=1`을 함께 게시한다. 따라서 timer·service가 멈추거나 IMDS 조회 전에 종료되어 지표를 전혀 게시하지 못한 경우에도, 5분 동안 heartbeat가 없으면 `missing=breaching` 알람이 SNS로 전달된다. 수집기 자체의 CloudWatch 게시도 실패하면 성공처럼 보이지 않도록 service가 non-zero로 끝나며 `systemctl status miriyum-valkey-memory-metrics.service`에서 확인한다.
+
+```bash
+sudo systemctl status miriyum-valkey-memory-metrics.timer --no-pager
+sudo systemctl start miriyum-valkey-memory-metrics.service
+sudo journalctl -u miriyum-valkey-memory-metrics.service -n 20 --no-pager
+```
+
+정상 로그에는 `event=auth_valkey_memory_collected`와 bytes·사용률만 포함된다. Dashboard의 **MiriYum Auth Valkey memory capacity**·**MiriYum Auth Valkey memory utilization**·**MiriYum Auth Valkey memory collection health** 위젯에서 최소 며칠 동안 peak·p95·증가 추세와 heartbeat·실패 신호를 확인한 뒤에만 사용률 경보 임계값을 별도 결정한다. 이 단계에서는 근거 없는 사용률 경보를 만들지 않는다.
 
 ## 위험 사건 전달 정체 지표
 
@@ -156,4 +171,5 @@ CloudWatch Agent는 임의의 비밀값을 자동으로 마스킹해 주는 기�
 6. 테스트 임계치를 임시로 낮춰 이메일 수신을 확인한 뒤 원래 임계치로 되돌린다.
 7. 위험 사건 전달 실패 테스트에서 민감값 없는 정체 로그와 `RefreshTokenRiskEventDeliveryStalled` 알람 구성을 확인한다.
 8. ReservationHold 대사 장기 체류 경계 테스트에서 식별자 없는 집계 로그와 `ReservationHoldReconciliationStalled` 알람 구성을 확인한다.
-9. 테스트 후 생성한 AWS 리소스와 알람 상태를 정리한다.
+9. Auth Valkey memory timer를 수동 실행하고 `AuthValkeyUsedMemoryBytes`, `AuthValkeyMaxMemoryBytes`, `AuthValkeyMemoryUtilizationPercent`, `AuthValkeyMemoryCollectionHeartbeat`가 같은 `InstanceId` 차원으로 생기는지 확인한다.
+10. 테스트 후 생성한 AWS 리소스와 알람 상태를 정리한다.

@@ -10,6 +10,10 @@ The production ECS task must not contain application secret values. The task def
 
 Backend CI also extracts `MIRIYUM_*` references without a default value from `backend/src/main/resources/application.yml`. Every such setting must be listed in `requiredSecrets`; adding a new mandatory application secret without updating the reviewed contract fails CI. Settings with a default value and profile-specific configuration remain a separate follow-up decision.
 
+## Operational incident response
+
+Production deployment checks, incident classification, and rollback to the last healthy task definition are documented in [Production ECS incident runbook](production-ecs-incident-runbook.md). That runbook does not authorize production fault injection; stopping a healthy task requires a separate approved game-day plan with capacity and abort/rollback conditions.
+
 ## Secret structure
 
 Create one JSON secret named `miriyum/production/application` after team approval. Its JSON keys must match the task definition exactly.

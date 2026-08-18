@@ -11,7 +11,8 @@ public enum AdminAuthorizationErrorCode implements ErrorCode {
     FORBIDDEN_AUTHORITY(HttpStatus.BAD_REQUEST, "ADMIN_004", "하위 운영자에게 부여할 수 없는 역할 또는 권한입니다."),
     DUPLICATE_OPERATOR_EMAIL(HttpStatus.CONFLICT, "ADMIN_005", "이미 등록된 운영자 이메일입니다."),
     AUDIT_EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_006", "감사 사건을 찾을 수 없습니다."),
-    AUDIT_CORRECTION_CONFLICT(HttpStatus.CONFLICT, "ADMIN_007", "이미 보정 사건이 연결되어 있습니다.");
+    AUDIT_CORRECTION_CONFLICT(HttpStatus.CONFLICT, "ADMIN_007", "이미 보정 사건이 연결되어 있습니다."),
+    OPERATOR_ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_008", "운영자 계정을 찾을 수 없습니다.");
 
     private final HttpStatus httpStatus;
     private final String code;

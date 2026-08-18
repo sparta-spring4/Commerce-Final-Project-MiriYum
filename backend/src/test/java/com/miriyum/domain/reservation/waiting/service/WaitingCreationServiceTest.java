@@ -40,6 +40,44 @@ import tools.jackson.databind.ObjectMapper;
 class WaitingCreationServiceTest {
 
     @Test
+    void rejectsNewConsumerRegistrationInsideTheIdempotentFirstExecution() {
+        WaitingQueueSequenceRepository sequenceRepository = mock(WaitingQueueSequenceRepository.class);
+        WaitingTeamRepository teamRepository = mock(WaitingTeamRepository.class);
+        WaitingActiveMembershipRepository membershipRepository = mock(WaitingActiveMembershipRepository.class);
+        WaitingTransitionAuditRepository auditRepository = mock(WaitingTransitionAuditRepository.class);
+        WaitingStatusEventRepository eventRepository = mock(WaitingStatusEventRepository.class);
+        WaitingReceptionGate receptionGate = mock(WaitingReceptionGate.class);
+        IdempotencyExecutor idempotencyExecutor = mock(IdempotencyExecutor.class);
+        WaitingCreationTransactionExecutor transactionExecutor = mock(WaitingCreationTransactionExecutor.class);
+        StoreTransactionEligibilityService storeEligibility = mock(StoreTransactionEligibilityService.class);
+        when(transactionExecutor.execute(any())).thenAnswer(invocation ->
+                ((Supplier<?>) invocation.getArgument(0)).get());
+        when(idempotencyExecutor.execute(any(), any())).thenAnswer(invocation ->
+                ((Supplier<?>) invocation.getArgument(1)).get());
+        WaitingCreationService service = new WaitingCreationService(
+                sequenceRepository, teamRepository, membershipRepository, auditRepository, eventRepository,
+                receptionGate, idempotencyExecutor, transactionExecutor, storeEligibility, new ObjectMapper(),
+                Clock.fixed(Instant.parse("2026-08-17T00:00:00Z"), ZoneOffset.UTC),
+                attempt -> 0L, millis -> { });
+
+        assertThatThrownBy(() -> service.createForConsumer(
+                100L,
+                200L,
+                LocalDate.of(2026, 8, 17),
+                2,
+                WaitingSource.REMOTE,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440001"),
+                false))
+                .isInstanceOfSatisfying(ServiceException.class, failure ->
+                        assertThat(failure.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.WAITING_RECEPTION_CLOSED));
+
+        verify(idempotencyExecutor).execute(any(), any());
+        verifyNoInteractions(storeEligibility, receptionGate, sequenceRepository, teamRepository,
+                membershipRepository, auditRepository, eventRepository);
+    }
+
+    @Test
     @DisplayName("제재로 대기 기능이 제한된 매장은 신규 대기 관계를 만들지 않는다")
     void rejectsStoreWithRestrictedWaitingFeatureBeforeCreatingMembership() {
         WaitingQueueSequenceRepository sequenceRepository = mock(WaitingQueueSequenceRepository.class);
