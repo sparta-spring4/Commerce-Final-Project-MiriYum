@@ -170,6 +170,31 @@ class StoreAdministrationServiceIT {
     }
 
     @Test
+    void storeManagementRestrictionAndReleaseAdvanceDashboardAuthorityVersion() {
+        Store target = openStore(TARGET_STORE_ID, 11L);
+        StoreEnforcementState state = StoreEnforcementState.initial(target);
+        given(storeRepository.findByIdForUpdate(TARGET_STORE_ID)).willReturn(Optional.of(target));
+        given(enforcementStates.findByStoreIdForUpdate(TARGET_STORE_ID))
+                .willReturn(Optional.of(state));
+
+        service.apply(new EnforcementCommand(
+                TARGET_STORE_ID, 0L, 91L, OperationStatus.OPEN,
+                true, true, true, true, false,
+                Set.of(RestrictedFeature.STORE_MANAGEMENT)));
+        long restrictedVersion = target.getDashboardAuthorityVersion();
+        target.applyPlatformEnforcement(
+                target.getOperationStatus(), target.isReservationEnabled(),
+                target.isMenuHoldEnabled(), target.isPickupEnabled(), false);
+        long unchangedRestrictedVersion = target.getDashboardAuthorityVersion();
+
+        service.release(new ReleaseCommand(TARGET_STORE_ID, 91L));
+
+        assertThat(restrictedVersion).isEqualTo(2L);
+        assertThat(unchangedRestrictedVersion).isEqualTo(2L);
+        assertThat(target.getDashboardAuthorityVersion()).isEqualTo(3L);
+    }
+
+    @Test
     void releasingLatestOverlappingSanctionKeepsEarlierRestriction() {
         Store target = openStore(TARGET_STORE_ID, 11L);
         StoreEnforcementState state = StoreEnforcementState.initial(target);

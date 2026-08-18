@@ -145,6 +145,7 @@ class DomainPackageArchitectureTest {
         assertThat(domains)
                 .containsExactly(
                         "alternative",
+                        "analytics",
                         "auth",
                         "consumer",
                         "menu",
