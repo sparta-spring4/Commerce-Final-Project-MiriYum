@@ -187,6 +187,11 @@ class FileStorageFacadeIntegrationTest {
 
         assertThat(deleted.status()).isEqualTo(FileStorageStatus.DELETED);
         assertThat(fileStoragePort.deletedObjectKeys()).containsExactly(objectKey, objectKey);
+        assertThat(fileMetadataRepository.findById(fileId))
+                .isPresent()
+                .get()
+                .extracting(FileMetadata::getObjectCleanupCompletedAt)
+                .isNotNull();
     }
 
     private FileStorageMetadata pendingMetadata(String fileId, String objectKey, String checksum, Instant createdAt) {
