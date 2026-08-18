@@ -6,6 +6,11 @@ interface Props {
   totalPages: number
   totalElements: number
   hasNext: boolean
+  /**
+   * 전체 개수의 단위 명사. 목록이 세는 대상이 화면마다 다르다.
+   * 기본값은 매장 검색에서 쓰는 "곳"이다.
+   */
+  unitLabel?: string
   onChange: (nextPage: number) => void
 }
 
@@ -20,6 +25,7 @@ export function Pagination({
   totalPages,
   totalElements,
   hasNext,
+  unitLabel = '곳',
   onChange,
 }: Props) {
   if (totalElements === 0) {
@@ -37,7 +43,7 @@ export function Pagination({
         이전
       </Button>
       <p className="mi-pagination__status" aria-live="polite">
-        {`${totalPages === 0 ? 1 : number + 1} / ${totalPages === 0 ? 1 : totalPages} 페이지 · 전체 ${totalElements}곳`}
+        {`${totalPages === 0 ? 1 : number + 1} / ${totalPages === 0 ? 1 : totalPages} 페이지 · 전체 ${totalElements}${unitLabel}`}
       </p>
       <Button
         variant="ghost"
