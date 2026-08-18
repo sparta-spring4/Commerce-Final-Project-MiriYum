@@ -261,6 +261,39 @@ class IntegratedStoreSearchRepositoryIT {
 
     @Test
     @Transactional
+    void expandedConceptsFindCurrentMenuWhilePreservingStructuredRegion() {
+        Store seoulKimchi = createStore(
+                "서울 김치찌개", Region.SEOUL, "KOREAN", Set.of(), false);
+        publishMenu(
+                seoulKimchi, "돼지고기 김치찌개", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Store busanKimchi = createStore(
+                "부산 김치찌개", Region.BUSAN, "KOREAN", Set.of(), false);
+        publishMenu(
+                busanKimchi, "김치찌개", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Store closedKimchi = createStore(
+                "종료 김치찌개", Region.SEOUL, "KOREAN", Set.of(), true);
+        publishMenu(
+                closedKimchi, "김치찌개", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        storeWithMenu(
+                "서울 디저트", "딸기 케이크", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        flushAndClear();
+        IntegratedStoreSearchQuery query = query(condition(
+                List.of("SEOUL"), List.of(), List.of(), List.of(), null,
+                "얼큰한 국물"), null, null, 20);
+
+        List<IntegratedStoreSearchCandidate> result = repository.searchExpanded(
+                query, List.of("김치찌개", "찌개"), 200);
+
+        assertThat(result).extracting(IntegratedStoreSearchCandidate::storeId)
+                .containsExactly(seoulKimchi.getId());
+    }
+
+    @Test
+    @Transactional
     void semanticAlternativeHitsRequireCurrentStoreAndPublishedVersionCoordinates() {
         Store sourceStore = createStore(
                 "대체 원본 매장", Region.SEOUL, "KOREAN", Set.of(), false);

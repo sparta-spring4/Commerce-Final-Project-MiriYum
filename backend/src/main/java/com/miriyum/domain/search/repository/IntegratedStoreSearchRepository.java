@@ -136,6 +136,55 @@ public class IntegratedStoreSearchRepository {
         return new IntegratedStoreSearchSlice(ordered, null);
     }
 
+    /** LLM 개념을 현재 공개 메뉴에 대조하고 원래 구조화 조건을 유지한다. */
+    public List<IntegratedStoreSearchCandidate> searchExpanded(
+            IntegratedStoreSearchQuery query,
+            List<String> concepts,
+            int limit
+    ) {
+        if (concepts == null || concepts.isEmpty() || limit < 1) {
+            return List.of();
+        }
+        List<String> validated = concepts.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .distinct()
+                .toList();
+        if (validated.isEmpty()) {
+            return List.of();
+        }
+        QStore store = QStore.store;
+        BooleanBuilder predicate = IntegratedStoreSearchPredicates.createExpanded(
+                store, query, validated);
+        BooleanExpression currentVerifiedCoordinates = store.geocodingStatus
+                .eq(GeocodingStatus.VERIFIED)
+                .and(store.geocodingAddressVersion.eq(store.addressVersion));
+        return List.copyOf(queryFactory
+                .select(Projections.constructor(
+                        IntegratedStoreSearchCandidate.class,
+                        store.id,
+                        store.name,
+                        store.region,
+                        store.address,
+                        store.storeCategoryCode,
+                        store.operationStatus,
+                        store.reservationEnabled,
+                        store.menuHoldEnabled,
+                        store.pickupEnabled,
+                        store.createdAt,
+                        Expressions.asNumber(1),
+                        new CaseBuilder().when(currentVerifiedCoordinates)
+                                .then(store.latitude)
+                                .otherwise(Expressions.nullExpression(BigDecimal.class)),
+                        new CaseBuilder().when(currentVerifiedCoordinates)
+                                .then(store.longitude)
+                                .otherwise(Expressions.nullExpression(BigDecimal.class))))
+                .from(store)
+                .where(predicate)
+                .orderBy(store.name.asc(), store.id.asc())
+                .limit(limit)
+                .fetch());
+    }
+
     /** 후보 순서를 유지하며 응답 직전 공개·운영·모드·검증 좌표를 다시 읽는다. */
     public List<IntegratedStoreSearchCandidate> refreshCurrentlyPublic(
             List<IntegratedStoreSearchCandidate> candidates
