@@ -21,13 +21,14 @@
 - 원 사건을 Notification에 기록하는 내부 공개 Service·DTO·오류 의미
 - 렌더링과 행동 유효성 재검증을 위한 원 도메인 공개 조회 경계
 - Notification 소유의 소비자 본인 알림 이력 HTTP API와 cursor 계약
+- 소비자 알림 이력을 다시 조회하게 하는 `notifications.changed` SSE 공개 계약과 account-bound 재연결 cursor
 - 최신 상태에 의한 미발송 작업 취소·만료·대체 규칙
 
 ### 제외
 
 - 일반 메뉴 품절, 일반 메뉴 추천, 주변 대체 매장 추천, 가게 찜, 광고·판촉 알림
 - Payment·환불·취소 자리 승계 목적과 원 사건
-- Waiting SSE endpoint·재연결·실시간 전달 Runtime과 AUTO 접수 오픈 worker
+- Notification·Waiting SSE production Runtime·Valkey fan-out·배포 설정과 AUTO 접수 오픈 worker
 - SMS·알림톡·푸시·이메일 provider와 실제 연락처 조회
 - frontend 화면·실시간 동작 구현, Notification runtime·migration·worker 구현
 - `NOTI-009`의 정확한 보관기간과 법률 문구
@@ -249,13 +250,31 @@ Notification 내부 작업은 `PENDING`, `DELIVERED`, `FAILED`, `CANCELLED`를 �
 
 `availability`는 `AVAILABLE`, `EXPIRED`, `SUPERSEDED`, `UNAVAILABLE` 중 하나다. frontend는 `AVAILABLE`만 실행하고 나머지는 비활성화한다. 실행 시 대상 API의 현재 권한과 상태를 다시 검증하며 알림 응답만으로 변경·수락을 확정하지 않는다.
 
+## 소비자 알림 이력 SSE 계약
+
+```http
+GET /api/v1/consumers/me/notification-events
+Authorization: Bearer {consumerAccessToken}
+Last-Event-ID: {opaqueCursor} # 재연결일 때만
+Accept: text/event-stream
+```
+
+- 브라우저는 Authorization header를 전달할 수 있는 fetch streaming을 사용한다. 성공 media type은 `text/event-stream`이며 이 계약 PR에서는 production route를 만들지 않고 path item에 `x-miriyum-runtime-status: contract-only`, `x-miriyum-owner-issue: 250`을 유지한다.
+- 업무 event 이름은 `notifications.changed` 하나다. event data는 알림 상태 본문이나 전달 성공의 근거가 아니며, client는 신호를 받으면 `GET /api/v1/consumers/me/notifications`를 다시 조회한다.
+- `Last-Event-ID`가 없으면 최초 연결이다. 연결 직후와 유효한 재연결 뒤 현재 MySQL high-watermark에 결속된 changed signal을 한 번 보내며 이후 신호는 중복 병합할 수 있다.
+- `id`는 consumer audience·인증 계정·계약 version에 결속한 무결성 보호 opaque cursor다. 형식·무결성이 잘못됐거나 다른 audience·계정 cursor면 `400 COMMON_001` JSON 오류 envelope로 거절한다.
+- 공개 이력에 새 `IN_APP DELIVERED`가 보이게 된 경우만 신호 대상이다. 내부 `PENDING`, `FAILED`, `CANCELLED`, channel attempt와 provider 결과는 제외한다. keepalive comment는 업무 event나 성공 근거가 아니며 cursor를 전진시키지 않는다.
+- Valkey Pub/Sub은 인스턴스 간 wake-up hint이고 MySQL이 유일한 재연결·보정 원본이다. 신호 유실·중복·역순과 구독 재시작 뒤에도 유한한 MySQL correction과 HTTP 재조회로 수렴한다.
+
+Waiting consumer·store-operator SSE endpoint와 `waiting.changed`의 영향 범위는 Waiting 기능 명세가 소유한다. 공통 transport·cursor·connection registry·Valkey·MySQL correction Runtime은 이 계약이 `dev`에 병합된 뒤 #250의 별도 Runtime exact allowlist에서 구현한다.
+
 ## 오류 계약
 
 | 코드 | 공개 HTTP 또는 내부 결과 | 의미 |
 |---|---:|---|
 | `NOTIFICATION_001` | 400 | cursor 형식·버전·무결성이 유효하지 않음 |
 | `NOTIFICATION_002` | 409 — 원 사건 producer 명령 | 같은 논리 멱등 식별에 저장된 canonical payload와 다른 payload가 기록됨. `ServiceException(NotificationErrorCode.SOURCE_EVENT_CONFLICT)`으로 전파하며 소비자 알림 이력 GET의 오류로 노출하지 않음 |
-| `COMMON_001` | 400 | `size` 등 요청 값 검증 실패 |
+| `COMMON_001` | 400 | `size` 등 요청 값 검증 실패 또는 SSE `Last-Event-ID` 형식·무결성·계정 결속 실패 |
 | `AUTH_001` | 401 | 사용할 수 있는 일반 사용자 인증이 없음 |
 | `AUTH_011` | 403 | 현재 계정 상태가 조회를 허용하지 않음 |
 | `COMMON_012` | 503 | 이력 중앙 저장소 등 필수 의존성을 일시적으로 사용할 수 없음 |
@@ -270,6 +289,7 @@ Notification 내부 작업은 `PENDING`, `DELIVERED`, `FAILED`, `CANCELLED`를 �
 - 목적·source event·cursor는 버전 필드를 가져야 한다. 새 목적과 nullable 필드는 하위 호환 추가만 허용하고 기존 enum 의미를 재사용하지 않는다.
 - `NOTI-009` 확정 전에도 보관 만료를 적용할 수 있는 구조를 갖추되 영구 보존이나 임의 삭제 기간을 기본값으로 넣지 않는다.
 - 외부 채널 추가는 논리 알림과 `IN_APP` 이력이 공유하는 `notificationId`를 바꾸지 않고 같은 논리 알림 아래 내부 채널 시도만 추가한다.
+- SSE path는 Runtime 병합 전까지 `contract-only`와 owner Issue #250을 함께 표시한다. Runtime PR은 세 path의 production 구현과 함께 이 두 확장 필드를 제거하며, frontend 생성 타입과 소비 구현은 #251·#410·#411이 각각 소유한다.
 
 ## 인수 조건
 
@@ -286,6 +306,8 @@ Notification 내부 작업은 `PENDING`, `DELIVERED`, `FAILED`, `CANCELLED`를 �
 - Waiting 목적은 `WAITING_TEAM`과 불변 수신자 관계에 결속되고, 입장 임박은 팀별 1회 비상태 사건이며 호출·취소·미응답·입장 완료·매장 종료는 각각 다른 목적과 상태 사건을 사용한다.
 - 실제 호출 목적은 중앙 `calledAt`과 정확히 10분 뒤 `arrivalDeadline`을 사용한다. 예약 전환 중인 입장 임박 작업은 retry budget 소진 없이 조건부 보류하고, 실패로 같은 `WAITING`에 복귀한 팀의 최초 작업은 유지한다. 상태 사건 재판정과 Worker 보류의 두 실행 순서 모두 작업 version fencing으로 수렴하며, 사건 처리 누락은 유한한 주기 재조회가 회수한다. 더 최신 실제 호출·`ARRIVED`·예약 전환 완료 또는 다른 종결 상태 뒤 오래된 호출·입장 임박 작업은 전달하지 않는다.
 - 본인 알림 이력은 `IN_APP` 전달 성공 항목만 고정 정렬·20/50 cursor 계약으로 조회되고 타인 이력, 내부 작업 상태와 금지 필드가 노출되지 않는다.
+- 알림 SSE 최초 연결·재연결은 `notifications.changed` 뒤 본인 HTTP 이력 재조회로 MySQL 최신 상태에 수렴하고, 다른 audience·계정 cursor를 재사용할 수 없다.
+- SSE 신호 유실·중복·역순과 Valkey 중단은 알림 작업이나 원 거래 상태를 변경하지 않으며, keepalive와 내부 작업 상태는 공개 업무 event가 아니다.
 - 알림 실패·열람·침묵이 예약 변경이나 메뉴 대체 동의로 해석되지 않는다.
 - OpenAPI 단독 파싱, 참조 해석과 consumer entrypoint 조합이 성공한다.
 
@@ -295,6 +317,6 @@ Notification 내부 작업은 `PENDING`, `DELIVERED`, `FAILED`, `CANCELLED`를 �
 - MenuHold 소유자는 메뉴 이행 위험·대체 제안과 결과 사건, `MenuHoldNotificationSource`의 허용 자원 경계를 검토한다.
 - Pickup 소유자는 픽업 확정·취소 사건, `PickupNotificationSource`의 버전·수신자 결속과 MenuHold 역방향 의존 금지를 검토한다.
 - Waiting 소유자는 상태 사건의 `eventSequence = version + 1`, 팀별 입장 임박 유일성, 예약 전환 실패 복귀 시 최초 사건 유지, 상태 사건 `PUBLISHED` 전 재판정과 `WaitingNotificationSource`의 수신자·목적별 상태 재검증·호출 제한 시각을 검토한다.
-- Consumer/API 검토자는 `/api/v1/consumers/me/notifications`, 공통 인증·오류 envelope와 cursor 실패 의미를 검토한다.
+- Consumer/API 검토자는 `/api/v1/consumers/me/notifications`와 `/api/v1/consumers/me/notification-events`, fetch streaming Bearer 인증, 공통 오류 envelope와 두 cursor의 서로 다른 실패 의미를 검토한다.
 - Frontend 검토자는 목적·필수 `deliveredAt`·nullable action과 `availability`만으로 전달 성공 이력을 표시하고 오래된 행동을 안전하게 비활성화할 수 있는지 검토한다.
 - 리뷰는 Notification 목적과 MenuHold·Waiting 정책을 다시 소유하지 않는다. 각 소비·제공 경계의 구현 가능성과 기존 계약 충돌만 확인한다.

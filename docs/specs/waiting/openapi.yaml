@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: MiriYum Waiting API
   version: 1.0.0
-  description: 매장 운영자 웨이팅 원장과 소비자 등록·현재 조회·취소 계약
+  description: 매장 운영자 웨이팅 원장, 소비자 등록·조회·취소와 audience별 변경 신호 계약
   license:
     name: All Rights Reserved
     identifier: LicenseRef-All-Rights-Reserved
@@ -16,6 +16,8 @@ tags:
     description: Reservation 도메인이 소유하는 중앙 FIFO 웨이팅 원장 조회와 운영자 전이
   - name: Consumer Waiting
     description: 로그인 소비자의 접수 가능 상태 조회, 등록, 현재 웨이팅 조회와 취소
+  - name: Waiting Events
+    description: HTTP/MySQL snapshot 재조회를 유도하는 audience별 최소 변경 신호
 paths:
   /api/v1/store-operators/stores/{storeId}/waiting-settings:
     get:
@@ -348,6 +350,41 @@ paths:
           $ref: "#/components/responses/WaitingLedgerConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/store-operators/stores/{storeId}/waiting-events:
+    x-miriyum-runtime-status: contract-only
+    x-miriyum-owner-issue: 250
+    get:
+      tags: [Waiting Events]
+      summary: 매장 운영자 웨이팅 변경 신호 구독
+      description: >-
+        대표 운영 권한을 재검증한 해당 store 범위의 fetch streaming 연결이다. 연결 직후와
+        유효한 Last-Event-ID 재연결 뒤 현재 MySQL high-watermark에 결속된 waiting.changed
+        신호를 보내며, 클라이언트는 해당 store의 웨이팅 목록·상세를 다시 조회한다.
+      operationId: streamStoreWaitingChanges
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/WaitingLastEventId"
+      responses:
+        "200":
+          description: 해당 매장의 팀 생성·공개 상태 변경을 알리는 최소 변경 신호 stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/WaitingStoreOperatorChangedEventStream"
+        "400":
+          $ref: "#/components/responses/WaitingEventCursorBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingStoreForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingStoreNotFound"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/consumers/me/stores/{storeId}/waiting-availabilities:
     get:
       tags: [Consumer Waiting]
@@ -473,6 +510,38 @@ paths:
           $ref: "#/components/responses/WaitingConsumerCancelConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/consumers/me/waiting-events:
+    x-miriyum-runtime-status: contract-only
+    x-miriyum-owner-issue: 250
+    get:
+      tags: [Waiting Events]
+      summary: 본인 웨이팅 변경 신호 구독
+      description: >-
+        consumer Bearer 인증을 사용하는 fetch streaming 연결이다. 연결 직후와 유효한
+        Last-Event-ID 재연결 뒤 현재 MySQL high-watermark에 결속된 waiting.changed 신호를
+        보내며, 클라이언트는 본인의 현재 웨이팅 snapshot을 다시 조회한다.
+      operationId: streamMyWaitingChanges
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WaitingLastEventId"
+      responses:
+        "200":
+          description: 본인 팀과 teamsAhead에 영향을 주는 최소 변경 신호 stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/WaitingConsumerChangedEventStream"
+        "400":
+          $ref: "#/components/responses/WaitingEventCursorBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingConsumerAccountForbidden"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
 components:
   securitySchemes:
     bearerAuth:
@@ -522,7 +591,32 @@ components:
         minimum: 1
         maximum: 100
         default: 20
+    WaitingLastEventId:
+      name: Last-Event-ID
+      in: header
+      required: false
+      description: >-
+        서버가 발급하고 audience·인증 계정·필요한 store scope·계약 version에 결속한 무결성
+        보호 opaque cursor. 없으면 최초 연결이며 클라이언트가 해석하거나 수정하지 않는다.
+      schema:
+        type: string
+        minLength: 1
   schemas:
+    WaitingConsumerChangedEventStream:
+      type: string
+      description: >-
+        UTF-8 SSE stream. 업무 event는 waiting.changed이고 id는 다음 Last-Event-ID로 그대로
+        재사용할 opaque cursor다. 본인 팀 생성·상태 변경과 같은 매장·영업일의 앞선 활성 팀
+        변화로 teamsAhead가 달라질 수 있을 때 신호를 보낸다. 수신 뒤
+        GET /api/v1/consumers/me/waiting-teams/current를 다시 조회한다. keepalive comment는 업무
+        event가 아니며 cursor를 전진시키지 않는다.
+    WaitingStoreOperatorChangedEventStream:
+      type: string
+      description: >-
+        UTF-8 SSE stream. 업무 event는 waiting.changed이고 id는 다음 Last-Event-ID로 그대로
+        재사용할 opaque cursor다. 해당 store의 팀 생성·공개 상태 변경을 알리며 수신 뒤 해당
+        store 웨이팅 목록·상세를 다시 조회한다. 설정과 AUTO·알림 worker 내부 상태는 신호가
+        아니다. keepalive comment는 업무 event가 아니며 cursor를 전진시키지 않는다.
     WaitingReceptionMode:
       type: string
       enum: [AUTO, MANUAL, PAUSED]
@@ -952,6 +1046,15 @@ components:
         data:
           $ref: "#/components/schemas/WaitingConsumerSnapshot"
   responses:
+    WaitingEventCursorBadRequest:
+      description: Last-Event-ID 형식·무결성 또는 audience·계정·store 결속이 유효하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: COMMON_001
+            message: 입력값이 올바르지 않습니다.
     WaitingStoreIdBadRequest:
       description: storeId가 양의 정수 문자열 PublicId 형식이 아님
       content:
