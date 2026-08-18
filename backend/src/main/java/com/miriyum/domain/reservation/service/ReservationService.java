@@ -652,7 +652,9 @@ public class ReservationService {
     }
 
     private void requireFulfillmentDependencies() {
-        if (menuHoldPort == null || fulfillmentAuditRepository == null) {
+        if (menuHoldPort == null
+                || fulfillmentAuditRepository == null
+                || notificationPublisher == null) {
             throw new IllegalStateException("reservation fulfillment dependencies are required");
         }
     }
@@ -733,6 +735,8 @@ public class ReservationService {
         fulfillmentAuditRepository.saveAndFlush(audit);
         ReservationDepositDispositionResponse depositDisposition =
                 persistDispositionObligation(dispositionPlan, occurredAt);
+        notificationPublisher.recordVisitCompleted(
+                reservation, occurredAt, correlationId);
         List<ReservationMenuHoldItemSnapshot> menuSnapshots =
                 presence == ReservationMenuHoldTerminationPresence.HOLD_PRESENT
                         ? menuHoldPort.findSnapshots(reservation.getId())
