@@ -44,6 +44,8 @@ export type SignOutOutcome = 'revoked' | 'unconfirmed'
 
 export interface ConsumerAuthContextValue {
   status: ConsumerAuthStatus
+  /** 현재 로그인 세션에만 속하는 캐시 식별자. 계정 정보 자체는 포함하지 않는다. */
+  sessionKey: number
   /** 보호 API 호출용 client. Access Token과 401 재발급이 이미 걸려 있다. */
   apiClient: ApiClient
   signIn: (credentials: LoginRequest) => Promise<void>
@@ -124,6 +126,7 @@ export function useConsumerAuth(): ConsumerAuthContextValue {
 export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
   const accessTokenRef = useRef<string | null>(null)
   const [status, setStatus] = useState<ConsumerAuthStatus>('restoring')
+  const [sessionKey, setSessionKey] = useState(0)
   const [signOutNotice, setSignOutNotice] = useState<SignOutOutcome | null>(
     null,
   )
@@ -170,6 +173,7 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
     refreshInFlight.current = null
     accessTokenRef.current = null
     setStatus('unauthenticated')
+    setSessionKey((previous) => previous + 1)
     void clearConsumerProtectedQueries(queryClient)
   }, [queryClient])
 
@@ -254,6 +258,7 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
       // 세션 종료와 같은 이유로 진행 중인 재발급도 넘겨받지 않는다.
       refreshInFlight.current = null
       const generation = sessionGeneration.current
+      setSessionKey((previous) => previous + 1)
 
       await clearConsumerProtectedQueries(queryClient)
       const token = await signInConsumer(credentials)
@@ -282,6 +287,7 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
       refreshInFlight.current = null
 
       const generation = sessionGeneration.current
+      setSessionKey((previous) => previous + 1)
       await clearConsumerProtectedQueries(queryClient)
 
       // 캐시 정리 중 로그아웃했다면 늦게 도착한 카카오 결과를 남기지 않는다.
@@ -318,6 +324,7 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       status,
+      sessionKey,
       apiClient,
       signIn,
       completeKakaoSignIn,
@@ -327,6 +334,7 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
     }),
     [
       status,
+      sessionKey,
       apiClient,
       signIn,
       completeKakaoSignIn,

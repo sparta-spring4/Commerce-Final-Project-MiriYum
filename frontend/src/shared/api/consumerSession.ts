@@ -44,6 +44,7 @@ function conditionSignature(query: object): string {
  */
 export const CONSUMER_PROTECTED_QUERY_ROOTS = {
   account: ['consumer-account'],
+  notificationHistory: ['consumer', 'notification-history'],
   reservations: ['reservations'],
   pickupReservations: ['pickup-reservations'],
 } as const

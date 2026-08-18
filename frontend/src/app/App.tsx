@@ -37,9 +37,14 @@ import { ROUTES } from './routes'
 const queryClient = createQueryClient()
 
 function ConsumerNotificationHistoryRoute() {
-  const { apiClient } = useConsumerAuth()
+  const { apiClient, sessionKey } = useConsumerAuth()
 
-  return <NotificationHistoryPage apiClient={apiClient} />
+  return (
+    <NotificationHistoryPage
+      apiClient={apiClient}
+      sessionKey={sessionKey}
+    />
+  )
 }
 
 /**
