@@ -111,12 +111,18 @@ describe('성공 봉투 검증 — 2xx라도 통과시키지 않는다', () => {
     expect((error as { violation: string }).violation).toBe('notAnObject')
   })
 
-  test('본문 없는 204를 성공으로 처리한다', async () => {
+  test('204는 operation이 허용한 경우에만 성공으로 처리한다', async () => {
     server.use(http.get(CATEGORIES, () => new HttpResponse(null, { status: 204 })))
 
-    const result = await getCategories()
+    const error = await getCategories().catch((thrown: unknown) => thrown)
 
-    expect(result).toBeUndefined()
+    expect(isApiContractError(error)).toBe(true)
+
+    const allowed = await client()(CATEGORIES, {
+      method: 'get',
+      allowNoContent: true,
+    })
+    expect(allowed).toBeUndefined()
   })
 
   test('계약 위반을 서버 오류 코드로 위장하지 않는다', async () => {

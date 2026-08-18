@@ -77,6 +77,32 @@ describe('메뉴 대표 이미지 패널', () => {
     expect(await screen.findByText('등록된 대표 이미지가 없습니다.')).toBeInTheDocument()
   })
 
+  it('서버의 이미지 형식·용량 오류를 구분해 안내한다', async () => {
+    let status = 413
+    server.use(
+      authenticatedOperator(),
+      http.put(IMAGE_PATH, () =>
+        HttpResponse.json(
+          { code: 'COMMON_009', message: '지원하지 않는 형식입니다.' },
+          { status },
+        ),
+      ),
+    )
+
+    renderPanel()
+    const input = screen.getByLabelText('이미지 등록')
+    fireEvent.change(input, {
+      target: { files: [new File(['image'], 'menu.webp', { type: 'image/webp' })] },
+    })
+    expect(await screen.findByText('이미지 파일은 10MB 이하만 등록할 수 있습니다.')).toBeInTheDocument()
+
+    status = 415
+    fireEvent.change(input, {
+      target: { files: [new File(['image'], 'menu-2.webp', { type: 'image/webp' })] },
+    })
+    expect(await screen.findByText('JPG, PNG, WEBP 이미지 파일만 등록할 수 있습니다.')).toBeInTheDocument()
+  })
+
   it('지원하지 않는 형식과 10MB 초과 파일을 업로드하지 않는다', async () => {
     let called = false
     server.use(

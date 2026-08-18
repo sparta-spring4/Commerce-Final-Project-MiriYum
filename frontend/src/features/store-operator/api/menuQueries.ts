@@ -283,6 +283,7 @@ export function useDeleteMenuImage(storeId: string, menuId: string) {
         {
           method: 'delete',
           pathParams: { storeId, menuId },
+          allowNoContent: true,
           idempotencyKey,
         },
       )

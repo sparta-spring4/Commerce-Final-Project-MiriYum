@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { createIdempotencyKeyCache } from '../../../shared/api/idempotencyKey'
+import { useRef, useState } from 'react'
+import { createIdempotencyKey } from '../../../shared/api/idempotencyKey'
 import { Button } from '../../../shared/ui/Button'
 import { Alert } from '../../../shared/ui/Feedback'
 import { useDeleteMenuImage, usePutMenuImage } from '../api/menuQueries'
@@ -18,7 +18,8 @@ export function MenuImagePanel({
 }) {
   const upload = usePutMenuImage(storeId, menuId)
   const remove = useDeleteMenuImage(storeId, menuId)
-  const uploadKeys = useMemo(createIdempotencyKeyCache, [])
+  const uploadKeys = useRef(new WeakMap<File, string>())
+  const deleteKey = useRef<string | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
@@ -38,11 +39,10 @@ export function MenuImagePanel({
     try {
       const url = await upload.mutateAsync({
         file,
-        idempotencyKey: uploadKeys.keyFor(
-          `${file.name}:${file.size}:${file.lastModified}`,
-        ),
+        idempotencyKey: uploadKeys.current.get(file) ?? createUploadKey(file, uploadKeys.current),
       })
       setImageUrl(url)
+      deleteKey.current = null
     } catch (error) {
       setMessage(storeErrorMessage(error))
     }
@@ -51,8 +51,10 @@ export function MenuImagePanel({
   async function handleDelete() {
     setMessage(null)
     try {
-      await remove.mutateAsync('menu-image-delete')
+      const key = deleteKey.current ?? (deleteKey.current = createIdempotencyKey())
+      await remove.mutateAsync(key)
       setImageUrl(null)
+      deleteKey.current = null
     } catch (error) {
       setMessage(storeErrorMessage(error))
     }
@@ -64,6 +66,9 @@ export function MenuImagePanel({
       hint="메뉴 목록과 상세 화면에 표시할 이미지를 관리합니다."
     >
       {message !== null && <Alert tone="error" title={message} />}
+      {upload.isPending && (
+        <Alert tone="info" title="이미지를 업로드하는 중입니다." />
+      )}
       <div className="op-menu-image">
         {imageUrl !== null ? (
           <img className="op-menu-image__preview" src={imageUrl} alt="메뉴 대표 이미지" />
@@ -71,23 +76,41 @@ export function MenuImagePanel({
           <div className="op-menu-image__empty">등록된 대표 이미지가 없습니다.</div>
         )}
         <div className="op-menu-image__actions">
-          <label className="mi-button mi-button--secondary" htmlFor="menu-image-file">
-            {imageUrl === null ? '이미지 등록' : '이미지 교체'}
+          <label
+            className={`mi-button mi-button--secondary${upload.isPending ? ' mi-button--disabled' : ''}`}
+            htmlFor="menu-image-file"
+            aria-disabled={upload.isPending}
+          >
+            {upload.isPending
+              ? '업로드 중...'
+              : imageUrl === null
+                ? '이미지 등록'
+                : '이미지 교체'}
           </label>
           <input
             id="menu-image-file"
             className="visually-hidden"
             type="file"
+            disabled={upload.isPending}
             accept="image/jpeg,image/png,image/webp"
             onChange={(event) => void handleFileChange(event.target.files?.[0])}
           />
-          {imageUrl !== null && (
-            <Button variant="danger" loading={remove.isPending} onClick={() => void handleDelete()}>
-              이미지 삭제
-            </Button>
-          )}
+          <Button
+            variant="danger"
+            loading={remove.isPending}
+            disabled={upload.isPending}
+            onClick={() => void handleDelete()}
+          >
+            이미지 삭제
+          </Button>
         </div>
       </div>
     </SectionCard>
   )
+}
+
+function createUploadKey(file: File, keys: WeakMap<File, string>): string {
+  const key = createIdempotencyKey()
+  keys.set(file, key)
+  return key
 }

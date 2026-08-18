@@ -31,6 +31,8 @@ export interface ApiClientDependencies {
 /** OpenAPI가 타이핑하지 않는 부수 입력. */
 interface CommonRequestOptions {
   query?: Record<string, string | number | boolean | undefined>
+  /** 본문 없는 성공을 허용할 operation에서만 지정한다. */
+  allowNoContent?: boolean
   multipart?: FormData
   signal?: AbortSignal
 }
@@ -107,6 +109,7 @@ export function createApiClient(
     options: {
       method: string
       body?: unknown
+      allowNoContent?: boolean
       multipart?: FormData
       idempotencyKey?: string
       csrfToken?: string
@@ -182,6 +185,7 @@ export function createApiClient(
       method,
       pathParams,
       body,
+      allowNoContent,
       multipart,
       idempotencyKey,
       csrfToken,
@@ -190,6 +194,7 @@ export function createApiClient(
     } = options as RequestOptions<P, M> & {
       pathParams?: Record<string, string | number>
       body?: unknown
+      allowNoContent?: boolean
       idempotencyKey?: string
       csrfToken?: string
       multipart?: FormData
@@ -199,6 +204,7 @@ export function createApiClient(
     const sendOptions = {
       method,
       body,
+      allowNoContent,
       multipart,
       idempotencyKey,
       csrfToken,
@@ -225,7 +231,7 @@ export function createApiClient(
       )
     }
 
-    if (response.status === 204) {
+    if (response.status === 204 && options.allowNoContent) {
       return undefined as unknown as ApiResult<P, M>
     }
 
