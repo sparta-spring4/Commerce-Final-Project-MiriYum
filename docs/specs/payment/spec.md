@@ -133,6 +133,8 @@ DispositionResult getReservationDepositDisposition(
 
 이 서버 내부 계약은 #239의 Payment 소유 경계이며 새 HTTP·OpenAPI를 만들지 않는다. 명령은 `paymentId`, `sourceEventId`, `sourceEventType`, nullable `correctsSourceEventId`, `policyVersion`, `responsibilityCode`, `targetRefundRateBasisPoints`, `idempotencyKey`만 가진다. 책임 코드는 `CONSUMER`, `STORE_RESPONSIBLE`, `PLATFORM_RESPONSIBLE`, 목표율은 `0`, `5000`, `10000`만 허용한다.
 
+Issue #241은 같은 계약에 `RESERVATION_FULFILLED`와 `RESERVATION_NO_SHOW` source를 추가한다. 정상 방문은 `CONSUMER/10000`, 확정 no-show는 Reservation이 승인한 `CONSUMER/0`, `STORE_RESPONSIBLE/10000`, `PLATFORM_RESPONSIBLE/10000`만 전달하며 `UNCLEAR`는 호출하지 않는다. Payment는 source type으로 귀책이나 목표율을 다시 판정하지 않는다.
+
 Payment는 `RESERVATION_DEPOSIT` 원 승인 스냅샷에서 목표 누적 환불액을 계산한다. `10000`은 원 승인액 그대로, 나머지는 `amountMinor × basisPoints ÷ 10000`의 정수 나눗셈 결과다. 최초 처분은 목표액 전부, 완료 처분의 정정은 기존 완료액과 목표액의 양의 차액만 `requestRefund`에 전달한다. 목표율 `0` 또는 이미 완료액과 같은 목표는 provider 호출 없이 완료한다.
 
 처분 ID는 정규화 UUID 멱등 키와 같고 `(payment, idempotencyKey)`, `(payment, sourceEventId)`를 유일하게 보존한다. 같은 키·같은 지문은 저장 결과를 재생하고 다른 지문은 `COMMON_007`로 거부한다. 정정 대상은 같은 결제의 완료 처분이면서 아직 유효한 자식 정정이 없는 현재 lineage head여야 한다. Payment 잠금 아래 이 조건을 확인하고 DB도 부모당 유효한 자식 하나만 허용해 순차·동시 sibling 정정의 초과 환불을 막는다. 목표 하향, stale parent, 미완료·미존재 처분 정정, 비예약금 source, 부적합 결제 상태와 환불 가능 잔액 초과는 외부 호출 없이 `FAILED/PERMANENT` 원장을 남기며 실제 완료액을 축소하지 않는다.

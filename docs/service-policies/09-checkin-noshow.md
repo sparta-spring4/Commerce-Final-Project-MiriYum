@@ -5,7 +5,7 @@
 
 > 문서 상태: 세부 정책 확정
 > 정책 범위: `CHECK-001`~`CHECK-010`
-> 최종 변경일: 2026-08-16
+> 최종 변경일: 2026-08-18
 
 체크인 자격과 수단, 지각, 일부 인원 도착, 노쇼 판정, 귀책, 제재 및 이의 제기를 다룬다.
 
@@ -66,7 +66,14 @@ Issue #240은 위 확정 정책 가운데 예약의 회전형 QR 방문 완료�
 - 성공 replay는 현재 운영자·매장 권한만 다시 확인하고 저장된 결과를 반환한다. 이미 성공한 raw QR·expiry·epoch·과거 상태·시간 경계를 다시 검증하지 않는다.
 - fresh no-show는 현재 권한과 멱등 claim 뒤 Reservation과 MenuHold 종결 잠금을 획득하고 `Reservation.NO_SHOW`, `MenuHold.FORFEITED`, 필수 사유 audit와 멱등 결과를 같은 트랜잭션에 기록한다.
 - QR scan, no-show, 기존 직접 방문 완료, 취소는 Reservation 잠금에서 하나의 종결 승자만 남긴다. 후속 상태·감사·grant·MenuHold·멱등 기록 중 하나라도 실패하면 전부 rollback한다.
-- QR 성공과 no-show는 예약 수용량·allocation·메뉴 재고·수량·return ledger·transfer를 조회하거나 복구하지 않는다. Issue #240은 금전 명령이나 `PAY-009` 입력을 실행·enqueue하지 않고 `NO_SHOW` 결과만 기록하며, 금전 연동은 후속 Issue #241이 소유한다.
+- QR 성공과 no-show는 예약 수용량·allocation·메뉴 재고·수량·return ledger·transfer를 조회하거나 복구하지 않는다. Issue #240 자체는 금전 명령을 만들지 않으며 후속 Issue #241만 아래 V2 처분 obligation을 연결한다.
+
+## Issue #241 예약금 처분 연결
+
+- V2 예약금 Reservation의 정상 직접 방문 완료·QR 체크인은 `RESERVATION_FULFILLED`, `CONSUMER`, 10000 bps 처분 obligation을 방문 상태·감사와 같은 transaction에 저장한다.
+- V2 확정 노쇼는 `USER_CAUSE_CANDIDATE → CONSUMER/0`, `STORE_CAUSE_CANDIDATE → STORE_RESPONSIBLE/10000`, `PLATFORM_EXTERNAL_CAUSE_CANDIDATE → PLATFORM_RESPONSIBLE/10000`으로 저장한다. `UNCLEAR`는 금전 처분을 만들지 않는다.
+- 완료된 동일 final Reservation의 예약금 process scalar link가 없거나 유효하지 않으면 방문 종결 전에 실패 폐쇄한다. V1/null/unknown과 비예약금 예약은 기존 비금전 동작을 유지한다.
+- 방문 transaction은 Payment 공개 Service나 provider를 호출하지 않는다. 저장된 obligation은 #239의 기존 worker가 transaction 밖에서 실행하며 replay는 최초 저장 응답을 반환해 중복 obligation을 만들지 않는다.
 
 ## CHECK-001 QR·번호·직원 확인 방식
 
