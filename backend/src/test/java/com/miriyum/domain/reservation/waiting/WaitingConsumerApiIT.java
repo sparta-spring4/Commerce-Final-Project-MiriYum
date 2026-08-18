@@ -70,6 +70,7 @@ import tools.jackson.databind.ObjectMapper;
             "miriyum.reservation.time-policy.activation-enabled=false",
             "miriyum.waiting.closure.initial-delay-ms=600000",
             "miriyum.waiting.compensation.initial-delay-ms=600000",
+            "miriyum.waiting.consumer-registration.location-proof-connected=true",
             "miriyum.payment.cursor-secret=test-history-cursor-secret-with-enough-entropy",
             "miriyum.payment.portone.api-secret=test-api-secret",
             "miriyum.payment.portone.webhook-secret=whsec_dGVzdC1zZWNyZXQ=",

@@ -1,18 +1,22 @@
 package com.miriyum.domain.reservation.waiting.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
+import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import java.time.Clock;
@@ -24,6 +28,34 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 class WaitingConsumerCommandFacadeTest {
+
+    @Test
+    void createFailsClosedBeforeTeamCreationWhenLocationProofIsNotConnected() {
+        ConsumerAccountService accounts = mock(ConsumerAccountService.class);
+        WaitingCreationService creation = mock(WaitingCreationService.class);
+        WaitingLedgerService ledger = mock(WaitingLedgerService.class);
+        WaitingConsumerCommandFacade facade = new WaitingConsumerCommandFacade(
+                accounts,
+                creation,
+                ledger,
+                Clock.fixed(Instant.parse("2026-08-17T03:00:00Z"), ZoneOffset.UTC),
+                false,
+                attempt -> 0L,
+                millis -> { });
+
+        assertThatThrownBy(() -> facade.create(
+                100L,
+                200L,
+                LocalDate.of(2026, 8, 17),
+                2,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440200")))
+                .isInstanceOfSatisfying(ServiceException.class, failure ->
+                        assertThat(failure.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.WAITING_RECEPTION_CLOSED));
+
+        verify(accounts).requireActiveAccount(200L);
+        verifyNoInteractions(creation);
+    }
 
     @Test
     void createRevalidatesTheConsumerAndFixesThePublicSourceToRemote() {
@@ -41,6 +73,7 @@ class WaitingConsumerCommandFacadeTest {
                 creation,
                 ledger,
                 Clock.fixed(Instant.parse("2026-08-17T03:00:00Z"), ZoneOffset.UTC),
+                true,
                 attempt -> 0L,
                 millis -> { });
 
@@ -69,6 +102,7 @@ class WaitingConsumerCommandFacadeTest {
                 creation,
                 ledger,
                 Clock.fixed(now, ZoneOffset.UTC),
+                false,
                 attempt -> 0L,
                 millis -> { });
 

@@ -379,6 +379,12 @@ paths:
       tags: [Consumer Waiting]
       summary: 웨이팅 등록
       operationId: createConsumerWaitingTeam
+      description: >-
+        위치 증명 세션을 등록과 같은 원자 경계에서 소비하는 #409가 연결되기 전에는
+        기본 비활성 상태이며, 팀·순번·membership을 만들지 않고 409 WAITING_012를 반환한다.
+      x-runtime-default: disabled
+      x-activation-owner-issue: 409
+      x-location-proof-required: true
       security:
         - bearerAuth: []
       parameters:

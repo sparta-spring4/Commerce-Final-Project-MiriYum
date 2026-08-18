@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.waiting.service;
 
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
@@ -21,6 +22,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.IntToLongFunction;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.QueryTimeoutException;
@@ -39,6 +41,7 @@ public class WaitingConsumerCommandFacade {
     private final WaitingCreationService creationService;
     private final WaitingLedgerService ledgerService;
     private final Clock clock;
+    private final boolean locationProofConnected;
     private final IntToLongFunction retryDelayMillis;
     private final RetrySleeper retrySleeper;
 
@@ -50,9 +53,11 @@ public class WaitingConsumerCommandFacade {
             ConsumerAccountService accountService,
             WaitingCreationService creationService,
             WaitingLedgerService ledgerService,
-            Clock clock
+            Clock clock,
+            @Value("${miriyum.waiting.consumer-registration.location-proof-connected:false}")
+                    boolean locationProofConnected
     ) {
-        this(accountService, creationService, ledgerService, clock,
+        this(accountService, creationService, ledgerService, clock, locationProofConnected,
                 WaitingConsumerCommandFacade::defaultDelayMillis, Thread::sleep);
     }
 
@@ -61,6 +66,7 @@ public class WaitingConsumerCommandFacade {
             WaitingCreationService creationService,
             WaitingLedgerService ledgerService,
             Clock clock,
+            boolean locationProofConnected,
             IntToLongFunction retryDelayMillis,
             RetrySleeper retrySleeper
     ) {
@@ -68,6 +74,7 @@ public class WaitingConsumerCommandFacade {
         this.creationService = Objects.requireNonNull(creationService);
         this.ledgerService = Objects.requireNonNull(ledgerService);
         this.clock = Objects.requireNonNull(clock);
+        this.locationProofConnected = locationProofConnected;
         this.retryDelayMillis = Objects.requireNonNull(retryDelayMillis);
         this.retrySleeper = Objects.requireNonNull(retrySleeper);
     }
@@ -82,6 +89,9 @@ public class WaitingConsumerCommandFacade {
         Objects.requireNonNull(businessDate, "businessDate must not be null");
         Objects.requireNonNull(key, "key must not be null");
         accountService.requireActiveAccount(consumerAccountId);
+        if (!locationProofConnected) {
+            throw new ServiceException(ReservationErrorCode.WAITING_RECEPTION_CLOSED);
+        }
         return creationService.createForConsumer(
                 storeId,
                 consumerAccountId,

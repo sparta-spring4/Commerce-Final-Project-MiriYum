@@ -472,7 +472,7 @@ version CAS는 Issue #380이 별도로 소유한다.
 | path | method | 의미 |
 |---|---|---|
 | `/api/v1/consumers/me/stores/{storeId}/waiting-availabilities` | `GET` | 중앙 시각 기준 접수 가능 여부와 등록에 사용할 `businessDate` 조회 |
-| `/api/v1/consumers/me/stores/{storeId}/waiting-teams` | `POST` | `businessDate`, `partySize`로 원격 웨이팅 등록 |
+| `/api/v1/consumers/me/stores/{storeId}/waiting-teams` | `POST` | #409 위치 증명 연결 뒤 `businessDate`, `partySize`로 원격 웨이팅 등록 |
 | `/api/v1/consumers/me/waiting-teams/current` | `GET` | 인증 소비자의 단일 활성 웨이팅 조회 |
 | `/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations` | `POST` | 본인 웨이팅을 `expectedVersion`으로 취소 |
 
@@ -481,6 +481,13 @@ version CAS는 Issue #380이 별도로 소유한다.
 `WaitingCreationService`를 사용하고 source는 `REMOTE`로 고정한다. availability 결과와 등록
 사이에 설정이나 영업 구간이 닫힐 수 있으므로 등록 트랜잭션은 Store/Schedule 접수 게이트를
 다시 잠그고 검사하며, 닫힌 경우 어떤 팀·membership·감사·상태 사건도 기록하지 않는다.
+
+#409가 계정·매장·목적에 결속된 단기 위치 증명 세션을 등록 트랜잭션에서 한 번만 소비하도록
+연결하기 전에는 `miriyum.waiting.consumer-registration.location-proof-connected`의 기본값을
+`false`로 유지한다. 이 상태의 등록 POST는 활성 계정만 재확인한 뒤 `409 WAITING_012`로 실패
+폐쇄하며 `WaitingCreationService`를 호출하지 않는다. 조회·availability·취소는 이 게이트의
+영향을 받지 않는다. 속성을 `true`로 바꾸는 배포 권한과 위치 증명-팀 생성 원자 결합 검증은
+#409가 소유한다.
 
 availability는 Waiting 설정 유무를 접수 가능 여부로 해석하기 전에 Store 존재를 확인한다. 없는
 매장은 `404 STORE_001`, 설정이 없거나 접수가 닫힌 기존 매장은 `200 accepting=false`다. 등록의
@@ -499,9 +506,9 @@ call/cancel이 같은 version으로 경합하면 팀 row lock에서 먼저 확�
 계산한다. 다른 소비자의 팀은 존재 여부와 소유권을 구분하지 않고 `404 WAITING_003`으로
 응답한다. 계정 ID, 운영 메모, 좌표, 원본 식별자, 멱등 키는 반환하지 않는다.
 
-플랫폼 3km 정책은 유지하지만 위치 판정·좌표 수집은 #408 범위에서 제외한다. 따라서 이 API는
-위치를 입력받거나 검증 완료를 주장하지 않으며, 후속 위치 증명 경계가 연결되기 전까지 그 점을
-운영 위험으로 남긴다.
+플랫폼 3km 정책은 유지하고 위치 판정·좌표 수집 구현은 #409가 소유한다. #408은 위치를
+입력받거나 검증 완료를 주장하지 않으며, 후속 위치 증명 경계가 연결되기 전에는 등록을 기본
+비활성화해 원격 팀·순번·membership이 생성되지 않도록 실패 폐쇄한다.
 
 ### 활성 팀 종결 작업과 #271 경계
 

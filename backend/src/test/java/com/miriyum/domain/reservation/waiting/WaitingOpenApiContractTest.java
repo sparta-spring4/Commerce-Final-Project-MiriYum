@@ -164,6 +164,10 @@ class WaitingOpenApiContractTest {
                 .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "429");
 
         Map<String, Object> create = map(map(paths.get(CONSUMER_CREATE_PATH)).get("post"));
+        assertThat(create)
+                .containsEntry("x-runtime-default", "disabled")
+                .containsEntry("x-activation-owner-issue", 409)
+                .containsEntry("x-location-proof-required", true);
         assertThat(map(create.get("responses")).keySet())
                 .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "409", "429");
         assertThat(list(create.get("parameters"))).anySatisfy(parameter ->
