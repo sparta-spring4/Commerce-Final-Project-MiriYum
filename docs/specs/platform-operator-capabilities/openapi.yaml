@@ -1,0 +1,107 @@
+openapi: 3.1.0
+info:
+  title: MiriYum Platform Operator Capabilities API
+  version: 1.0.0
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+  description: 현재 플랫폼 운영자의 중앙 역할과 최종 유효 권한 조회 계약이다.
+servers:
+  - url: /
+security: []
+paths:
+  /api/v1/platform-operators/me:
+    get:
+      tags: [Platform Operator Capabilities]
+      summary: 현재 플랫폼 운영자의 중앙 유효 권한 조회
+      operationId: getCurrentPlatformOperatorCapabilities
+      security:
+        - platformOperatorBearerAuth: []
+      responses:
+        "200":
+          $ref: "#/components/responses/PlatformOperatorCapabilitiesResult"
+        "401":
+          $ref: "#/components/responses/SessionUnauthorized"
+        "403":
+          $ref: "#/components/responses/CapabilitiesForbidden"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+components:
+  securitySchemes:
+    platformOperatorBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: audience와 namespace가 platform-operator이고 중앙 세션 검증을 통과한 Access JWT
+  schemas:
+    PlatformOperatorRole:
+      type: string
+      enum: [SUPER_ADMIN, ONBOARDING_REVIEWER, MEMBER_SUPPORT_OPERATOR, ENFORCEMENT_OPERATOR, PAYMENT_RECOVERY_OPERATOR, OPERATIONS_MONITOR, AUDIT_READER, INCIDENT_RESPONDER]
+    PlatformOperatorPermission:
+      type: string
+      enum: [OPERATOR_CREATE, OPERATOR_AUTHORITY_MANAGE, OPERATOR_SUSPEND, ONBOARDING_REVIEW, ONBOARDING_EVIDENCE_READ, MEMBER_READ_MINIMAL, MEMBER_RECOVERY, ACCOUNT_SANCTION, ACCOUNT_PERMANENT_SANCTION_APPROVE, ACCOUNT_APPEAL_REVIEW, STORE_READ_MINIMAL, STORE_SANCTION, OPERATIONS_MONITOR_READ, PAYMENT_RECOVERY_EXECUTE, PAYMENT_RECOVERY_HIGH_VALUE_APPROVE, AUDIT_READ, INCIDENT_RESPOND, BREAK_GLASS_APPROVE]
+    PlatformOperatorCapabilitiesData:
+      type: object
+      additionalProperties: false
+      required: [authorityVersion, roles, permissions]
+      properties:
+        authorityVersion:
+          type: integer
+          format: int64
+          minimum: 1
+        roles:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/PlatformOperatorRole"
+        permissions:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/PlatformOperatorPermission"
+    PlatformOperatorCapabilitiesResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/PlatformOperatorCapabilitiesData"
+  responses:
+    PlatformOperatorCapabilitiesResult:
+      description: 현재 중앙 권한 version의 활성 역할과 최종 유효 권한
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PlatformOperatorCapabilitiesResponse"
+    SessionUnauthorized:
+      description: Access Token, 중앙 세션 또는 authority version이 유효하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            AccessTokenRequired:
+              value: {code: AUTH_001, message: Access Token이 필요합니다.}
+            AccessTokenExpired:
+              value: {code: AUTH_002, message: Access Token이 만료됐습니다.}
+            AccessTokenInvalid:
+              value: {code: AUTH_003, message: Access Token 형식 또는 서명이 유효하지 않습니다.}
+            TokenNamespaceMismatch:
+              value: {code: AUTH_004, message: 토큰 namespace가 요청한 API와 일치하지 않습니다.}
+            SessionInvalid:
+              value: {code: AUTH_015, message: 플랫폼 운영자 세션이 더 이상 유효하지 않습니다.}
+    CapabilitiesForbidden:
+      description: 계정이 중지됐거나 최초 비밀번호 변경 전 제한 세션임
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            AccountRestricted:
+              value: {code: AUTH_011, message: 현재 계정 상태로는 이용할 수 없습니다.}
+            InitialPasswordChangeRequired:
+              value: {code: AUTH_012, message: 최초 비밀번호 변경이 필요합니다.}
