@@ -10,12 +10,20 @@ public class ReservationCancellationPolicyRegistry {
 
     private static final ReservationCancellationPolicyVersion VERSION_ONE =
             new ReservationCancellationPolicyVersion(1L);
+    private static final ReservationCancellationPolicyVersion VERSION_TWO =
+            new ReservationCancellationPolicyVersion(2L);
 
     public Optional<ReservationCancellationPolicyVersion> findByStoredVersion(
             Long storedVersion) {
-        if (storedVersion == null || storedVersion != VERSION_ONE.value()) {
+        if (storedVersion == null) {
             return Optional.empty();
         }
-        return Optional.of(VERSION_ONE);
+        if (storedVersion == VERSION_ONE.value()) {
+            return Optional.of(VERSION_ONE);
+        }
+        if (storedVersion == VERSION_TWO.value()) {
+            return Optional.of(VERSION_TWO);
+        }
+        return Optional.empty();
     }
 }

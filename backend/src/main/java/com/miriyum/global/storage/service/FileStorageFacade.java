@@ -6,6 +6,7 @@ import com.miriyum.global.storage.FileStorageRequest;
 import com.miriyum.global.storage.FileStorageSaveResult;
 import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.FileStorageOwner;
+import com.miriyum.global.storage.FileStorageOutcomeUnknownException;
 import com.miriyum.global.storage.FileStoragePurpose;
 import com.miriyum.global.storage.entity.FileMetadata;
 import java.time.Instant;
@@ -39,6 +40,9 @@ public class FileStorageFacade {
         try {
             FileStorageSaveResult saveResult = fileStoragePort.save(request);
             validateSaveResult(persistedMetadata, saveResult);
+        } catch (FileStorageOutcomeUnknownException exception) {
+            // PENDING을 유지해야 reconciliation이 고아 객체를 안전하게 정리할 수 있다.
+            throw exception;
         } catch (RuntimeException exception) {
             markFailedWithoutHidingStorageFailure(persistedMetadata.getFileId(), exception);
             throw exception;
@@ -96,15 +100,7 @@ public class FileStorageFacade {
         }
         FileStorageMetadata deleted = transactionExecutor.deleteOrGetDeleted(fileId.toString(), deletedAt)
                 .toPublicMetadata();
-        try {
-            fileStoragePort.delete(deleted.objectKey());
-        } catch (RuntimeException exception) {
-            log.warn(
-                    "event=file_storage_object_delete_failed file_id={}",
-                    deleted.fileId(),
-                    exception);
-            throw exception;
-        }
+        deleteObjectAndRecordCompletion(deleted, "file_storage_object_delete_failed");
         return deleted;
     }
 
@@ -115,16 +111,45 @@ public class FileStorageFacade {
         }
         FileStorageMetadata deleted = transactionExecutor.discardPendingOrGetDeleted(fileId.toString(), deletedAt)
                 .toPublicMetadata();
+        deleteObjectAndRecordCompletion(deleted, "file_storage_pending_compensation_failed");
+        return deleted;
+    }
+
+    /**
+     * reconciliation worker가 이미 claim한 논리 삭제 객체를 재시도한다.
+     * 이 경로는 배치의 식별자 없는 집계 로그만 남기기 위해 개별 실패 로그를 만들지 않는다.
+     */
+    public boolean deleteForReconciliation(FileStorageMetadata deleted, String claimToken, Instant completedAt) {
+        fileStoragePort.delete(deleted.objectKey());
+        return transactionExecutor.completeClaimedObjectCleanup(deleted.fileId().toString(), claimToken, completedAt);
+    }
+
+    /**
+     * 물리 삭제와 DB 완료 기록을 각각 실패 원인으로 남긴다.
+     *
+     * <p>완료 기록이 실패해도 DELETED 상태와 객체 키는 남으므로 reconciliation 작업이 멱등 삭제 후 다시
+     * 완료 시각을 기록한다.</p>
+     */
+    private void deleteObjectAndRecordCompletion(FileStorageMetadata deleted, String objectDeletionFailureEvent) {
         try {
             fileStoragePort.delete(deleted.objectKey());
         } catch (RuntimeException exception) {
             log.warn(
-                    "event=file_storage_pending_compensation_failed file_id={}",
+                    "event={} file_id={}",
+                    objectDeletionFailureEvent,
                     deleted.fileId(),
                     exception);
             throw exception;
         }
-        return deleted;
+        try {
+            transactionExecutor.completeObjectCleanup(deleted.fileId().toString(), Instant.now());
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "event=file_storage_object_cleanup_state_record_failed file_id={}",
+                    deleted.fileId(),
+                    exception);
+            throw exception;
+        }
     }
 
     private void validatePendingMetadata(FileStorageMetadata metadata) {

@@ -74,7 +74,9 @@ class ReservationDepositMigrationTest {
 
             assertThat(upgraded.info().applied())
                     .extracting(MigrationInfo::getScript)
-                    .contains("V55__create_reservation_deposit_runtime.sql");
+                    .contains(
+                            "V55__create_reservation_deposit_runtime.sql",
+                            "V59__create_reservation_deposit_disposition_obligations.sql");
             try (Connection connection = mysql.createConnection("")) {
                 assertThat(singleString(connection, """
                         SELECT JSON_OBJECT(
@@ -107,6 +109,9 @@ class ReservationDepositMigrationTest {
                         "SELECT COUNT(*) FROM reservation_deposit_cause_audits")).isZero();
                 assertThat(singleLong(connection,
                         "SELECT COUNT(*) FROM reservation_deposit_refund_obligations")).isZero();
+                assertThat(singleLong(connection,
+                        "SELECT COUNT(*) FROM "
+                                + "reservation_deposit_disposition_obligations")).isZero();
                 assertThat(columnsOf(connection, "reservation_deposit_processes")).contains(
                         "resources_protected",
                         "resources_protected_at",
@@ -138,6 +143,14 @@ class ReservationDepositMigrationTest {
         assertThat(indexesOf(connection, "reservation_deposit_refund_obligations")).contains(
                 "uk_reservation_deposit_refund_obligation_identity",
                 "idx_reservation_deposit_refund_due");
+        assertThat(indexesOf(
+                connection,
+                "reservation_deposit_disposition_obligations")).contains(
+                "uk_reservation_deposit_disposition_payment_event",
+                "uk_reservation_deposit_disposition_obligation_key",
+                "uk_reservation_deposit_disposition_cancellation_key",
+                "idx_reservation_deposit_disposition_due",
+                "idx_reservation_deposit_disposition_reservation_latest");
         assertThat(referencedTablesOf(connection, "reservation_deposit_processes"))
                 .contains("reservation_holds", "consumer_accounts", "reservations")
                 .doesNotContain("payments");
@@ -243,6 +256,52 @@ class ReservationDepositMigrationTest {
                     '2026-08-20 09:11:02.000000'
                 )
                 """.formatted(secondProcessId));
+
+        executeUpdate(connection, pendingDispositionInsert(
+                firstProcessId,
+                "reservation-cancel:40001:550e8400-e29b-41d4-a716-446655440011",
+                "550e8400-e29b-41d4-a716-446655440012",
+                "550e8400-e29b-41d4-a716-446655440011"));
+        assertSqlFails(connection, pendingDispositionInsert(
+                secondProcessId,
+                "reservation-cancel:40001:550e8400-e29b-41d4-a716-446655440011",
+                "550e8400-e29b-41d4-a716-446655440013",
+                "550e8400-e29b-41d4-a716-446655440013"));
+        assertSqlFails(connection, pendingDispositionInsert(
+                secondProcessId,
+                "reservation-cancel:40001:550e8400-e29b-41d4-a716-446655440014",
+                "550e8400-e29b-41d4-a716-446655440012",
+                "550e8400-e29b-41d4-a716-446655440014"));
+        assertSqlFails(connection, pendingDispositionInsert(
+                secondProcessId,
+                "reservation-cancel:40001:550e8400-e29b-41d4-a716-446655440015",
+                "550e8400-e29b-41d4-a716-446655440015",
+                "550e8400-e29b-41d4-a716-446655440011"));
+    }
+
+    private static String pendingDispositionInsert(
+            long processId,
+            String sourceEventId,
+            String obligationKey,
+            String cancellationKey
+    ) {
+        return """
+                INSERT INTO reservation_deposit_disposition_obligations (
+                    reservation_deposit_process_id, reservation_id, payment_id,
+                    source_event_id, source_event_type, policy_version,
+                    responsibility_code, target_refund_rate_basis_points,
+                    obligation_key, cancellation_idempotency_key,
+                    status, next_operation, attempt_count, next_attempt_at,
+                    claim_token, created_at, updated_at, row_version
+                ) VALUES (
+                    %d, 40001, '900000000000000001', '%s',
+                    'RESERVATION_CANCELLED', 2, 'CONSUMER', 5000,
+                    '%s', '%s', 'PENDING', 'APPLY', 0,
+                    '2026-08-20 09:12:00.000000', 0,
+                    '2026-08-20 09:12:00.000000',
+                    '2026-08-20 09:12:00.000000', 0
+                )
+                """.formatted(processId, sourceEventId, obligationKey, cancellationKey);
     }
 
     private static long insertAwaitingProcess(

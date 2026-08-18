@@ -4,6 +4,7 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import jakarta.persistence.LockModeType;
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.Optional;
 import java.util.List;
@@ -103,6 +104,20 @@ public interface WaitingTeamRepository extends JpaRepository<WaitingTeam, Long> 
             Collection<WaitingTeamStatus> activeStatuses
     );
 
+    @Query("""
+            select count(team)
+            from WaitingTeam team
+            where team.storeId = :storeId
+              and team.businessDate = :businessDate
+              and team.queueSequence < :queueSequence
+              and team.status in ('WAITING', 'CALLED', 'ARRIVED', 'RESERVATION_CONVERTING')
+            """)
+    long countActiveAhead(
+            @Param("storeId") long storeId,
+            @Param("businessDate") LocalDate businessDate,
+            @Param("queueSequence") long queueSequence
+    );
+
     @Query("select team.id from WaitingTeam team where team.storeId = :storeId and team.status in :statuses order by team.id")
     List<Long> findIdsByStoreIdAndStatusIn(@Param("storeId") long storeId,
             @Param("statuses") Collection<WaitingTeamStatus> statuses);
@@ -174,5 +189,22 @@ public interface WaitingTeamRepository extends JpaRepository<WaitingTeam, Long> 
     default long findTerminalCompensationScanUpperBoundId() {
         Long upperBound = findMaxWaitingTeamId();
         return upperBound == null ? 0L : upperBound;
+    }
+
+    @Query(value = """
+            SELECT COALESCE(MAX(t.waiting_team_id), 0) AS maxTeamId
+            FROM waiting_teams t
+            WHERE t.store_id = :storeId
+              AND t.business_date = :businessDate
+              AND t.created_at <= :asOf
+            """, nativeQuery = true)
+    WaitingDashboardCheckpoint dashboardCheckpoint(
+            @Param("storeId") long storeId,
+            @Param("businessDate") LocalDate businessDate,
+            @Param("asOf") Instant asOf
+    );
+
+    interface WaitingDashboardCheckpoint {
+        Long getMaxTeamId();
     }
 }

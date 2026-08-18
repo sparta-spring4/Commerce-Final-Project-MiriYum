@@ -6,7 +6,12 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.miriyum.domain.payment.dto.PaymentContracts.ApplyReservationDepositDispositionCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.ConfirmPaymentCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.DispositionFailureClassification;
+import com.miriyum.domain.payment.dto.PaymentContracts.DispositionResult;
+import com.miriyum.domain.payment.dto.PaymentContracts.DispositionStatus;
+import com.miriyum.domain.payment.dto.PaymentContracts.GetReservationDepositDispositionQuery;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentAttemptStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentResult;
@@ -14,11 +19,13 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDepositCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareWaitingReservationDepositCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
+import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservationDeposit;
 import com.miriyum.domain.payment.entity.Payment;
 import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
+import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderCancellation;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderPayment;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderStatus;
 import com.miriyum.global.exception.CommonErrorCode;
@@ -376,6 +383,319 @@ class PaymentServiceTest {
     }
 
     @Test
+    @DisplayName("0퍼센트 예약금 처분은 환불이나 provider 호출 없이 저장 결과를 반환한다")
+    void appliesZeroPercentDispositionWithoutRefund() {
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(0);
+        DispositionResult expected = dispositionResult(
+                0, 0L, 0L, null, DispositionStatus.COMPLETED, null);
+        PaymentTransactionService.DispositionClaim claim =
+                PaymentTransactionService.DispositionClaim.completed(expected);
+        when(transactions.claimDisposition(command, NOW)).thenReturn(claim);
+
+        DispositionResult result = paymentService.applyReservationDepositDisposition(command);
+
+        assertThat(result).isEqualTo(expected);
+        verify(providerClient, never()).cancelPayment(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    @DisplayName("50퍼센트 예약금 처분은 기존 환불 machinery 결과를 처분 원장에 반영한다")
+    void appliesPositiveDispositionThroughExistingRefundMachinery() {
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(5000);
+        RequestRefundCommand refundCommand = new RequestRefundCommand(
+                PAYMENT_ID,
+                command.sourceEventId(),
+                15_000L,
+                "RESERVATION_DEPOSIT_DISPOSITION",
+                2L,
+                command.idempotencyKey());
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                PaymentTransactionService.DispositionClaim.requiresRefund(
+                        command.idempotencyKey(), refundCommand);
+        PaymentTransactionService.RefundClaim refundClaim =
+                PaymentTransactionService.RefundClaim.requiresCall(
+                        "910000000000000001", PAYMENT_ID, PORTONE_PAYMENT_ID,
+                        15_000L, "KRW", "RESERVATION_DEPOSIT_DISPOSITION");
+        ProviderCancellation providerCancellation = new ProviderCancellation(
+                "cancellation-1", ProviderStatus.PARTIALLY_CANCELLED, 15_000L, "KRW");
+        RefundResult refundResult = new RefundResult(
+                "910000000000000001", PAYMENT_ID, 15_000L, 15_000L,
+                15_000L, 15_000L, "KRW", RefundStatus.COMPLETED,
+                NOW, NOW);
+        DispositionResult expected = dispositionResult(
+                5000, 15_000L, 15_000L, "910000000000000001",
+                DispositionStatus.COMPLETED, null);
+        when(transactions.claimDisposition(command, NOW)).thenReturn(dispositionClaim);
+        when(transactions.claimRefund(refundCommand, NOW)).thenReturn(refundClaim);
+        when(providerClient.cancelPayment(
+                PORTONE_PAYMENT_ID, "910000000000000001", 15_000L, "KRW",
+                "RESERVATION_DEPOSIT_DISPOSITION")).thenReturn(providerCancellation);
+        when(transactions.finalizeRefund(refundClaim, providerCancellation, NOW))
+                .thenReturn(refundResult);
+        when(transactions.finalizeDisposition(
+                command.idempotencyKey(), refundResult, NOW)).thenReturn(expected);
+
+        DispositionResult result = paymentService.applyReservationDepositDisposition(command);
+
+        assertThat(result).isEqualTo(expected);
+        verify(transactions).finalizeDisposition(command.idempotencyKey(), refundResult, NOW);
+    }
+
+    @Test
+    @DisplayName("provider 결과가 불명확한 예약금 처분은 대사 필요·UNKNOWN으로 수렴한다")
+    void marksDispositionUnknownWhenRefundOutcomeIsUnknown() {
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(5000);
+        RequestRefundCommand refundCommand = dispositionRefundCommand(command);
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                PaymentTransactionService.DispositionClaim.requiresRefund(
+                        command.idempotencyKey(), refundCommand);
+        PaymentTransactionService.RefundClaim refundClaim =
+                PaymentTransactionService.RefundClaim.requiresCall(
+                        "910000000000000001", PAYMENT_ID, PORTONE_PAYMENT_ID,
+                        15_000L, "KRW", "RESERVATION_DEPOSIT_DISPOSITION");
+        RefundResult refundResult = refundResult(
+                RefundStatus.RECONCILIATION_REQUIRED, 0L, null);
+        DispositionResult expected = dispositionResult(
+                5000, 15_000L, 0L, "910000000000000001",
+                DispositionStatus.RECONCILIATION_REQUIRED,
+                DispositionFailureClassification.UNKNOWN);
+        when(transactions.claimDisposition(command, NOW)).thenReturn(dispositionClaim);
+        when(transactions.claimRefund(refundCommand, NOW)).thenReturn(refundClaim);
+        when(providerClient.cancelPayment(
+                PORTONE_PAYMENT_ID, "910000000000000001", 15_000L, "KRW",
+                "RESERVATION_DEPOSIT_DISPOSITION"))
+                .thenThrow(new PaymentProviderClient.ProviderUnavailableException("timeout"));
+        when(transactions.markRefundUnknown(refundClaim, NOW)).thenReturn(refundResult);
+        when(transactions.finalizeDisposition(
+                command.idempotencyKey(), refundResult, NOW)).thenReturn(expected);
+
+        DispositionResult result = paymentService.applyReservationDepositDisposition(command);
+
+        assertThat(result.status()).isEqualTo(DispositionStatus.RECONCILIATION_REQUIRED);
+        assertThat(result.failureClassification())
+                .isEqualTo(DispositionFailureClassification.UNKNOWN);
+    }
+
+    @Test
+    @DisplayName("provider 명시 실패는 같은 환불을 재시도할 수 있는 처분 실패로 수렴한다")
+    void marksDispositionRetryableWhenProviderExplicitlyFails() {
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(5000);
+        RequestRefundCommand refundCommand = dispositionRefundCommand(command);
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                PaymentTransactionService.DispositionClaim.requiresRefund(
+                        command.idempotencyKey(), refundCommand);
+        PaymentTransactionService.RefundClaim refundClaim =
+                PaymentTransactionService.RefundClaim.requiresCall(
+                        "910000000000000001", PAYMENT_ID, PORTONE_PAYMENT_ID,
+                        15_000L, "KRW", "RESERVATION_DEPOSIT_DISPOSITION");
+        ProviderCancellation providerCancellation = new ProviderCancellation(
+                "cancellation-failed", ProviderStatus.FAILED, 15_000L, "KRW");
+        RefundResult refundResult = refundResult(RefundStatus.FAILED, 0L, null);
+        DispositionResult expected = dispositionResult(
+                5000, 15_000L, 0L, "910000000000000001",
+                DispositionStatus.FAILED, DispositionFailureClassification.RETRYABLE);
+        when(transactions.claimDisposition(command, NOW)).thenReturn(dispositionClaim);
+        when(transactions.claimRefund(refundCommand, NOW)).thenReturn(refundClaim);
+        when(providerClient.cancelPayment(
+                PORTONE_PAYMENT_ID, "910000000000000001", 15_000L, "KRW",
+                "RESERVATION_DEPOSIT_DISPOSITION")).thenReturn(providerCancellation);
+        when(transactions.finalizeRefund(refundClaim, providerCancellation, NOW))
+                .thenReturn(refundResult);
+        when(transactions.finalizeDisposition(
+                command.idempotencyKey(), refundResult, NOW)).thenReturn(expected);
+
+        DispositionResult result = paymentService.applyReservationDepositDisposition(command);
+
+        assertThat(result.failureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+    }
+
+    @Test
+    @DisplayName("환불 계약의 결정적 거부는 처분을 영구 실패로 보존해 반환한다")
+    void persistsPermanentDispositionWhenRefundContractRejects() {
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(5000);
+        RequestRefundCommand refundCommand = dispositionRefundCommand(command);
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                PaymentTransactionService.DispositionClaim.requiresRefund(
+                        command.idempotencyKey(), refundCommand);
+        DispositionResult expected = dispositionResult(
+                5000, 15_000L, 0L, null,
+                DispositionStatus.FAILED, DispositionFailureClassification.PERMANENT);
+        when(transactions.claimDisposition(command, NOW)).thenReturn(dispositionClaim);
+        when(transactions.claimRefund(refundCommand, NOW))
+                .thenThrow(new ServiceException(PaymentErrorCode.INVALID_STATE_TRANSITION));
+        when(transactions.resolveDispositionAfterRefundFailure(
+                command.idempotencyKey(), false, NOW)).thenReturn(expected);
+
+        DispositionResult result = paymentService.applyReservationDepositDisposition(command);
+
+        assertThat(result).isEqualTo(expected);
+        verify(transactions).resolveDispositionAfterRefundFailure(
+                command.idempotencyKey(), false, NOW);
+    }
+
+    @Test
+    @DisplayName("sibling PROCESSING 잔액 충돌은 refund 없는 retryable 처분으로 보존한다")
+    void preservesRetryableDispositionWhenRefundCapacityIsTemporarilyReserved() {
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(5000);
+        RequestRefundCommand refundCommand = dispositionRefundCommand(command);
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                PaymentTransactionService.DispositionClaim.requiresRefund(
+                        command.idempotencyKey(), refundCommand);
+        DispositionResult expected = dispositionResult(
+                5000, 15_000L, 0L, null,
+                DispositionStatus.FAILED, DispositionFailureClassification.RETRYABLE);
+        when(transactions.claimDisposition(command, NOW)).thenReturn(dispositionClaim);
+        when(transactions.claimRefund(refundCommand, NOW))
+                .thenThrow(new ServiceException(PaymentErrorCode.REFUND_AMOUNT_EXCEEDED));
+        when(transactions.resolveDispositionAfterRefundFailure(
+                command.idempotencyKey(), true, NOW)).thenReturn(expected);
+
+        DispositionResult result = paymentService.applyReservationDepositDisposition(command);
+
+        assertThat(result).isEqualTo(expected);
+        verify(transactions).resolveDispositionAfterRefundFailure(
+                command.idempotencyKey(), true, NOW);
+        verify(providerClient, never()).cancelPayment(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    @DisplayName("예약금 처분 조회는 저장 결과만 반환하고 provider를 호출하지 않는다")
+    void getsDispositionWithoutProviderCall() {
+        GetReservationDepositDispositionQuery query =
+                new GetReservationDepositDispositionQuery(
+                        PAYMENT_ID, "reservation:123:cancelled");
+        DispositionResult expected = dispositionResult(
+                5000, 15_000L, 15_000L, "910000000000000001",
+                DispositionStatus.COMPLETED, null);
+        when(transactions.claimDispositionReconciliation(query, NOW))
+                .thenReturn(PaymentTransactionService.DispositionReconciliationClaim
+                        .completed(expected));
+
+        DispositionResult result = paymentService.getReservationDepositDisposition(query);
+
+        assertThat(result).isEqualTo(expected);
+        verify(providerClient, never()).cancelPayment(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    @DisplayName("UNKNOWN 처분 조회는 marker가 일치한 provider 취소만 GET으로 대사 완료한다")
+    void reconcilesUnknownDispositionFromMatchingProviderCancellation() {
+        GetReservationDepositDispositionQuery query =
+                new GetReservationDepositDispositionQuery(
+                        PAYMENT_ID, "reservation:123:cancelled");
+        DispositionResult unknown = dispositionResult(
+                5000, 15_000L, 0L, "910000000000000001",
+                DispositionStatus.RECONCILIATION_REQUIRED,
+                DispositionFailureClassification.UNKNOWN);
+        PaymentTransactionService.DispositionReconciliationClaim claim =
+                PaymentTransactionService.DispositionReconciliationClaim.requiresLookup(
+                        unknown.dispositionId(),
+                        PAYMENT_ID,
+                        PORTONE_PAYMENT_ID,
+                        "910000000000000001",
+                        30_000L,
+                        15_000L,
+                        "KRW",
+                        "RESERVATION_DEPOSIT_DISPOSITION",
+                        unknown);
+        ProviderCancellation cancellation = new ProviderCancellation(
+                "cancellation-reconciled",
+                ProviderStatus.PARTIALLY_CANCELLED,
+                15_000L,
+                "KRW",
+                "RESERVATION_DEPOSIT_DISPOSITION "
+                        + "[MIRIYUM_REFUND_ID=910000000000000001]");
+        ProviderPayment providerPayment = new ProviderPayment(
+                PORTONE_PAYMENT_ID,
+                "transaction-1",
+                ProviderStatus.PARTIALLY_CANCELLED,
+                30_000L,
+                "KRW",
+                List.of(cancellation));
+        DispositionResult completed = dispositionResult(
+                5000, 15_000L, 15_000L, "910000000000000001",
+                DispositionStatus.COMPLETED, null);
+        when(transactions.claimDispositionReconciliation(query, NOW)).thenReturn(claim);
+        when(providerClient.getPayment(PORTONE_PAYMENT_ID)).thenReturn(providerPayment);
+        when(transactions.finalizeDispositionReconciliation(claim, cancellation, NOW))
+                .thenReturn(completed);
+
+        DispositionResult result = paymentService.getReservationDepositDisposition(query);
+
+        assertThat(result).isEqualTo(completed);
+        verify(providerClient, never()).cancelPayment(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    @DisplayName("같은 marker 취소가 둘이면 어느 것도 추정하지 않고 UNKNOWN을 유지한다")
+    void keepsUnknownDispositionWhenProviderMarkerIsAmbiguous() {
+        GetReservationDepositDispositionQuery query =
+                new GetReservationDepositDispositionQuery(
+                        PAYMENT_ID, "reservation:123:cancelled");
+        DispositionResult unknown = dispositionResult(
+                5000, 15_000L, 0L, "910000000000000001",
+                DispositionStatus.RECONCILIATION_REQUIRED,
+                DispositionFailureClassification.UNKNOWN);
+        PaymentTransactionService.DispositionReconciliationClaim claim =
+                PaymentTransactionService.DispositionReconciliationClaim.requiresLookup(
+                        unknown.dispositionId(), PAYMENT_ID, PORTONE_PAYMENT_ID,
+                        "910000000000000001", 30_000L, 15_000L, "KRW",
+                        "RESERVATION_DEPOSIT_DISPOSITION", unknown);
+        String reason = PaymentProviderClient.cancellationReason(
+                "RESERVATION_DEPOSIT_DISPOSITION", "910000000000000001");
+        ProviderPayment providerPayment = new ProviderPayment(
+                PORTONE_PAYMENT_ID,
+                "transaction-1",
+                ProviderStatus.PARTIALLY_CANCELLED,
+                30_000L,
+                "KRW",
+                List.of(
+                        new ProviderCancellation(
+                                "cancellation-1", ProviderStatus.PARTIALLY_CANCELLED,
+                                15_000L, "KRW", reason),
+                        new ProviderCancellation(
+                                "cancellation-2", ProviderStatus.PARTIALLY_CANCELLED,
+                                15_000L, "KRW", reason)));
+        when(transactions.claimDispositionReconciliation(query, NOW)).thenReturn(claim);
+        when(providerClient.getPayment(PORTONE_PAYMENT_ID)).thenReturn(providerPayment);
+
+        DispositionResult result = paymentService.getReservationDepositDisposition(query);
+
+        assertThat(result).isEqualTo(unknown);
+        verify(transactions, never()).finalizeDispositionReconciliation(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
+        verify(providerClient, never()).cancelPayment(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
     @DisplayName("Reservation 공개 준비·환불 DTO는 Payment 정본의 scalar 필드만 정확히 노출한다")
     void exposesCanonicalReservationPaymentContracts() {
         assertThat(recordComponentNames(PrepareReservationDepositCommand.class)).containsExactly(
@@ -391,6 +711,47 @@ class PaymentServiceTest {
                 "refundId", "paymentId", "requestedAmountMinor", "completedAmountMinor",
                 "cumulativeRefundedAmountMinor", "remainingRefundableAmountMinor", "currency",
                 "status", "requestedAt", "completedAt");
+        assertThat(recordComponentNames(ApplyReservationDepositDispositionCommand.class))
+                .containsExactly(
+                        "paymentId", "sourceEventId", "sourceEventType",
+                        "correctsSourceEventId", "policyVersion", "responsibilityCode",
+                        "targetRefundRateBasisPoints", "idempotencyKey");
+        assertThat(recordComponentNames(GetReservationDepositDispositionQuery.class))
+                .containsExactly("paymentId", "sourceEventId");
+        assertThat(recordComponentNames(DispositionResult.class)).containsExactly(
+                "dispositionId", "paymentId", "sourceEventId", "sourceEventType",
+                "correctsSourceEventId", "policyVersion", "responsibilityCode",
+                "targetRefundRateBasisPoints", "originalAmountMinor",
+                "targetRefundAmountMinor", "incrementalRefundAmountMinor",
+                "completedRefundAmountMinor", "withheldAmountMinor", "currency",
+                "refundId", "status", "failureClassification", "requestedAt",
+                "updatedAt", "completedAt");
+    }
+
+    @Test
+    @DisplayName("예약금 처분 명령은 승인된 목표율과 정규화 UUID만 허용한다")
+    void validatesReservationDepositDispositionCommand() {
+        assertThatThrownBy(() -> new ApplyReservationDepositDispositionCommand(
+                PAYMENT_ID,
+                "reservation:123:cancelled",
+                "RESERVATION_CANCELLED",
+                null,
+                2L,
+                "CONSUMER",
+                2500,
+                "550e8400-e29b-41d4-a716-446655440001"
+        )).isInstanceOf(IllegalArgumentException.class);
+
+        assertThatThrownBy(() -> new ApplyReservationDepositDispositionCommand(
+                PAYMENT_ID,
+                "reservation:123:cancelled",
+                "RESERVATION_CANCELLED",
+                null,
+                2L,
+                "CONSUMER",
+                5000,
+                "550E8400-E29B-41D4-A716-446655440001"
+        )).isInstanceOf(IllegalArgumentException.class);
     }
 
     private static List<String> recordComponentNames(Class<?> type) {
@@ -408,6 +769,81 @@ class PaymentServiceTest {
                 NOW.plusSeconds(600),
                 7L,
                 "550e8400-e29b-41d4-a716-446655440123"
+        );
+    }
+
+    private static ApplyReservationDepositDispositionCommand dispositionCommand(int targetRate) {
+        return new ApplyReservationDepositDispositionCommand(
+                PAYMENT_ID,
+                "reservation:123:cancelled",
+                "RESERVATION_CANCELLED",
+                null,
+                2L,
+                "CONSUMER",
+                targetRate,
+                "550e8400-e29b-41d4-a716-446655440001"
+        );
+    }
+
+    private static RequestRefundCommand dispositionRefundCommand(
+            ApplyReservationDepositDispositionCommand command
+    ) {
+        return new RequestRefundCommand(
+                PAYMENT_ID,
+                command.sourceEventId(),
+                15_000L,
+                "RESERVATION_DEPOSIT_DISPOSITION",
+                command.policyVersion(),
+                command.idempotencyKey());
+    }
+
+    private static RefundResult refundResult(
+            RefundStatus status,
+            long completedAmount,
+            Instant completedAt
+    ) {
+        return new RefundResult(
+                "910000000000000001",
+                PAYMENT_ID,
+                15_000L,
+                completedAmount,
+                completedAmount,
+                30_000L - completedAmount,
+                "KRW",
+                status,
+                NOW,
+                completedAt);
+    }
+
+    private static DispositionResult dispositionResult(
+            int targetRate,
+            long targetAmount,
+            long completedAmount,
+            String refundId,
+            DispositionStatus status,
+            DispositionFailureClassification failureClassification
+    ) {
+        return new DispositionResult(
+                "550e8400-e29b-41d4-a716-446655440001",
+                PAYMENT_ID,
+                "reservation:123:cancelled",
+                "RESERVATION_CANCELLED",
+                null,
+                2L,
+                "CONSUMER",
+                targetRate,
+                30_000L,
+                targetAmount,
+                targetAmount,
+                completedAmount,
+                30_000L - targetAmount,
+                "KRW",
+                refundId,
+                status,
+                failureClassification,
+                NOW,
+                NOW,
+                status == DispositionStatus.COMPLETED ? NOW : null
         );
     }
 

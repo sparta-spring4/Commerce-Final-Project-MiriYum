@@ -36,6 +36,19 @@ public final class PaymentContracts {
         RECONCILIATION_REQUIRED
     }
 
+    public enum DispositionStatus {
+        PROCESSING,
+        COMPLETED,
+        FAILED,
+        RECONCILIATION_REQUIRED
+    }
+
+    public enum DispositionFailureClassification {
+        RETRYABLE,
+        PERMANENT,
+        UNKNOWN
+    }
+
     public record PrepareReservationDepositCommand(
             String sourceReferenceId,
             long consumerAccountId,
@@ -161,6 +174,73 @@ public final class PaymentContracts {
             String currency,
             RefundStatus status,
             Instant requestedAt,
+            Instant completedAt
+    ) {
+    }
+
+    public record ApplyReservationDepositDispositionCommand(
+            String paymentId,
+            String sourceEventId,
+            String sourceEventType,
+            String correctsSourceEventId,
+            long policyVersion,
+            String responsibilityCode,
+            int targetRefundRateBasisPoints,
+            String idempotencyKey
+    ) {
+        public ApplyReservationDepositDispositionCommand {
+            requirePublicId(paymentId, "paymentId");
+            requireText(sourceEventId, 100, "sourceEventId");
+            requireText(sourceEventType, 40, "sourceEventType");
+            if (correctsSourceEventId != null) {
+                requireText(correctsSourceEventId, 100, "correctsSourceEventId");
+            }
+            requirePositive(policyVersion, "policyVersion");
+            if (!"CONSUMER".equals(responsibilityCode)
+                    && !"STORE_RESPONSIBLE".equals(responsibilityCode)
+                    && !"PLATFORM_RESPONSIBLE".equals(responsibilityCode)) {
+                throw new IllegalArgumentException("responsibilityCode is not supported");
+            }
+            if (targetRefundRateBasisPoints != 0
+                    && targetRefundRateBasisPoints != 5000
+                    && targetRefundRateBasisPoints != 10000) {
+                throw new IllegalArgumentException(
+                        "targetRefundRateBasisPoints must be 0, 5000, or 10000");
+            }
+            requireIdempotencyKey(idempotencyKey);
+        }
+    }
+
+    public record GetReservationDepositDispositionQuery(
+            String paymentId,
+            String sourceEventId
+    ) {
+        public GetReservationDepositDispositionQuery {
+            requirePublicId(paymentId, "paymentId");
+            requireText(sourceEventId, 100, "sourceEventId");
+        }
+    }
+
+    public record DispositionResult(
+            String dispositionId,
+            String paymentId,
+            String sourceEventId,
+            String sourceEventType,
+            String correctsSourceEventId,
+            long policyVersion,
+            String responsibilityCode,
+            int targetRefundRateBasisPoints,
+            long originalAmountMinor,
+            long targetRefundAmountMinor,
+            long incrementalRefundAmountMinor,
+            long completedRefundAmountMinor,
+            long withheldAmountMinor,
+            String currency,
+            String refundId,
+            DispositionStatus status,
+            DispositionFailureClassification failureClassification,
+            Instant requestedAt,
+            Instant updatedAt,
             Instant completedAt
     ) {
     }
