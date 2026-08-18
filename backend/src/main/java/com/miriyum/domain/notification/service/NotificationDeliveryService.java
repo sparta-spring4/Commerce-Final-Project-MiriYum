@@ -105,8 +105,11 @@ public class NotificationDeliveryService {
     }
 
     private boolean deliver(LeasedTask task, RuntimePolicy policy) {
-        if (task.sourceDomain()
-                != com.miriyum.domain.notification.dto.source.NotificationSourceDomain.WAITING) {
+        boolean lockedSourceDelivery = task.sourceDomain()
+                == com.miriyum.domain.notification.dto.source.NotificationSourceDomain.WAITING
+                || task.sourceDomain()
+                == com.miriyum.domain.notification.dto.source.NotificationSourceDomain.RESERVATION;
+        if (!lockedSourceDelivery) {
             return readAndDeliver(task, policy, false);
         }
         try {
@@ -121,11 +124,11 @@ public class NotificationDeliveryService {
     private boolean readAndDeliver(
             LeasedTask task,
             RuntimePolicy policy,
-            boolean lockedWaitingDelivery
+            boolean lockedSourceDelivery
     ) {
         NotificationSourceContextV1 context;
         try {
-            context = lockedWaitingDelivery
+            context = lockedSourceDelivery
                     ? sourceRegistry.readContextForDelivery(
                             task.sourceDomain(),
                             task.purpose(),
@@ -141,7 +144,7 @@ public class NotificationDeliveryService {
                             task.resourceVersion(),
                             task.recipientAccountId());
         } catch (RuntimeException sourceFailure) {
-            if (lockedWaitingDelivery) {
+            if (lockedSourceDelivery) {
                 throw new SourceReadFailure(sourceFailure);
             }
             context = unavailable();

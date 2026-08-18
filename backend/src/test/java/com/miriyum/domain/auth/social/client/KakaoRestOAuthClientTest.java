@@ -157,14 +157,22 @@ class KakaoRestOAuthClientTest {
     @Test
     @DisplayName("카카오 토큰 응답 JSON이 깨져 있으면 일시적 서비스 장애로 처리한다")
     void mapsMalformedKakaoResponseToServiceUnavailable() {
+        String malformedResponse = "{not-json";
         server.expect(requestTo(TOKEN_URL))
                 .andExpect(method(POST))
-                .andRespond(withSuccess("{not-json", MediaType.APPLICATION_JSON));
+                .andRespond(withSuccess(malformedResponse, MediaType.APPLICATION_JSON));
 
         assertThatThrownBy(() -> client.authenticate("authorization-code", REDIRECT_URI))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE);
+
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .anySatisfy(message -> assertThat(message)
+                        .contains("event=kakao_oauth_transport_failed")
+                        .contains("exception_type=")
+                        .doesNotContain(malformedResponse));
         server.verify();
     }
 }

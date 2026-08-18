@@ -28,6 +28,7 @@
         {"name": "MIRIYUM_KAKAO_ENABLED", "value": "false"},
         {"name": "MIRIYUM_PAYMENT_ENABLED", "value": "false"},
         {"name": "MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED", "value": "true"},
+        {"name": "MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED", "value": "true"},
         {"name": "MIRIYUM_WAITING_CLOSURE_ENABLED", "value": "false"},
         {"name": "MIRIYUM_WAITING_AUTO_OPEN_ENABLED", "value": "false"},
         {"name": "MIRIYUM_WAITING_AUTO_OPEN_WORKER_ID", "value": ""},

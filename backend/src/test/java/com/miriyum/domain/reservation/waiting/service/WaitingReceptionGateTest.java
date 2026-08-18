@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.waiting.service;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -15,6 +16,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -113,6 +115,43 @@ class WaitingReceptionGateTest {
                 STORE_ID,
                 BUSINESS_DATE,
                 Instant.parse("2026-08-17T09:00:00Z")));
+    }
+
+    @Test
+    void inspectReturnsTheCurrentManualBusinessDateWithoutTakingWriteLocks() {
+        Instant localMidnight = Instant.parse("2026-08-16T15:00:00Z");
+        given(intervalPort.findUpcoming(
+                Set.of(STORE_ID),
+                localMidnight.minusSeconds(86_400),
+                localMidnight.plusSeconds(172_800)))
+                .willReturn(List.of(interval(
+                        Instant.parse("2026-08-17T01:00:00Z"),
+                        Instant.parse("2026-08-17T09:00:00Z"))));
+        given(settingRepository.findByStoreId(STORE_ID))
+                .willReturn(Optional.of(setting(WaitingReceptionMode.MANUAL)));
+
+        assertThat(gate.inspect(STORE_ID, localMidnight))
+                .extracting("storeId", "accepting", "businessDate")
+                .containsExactly("7", true, BUSINESS_DATE);
+
+        verifyNoInteractions(windowRepository);
+    }
+
+    @Test
+    void inspectFailsClosedWhenAutoWindowIsNotOpen() {
+        given(intervalPort.findUpcoming(
+                Set.of(STORE_ID),
+                NOW.minusSeconds(86_400),
+                NOW.plusSeconds(172_800)))
+                .willReturn(List.of(interval(
+                        Instant.parse("2026-08-17T01:00:00Z"),
+                        Instant.parse("2026-08-17T09:00:00Z"))));
+        given(settingRepository.findByStoreId(STORE_ID))
+                .willReturn(Optional.of(setting(WaitingReceptionMode.AUTO)));
+
+        assertThat(gate.inspect(STORE_ID, NOW))
+                .extracting("storeId", "accepting", "businessDate")
+                .containsExactly("7", false, null);
     }
 
     private static WaitingSetting setting(WaitingReceptionMode mode) {

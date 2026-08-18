@@ -10,8 +10,8 @@ const LOCAL_HOSTS = new Set([
   '127.0.0.1',
   '::1',
 ])
-// Staging stays fail-closed until an approved hostname is added in a reviewed repository change.
-const TRUSTED_STAGING_HOSTS = new Set([])
+// This hostname is the reviewed staging endpoint. Production hosts remain forbidden.
+const TRUSTED_STAGING_HOSTS = new Set(['staging-api.miriyum.click'])
 
 export function assertSafeTarget(targetEnv, baseUrl, allowedHosts) {
   if (!VALID_TARGET_ENVS.has(targetEnv)) {

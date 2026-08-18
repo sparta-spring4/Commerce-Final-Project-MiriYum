@@ -89,6 +89,10 @@ function renderProvider() {
 /** 보호 데이터가 캐시에 남아 있는 상태를 만든다. */
 function seedProtectedCache(queryClient: QueryClient, owner: string) {
   queryClient.setQueryData(consumerAccountKeys.me(), { nickname: owner })
+  queryClient.setQueryData(
+    ['consumer', 'notification-history', 0],
+    { items: [{ title: owner }] },
+  )
   queryClient.setQueryData(reservationKeys.detail('r-1'), { storeName: owner })
   queryClient.setQueryData(pickupKeys.detail('p-1'), { storeName: owner })
 }
@@ -96,6 +100,7 @@ function seedProtectedCache(queryClient: QueryClient, owner: string) {
 function cachedOwners(queryClient: QueryClient): unknown[] {
   return [
     queryClient.getQueryData(consumerAccountKeys.me()),
+    queryClient.getQueryData(['consumer', 'notification-history', 0]),
     queryClient.getQueryData(reservationKeys.detail('r-1')),
     queryClient.getQueryData(pickupKeys.detail('p-1')),
   ]
@@ -651,6 +656,7 @@ describe('일반 사용자 인증 shell', () => {
         undefined,
         undefined,
         undefined,
+        undefined,
       ]),
     )
   })
@@ -680,6 +686,7 @@ describe('일반 사용자 인증 shell', () => {
         undefined,
         undefined,
         undefined,
+        undefined,
       ]),
     )
   })
@@ -701,7 +708,12 @@ describe('일반 사용자 인증 shell', () => {
     fireEvent.click(screen.getByRole('button', { name: '로그인' }))
     await waitFor(() => expect(status()).toBe('authenticated'))
 
-    expect(cachedOwners(queryClient)).toEqual([undefined, undefined, undefined])
+    expect(cachedOwners(queryClient)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ])
   })
 
   it('카카오 로그인 완료도 인증 상태 전환 전에 이전 보호 캐시를 지운다', async () => {
@@ -716,12 +728,17 @@ describe('일반 사용자 인증 shell', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '카카오 로그인 완료' }))
 
-    await waitFor(() => expect(queryClient.cancelQueries).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(queryClient.cancelQueries).toHaveBeenCalledTimes(4))
     expect(status()).toBe('unauthenticated')
     expect(cachedOwners(queryClient)).not.toContain(undefined)
 
     cacheClear.resolve()
     await waitFor(() => expect(status()).toBe('authenticated'))
-    expect(cachedOwners(queryClient)).toEqual([undefined, undefined, undefined])
+    expect(cachedOwners(queryClient)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ])
   })
 })

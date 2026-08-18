@@ -274,7 +274,7 @@ describe('마이페이지', () => {
     ).toBeInTheDocument()
   })
 
-  it('1차 MVP에 없는 항목의 진입점을 만들지 않는다', async () => {
+  it('연결된 알림 이력과 아직 준비되지 않은 항목을 구분한다', async () => {
     server.use(
       authenticatedConsumer(),
       http.get(CONSUMER_ME_PATH, () => successResponse(consumerAccount())),
@@ -284,7 +284,12 @@ describe('마이페이지', () => {
 
     await screen.findByText('user@example.com')
 
-    for (const label of ['결제 내역', '환불 내역', '알림', '웨이팅', '비밀번호 변경']) {
+    expect(screen.getByRole('link', { name: /알림 이력/ })).toHaveAttribute(
+      'href',
+      ROUTES.notificationHistory,
+    )
+
+    for (const label of ['결제 내역', '환불 내역', '웨이팅', '비밀번호 변경']) {
       expect(screen.queryByText(label)).not.toBeInTheDocument()
     }
   })

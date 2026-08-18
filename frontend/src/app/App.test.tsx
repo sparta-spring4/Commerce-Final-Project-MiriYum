@@ -3,11 +3,17 @@ import { http } from 'msw'
 import { beforeEach, describe, expect, test } from 'vitest'
 import {
   authenticatedConsumer,
+  CONSUMER_REFRESH_PATH,
   unauthenticatedConsumer,
 } from '../features/auth/test/handlers'
+import {
+  OPERATOR_REFRESH_PATH,
+  unauthenticatedOperator,
+} from '../features/store-operator/test/handlers'
 import { storePage } from '../features/store-search/test/fixtures'
 import { catalogHandlers } from '../features/store-search/test/handlers'
-import { successResponse } from '../test/msw/envelope'
+import { AuthErrorCode } from '../features/auth/model/authErrors'
+import { errorResponse, successResponse } from '../test/msw/envelope'
 import { server } from '../test/msw/server'
 import App from './App'
 
@@ -22,6 +28,7 @@ beforeEach(() => {
   server.use(
     ...catalogHandlers,
     unauthenticatedConsumer,
+    unauthenticatedOperator,
     http.get('/api/v1/stores', () => successResponse(storePage([]))),
   )
 })
@@ -141,5 +148,52 @@ describe('앱 셸', () => {
       screen.getByRole('heading', { level: 1, name: '접근할 수 없습니다' }),
     ).toBeInTheDocument()
     expect(screen.queryByText('페이지를 찾을 수 없습니다')).not.toBeInTheDocument()
+  })
+})
+
+describe('인증 shell 격리', () => {
+  /** 두 shell이 mount 시 부르는 재발급 경로를 각각 센다. */
+  function countRefreshes() {
+    const calls = { consumer: 0, operator: 0 }
+    server.use(
+      http.post(CONSUMER_REFRESH_PATH, () => {
+        calls.consumer += 1
+        return errorResponse(
+          401,
+          AuthErrorCode.REFRESH_TOKEN_REQUIRED,
+          'Refresh Token 쿠키가 필요합니다.',
+        )
+      }),
+      http.post(OPERATOR_REFRESH_PATH, () => {
+        calls.operator += 1
+        return errorResponse(
+          401,
+          AuthErrorCode.REFRESH_TOKEN_REQUIRED,
+          'Refresh Token 쿠키가 필요합니다.',
+        )
+      }),
+    )
+    return calls
+  }
+
+  test('운영자 화면은 소비자 세션 복구를 부르지 않는다', async () => {
+    const calls = countRefreshes()
+
+    renderAt('/store-operator/sign-in')
+
+    // 운영자 provider가 자기 재발급을 시도할 때까지 기다린 뒤 비교한다.
+    await waitFor(() => expect(calls.operator).toBeGreaterThan(0))
+    // 두 shell은 형제다. 운영자 경로에서 소비자 provider가 mount되면 남의 shell
+    // 세션 복구와 캐시 정리가 함께 돌아간다.
+    expect(calls.consumer).toBe(0)
+  })
+
+  test('소비자 화면은 운영자 세션 복구를 부르지 않는다', async () => {
+    const calls = countRefreshes()
+
+    renderAt('/')
+
+    await waitFor(() => expect(calls.consumer).toBeGreaterThan(0))
+    expect(calls.operator).toBe(0)
   })
 })

@@ -15,7 +15,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.payment.dto.PaymentContracts.ApplyReservationDepositDispositionCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.ConfirmPaymentCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.DispositionFailureClassification;
+import com.miriyum.domain.payment.dto.PaymentContracts.DispositionResult;
+import com.miriyum.domain.payment.dto.PaymentContracts.DispositionStatus;
+import com.miriyum.domain.payment.dto.PaymentContracts.GetReservationDepositDispositionQuery;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentHistoryQuery;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentResult;
@@ -68,6 +73,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -118,6 +124,7 @@ class PaymentPersistenceIT {
         jdbcTemplate.execute("DELETE FROM waiting_conversion_compensations");
         jdbcTemplate.execute("DELETE FROM payment_webhook_receipts");
         jdbcTemplate.execute("DELETE FROM payment_ledger_entries");
+        jdbcTemplate.execute("DELETE FROM reservation_deposit_dispositions");
         jdbcTemplate.execute("DELETE FROM payment_refunds");
         jdbcTemplate.execute("DELETE FROM payment_attempts");
         jdbcTemplate.execute("DELETE FROM payments");
@@ -128,6 +135,1331 @@ class PaymentPersistenceIT {
                 ) VALUES (11, 'payment-owner@example.com', 'hash', '결제소유자',
                           'ACTIVE', NOW(6), NOW(6))
                 """);
+    }
+
+    @Test
+    @DisplayName("예약금 50퍼센트 처분과 재생은 하나의 외부 환불·처분 원장으로 수렴한다")
+    void convergesReservationDepositDispositionReplay() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("201");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:201:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440201");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenReturn(new ProviderCancellation(
+                        "cancellation-disposition-201",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        15_000L,
+                        "KRW"));
+
+        DispositionResult first = paymentService.applyReservationDepositDisposition(command);
+        DispositionResult replay = paymentService.applyReservationDepositDisposition(command);
+        ApplyReservationDepositDispositionCommand sameSourceWithNewKey = dispositionCommand(
+                preparation.paymentId(),
+                command.sourceEventId(),
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440207");
+        DispositionResult sourceReplay = paymentService.applyReservationDepositDisposition(
+                sameSourceWithNewKey);
+        DispositionResult queried = paymentService.getReservationDepositDisposition(
+                new GetReservationDepositDispositionQuery(
+                        preparation.paymentId(), command.sourceEventId()));
+
+        assertThat(first.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(first.completedRefundAmountMinor()).isEqualTo(15_000L);
+        assertThat(replay).isEqualTo(first);
+        assertThat(sourceReplay).isEqualTo(first);
+        assertThat(queried).isEqualTo(first);
+        verify(providerClient, times(1)).cancelPayment(
+                eq(preparation.portOnePaymentId()), eq(first.refundId()), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION"));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_deposit_dispositions", Long.class))
+                .isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds", Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("provider 명시 실패 재시도는 같은 처분·환불 ID로만 완료한다")
+    void retriesExplicitDispositionFailureWithSameRefund() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("202");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:202:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440202");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenReturn(
+                        new ProviderCancellation(
+                                "cancellation-disposition-failed-202",
+                                ProviderStatus.FAILED,
+                                15_000L,
+                                "KRW"),
+                        new ProviderCancellation(
+                                "cancellation-disposition-completed-202",
+                                ProviderStatus.PARTIALLY_CANCELLED,
+                                15_000L,
+                                "KRW"));
+
+        DispositionResult failed = paymentService.applyReservationDepositDisposition(command);
+        DispositionResult completed = paymentService.applyReservationDepositDisposition(command);
+
+        assertThat(failed.status()).isEqualTo(DispositionStatus.FAILED);
+        assertThat(failed.failureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+        assertThat(completed.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(completed.dispositionId()).isEqualTo(failed.dispositionId());
+        assertThat(completed.refundId()).isEqualTo(failed.refundId());
+        verify(providerClient, times(2)).cancelPayment(
+                eq(preparation.portOnePaymentId()), eq(failed.refundId()), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION"));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT attempt_count FROM payment_refunds", Integer.class)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT attempt_count FROM reservation_deposit_dispositions", Integer.class))
+                .isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE entry_type = 'REFUND_RETRY_REQUESTED'
+                """, Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("완료된 50퍼센트 처분을 100퍼센트로 정정하면 차액만 추가 환불한다")
+    void refundsOnlyIncrementalAmountForDispositionCorrection() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("203");
+        ApplyReservationDepositDispositionCommand first = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:203:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440203");
+        ApplyReservationDepositDispositionCommand correction = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:203:correction:1",
+                first.sourceEventId(),
+                10000,
+                "550e8400-e29b-41d4-a716-446655440204");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenReturn(
+                        new ProviderCancellation(
+                                "cancellation-disposition-203-a",
+                                ProviderStatus.PARTIALLY_CANCELLED,
+                                15_000L,
+                                "KRW"),
+                        new ProviderCancellation(
+                                "cancellation-disposition-203-b",
+                                ProviderStatus.CANCELLED,
+                                15_000L,
+                                "KRW"));
+
+        DispositionResult firstResult =
+                paymentService.applyReservationDepositDisposition(first);
+        DispositionResult corrected =
+                paymentService.applyReservationDepositDisposition(correction);
+
+        assertThat(firstResult.completedRefundAmountMinor()).isEqualTo(15_000L);
+        assertThat(corrected.targetRefundAmountMinor()).isEqualTo(30_000L);
+        assertThat(corrected.incrementalRefundAmountMinor()).isEqualTo(15_000L);
+        assertThat(corrected.completedRefundAmountMinor()).isEqualTo(30_000L);
+        assertThat(corrected.withheldAmountMinor()).isZero();
+        verify(providerClient, times(2)).cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION"));
+    }
+
+    @Test
+    @DisplayName("같은 완료 처분을 다시 정정하면 외부 호출 없이 영구 실패해 sibling 초과 환불을 막는다")
+    void rejectsSequentialSiblingDispositionCorrection() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("208");
+        ApplyReservationDepositDispositionCommand parent = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:208:cancelled",
+                null,
+                0,
+                "550e8400-e29b-41d4-a716-446655440220");
+        ApplyReservationDepositDispositionCommand firstCorrection = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:208:correction:1",
+                parent.sourceEventId(),
+                5000,
+                "550e8400-e29b-41d4-a716-446655440221");
+        ApplyReservationDepositDispositionCommand siblingCorrection = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:208:correction:2",
+                parent.sourceEventId(),
+                5000,
+                "550e8400-e29b-41d4-a716-446655440222");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenReturn(
+                        new ProviderCancellation(
+                                "cancellation-disposition-208-a",
+                                ProviderStatus.PARTIALLY_CANCELLED,
+                                15_000L,
+                                "KRW"),
+                        new ProviderCancellation(
+                                "cancellation-disposition-208-b",
+                                ProviderStatus.CANCELLED,
+                                15_000L,
+                                "KRW"));
+
+        paymentService.applyReservationDepositDisposition(parent);
+        DispositionResult first =
+                paymentService.applyReservationDepositDisposition(firstCorrection);
+        DispositionResult sibling =
+                paymentService.applyReservationDepositDisposition(siblingCorrection);
+
+        assertThat(first.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(sibling.status()).isEqualTo(DispositionStatus.FAILED);
+        assertThat(sibling.failureClassification())
+                .isEqualTo(DispositionFailureClassification.PERMANENT);
+        assertThat(sibling.incrementalRefundAmountMinor()).isEqualTo(15_000L);
+        verify(providerClient, times(1)).cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION"));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds", Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("동시 sibling 정정도 부모당 한 건만 provider를 호출한다")
+    void rejectsConcurrentSiblingDispositionCorrection() throws Exception {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("209");
+        ApplyReservationDepositDispositionCommand parent = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:209:cancelled",
+                null,
+                0,
+                "550e8400-e29b-41d4-a716-446655440223");
+        paymentService.applyReservationDepositDisposition(parent);
+        ApplyReservationDepositDispositionCommand firstCorrection = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:209:correction:1",
+                parent.sourceEventId(),
+                5000,
+                "550e8400-e29b-41d4-a716-446655440224");
+        ApplyReservationDepositDispositionCommand siblingCorrection = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:209:correction:2",
+                parent.sourceEventId(),
+                5000,
+                "550e8400-e29b-41d4-a716-446655440225");
+        CountDownLatch providerEntered = new CountDownLatch(1);
+        CountDownLatch releaseProvider = new CountDownLatch(1);
+        AtomicInteger providerCalls = new AtomicInteger();
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenAnswer(invocation -> {
+                    int call = providerCalls.incrementAndGet();
+                    if (call == 1) {
+                        providerEntered.countDown();
+                        awaitLatch(releaseProvider, "disposition provider release");
+                    }
+                    return new ProviderCancellation(
+                            "cancellation-disposition-209-" + call,
+                            ProviderStatus.PARTIALLY_CANCELLED,
+                            15_000L,
+                            "KRW");
+                });
+
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<DispositionResult> first = executor.submit(() ->
+                    paymentService.applyReservationDepositDisposition(firstCorrection));
+            assertThat(providerEntered.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<DispositionResult> sibling = executor.submit(() ->
+                    paymentService.applyReservationDepositDisposition(siblingCorrection));
+            DispositionResult siblingResult = sibling.get(5, TimeUnit.SECONDS);
+            releaseProvider.countDown();
+            DispositionResult firstResult = first.get(5, TimeUnit.SECONDS);
+
+            assertThat(List.of(firstResult.status(), siblingResult.status()))
+                    .containsExactlyInAnyOrder(
+                            DispositionStatus.COMPLETED,
+                            DispositionStatus.FAILED);
+        } finally {
+            releaseProvider.countDown();
+        }
+        assertThat(providerCalls).hasValue(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds", Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("완료액보다 낮은 목표 정정은 외부 호출 없이 실제 완료액을 보존해 영구 실패한다")
+    void rejectsDispositionTargetDecreasePermanently() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("204");
+        ApplyReservationDepositDispositionCommand first = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:204:cancelled",
+                null,
+                10000,
+                "550e8400-e29b-41d4-a716-446655440205");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(30_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenReturn(new ProviderCancellation(
+                        "cancellation-disposition-204",
+                        ProviderStatus.CANCELLED,
+                        30_000L,
+                        "KRW"));
+        paymentService.applyReservationDepositDisposition(first);
+        ApplyReservationDepositDispositionCommand correction = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:204:correction:1",
+                first.sourceEventId(),
+                5000,
+                "550e8400-e29b-41d4-a716-446655440206");
+
+        DispositionResult rejected =
+                paymentService.applyReservationDepositDisposition(correction);
+
+        assertThat(rejected.status()).isEqualTo(DispositionStatus.FAILED);
+        assertThat(rejected.failureClassification())
+                .isEqualTo(DispositionFailureClassification.PERMANENT);
+        assertThat(rejected.targetRefundAmountMinor()).isEqualTo(15_000L);
+        assertThat(rejected.completedRefundAmountMinor()).isEqualTo(30_000L);
+        assertThat(rejected.incrementalRefundAmountMinor()).isZero();
+        verify(providerClient, times(1)).cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(30_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION"));
+    }
+
+    @Test
+    @DisplayName("예약금 처분의 provider mapping 불일치는 새 환불 없이 UNKNOWN 대사 상태로 재생한다")
+    void isolatesDispositionProviderMismatchForReconciliation() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("205");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:205:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440208");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenReturn(new ProviderCancellation(
+                        "cancellation-disposition-mismatch-205",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        14_999L,
+                        "KRW"));
+
+        DispositionResult first = paymentService.applyReservationDepositDisposition(command);
+        DispositionResult replay = paymentService.applyReservationDepositDisposition(command);
+
+        assertThat(first.status()).isEqualTo(DispositionStatus.RECONCILIATION_REQUIRED);
+        assertThat(first.failureClassification())
+                .isEqualTo(DispositionFailureClassification.UNKNOWN);
+        assertThat(first.refundId()).isNotNull();
+        assertThat(replay).isEqualTo(first);
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        verify(providerClient, times(1)).cancelPayment(
+                eq(preparation.portOnePaymentId()), eq(first.refundId()), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION"));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds", Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("응답 유실된 예약금 취소는 marker가 일치한 provider GET으로 한 번만 대사 완료한다")
+    void reconcilesUnknownDispositionFromProviderCancellationOnce() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("212");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:212:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440212");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenThrow(new PaymentProviderClient.ProviderUnavailableException("timeout"));
+
+        DispositionResult unknown = paymentService.applyReservationDepositDisposition(command);
+        ProviderCancellation reconciledCancellation = new ProviderCancellation(
+                "cancellation-disposition-212",
+                ProviderStatus.PARTIALLY_CANCELLED,
+                15_000L,
+                "KRW",
+                PaymentProviderClient.cancellationReason(
+                        "RESERVATION_DEPOSIT_DISPOSITION", unknown.refundId()));
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return new ProviderPayment(
+                    preparation.portOnePaymentId(),
+                    "transaction-212",
+                    ProviderStatus.PARTIALLY_CANCELLED,
+                    30_000L,
+                    "KRW",
+                    List.of(reconciledCancellation));
+        });
+        GetReservationDepositDispositionQuery query =
+                new GetReservationDepositDispositionQuery(
+                        preparation.paymentId(), command.sourceEventId());
+
+        DispositionResult completed = paymentService.getReservationDepositDisposition(query);
+        DispositionResult replay = paymentService.getReservationDepositDisposition(query);
+
+        assertThat(unknown.status()).isEqualTo(DispositionStatus.RECONCILIATION_REQUIRED);
+        assertThat(completed.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(completed.completedRefundAmountMinor()).isEqualTo(15_000L);
+        assertThat(replay).isEqualTo(completed);
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_refunds
+                 WHERE refund_id = ?
+                   AND status = 'COMPLETED'
+                   AND provider_cancellation_id = ?
+                """, Long.class, unknown.refundId(), "cancellation-disposition-212"))
+                .isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE event_key = ? AND entry_type = 'REFUND_COMPLETED'
+                """, Long.class, "refund-completed:cancellation-disposition-212"))
+                .isEqualTo(1L);
+        verify(providerClient, times(1)).cancelPayment(
+                eq(preparation.portOnePaymentId()), eq(unknown.refundId()), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION"));
+        verify(providerClient, times(2)).getPayment(preparation.portOnePaymentId());
+    }
+
+    @Test
+    @DisplayName("PROCESSING 처분은 refund lease 만료 후 GET-only 대사로 완료한다")
+    void reconcilesStaleProcessingDispositionWithoutRetryingCancellation() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("216");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:216:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440216");
+        Instant claimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                transactions.claimDisposition(command, claimedAt);
+        PaymentTransactionService.RefundClaim refundClaim = transactions.claimRefund(
+                dispositionClaim.refundCommand(), claimedAt);
+        transactions.finalizeDisposition(
+                dispositionClaim.dispositionId(),
+                new RefundResult(
+                        refundClaim.refundId(),
+                        preparation.paymentId(),
+                        15_000L,
+                        0L,
+                        0L,
+                        30_000L,
+                        "KRW",
+                        RefundStatus.PROCESSING,
+                        claimedAt,
+                        null),
+                claimedAt);
+        GetReservationDepositDispositionQuery query =
+                new GetReservationDepositDispositionQuery(
+                        preparation.paymentId(), command.sourceEventId());
+
+        DispositionResult activeLease =
+                paymentService.getReservationDepositDisposition(query);
+
+        assertThat(activeLease.status()).isEqualTo(DispositionStatus.PROCESSING);
+        jdbcTemplate.update("""
+                UPDATE payment_refunds
+                   SET processing_started_at = DATE_SUB(NOW(6), INTERVAL 6 MINUTE)
+                 WHERE refund_id = ?
+                """, refundClaim.refundId());
+        String reason = PaymentProviderClient.cancellationReason(
+                "RESERVATION_DEPOSIT_DISPOSITION", refundClaim.refundId());
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return new ProviderPayment(
+                    preparation.portOnePaymentId(),
+                    "transaction-216",
+                    ProviderStatus.PARTIALLY_CANCELLED,
+                    30_000L,
+                    "KRW",
+                    List.of(new ProviderCancellation(
+                            "cancellation-disposition-216",
+                            ProviderStatus.PARTIALLY_CANCELLED,
+                            15_000L,
+                            "KRW",
+                            reason)));
+        });
+
+        DispositionResult completed = paymentService.getReservationDepositDisposition(query);
+
+        assertThat(completed.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(completed.refundId()).isEqualTo(refundClaim.refundId());
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+        verify(providerClient, never()).cancelPayment(
+                anyString(), anyString(), anyLong(), anyString(), anyString());
+        verify(providerClient, times(2)).getPayment(preparation.portOnePaymentId());
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE entry_type = 'REFUND_RECONCILIATION_REQUIRED'
+                   AND event_key = ?
+                """, Long.class, "refund-reconciliation:" + refundClaim.refundId()))
+                .isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("lease 만료와 겹친 늦은 취소 성공은 UNKNOWN 처분을 완료로 수렴시킨다")
+    void convergesLateSuccessfulCancellationAfterLeaseExpiry() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("219");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:219:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440221");
+        Instant claimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                transactions.claimDisposition(command, claimedAt);
+        PaymentTransactionService.RefundClaim refundClaim = transactions.claimRefund(
+                dispositionClaim.refundCommand(), claimedAt);
+        transactions.finalizeDisposition(
+                dispositionClaim.dispositionId(),
+                new RefundResult(
+                        refundClaim.refundId(), preparation.paymentId(), 15_000L,
+                        0L, 0L, 30_000L, "KRW", RefundStatus.PROCESSING,
+                        claimedAt, null),
+                claimedAt);
+        GetReservationDepositDispositionQuery query =
+                new GetReservationDepositDispositionQuery(
+                        preparation.paymentId(), command.sourceEventId());
+
+        PaymentTransactionService.DispositionReconciliationClaim reconciliation =
+                transactions.claimDispositionReconciliation(
+                        query, claimedAt.plusSeconds(301));
+        RefundResult lateSuccess = transactions.finalizeRefund(
+                refundClaim,
+                new ProviderCancellation(
+                        "cancellation-late-success-219",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        15_000L,
+                        "KRW"),
+                claimedAt.plusSeconds(302));
+        transactions.finalizeDisposition(
+                dispositionClaim.dispositionId(), lateSuccess, claimedAt.plusSeconds(302));
+
+        DispositionResult completed =
+                paymentService.getReservationDepositDisposition(query);
+
+        assertThat(reconciliation.requiresProviderLookup()).isTrue();
+        assertThat(completed.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(completed.completedRefundAmountMinor()).isEqualTo(15_000L);
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+        verify(providerClient, times(1)).getPayment(preparation.portOnePaymentId());
+        verify(providerClient, never()).cancelPayment(
+                anyString(), anyString(), anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("lease 만료와 겹친 늦은 취소 실패는 UNKNOWN 처분을 RETRYABLE로 수렴시킨다")
+    void convergesLateFailedCancellationAfterLeaseExpiry() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("220");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:220:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440222");
+        Instant claimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                transactions.claimDisposition(command, claimedAt);
+        PaymentTransactionService.RefundClaim refundClaim = transactions.claimRefund(
+                dispositionClaim.refundCommand(), claimedAt);
+        transactions.finalizeDisposition(
+                dispositionClaim.dispositionId(),
+                new RefundResult(
+                        refundClaim.refundId(), preparation.paymentId(), 15_000L,
+                        0L, 0L, 30_000L, "KRW", RefundStatus.PROCESSING,
+                        claimedAt, null),
+                claimedAt);
+        GetReservationDepositDispositionQuery query =
+                new GetReservationDepositDispositionQuery(
+                        preparation.paymentId(), command.sourceEventId());
+
+        PaymentTransactionService.DispositionReconciliationClaim reconciliation =
+                transactions.claimDispositionReconciliation(
+                        query, claimedAt.plusSeconds(301));
+        RefundResult lateFailure = transactions.finalizeRefund(
+                refundClaim,
+                new ProviderCancellation(
+                        "cancellation-late-failed-220",
+                        ProviderStatus.FAILED,
+                        15_000L,
+                        "KRW"),
+                claimedAt.plusSeconds(302));
+        transactions.finalizeDisposition(
+                dispositionClaim.dispositionId(), lateFailure, claimedAt.plusSeconds(302));
+
+        DispositionResult failed = paymentService.getReservationDepositDisposition(query);
+
+        assertThat(reconciliation.requiresProviderLookup()).isTrue();
+        assertThat(failed.status()).isEqualTo(DispositionStatus.FAILED);
+        assertThat(failed.failureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+        assertThat(failed.refundId()).isEqualTo(refundClaim.refundId());
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.PAID);
+        verify(providerClient, times(1)).getPayment(preparation.portOnePaymentId());
+        verify(providerClient, never()).cancelPayment(
+                anyString(), anyString(), anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("GET 실패 뒤 늦은 POST 성공은 RETRYABLE 처분을 즉시 완료한다")
+    void completesRetryableDispositionWhenLatePostSucceedsAfterProviderFailure() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("225");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:225:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440227");
+        Instant claimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                transactions.claimDisposition(command, claimedAt);
+        PaymentTransactionService.RefundClaim refundClaim = transactions.claimRefund(
+                dispositionClaim.refundCommand(), claimedAt);
+        transactions.finalizeDisposition(
+                dispositionClaim.dispositionId(),
+                new RefundResult(
+                        refundClaim.refundId(), preparation.paymentId(), 15_000L,
+                        0L, 0L, 30_000L, "KRW", RefundStatus.PROCESSING,
+                        claimedAt, null),
+                claimedAt);
+        GetReservationDepositDispositionQuery query =
+                new GetReservationDepositDispositionQuery(
+                        preparation.paymentId(), command.sourceEventId());
+        PaymentTransactionService.DispositionReconciliationClaim reconciliation =
+                transactions.claimDispositionReconciliation(
+                        query, claimedAt.plusSeconds(301));
+        String reason = PaymentProviderClient.cancellationReason(
+                "RESERVATION_DEPOSIT_DISPOSITION", refundClaim.refundId());
+        DispositionResult failed = transactions.finalizeDispositionReconciliation(
+                reconciliation,
+                new ProviderCancellation(
+                        "cancellation-lookup-failed-225",
+                        ProviderStatus.FAILED,
+                        15_000L,
+                        "KRW",
+                        reason),
+                claimedAt.plusSeconds(302));
+
+        RefundResult lateSuccess = transactions.finalizeRefund(
+                refundClaim,
+                new ProviderCancellation(
+                        "cancellation-late-success-225",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        15_000L,
+                        "KRW"),
+                claimedAt.plusSeconds(303));
+        DispositionResult completed = transactions.finalizeDisposition(
+                dispositionClaim.dispositionId(), lateSuccess, claimedAt.plusSeconds(303));
+
+        assertThat(reconciliation.requiresProviderLookup()).isTrue();
+        assertThat(failed.status()).isEqualTo(DispositionStatus.FAILED);
+        assertThat(failed.failureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+        assertThat(completed.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(completed.refundId()).isEqualTo(refundClaim.refundId());
+        assertThat(completed.completedRefundAmountMinor()).isEqualTo(15_000L);
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+    }
+
+    @Test
+    @DisplayName("GET 실패 뒤 완료된 같은 refund는 다음 QUERY에서 RETRYABLE 처분을 완료한다")
+    void synchronizesRetryableDispositionWhenLatePostSucceededBeforeQuery() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("226");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:226:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440228");
+        Instant claimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                transactions.claimDisposition(command, claimedAt);
+        PaymentTransactionService.RefundClaim refundClaim = transactions.claimRefund(
+                dispositionClaim.refundCommand(), claimedAt);
+        transactions.finalizeDisposition(
+                dispositionClaim.dispositionId(),
+                new RefundResult(
+                        refundClaim.refundId(), preparation.paymentId(), 15_000L,
+                        0L, 0L, 30_000L, "KRW", RefundStatus.PROCESSING,
+                        claimedAt, null),
+                claimedAt);
+        GetReservationDepositDispositionQuery query =
+                new GetReservationDepositDispositionQuery(
+                        preparation.paymentId(), command.sourceEventId());
+        PaymentTransactionService.DispositionReconciliationClaim reconciliation =
+                transactions.claimDispositionReconciliation(
+                        query, claimedAt.plusSeconds(301));
+        String reason = PaymentProviderClient.cancellationReason(
+                "RESERVATION_DEPOSIT_DISPOSITION", refundClaim.refundId());
+        transactions.finalizeDispositionReconciliation(
+                reconciliation,
+                new ProviderCancellation(
+                        "cancellation-lookup-failed-226",
+                        ProviderStatus.FAILED,
+                        15_000L,
+                        "KRW",
+                        reason),
+                claimedAt.plusSeconds(302));
+        transactions.finalizeRefund(
+                refundClaim,
+                new ProviderCancellation(
+                        "cancellation-late-success-226",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        15_000L,
+                        "KRW"),
+                claimedAt.plusSeconds(303));
+
+        DispositionResult completed =
+                paymentService.getReservationDepositDisposition(query);
+
+        assertThat(reconciliation.requiresProviderLookup()).isTrue();
+        assertThat(completed.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(completed.refundId()).isEqualTo(refundClaim.refundId());
+        assertThat(completed.completedRefundAmountMinor()).isEqualTo(15_000L);
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+    }
+
+    @Test
+    @DisplayName("늦은 환불 실패는 별도 unmatched 취소 Webhook의 대사 격리를 해제하지 않는다")
+    void keepsIndependentWebhookReconciliationAfterLateRefundFailure() throws Exception {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("222");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:222:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440224");
+        Instant claimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                transactions.claimDisposition(command, claimedAt);
+        PaymentTransactionService.RefundClaim refundClaim = transactions.claimRefund(
+                dispositionClaim.refundCommand(), claimedAt);
+        transactions.finalizeDisposition(
+                dispositionClaim.dispositionId(),
+                new RefundResult(
+                        refundClaim.refundId(), preparation.paymentId(), 15_000L,
+                        0L, 0L, 30_000L, "KRW", RefundStatus.PROCESSING,
+                        claimedAt, null),
+                claimedAt);
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenReturn(
+                new ProviderPayment(
+                        preparation.portOnePaymentId(),
+                        "transaction-222",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        30_000L,
+                        "KRW"));
+        String body = """
+                {"type":"Transaction.PartialCancelled","timestamp":"2026-08-18T01:00:00Z","data":{"storeId":"store-1","paymentId":"%s","transactionId":"transaction-222","cancellationId":"external-cancellation-222"}}"""
+                .formatted(preparation.portOnePaymentId());
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String signature = "v1," + webhookSignature(
+                "msg_webhook_cancel_222", timestamp, body);
+
+        PaymentWebhookService.WebhookResult webhook = webhookService.handle(
+                body, "msg_webhook_cancel_222", timestamp, signature);
+        RefundResult lateFailure = transactions.finalizeRefund(
+                refundClaim,
+                new ProviderCancellation(
+                        "cancellation-late-failed-222",
+                        ProviderStatus.FAILED,
+                        15_000L,
+                        "KRW"),
+                Instant.now().truncatedTo(ChronoUnit.MICROS));
+        transactions.finalizeDisposition(
+                dispositionClaim.dispositionId(),
+                lateFailure,
+                Instant.now().truncatedTo(ChronoUnit.MICROS));
+        DispositionResult failed = paymentService.getReservationDepositDisposition(
+                new GetReservationDepositDispositionQuery(
+                        preparation.paymentId(), command.sourceEventId()));
+
+        assertThat(webhook)
+                .isEqualTo(PaymentWebhookService.WebhookResult.RECONCILIATION_REQUIRED);
+        assertThat(failed.failureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE entry_type = 'PAYMENT_RECONCILIATION_REQUIRED'
+                """, Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("늦은 환불 성공은 별도 unmatched 취소 Webhook의 대사 격리를 해제하지 않는다")
+    void keepsIndependentWebhookReconciliationAfterLateRefundSuccess() throws Exception {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("223");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:223:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440225");
+        Instant claimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                transactions.claimDisposition(command, claimedAt);
+        PaymentTransactionService.RefundClaim refundClaim = transactions.claimRefund(
+                dispositionClaim.refundCommand(), claimedAt);
+        transactions.finalizeDisposition(
+                dispositionClaim.dispositionId(),
+                new RefundResult(
+                        refundClaim.refundId(), preparation.paymentId(), 15_000L,
+                        0L, 0L, 30_000L, "KRW", RefundStatus.PROCESSING,
+                        claimedAt, null),
+                claimedAt);
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenReturn(
+                new ProviderPayment(
+                        preparation.portOnePaymentId(),
+                        "transaction-223",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        30_000L,
+                        "KRW"));
+        String body = """
+                {"type":"Transaction.PartialCancelled","timestamp":"2026-08-18T01:00:00Z","data":{"storeId":"store-1","paymentId":"%s","transactionId":"transaction-223","cancellationId":"external-cancellation-223"}}"""
+                .formatted(preparation.portOnePaymentId());
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String signature = "v1," + webhookSignature(
+                "msg_webhook_cancel_223", timestamp, body);
+
+        PaymentWebhookService.WebhookResult webhook = webhookService.handle(
+                body, "msg_webhook_cancel_223", timestamp, signature);
+        RefundResult lateSuccess = transactions.finalizeRefund(
+                refundClaim,
+                new ProviderCancellation(
+                        "cancellation-late-success-223",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        15_000L,
+                        "KRW"),
+                Instant.now().truncatedTo(ChronoUnit.MICROS));
+        DispositionResult completed = transactions.finalizeDisposition(
+                dispositionClaim.dispositionId(),
+                lateSuccess,
+                Instant.now().truncatedTo(ChronoUnit.MICROS));
+
+        assertThat(webhook)
+                .isEqualTo(PaymentWebhookService.WebhookResult.RECONCILIATION_REQUIRED);
+        assertThat(completed.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+    }
+
+    @Test
+    @DisplayName("GET 대사 성공은 refund 시작 뒤 별도 Webhook 대사 격리를 해제하지 않는다")
+    void keepsIndependentWebhookReconciliationAfterSuccessfulProviderLookup() throws Exception {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("224");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:224:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440226");
+        Instant claimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                transactions.claimDisposition(command, claimedAt);
+        PaymentTransactionService.RefundClaim refundClaim = transactions.claimRefund(
+                dispositionClaim.refundCommand(), claimedAt);
+        transactions.finalizeDisposition(
+                dispositionClaim.dispositionId(),
+                new RefundResult(
+                        refundClaim.refundId(), preparation.paymentId(), 15_000L,
+                        0L, 0L, 30_000L, "KRW", RefundStatus.PROCESSING,
+                        claimedAt, null),
+                claimedAt);
+        GetReservationDepositDispositionQuery query =
+                new GetReservationDepositDispositionQuery(
+                        preparation.paymentId(), command.sourceEventId());
+        PaymentTransactionService.DispositionReconciliationClaim reconciliation =
+                transactions.claimDispositionReconciliation(
+                        query, claimedAt.plusSeconds(301));
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenReturn(
+                new ProviderPayment(
+                        preparation.portOnePaymentId(),
+                        "transaction-224",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        30_000L,
+                        "KRW"));
+        String body = """
+                {"type":"Transaction.PartialCancelled","timestamp":"2026-08-18T01:00:00Z","data":{"storeId":"store-1","paymentId":"%s","transactionId":"transaction-224","cancellationId":"external-cancellation-224"}}"""
+                .formatted(preparation.portOnePaymentId());
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String signature = "v1," + webhookSignature(
+                "msg_webhook_cancel_224", timestamp, body);
+        PaymentWebhookService.WebhookResult webhook = webhookService.handle(
+                body, "msg_webhook_cancel_224", timestamp, signature);
+        String reason = PaymentProviderClient.cancellationReason(
+                "RESERVATION_DEPOSIT_DISPOSITION", refundClaim.refundId());
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenReturn(
+                new ProviderPayment(
+                        preparation.portOnePaymentId(),
+                        "transaction-224",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        30_000L,
+                        "KRW",
+                        List.of(new ProviderCancellation(
+                                "cancellation-lookup-success-224",
+                                ProviderStatus.PARTIALLY_CANCELLED,
+                                15_000L,
+                                "KRW",
+                                reason))));
+
+        DispositionResult completed =
+                paymentService.getReservationDepositDisposition(query);
+
+        assertThat(reconciliation.requiresProviderLookup()).isTrue();
+        assertThat(webhook)
+                .isEqualTo(PaymentWebhookService.WebhookResult.RECONCILIATION_REQUIRED);
+        assertThat(completed.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+    }
+
+    @Test
+    @DisplayName("refund 없는 RETRYABLE 재생은 뒤늦게 완료된 같은 refund를 먼저 흡수한다")
+    void synchronizesLateMatchingRefundBeforeCapacityRejection() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("221");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:221:cancelled",
+                null,
+                10000,
+                "550e8400-e29b-41d4-a716-446655440223");
+        Instant claimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                transactions.claimDisposition(command, claimedAt);
+        DispositionResult deferred = transactions.resolveDispositionAfterRefundFailure(
+                dispositionClaim.dispositionId(), true, claimedAt.plusSeconds(1));
+        PaymentTransactionService.RefundClaim lateRefund = transactions.claimRefund(
+                dispositionClaim.refundCommand(), claimedAt.plusSeconds(2));
+        transactions.finalizeRefund(
+                lateRefund,
+                new ProviderCancellation(
+                        "cancellation-late-matching-221",
+                        ProviderStatus.CANCELLED,
+                        30_000L,
+                        "KRW"),
+                claimedAt.plusSeconds(3));
+
+        DispositionResult completed =
+                paymentService.applyReservationDepositDisposition(command);
+
+        assertThat(deferred.failureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+        assertThat(completed.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(completed.refundId()).isEqualTo(lateRefund.refundId());
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.REFUNDED);
+        verify(providerClient, never()).cancelPayment(
+                anyString(), anyString(), anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("provider GET 중 refund 상태가 바뀌면 stale 취소 성공을 원장에 적용하지 않는다")
+    void ignoresStaleProviderCancellationAfterRefundStateChanges() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("213");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:213:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440213");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenThrow(new PaymentProviderClient.ProviderUnavailableException("timeout"));
+        DispositionResult unknown = paymentService.applyReservationDepositDisposition(command);
+        ProviderCancellation staleCancellation = new ProviderCancellation(
+                "cancellation-stale-213",
+                ProviderStatus.PARTIALLY_CANCELLED,
+                15_000L,
+                "KRW",
+                PaymentProviderClient.cancellationReason(
+                        "RESERVATION_DEPOSIT_DISPOSITION", unknown.refundId()));
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenAnswer(invocation -> {
+            jdbcTemplate.update("""
+                    UPDATE payment_refunds
+                       SET status = 'FAILED', updated_at = NOW(6)
+                     WHERE refund_id = ?
+                    """, unknown.refundId());
+            return new ProviderPayment(
+                    preparation.portOnePaymentId(),
+                    "transaction-213",
+                    ProviderStatus.PARTIALLY_CANCELLED,
+                    30_000L,
+                    "KRW",
+                    List.of(staleCancellation));
+        });
+
+        DispositionResult result = paymentService.getReservationDepositDisposition(
+                new GetReservationDepositDispositionQuery(
+                        preparation.paymentId(), command.sourceEventId()));
+
+        assertThat(result.status()).isEqualTo(DispositionStatus.RECONCILIATION_REQUIRED);
+        assertThat(result.completedRefundAmountMinor()).isZero();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT status FROM payment_refunds WHERE refund_id = ?
+                """, String.class, unknown.refundId())).isEqualTo("FAILED");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE event_key = 'refund-completed:cancellation-stale-213'
+                """, Long.class)).isZero();
+    }
+
+    @Test
+    @DisplayName("marker가 일치한 provider 취소 명시 실패는 같은 환불을 retryable 실패로 종결한다")
+    void reconcilesUnknownDispositionToExplicitFailure() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("214");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:214:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440214");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenThrow(new PaymentProviderClient.ProviderUnavailableException("timeout"));
+        DispositionResult unknown = paymentService.applyReservationDepositDisposition(command);
+        ProviderCancellation failedCancellation = new ProviderCancellation(
+                "cancellation-failed-214",
+                ProviderStatus.FAILED,
+                15_000L,
+                "KRW",
+                PaymentProviderClient.cancellationReason(
+                        "RESERVATION_DEPOSIT_DISPOSITION", unknown.refundId()));
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenReturn(
+                new ProviderPayment(
+                        preparation.portOnePaymentId(),
+                        "transaction-214",
+                        ProviderStatus.PAID,
+                        30_000L,
+                        "KRW",
+                        List.of(failedCancellation)));
+        GetReservationDepositDispositionQuery query =
+                new GetReservationDepositDispositionQuery(
+                        preparation.paymentId(), command.sourceEventId());
+
+        DispositionResult failed = paymentService.getReservationDepositDisposition(query);
+        DispositionResult replay = paymentService.getReservationDepositDisposition(query);
+
+        assertThat(failed.status()).isEqualTo(DispositionStatus.FAILED);
+        assertThat(failed.failureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+        assertThat(failed.completedRefundAmountMinor()).isZero();
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.PAID);
+        assertThat(replay).isEqualTo(failed);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT status FROM payment_refunds WHERE refund_id = ?
+                """, String.class, unknown.refundId())).isEqualTo("FAILED");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE event_key = ? AND entry_type = 'REFUND_FAILED'
+                """, Long.class,
+                "refund-failed:" + unknown.refundId() + ":1")).isEqualTo(1L);
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), eq(unknown.refundId()), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenReturn(new ProviderCancellation(
+                        "cancellation-retried-214",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        15_000L,
+                        "KRW"));
+
+        DispositionResult retried =
+                paymentService.applyReservationDepositDisposition(command);
+
+        assertThat(retried.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(retried.refundId()).isEqualTo(unknown.refundId());
+        verify(providerClient, times(2)).cancelPayment(
+                eq(preparation.portOnePaymentId()), eq(unknown.refundId()), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION"));
+        verify(providerClient, times(2)).getPayment(preparation.portOnePaymentId());
+    }
+
+    @Test
+    @DisplayName("미완료 처분을 참조한 정정은 외부 호출 없이 영구 실패로 기록한다")
+    void rejectsCorrectionOfUnfinishedDispositionPermanently() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("206");
+        ApplyReservationDepositDispositionCommand unfinished = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:206:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440209");
+        PaymentTransactionService.DispositionClaim claim = transactions.claimDisposition(
+                unfinished, Instant.now().truncatedTo(ChronoUnit.MICROS));
+        assertThat(claim.requiresRefund()).isTrue();
+        ApplyReservationDepositDispositionCommand correction = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:206:correction:1",
+                unfinished.sourceEventId(),
+                10000,
+                "550e8400-e29b-41d4-a716-446655440210");
+
+        DispositionResult rejected =
+                paymentService.applyReservationDepositDisposition(correction);
+
+        assertThat(rejected.status()).isEqualTo(DispositionStatus.FAILED);
+        assertThat(rejected.failureClassification())
+                .isEqualTo(DispositionFailureClassification.PERMANENT);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_deposit_dispositions", Long.class))
+                .isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds", Long.class)).isZero();
+        verify(providerClient, never()).cancelPayment(
+                anyString(), anyString(), anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("실패 처분 재시도는 최신 환불 잔액을 다시 검증해 provider 초과 환불을 막는다")
+    void revalidatesRefundableAmountBeforeDispositionRetry() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("207");
+        ApplyReservationDepositDispositionCommand disposition = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:207:cancelled",
+                null,
+                10000,
+                "550e8400-e29b-41d4-a716-446655440211");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(30_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenReturn(new ProviderCancellation(
+                        "cancellation-disposition-failed-207",
+                        ProviderStatus.FAILED,
+                        30_000L,
+                        "KRW"));
+        DispositionResult failed =
+                paymentService.applyReservationDepositDisposition(disposition);
+        assertThat(failed.failureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(20_000L),
+                eq("KRW"), eq("RESERVATION_ADJUSTED")))
+                .thenReturn(new ProviderCancellation(
+                        "cancellation-sibling-207",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        20_000L,
+                        "KRW"));
+        paymentService.requestRefund(new RequestRefundCommand(
+                preparation.paymentId(),
+                "reservation:207:adjusted",
+                20_000L,
+                "RESERVATION_ADJUSTED",
+                7L,
+                "550e8400-e29b-41d4-a716-446655440212"));
+
+        DispositionResult rejectedRetry =
+                paymentService.applyReservationDepositDisposition(disposition);
+
+        assertThat(rejectedRetry.status()).isEqualTo(DispositionStatus.FAILED);
+        assertThat(rejectedRetry.failureClassification())
+                .isEqualTo(DispositionFailureClassification.PERMANENT);
+        verify(providerClient, times(1)).cancelPayment(
+                eq(preparation.portOnePaymentId()), eq(failed.refundId()), eq(30_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION"));
+    }
+
+    @Test
+    @DisplayName("환불 재시도 lease는 최초 요청이 아니라 최신 시도 시작 시각부터 계산한다")
+    void startsFreshLeaseForExplicitRefundRetry() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("208");
+        RequestRefundCommand command = new RequestRefundCommand(
+                preparation.paymentId(),
+                "reservation:208:cancelled",
+                10_000L,
+                "RESERVATION_CANCELLED",
+                7L,
+                "550e8400-e29b-41d4-a716-446655440213");
+        Instant firstClaimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        PaymentTransactionService.RefundClaim first =
+                transactions.claimRefund(command, firstClaimedAt);
+        transactions.finalizeRefund(
+                first,
+                new ProviderCancellation(
+                        "cancellation-failed-208",
+                        ProviderStatus.FAILED,
+                        10_000L,
+                        "KRW"),
+                firstClaimedAt.plusSeconds(1));
+
+        Instant retriedAt = firstClaimedAt.plusSeconds(600);
+        PaymentTransactionService.RefundClaim retry =
+                transactions.claimRefund(command, retriedAt);
+        PaymentTransactionService.RefundClaim activeReplay =
+                transactions.claimRefund(command, retriedAt.plusSeconds(299));
+        PaymentTransactionService.RefundClaim staleReplay =
+                transactions.claimRefund(command, retriedAt.plusSeconds(301));
+
+        assertThat(retry.requiresProviderCall()).isTrue();
+        assertThat(activeReplay.completedResult().status()).isEqualTo(RefundStatus.PROCESSING);
+        assertThat(staleReplay.completedResult().status())
+                .isEqualTo(RefundStatus.RECONCILIATION_REQUIRED);
+    }
+
+    @Test
+    @DisplayName("예약금 처분 provider 호출 동안 ambient caller transaction을 중단한다")
+    void suspendsCallerTransactionAroundDispositionProviderCall() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("209");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:209:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440214");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenAnswer(invocation -> {
+                    assertThat(TransactionSynchronizationManager.isActualTransactionActive())
+                            .isFalse();
+                    return new ProviderCancellation(
+                            "cancellation-disposition-209",
+                            ProviderStatus.PARTIALLY_CANCELLED,
+                            15_000L,
+                            "KRW");
+                });
+        AtomicReference<DispositionResult> observed = new AtomicReference<>();
+
+        transactionTemplate.executeWithoutResult(ignored -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+            observed.set(paymentService.applyReservationDepositDisposition(command));
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+        });
+
+        assertThat(observed.get().status()).isEqualTo(DispositionStatus.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("같은 환불의 반복 명시 실패는 attempt별 감사 원장을 남긴 뒤 동일 ID로 완료한다")
+    void auditsRepeatedExplicitRefundFailuresByAttempt() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("210");
+        ApplyReservationDepositDispositionCommand command = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:210:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440215");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenReturn(
+                        new ProviderCancellation(
+                                "cancellation-failed-210-a",
+                                ProviderStatus.FAILED,
+                                15_000L,
+                                "KRW"),
+                        new ProviderCancellation(
+                                "cancellation-failed-210-b",
+                                ProviderStatus.FAILED,
+                                15_000L,
+                                "KRW"),
+                        new ProviderCancellation(
+                                "cancellation-completed-210",
+                                ProviderStatus.PARTIALLY_CANCELLED,
+                                15_000L,
+                                "KRW"));
+
+        DispositionResult first = paymentService.applyReservationDepositDisposition(command);
+        DispositionResult second = paymentService.applyReservationDepositDisposition(command);
+        DispositionResult completed = paymentService.applyReservationDepositDisposition(command);
+
+        assertThat(first.failureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+        assertThat(second.failureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+        assertThat(completed.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(completed.refundId()).isEqualTo(first.refundId());
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE entry_type = 'REFUND_FAILED'
+                """, Long.class)).isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE entry_type = 'REFUND_RETRY_REQUESTED'
+                """, Long.class)).isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds", Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("처분 retry claim 뒤 경쟁 환불이 잔액을 쓰면 provider 호출 없이 즉시 영구 실패한다")
+    void rejectsDispositionRetryRacePermanently() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("211");
+        ApplyReservationDepositDispositionCommand disposition = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:211:cancelled",
+                null,
+                10000,
+                "550e8400-e29b-41d4-a716-446655440216");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(30_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenReturn(new ProviderCancellation(
+                        "cancellation-disposition-failed-211",
+                        ProviderStatus.FAILED,
+                        30_000L,
+                        "KRW"));
+        DispositionResult failed =
+                paymentService.applyReservationDepositDisposition(disposition);
+        assertThat(failed.failureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+
+        PaymentTransactionService.DispositionClaim retryClaim = transactions.claimDisposition(
+                disposition, Instant.now().truncatedTo(ChronoUnit.MICROS));
+        assertThat(retryClaim.requiresRefund()).isTrue();
+        RequestRefundCommand siblingCommand = new RequestRefundCommand(
+                preparation.paymentId(),
+                "reservation:211:adjusted",
+                20_000L,
+                "RESERVATION_ADJUSTED",
+                7L,
+                "550e8400-e29b-41d4-a716-446655440217");
+        PaymentTransactionService.RefundClaim sibling = transactions.claimRefund(
+                siblingCommand, Instant.now().truncatedTo(ChronoUnit.MICROS));
+        transactions.finalizeRefund(
+                sibling,
+                new ProviderCancellation(
+                        "cancellation-sibling-211",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        20_000L,
+                        "KRW"),
+                Instant.now().truncatedTo(ChronoUnit.MICROS));
+
+        DispositionResult rejected =
+                paymentService.applyReservationDepositDisposition(disposition);
+
+        assertThat(rejected.status()).isEqualTo(DispositionStatus.FAILED);
+        assertThat(rejected.failureClassification())
+                .isEqualTo(DispositionFailureClassification.PERMANENT);
+        verify(providerClient, times(1)).cancelPayment(
+                eq(preparation.portOnePaymentId()), eq(failed.refundId()), eq(30_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION"));
     }
 
     @Test
@@ -1149,6 +2481,137 @@ class PaymentPersistenceIT {
     }
 
     @Test
+    @DisplayName("sibling PROCESSING 환불이 점유한 잔액은 처분을 RETRYABLE로 대기시킨다")
+    void retriesDispositionAfterSiblingProcessingRefundReleasesCapacity() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("217");
+        Instant claimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        RequestRefundCommand siblingCommand = new RequestRefundCommand(
+                preparation.paymentId(),
+                "reservation:217:adjusted",
+                20_000L,
+                "RESERVATION_ADJUSTED",
+                7L,
+                "550e8400-e29b-41d4-a716-446655440217");
+        PaymentTransactionService.RefundClaim sibling =
+                transactions.claimRefund(siblingCommand, claimedAt);
+        ApplyReservationDepositDispositionCommand disposition = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:217:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440218");
+
+        DispositionResult deferred =
+                paymentService.applyReservationDepositDisposition(disposition);
+
+        assertThat(deferred.status()).isEqualTo(DispositionStatus.FAILED);
+        assertThat(deferred.failureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+        assertThat(deferred.refundId()).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds", Long.class)).isEqualTo(1L);
+        verify(providerClient, never()).cancelPayment(
+                anyString(), anyString(), anyLong(), anyString(), anyString());
+
+        DispositionResult stillDeferred =
+                paymentService.applyReservationDepositDisposition(disposition);
+        assertThat(stillDeferred.failureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+
+        transactions.finalizeRefund(
+                sibling,
+                new ProviderCancellation(
+                        "cancellation-sibling-failed-217",
+                        ProviderStatus.FAILED,
+                        20_000L,
+                        "KRW"),
+                claimedAt.plusSeconds(1));
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenReturn(new ProviderCancellation(
+                        "cancellation-disposition-217",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        15_000L,
+                        "KRW"));
+
+        DispositionResult completed =
+                paymentService.applyReservationDepositDisposition(disposition);
+
+        assertThat(completed.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(completed.dispositionId()).isEqualTo(deferred.dispositionId());
+        assertThat(completed.refundId()).isNotNull();
+        verify(providerClient, times(1)).cancelPayment(
+                eq(preparation.portOnePaymentId()), eq(completed.refundId()), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION"));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds", Long.class)).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("처분 claim 뒤 sibling 환불 경쟁도 refund 없는 RETRYABLE로 복구한다")
+    void recoversDispositionClaimRaceWithSiblingProcessingRefund() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("218");
+        Instant claimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        ApplyReservationDepositDispositionCommand disposition = dispositionCommand(
+                preparation.paymentId(),
+                "reservation:218:cancelled",
+                null,
+                5000,
+                "550e8400-e29b-41d4-a716-446655440219");
+        PaymentTransactionService.DispositionClaim dispositionClaim =
+                transactions.claimDisposition(disposition, claimedAt);
+        PaymentTransactionService.RefundClaim sibling = transactions.claimRefund(
+                new RequestRefundCommand(
+                        preparation.paymentId(),
+                        "reservation:218:adjusted",
+                        20_000L,
+                        "RESERVATION_ADJUSTED",
+                        7L,
+                        "550e8400-e29b-41d4-a716-446655440220"),
+                claimedAt.plusSeconds(1));
+
+        DispositionResult deferred =
+                paymentService.applyReservationDepositDisposition(disposition);
+
+        assertThat(dispositionClaim.requiresRefund()).isTrue();
+        assertThat(deferred.status()).isEqualTo(DispositionStatus.FAILED);
+        assertThat(deferred.failureClassification())
+                .isEqualTo(DispositionFailureClassification.RETRYABLE);
+        assertThat(deferred.refundId()).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds", Long.class)).isEqualTo(1L);
+        verify(providerClient, never()).cancelPayment(
+                anyString(), anyString(), anyLong(), anyString(), anyString());
+
+        transactions.finalizeRefund(
+                sibling,
+                new ProviderCancellation(
+                        "cancellation-sibling-failed-218",
+                        ProviderStatus.FAILED,
+                        20_000L,
+                        "KRW"),
+                claimedAt.plusSeconds(2));
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION")))
+                .thenReturn(new ProviderCancellation(
+                        "cancellation-disposition-218",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        15_000L,
+                        "KRW"));
+
+        DispositionResult completed =
+                paymentService.applyReservationDepositDisposition(disposition);
+
+        assertThat(completed.status()).isEqualTo(DispositionStatus.COMPLETED);
+        assertThat(completed.dispositionId()).isEqualTo(deferred.dispositionId());
+        verify(providerClient, times(1)).cancelPayment(
+                eq(preparation.portOnePaymentId()), eq(completed.refundId()), eq(15_000L),
+                eq("KRW"), eq("RESERVATION_DEPOSIT_DISPOSITION"));
+    }
+
+    @Test
     @DisplayName("외부 호출 전에 중단된 환불 claim은 lease 만료 후 재호출 없이 대사 상태로 격리한다")
     void isolatesStaleRefundClaimWithoutRetryingProviderCancellation() {
         PaymentPreparation preparation = prepareAndConfirmPaidPayment("140");
@@ -1197,7 +2660,7 @@ class PaymentPersistenceIT {
                 transactions.claimRefund(abandoned, claimedAt);
         jdbcTemplate.update("""
                 UPDATE payment_refunds
-                   SET requested_at = DATE_SUB(NOW(6), INTERVAL 5 MINUTE)
+                   SET processing_started_at = DATE_SUB(NOW(6), INTERVAL 5 MINUTE)
                  WHERE refund_id = ?
                 """, claim.refundId());
 
@@ -1301,6 +2764,26 @@ class PaymentPersistenceIT {
                 "550e8400-e29b-41d4-a716-" + String.format("%012d", Long.parseLong(reservationReferenceId))
         ));
         return preparation;
+    }
+
+    private static ApplyReservationDepositDispositionCommand dispositionCommand(
+            String paymentId,
+            String sourceEventId,
+            String correctsSourceEventId,
+            int targetRefundRateBasisPoints,
+            String idempotencyKey
+    ) {
+        return new ApplyReservationDepositDispositionCommand(
+                paymentId,
+                sourceEventId,
+                correctsSourceEventId == null
+                        ? "RESERVATION_CANCELLED"
+                        : "RESERVATION_CANCELLATION_CORRECTED",
+                correctsSourceEventId,
+                2L,
+                "CONSUMER",
+                targetRefundRateBasisPoints,
+                idempotencyKey);
     }
 
     private void awaitPaymentPreparationUniqueWait() {

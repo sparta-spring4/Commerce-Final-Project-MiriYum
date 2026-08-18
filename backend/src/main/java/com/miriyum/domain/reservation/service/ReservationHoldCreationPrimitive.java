@@ -117,6 +117,18 @@ public class ReservationHoldCreationPrimitive {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public ReservationHold create(Command command) {
+        return create(command, requireCancellationPolicy(false));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public ReservationHold createDeposit(Command command) {
+        return create(command, requireCancellationPolicy(true));
+    }
+
+    private ReservationHold create(
+            Command command,
+            ReservationCancellationPolicyVersion cancellationPolicyVersion
+    ) {
         ReservationHold concurrentReplay = holdRepository
                 .findByConsumerAccountIdAndCreationCommandId(
                         command.consumerAccountId(), command.creationCommandId())
@@ -180,7 +192,7 @@ public class ReservationHoldCreationPrimitive {
                 ReservationContactSnapshot.contactable(
                         command.notificationTargetReference()),
                 capacityPolicyVersion,
-                requireCancellationPolicy(),
+                cancellationPolicyVersion,
                 command.creationCommandId(),
                 createdAt);
         ReservationHold saved = holdRepository.saveAndFlush(hold);
@@ -244,8 +256,10 @@ public class ReservationHoldCreationPrimitive {
                 selections));
     }
 
-    private ReservationCancellationPolicyVersion requireCancellationPolicy() {
-        ReservationCancellationPolicyVersion selected = cancellationPolicySelector.select();
+    private ReservationCancellationPolicyVersion requireCancellationPolicy(boolean deposit) {
+        ReservationCancellationPolicyVersion selected = deposit
+                ? cancellationPolicySelector.selectDeposit()
+                : cancellationPolicySelector.select();
         if (selected == null) {
             throw new IllegalStateException("cancellation policy selection is required");
         }

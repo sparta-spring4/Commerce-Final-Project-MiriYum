@@ -2,6 +2,8 @@ package com.miriyum.domain.reservation.waiting.service;
 
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamSnapshot;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActiveMembership;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActorType;
@@ -32,6 +34,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Objects;
 import java.util.function.Supplier;
+import java.util.function.Function;
 import java.util.function.IntToLongFunction;
 import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -161,33 +164,54 @@ public class WaitingCreationService {
         Objects.requireNonNull(businessDate, "businessDate must not be null");
         Objects.requireNonNull(source, "source must not be null");
         Objects.requireNonNull(key, "key must not be null");
-        IdempotencyCommand command = new IdempotencyCommand(
-                "consumer",
-                consumerAccountId,
-                "WAITING_TEAM_CREATE",
-                key.value(),
-                RequestFingerprint.of("storeId=" + storeId
-                        + "|consumerAccountId=" + consumerAccountId
-                        + "|businessDate=" + businessDate
-                        + "|partySize=" + partySize
-                        + "|source=" + source)
-        );
+        IdempotencyCommand command = createCommand(
+                storeId, consumerAccountId, businessDate, partySize, source, key);
         Instant occurredAt = clock.instant();
-        return executeWithRetry(() -> createInTransaction(
-                storeId, consumerAccountId, businessDate, partySize, source, command, occurredAt));
+        IdempotentOutcome outcome = executeWithRetry(() -> createInTransaction(
+                storeId, consumerAccountId, businessDate, partySize, source, command, occurredAt,
+                WaitingTeamSnapshot::from, () -> { }));
+        return new WaitingCommandResult(outcome.httpStatus(),
+                objectMapper.treeToValue(outcome.data(), WaitingTeamSnapshot.class));
     }
 
-    private WaitingCommandResult createInTransaction(
+    /** 최초 소비자 공개 snapshot 전체를 저장해 같은 키 재요청에 그대로 재생한다. */
+    public WaitingConsumerCommandResult createForConsumer(
+            long storeId,
+            long consumerAccountId,
+            LocalDate businessDate,
+            int partySize,
+            WaitingSource source,
+            IdempotencyKey key,
+            boolean locationProofConnected
+    ) {
+        Objects.requireNonNull(businessDate, "businessDate must not be null");
+        Objects.requireNonNull(source, "source must not be null");
+        Objects.requireNonNull(key, "key must not be null");
+        IdempotencyCommand command = createCommand(
+                storeId, consumerAccountId, businessDate, partySize, source, key);
+        Instant occurredAt = clock.instant();
+        IdempotentOutcome outcome = executeWithRetry(() -> createInTransaction(
+                storeId, consumerAccountId, businessDate, partySize, source, command, occurredAt,
+                this::consumerSnapshot,
+                () -> requireLocationProofConnected(locationProofConnected)));
+        return new WaitingConsumerCommandResult(outcome.httpStatus(),
+                objectMapper.treeToValue(outcome.data(), WaitingConsumerSnapshot.class));
+    }
+
+    private <T> IdempotentOutcome createInTransaction(
             long storeId,
             long consumerAccountId,
             LocalDate businessDate,
             int partySize,
             WaitingSource source,
             IdempotencyCommand command,
-            Instant occurredAt
+            Instant occurredAt,
+            Function<WaitingTeam, T> snapshotFactory,
+            Runnable firstExecutionGuard
     ) {
         return transactionExecutor.execute(() -> {
-            IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+            return idempotencyExecutor.execute(command, () -> {
+                    firstExecutionGuard.run();
                     storeEligibility.requireWaitingTransactionEligibility(storeId);
                     Instant eligibilityAt = clock.instant();
                     receptionCheck.requireOpen(storeId, businessDate, eligibilityAt);
@@ -208,13 +232,36 @@ public class WaitingCreationService {
                             commandId, occurredAt, clock.instant()));
                     eventRepository.save(WaitingStatusEvent.pending(
                             team.getId(), 1L, WaitingTeamStatus.WAITING, occurredAt));
-                    WaitingTeamSnapshot snapshot = WaitingTeamSnapshot.from(team);
                     return new BusinessResult<>(HttpStatus.OK.value(), "SUCCESS",
-                            "WAITING_TEAM", Long.toString(team.getId()), snapshot);
+                            "WAITING_TEAM", Long.toString(team.getId()), snapshotFactory.apply(team));
             });
-            return new WaitingCommandResult(outcome.httpStatus(),
-                    objectMapper.treeToValue(outcome.data(), WaitingTeamSnapshot.class));
         });
+    }
+
+    private WaitingConsumerSnapshot consumerSnapshot(WaitingTeam team) {
+        long teamsAhead = teamRepository.countActiveAhead(
+                team.getStoreId(), team.getBusinessDate(), team.getQueueSequence());
+        return WaitingConsumerSnapshot.from(team, teamsAhead);
+    }
+
+    private static IdempotencyCommand createCommand(
+            long storeId,
+            long consumerAccountId,
+            LocalDate businessDate,
+            int partySize,
+            WaitingSource source,
+            IdempotencyKey key
+    ) {
+        return new IdempotencyCommand(
+                "consumer",
+                consumerAccountId,
+                "WAITING_TEAM_CREATE",
+                key.value(),
+                RequestFingerprint.of("storeId=" + storeId
+                        + "|consumerAccountId=" + consumerAccountId
+                        + "|businessDate=" + businessDate
+                        + "|partySize=" + partySize
+                        + "|source=" + source));
     }
 
     private WaitingQueueSequence lockSequence(long storeId, LocalDate businessDate) {
@@ -276,6 +323,12 @@ public class WaitingCreationService {
 
     private static ServiceException membershipConflict() {
         return new ServiceException(ReservationErrorCode.ACCOUNT_ACTIVE_WAITING_EXISTS);
+    }
+
+    private static void requireLocationProofConnected(boolean locationProofConnected) {
+        if (!locationProofConnected) {
+            throw new ServiceException(ReservationErrorCode.WAITING_RECEPTION_CLOSED);
+        }
     }
 
     private static ServiceException receptionClosed() {

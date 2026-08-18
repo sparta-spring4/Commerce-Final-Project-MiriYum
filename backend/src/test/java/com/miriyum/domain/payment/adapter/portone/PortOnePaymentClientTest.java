@@ -18,6 +18,7 @@ import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderUnavailable
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -50,7 +51,7 @@ class PortOnePaymentClientTest {
     }
 
     @Test
-    @DisplayName("PortOne V2 결제 단건 조회의 id·transactionId·status·금액·통화만 core로 반환한다")
+    @DisplayName("PortOne V2 결제 단건 조회는 취소 marker와 상태·금액을 core snapshot으로 반환한다")
     void getsVerifiedPaymentSnapshot() {
         server.expect(requestTo(
                         "https://api.portone.test/payments/payment-reservation-900000000000000001"))
@@ -63,6 +64,15 @@ class PortOnePaymentClientTest {
                           "transactionId": "transaction-1",
                           "amount": {"total": 30000},
                           "currency": "KRW",
+                          "cancellations": [
+                            {
+                              "status": "SUCCEEDED",
+                              "id": "cancellation-1",
+                              "totalAmount": 10000,
+                              "reason": "예약 취소 [MIRIYUM_REFUND_ID=910000000000000001]",
+                              "requestedAt": "2026-08-18T00:00:00Z"
+                            }
+                          ],
                           "method": {"type": "CARD", "card": {"number": "1234********5678"}}
                         }
                         """, MediaType.APPLICATION_JSON));
@@ -75,7 +85,13 @@ class PortOnePaymentClientTest {
                 "transaction-1",
                 ProviderStatus.PAID,
                 30_000L,
-                "KRW"
+                "KRW",
+                List.of(new ProviderCancellation(
+                        "cancellation-1",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        10_000L,
+                        "KRW",
+                        "예약 취소 [MIRIYUM_REFUND_ID=910000000000000001]"))
         ));
         server.verify();
     }
@@ -92,7 +108,7 @@ class PortOnePaymentClientTest {
                         {
                           "storeId": "store-1",
                           "amount": 10000,
-                          "reason": "예약 취소",
+                          "reason": "예약 취소 [MIRIYUM_REFUND_ID=910000000000000001]",
                           "requester": "CUSTOMER"
                         }
                         """))
@@ -178,6 +194,35 @@ class PortOnePaymentClientTest {
                           "currency": "KRW"
                         }
                         """.formatted(transactionField), MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.getPayment(
+                "payment-reservation-900000000000000001"))
+                .isInstanceOf(ProviderUnavailableException.class);
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("PortOne 취소 이력의 marker reason 누락은 추정하지 않고 결과 불명으로 변환한다")
+    void rejectsCancellationSnapshotWithoutReasonMarker() {
+        server.expect(requestTo(
+                        "https://api.portone.test/payments/payment-reservation-900000000000000001"))
+                .andRespond(withSuccess("""
+                        {
+                          "status": "PARTIAL_CANCELLED",
+                          "id": "payment-reservation-900000000000000001",
+                          "transactionId": "transaction-1",
+                          "amount": {"total": 30000},
+                          "currency": "KRW",
+                          "cancellations": [
+                            {
+                              "status": "SUCCEEDED",
+                              "id": "cancellation-1",
+                              "totalAmount": 10000,
+                              "requestedAt": "2026-08-18T00:00:00Z"
+                            }
+                          ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
 
         assertThatThrownBy(() -> client.getPayment(
                 "payment-reservation-900000000000000001"))
