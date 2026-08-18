@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.LinkedHashMap;
 import com.miriyum.domain.platformoperator.controller.auth.PlatformOperatorAuthController;
+import com.miriyum.domain.platformoperator.controller.management.PlatformOperatorAccountQueryController;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -36,7 +37,9 @@ class PlatformOperatorOpenApiContractTest {
             "/api/v1/platform-operators/members/{accountType}/{accountId}/sanctions",
             "/api/v1/platform-operators/member-sanctions/{sanctionId}/additional-approvals");
     private static final Set<String> MANAGEMENT_AUDIT_PATHS = Set.of(
+            "/api/v1/platform-operators/me",
             "/api/v1/platform-operators/accounts",
+            "/api/v1/platform-operators/accounts/{operatorId}",
             "/api/v1/platform-operators/accounts/{operatorId}/authority",
             "/api/v1/platform-operators/accounts/{operatorId}/suspension",
             "/api/v1/platform-operators/audit-events",
@@ -108,6 +111,75 @@ class PlatformOperatorOpenApiContractTest {
         Map<String, Object> management = document("platform-operator-management-audit/openapi.yaml");
         Map<String, Object> schemas = map(map(management.get("components")).get("schemas"));
         assertThat(list(map(schemas.get("AuditReason")).get("enum"))).contains("STORE_ENFORCEMENT");
+    }
+
+    @Test
+    void accountReadContractDefinesSafeQueriesAndSecretFreeResponses() throws Exception {
+        Map<String, Object> management = document("platform-operator-management-audit/openapi.yaml");
+        Map<String, Object> paths = map(management.get("paths"));
+        assertThat(map(paths.get("/api/v1/platform-operators/me")))
+                .containsOnlyKeys("get");
+        assertThat(map(map(paths.get("/api/v1/platform-operators/me")).get("get")))
+                .containsEntry("operationId", "getCurrentPlatformOperator");
+        assertThat(map(map(paths.get("/api/v1/platform-operators/accounts")).get("get")))
+                .containsEntry("operationId", "searchPlatformOperatorAccounts");
+        assertThat(map(map(paths.get("/api/v1/platform-operators/accounts/{operatorId}")).get("get")))
+                .containsEntry("operationId", "getPlatformOperatorAccount");
+
+        Map<String, Object> meResponses = map(map(map(paths.get("/api/v1/platform-operators/me"))
+                .get("get")).get("responses"));
+        assertThat(map(meResponses.get("403")))
+                .containsEntry("$ref", "#/components/responses/InitialPasswordChangeRequired");
+        Map<String, Object> componentResponses = map(map(management.get("components")).get("responses"));
+        assertThat(map(map(componentResponses.get("InitialPasswordChangeRequired")).get("content"))
+                .toString()).contains("AUTH_012");
+        assertThat(map(map(componentResponses.get("AuthorizationDenied")).get("content"))
+                .toString()).contains("AUTH_012", "ADMIN_001");
+
+        Map<String, Object> schemas = map(map(management.get("components")).get("schemas"));
+        assertThat(schemas).containsKeys(
+                "CurrentOperatorData", "OperatorAccountSummary", "OperatorAccountPage", "OperatorAccountDetail");
+        assertThat(map(map(schemas.get("CurrentOperatorData")).get("properties")).keySet())
+                .containsExactlyInAnyOrder("operatorId", "displayName", "status", "authorityVersion",
+                        "roles", "permissions", "passwordChangeRequired");
+        assertThat(map(map(schemas.get("OperatorAccountSummary")).get("properties")).keySet())
+                .containsExactlyInAnyOrder("operatorId", "email", "displayName", "status",
+                        "passwordChangeRequired", "authorityVersion", "roles", "lastLoginAt");
+        assertThat(map(map(schemas.get("OperatorAccountDetail")).get("properties")).keySet())
+                .containsExactlyInAnyOrder("operatorId", "email", "displayName", "status",
+                        "passwordChangeRequired", "authorityVersion", "roles", "directPermissions",
+                        "effectivePermissions", "lastLoginAt")
+                .noneMatch(name -> name.toLowerCase(java.util.Locale.ROOT).contains("passwordhash")
+                        || name.toLowerCase(java.util.Locale.ROOT).contains("token")
+                        || name.toLowerCase(java.util.Locale.ROOT).contains("session")
+                        || name.toLowerCase(java.util.Locale.ROOT).contains("approval"));
+    }
+
+    @Test
+    void accountReadRuntimeMethodsCannotDriftFromStaticOperations() throws Exception {
+        Map<String, Object> paths = map(document("platform-operator-management-audit/openapi.yaml").get("paths"));
+        Map<String, String> runtime = new LinkedHashMap<>();
+        for (var method : PlatformOperatorAccountQueryController.class.getDeclaredMethods()) {
+            if (method.isAnnotationPresent(GetMapping.class)) {
+                runtime.put("get /api/v1/platform-operators"
+                        + method.getAnnotation(GetMapping.class).value()[0], method.getName());
+            }
+        }
+
+        Map<String, String> contract = new LinkedHashMap<>();
+        runtime.keySet().forEach(operation -> {
+            String path = operation.substring("get ".length());
+            contract.put(operation, (String) map(map(paths.get(path)).get("get")).get("operationId"));
+        });
+
+        assertThat(runtime).containsExactlyInAnyOrderEntriesOf(Map.of(
+                "get /api/v1/platform-operators/me", "current",
+                "get /api/v1/platform-operators/accounts", "search",
+                "get /api/v1/platform-operators/accounts/{operatorId}", "detail"));
+        assertThat(contract).containsExactlyInAnyOrderEntriesOf(Map.of(
+                "get /api/v1/platform-operators/me", "getCurrentPlatformOperator",
+                "get /api/v1/platform-operators/accounts", "searchPlatformOperatorAccounts",
+                "get /api/v1/platform-operators/accounts/{operatorId}", "getPlatformOperatorAccount"));
     }
 
     @Test
