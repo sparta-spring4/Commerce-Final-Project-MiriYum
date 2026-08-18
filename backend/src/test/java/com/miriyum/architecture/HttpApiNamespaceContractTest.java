@@ -37,7 +37,10 @@ class HttpApiNamespaceContractTest {
                 .collect(java.util.stream.Collectors.toSet());
 
         assertThat(routes).contains(
+                new ApiRoute(RequestMethod.GET, "/api/v1/platform-operators/me"),
+                new ApiRoute(RequestMethod.GET, "/api/v1/platform-operators/accounts"),
                 new ApiRoute(RequestMethod.POST, "/api/v1/platform-operators/accounts"),
+                new ApiRoute(RequestMethod.GET, "/api/v1/platform-operators/accounts/{operatorId}"),
                 new ApiRoute(RequestMethod.PUT, "/api/v1/platform-operators/accounts/{operatorId}/authority"),
                 new ApiRoute(RequestMethod.PUT, "/api/v1/platform-operators/accounts/{operatorId}/suspension"),
                 new ApiRoute(RequestMethod.GET, "/api/v1/platform-operators/audit-events"),
