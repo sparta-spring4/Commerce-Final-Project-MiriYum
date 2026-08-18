@@ -1,5 +1,5 @@
 import { Link, Navigate } from 'react-router'
-import { Alert, EmptyState } from '../../../shared/ui/Feedback'
+import { EmptyState } from '../../../shared/ui/Feedback'
 import {
   decideAnyCapability,
   usePlatformOperatorAuth,
@@ -18,8 +18,7 @@ import './page.css'
  * 그래서 자동 이동을 없애고 중립 화면을 둔다. 여기서는 어떤 업무 query도
  * 실행하지 않는다. 운영자가 항목을 직접 고를 때 비로소 조회가 시작된다.
  *
- * 권한 계약(#403)이 들어오면 서버가 알려 준 권한으로 판정이 바뀐다.
- * 갈 수 있는 곳이 하나뿐이면 그때는 자동 이동이 안전해진다.
+ * 서버가 알려 준 권한으로 갈 수 있는 곳이 하나뿐이면 자동 이동이 안전하다.
  */
 export function ConsoleHomePage() {
   const { capabilities } = usePlatformOperatorAuth()
@@ -55,15 +54,6 @@ export function ConsoleHomePage() {
           </p>
         </div>
       </header>
-
-      {capabilities.status === 'unknown' && (
-        <Alert tone="info" title="권한 확인 기능이 아직 연결되지 않았습니다.">
-          현재 운영자의 권한을 조회하는 API가 준비되면 권한 없는 업무가 목록에서
-          자동으로 빠집니다. 지금은 모든 업무가 보이며, 권한이 없는 업무를
-          선택하면 서버가 거절합니다. 콘솔에 들어오는 것만으로는 어떤 조회도
-          실행되지 않습니다.
-        </Alert>
-      )}
 
       <ul className="po-home__list">
         {visible.map((item) => (

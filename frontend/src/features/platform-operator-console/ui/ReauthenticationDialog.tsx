@@ -4,6 +4,7 @@ import { CommonErrorCode } from '../../../shared/api/envelope'
 import { Button } from '../../../shared/ui/Button'
 import { PasswordField } from '../../../shared/ui/Field'
 import { AuthErrorCode } from '../../auth/model/authErrors'
+import { useDialogFocus } from '../../../shared/ui/useDialogFocus'
 import { usePlatformOperatorAuth } from '../../platform-operator-auth'
 import {
   createReauthenticationApproval,
@@ -45,6 +46,18 @@ export function ReauthenticationDialog({
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
+  /*
+   * 처리 중에는 ESC로 닫지 않는다. 승인 발급이 떠 있는 동안 닫으면 발급된
+   * 승인값을 아무도 받지 못한 채 사라지고, 사용자는 취소된 줄 안다.
+   */
+  const dialogRef = useDialogFocus<HTMLDivElement>({
+    onEscape: () => {
+      setPassword('')
+      onCancel()
+    },
+    escapeEnabled: !submitting,
+  })
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
     if (password.length === 0) {
@@ -73,15 +86,20 @@ export function ReauthenticationDialog({
 
   return (
     <div
+      ref={dialogRef}
       className="po-dialog"
       role="dialog"
       aria-modal="true"
       aria-labelledby="po-reauth-heading"
+      aria-describedby="po-reauth-description"
+      tabIndex={-1}
     >
       <h2 className="po-dialog__title" id="po-reauth-heading">
         재인증이 필요합니다
       </h2>
-      <p className="po-dialog__description">{description}</p>
+      <p className="po-dialog__description" id="po-reauth-description">
+        {description}
+      </p>
 
       <form
         className="po-dialog__form"
@@ -106,6 +124,7 @@ export function ReauthenticationDialog({
           <Button
             type="button"
             variant="ghost"
+            disabled={submitting}
             onClick={() => {
               setPassword('')
               onCancel()
@@ -113,7 +132,13 @@ export function ReauthenticationDialog({
           >
             취소
           </Button>
-          <Button type="submit" variant="primary" loading={submitting}>
+          {/* 중복 제출 방지. 승인은 일회용이라 두 번 발급되면 하나는 버려진다. */}
+          <Button
+            type="submit"
+            variant="primary"
+            loading={submitting}
+            disabled={submitting}
+          >
             확인
           </Button>
         </div>

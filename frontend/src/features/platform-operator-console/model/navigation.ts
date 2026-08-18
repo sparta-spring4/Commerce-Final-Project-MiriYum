@@ -12,8 +12,7 @@ import type { PlatformOperatorPermission } from '../../platform-operator-auth/mo
  * 하나라도 있으면 항목을 노출한다. 회원 관리처럼 조회와 제재가 다른 권한인
  * 경우, 조회만 가진 운영자에게도 항목은 보여야 하기 때문이다.
  *
- * 실제 노출 판정은 `capabilities.ts`가 한다. 권한 계약(#403) 전에는 판정이
- * `undetermined`라 항목을 숨기지도 확정하지도 않는다.
+ * 실제 노출 판정은 `capabilities.ts`가 중앙 RBAC snapshot으로 수행한다.
  */
 export interface ConsoleNavigationItem {
   label: string
@@ -31,6 +30,25 @@ export const CONSOLE_NAVIGATION: readonly ConsoleNavigationItem[] = [
     label: '회원지원 사건',
     path: ROUTES.platformOperatorSupportCases,
     permissions: ['MEMBER_RECOVERY', 'ACCOUNT_APPEAL_REVIEW'],
+  },
+  {
+    label: '매장 관리',
+    path: ROUTES.platformOperatorStores,
+    permissions: ['STORE_READ_MINIMAL'],
+  },
+  {
+    /*
+     * 영구 정지 승인. 승인 대기 목록을 조회하는 계약이 없어(#425) 제안자가
+     * 전달한 값으로 진입하는 화면이지만, 주소를 손으로 치게 두지 않는다.
+     */
+    label: '영구 정지 승인',
+    path: ROUTES.platformOperatorMemberSanctionApproval,
+    permissions: ['ACCOUNT_PERMANENT_SANCTION_APPROVE'],
+  },
+  {
+    label: '운영자 관리',
+    path: ROUTES.platformOperatorOperators,
+    permissions: ['OPERATOR_AUTHORITY_MANAGE'],
   },
   {
     label: '감사 이력',

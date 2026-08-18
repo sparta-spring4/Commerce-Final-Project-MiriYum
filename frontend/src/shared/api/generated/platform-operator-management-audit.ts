@@ -5,9 +5,19 @@
 
 
 export interface paths {
+  "/api/v1/platform-operators/me": {
+    /** 현재 플랫폼 운영자와 중앙 유효 권한 조회 */
+    get: operations["getCurrentPlatformOperator"];
+  };
   "/api/v1/platform-operators/accounts": {
+    /** 플랫폼 운영자 계정 목록 조회 */
+    get: operations["searchPlatformOperatorAccounts"];
     /** 비슈퍼관리자 플랫폼 운영자 생성 */
     post: operations["createPlatformOperatorAccount"];
+  };
+  "/api/v1/platform-operators/accounts/{operatorId}": {
+    /** 플랫폼 운영자 계정과 유효 권한 상세 조회 */
+    get: operations["getPlatformOperatorAccount"];
   };
   "/api/v1/platform-operators/accounts/{operatorId}/authority": {
     /** 비슈퍼관리자 역할·직접 권한 전체 교체 */
@@ -36,6 +46,13 @@ export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
     PublicId: string;
+    /** @enum {string} */
+    OperatorAccountStatus: "ACTIVE" | "SUSPENDED";
+    /** @enum {string} */
+    OperatorRole: "SUPER_ADMIN" | "ONBOARDING_REVIEWER" | "MEMBER_SUPPORT_OPERATOR" | "ENFORCEMENT_OPERATOR" | "PAYMENT_RECOVERY_OPERATOR" | "OPERATIONS_MONITOR" | "AUDIT_READER" | "INCIDENT_RESPONDER";
+    /** @enum {string} */
+    OperatorPermission: "OPERATOR_CREATE" | "OPERATOR_AUTHORITY_MANAGE" | "OPERATOR_SUSPEND" | "ONBOARDING_REVIEW" | "ONBOARDING_EVIDENCE_READ" | "MEMBER_READ_MINIMAL" | "MEMBER_RECOVERY" | "ACCOUNT_SANCTION" | "ACCOUNT_PERMANENT_SANCTION_APPROVE" | "ACCOUNT_APPEAL_REVIEW" | "STORE_READ_MINIMAL" | "STORE_SANCTION" | "OPERATIONS_MONITOR_READ" | "PAYMENT_RECOVERY_EXECUTE" | "PAYMENT_RECOVERY_HIGH_VALUE_APPROVE" | "AUDIT_READ" | "INCIDENT_RESPOND" | "BREAK_GLASS_APPROVE";
+    MaskedEmail: string;
     EventKey: string;
     /** @enum {string} */
     NonSuperAdminRole: "ONBOARDING_REVIEWER" | "MEMBER_SUPPORT_OPERATOR" | "ENFORCEMENT_OPERATOR" | "PAYMENT_RECOVERY_OPERATOR" | "OPERATIONS_MONITOR" | "AUDIT_READER" | "INCIDENT_RESPONDER";
@@ -79,6 +96,44 @@ export interface components {
       roles: components["schemas"]["NonSuperAdminRole"][];
       directPermissions: components["schemas"]["NonCorePermission"][];
     };
+    CurrentOperatorData: {
+      operatorId: components["schemas"]["PublicId"];
+      displayName: string;
+      status: components["schemas"]["OperatorAccountStatus"];
+      /** Format: int64 */
+      authorityVersion: number;
+      roles: components["schemas"]["OperatorRole"][];
+      permissions: components["schemas"]["OperatorPermission"][];
+      passwordChangeRequired: boolean;
+    };
+    OperatorAccountSummary: {
+      operatorId: components["schemas"]["PublicId"];
+      email: components["schemas"]["MaskedEmail"];
+      displayName: string;
+      status: components["schemas"]["OperatorAccountStatus"];
+      passwordChangeRequired: boolean;
+      /** Format: int64 */
+      authorityVersion: number;
+      roles: components["schemas"]["OperatorRole"][];
+      lastLoginAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"] | null;
+    };
+    OperatorAccountPage: {
+      content: components["schemas"]["OperatorAccountSummary"][];
+      page: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PageMetadata"];
+    };
+    OperatorAccountDetail: {
+      operatorId: components["schemas"]["PublicId"];
+      email: components["schemas"]["MaskedEmail"];
+      displayName: string;
+      status: components["schemas"]["OperatorAccountStatus"];
+      passwordChangeRequired: boolean;
+      /** Format: int64 */
+      authorityVersion: number;
+      roles: components["schemas"]["OperatorRole"][];
+      directPermissions: components["schemas"]["OperatorPermission"][];
+      effectivePermissions: components["schemas"]["OperatorPermission"][];
+      lastLoginAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"] | null;
+    };
     AuditEventData: {
       eventKey: components["schemas"]["EventKey"];
       source: components["schemas"]["EventSource"];
@@ -121,6 +176,21 @@ export interface components {
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["AccountData"];
     };
+    CurrentOperatorResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["CurrentOperatorData"];
+    };
+    OperatorAccountSearchResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["OperatorAccountPage"];
+    };
+    OperatorAccountDetailResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["OperatorAccountDetail"];
+    };
     AuditEventResponse: {
       code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
@@ -144,6 +214,24 @@ export interface components {
     };
   };
   responses: {
+    /** @description 현재 운영자와 중앙 유효 권한 */
+    CurrentOperatorResult: {
+      content: {
+        "application/json": components["schemas"]["CurrentOperatorResponse"];
+      };
+    };
+    /** @description 마스킹된 운영자 계정 페이지 */
+    OperatorAccountSearchResult: {
+      content: {
+        "application/json": components["schemas"]["OperatorAccountSearchResponse"];
+      };
+    };
+    /** @description 마스킹된 운영자 계정과 부여·유효 권한 */
+    OperatorAccountDetailResult: {
+      content: {
+        "application/json": components["schemas"]["OperatorAccountDetailResponse"];
+      };
+    };
     /** @description 생성된 비슈퍼관리자 계정 */
     AccountCreated: {
       content: {
@@ -180,8 +268,14 @@ export interface components {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
     };
-    /** @description singleton·권한·배정·재인증 또는 조회 범위가 유효하지 않음 */
+    /** @description 최초 비밀번호 변경 제한 또는 singleton·권한·배정·재인증·조회 범위가 유효하지 않음 */
     AuthorizationDenied: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 최초 비밀번호 변경 전 제한 세션은 운영 읽기에 접근할 수 없음 */
+    InitialPasswordChangeRequired: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -206,6 +300,12 @@ export interface components {
     };
     /** @description 보정 대상·필드 또는 원 사건 연결이 유효하지 않음 */
     AuditCorrectionConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 조회 권한 확인 뒤 대상 운영자 계정이 존재하지 않음 */
+    OperatorAccountNotFound: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -562,6 +662,35 @@ export interface external {
 
 export interface operations {
 
+  /** 현재 플랫폼 운영자와 중앙 유효 권한 조회 */
+  getCurrentPlatformOperator: {
+    responses: {
+      200: components["responses"]["CurrentOperatorResult"];
+      401: components["responses"]["SessionUnauthorized"];
+      403: components["responses"]["InitialPasswordChangeRequired"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /** 플랫폼 운영자 계정 목록 조회 */
+  searchPlatformOperatorAccounts: {
+    parameters: {
+      query?: {
+        status?: components["schemas"]["OperatorAccountStatus"];
+        role?: components["schemas"]["OperatorRole"];
+        query?: string;
+        page?: number;
+        size?: number;
+        sort?: "operatorId,asc" | "operatorId,desc" | "displayName,asc" | "displayName,desc" | "status,asc" | "status,desc" | "lastLoginAt,asc" | "lastLoginAt,desc";
+      };
+    };
+    responses: {
+      200: components["responses"]["OperatorAccountSearchResult"];
+      400: components["responses"]["ManagementBadRequest"];
+      401: components["responses"]["SessionUnauthorized"];
+      403: components["responses"]["AuthorizationDenied"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
   /** 비슈퍼관리자 플랫폼 운영자 생성 */
   createPlatformOperatorAccount: {
     parameters: {
@@ -583,6 +712,22 @@ export interface operations {
       401: components["responses"]["SessionUnauthorized"];
       403: components["responses"]["AuthorizationDenied"];
       409: components["responses"]["ManagementConflict"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /** 플랫폼 운영자 계정과 유효 권한 상세 조회 */
+  getPlatformOperatorAccount: {
+    parameters: {
+      path: {
+        operatorId: components["parameters"]["OperatorId"];
+      };
+    };
+    responses: {
+      200: components["responses"]["OperatorAccountDetailResult"];
+      400: components["responses"]["ManagementBadRequest"];
+      401: components["responses"]["SessionUnauthorized"];
+      403: components["responses"]["AuthorizationDenied"];
+      404: components["responses"]["OperatorAccountNotFound"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };

@@ -1,12 +1,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { http } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { errorResponse, successResponse } from '../../../test/msw/envelope'
 import { server } from '../../../test/msw/server'
 import { TestQueryProvider } from '../../../test/TestQueryProvider'
 import { AuthErrorCode } from '../../auth/model/authErrors'
 import { PlatformOperatorAuthProvider } from '../../platform-operator-auth'
-import { authenticatedPlatformOperator } from '../../platform-operator-auth/test/handlers'
+import {
+  authenticatedPlatformOperator,
+  currentPlatformOperator,
+} from '../../platform-operator-auth/test/handlers'
 import { SanctionForm } from './SanctionForm'
 
 const SANCTION_PATH =
@@ -41,6 +44,10 @@ function fillAndSubmit() {
 }
 
 describe('회원 제재 적용', () => {
+  beforeEach(() => {
+    server.use(currentPlatformOperator())
+  })
+
   it('재인증 전에는 제재를 보내지 않는다', async () => {
     const sanctionRequests: Request[] = []
     server.use(
@@ -153,6 +160,10 @@ describe('회원 제재 적용', () => {
 
     const notice = await screen.findByText(/추가 승인 대기로 제안했습니다/)
     expect(notice).toBeInTheDocument()
+    expect(screen.getByText('대상 계정 유형')).toBeInTheDocument()
+    expect(screen.getByText('CONSUMER')).toBeInTheDocument()
+    expect(screen.getByText('대상 계정 ID')).toBeInTheDocument()
+    expect(screen.getByText('member-1')).toBeInTheDocument()
   })
 
   /**

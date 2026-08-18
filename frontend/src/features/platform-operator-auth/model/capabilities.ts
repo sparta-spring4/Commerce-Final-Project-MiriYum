@@ -1,14 +1,10 @@
 /**
  * 플랫폼 운영자 권한 노출 판정.
  *
- * ## 지금 상태
+ * 권한은 `GET /api/v1/platform-operators/me`가 중앙 RBAC 원장에서 계산한 값을
+ * 사용한다. 로그인·회전 응답이나 Access Token claims에서 추정하지 않는다.
  *
- * 서버가 "현재 운영자의 유효 권한"을 알려 주는 계약이 아직 없다. 로그인·회전
- * 응답(`PlatformOperatorTokenData`)에는 만료 시각과 비밀번호 변경 필요 여부만
- * 있고 역할·권한이 없으며, audience 진입점 20개 path 중에도 조회 endpoint가 없다.
- * 계약은 issue #403에서 `GET /api/v1/platform-operators/me`로 추가될 예정이다.
- *
- * ## 그때까지 하지 않는 것
+ * ## 하지 않는 것
  *
  * - **Access Token 디코딩**: 토큰 구조에 화면이 결합되고, 권한을 회수해도
  *   토큰이 만료될 때까지 화면이 옛 권한을 믿는다.
@@ -21,12 +17,8 @@
  * - **403을 받아 보고 메뉴 구성**: 거부될 걸 알면서 보내는 요청은 감사 원장에
  *   거부 기록을 쌓는다. 감사 조회는 거부도 append하는 계약이다.
  *
- * ## 그래서 지금 하는 것
- *
- * 권한 판정 지점을 화면에서 분리해 이 모듈 하나로 모은다. `unknown` 상태에서는
- * 판정을 내리지 않고 그 사실을 그대로 돌려준다. 화면은 "권한 있음/없음"이
- * 아니라 "아직 모름"을 별도 상태로 렌더링한다. #403이 들어오면 이 파일의
- * `resolveCapabilities`만 실제 응답으로 바꾸면 되고 화면은 손대지 않는다.
+ * 권한 조회 중이거나 실패하면 판정을 내리지 않는다. 그 구간에 업무 요청을
+ * 보내면 권한 없는 요청이 감사 원장에 쌓이므로 화면은 실패 폐쇄한다.
  */
 
 /**
@@ -62,29 +54,27 @@ export type PlatformOperatorPermission =
  * 화면이 조용히 빈 상태로 남는다.
  */
 export type CapabilityState =
-  | { status: 'unknown'; reason: 'contractPending' }
+  | { status: 'unknown'; reason: 'loading' }
+  | { status: 'unknown'; reason: 'loadFailed'; error: unknown }
   | { status: 'loaded'; permissions: ReadonlySet<PlatformOperatorPermission> }
 
 /** 한 기능을 노출할지에 대한 판정. */
 export type CapabilityDecision = 'allowed' | 'denied' | 'undetermined'
 
 /**
- * 현재 운영자의 권한을 읽는다.
- *
- * #403이 들어오면 이 함수만 실제 호출로 바꾼다. 지금은 계약이 없다는 사실을
- * 그대로 반환한다. 빈 집합을 돌려주면 호출자가 "권한 없음"으로 오해한다.
+ * 서버 snapshot을 화면 판정용 집합으로 바꾼다.
  */
-export function resolveCapabilities(): CapabilityState {
-  return { status: 'unknown', reason: 'contractPending' }
+export function resolveCapabilities(current: {
+  permissions: readonly PlatformOperatorPermission[]
+}): CapabilityState {
+  return { status: 'loaded', permissions: new Set(current.permissions) }
 }
 
 /**
  * 권한 하나에 대한 노출 판정.
  *
- * 모를 때 `allowed`로 기울면 없는 권한의 버튼이 그려지고, `denied`로 기울면
- * 계약이 생기기 전까지 콘솔이 통째로 빈 화면이 된다. 어느 쪽으로도 기울지 않고
- * 모른다는 것을 그대로 돌려준다. 판정을 화면이 하게 두면 이 규칙이 화면마다
- * 달라지므로 여기서만 한다.
+ * 조회 중·실패를 `allowed`로 기울이면 없는 권한의 버튼이 그려진다. 어느
+ * 쪽으로도 추정하지 않고 `undetermined`를 돌려 화면이 실패 폐쇄하게 한다.
  */
 export function decideCapability(
   state: CapabilityState,

@@ -24,6 +24,29 @@ export function supportCaseDetailPath(caseId: string): string {
   )
 }
 
+export function operatorDetailPath(operatorId: string): string {
+  return ROUTES.platformOperatorDetail.replace(
+    ':operatorId',
+    encodeURIComponent(operatorId),
+  )
+}
+
+export function storeDetailPath(storeId: number): string {
+  return ROUTES.platformOperatorStoreDetail.replace(
+    ':storeId',
+    encodeURIComponent(String(storeId)),
+  )
+}
+
+export function storeSanctionCasePath(
+  storeId: number,
+  caseId: string,
+): string {
+  return ROUTES.platformOperatorStoreSanctionCase
+    .replace(':storeId', encodeURIComponent(String(storeId)))
+    .replace(':caseId', encodeURIComponent(caseId))
+}
+
 export function auditEventDetailPath(eventKey: string): string {
   return ROUTES.platformOperatorAuditDetail.replace(
     ':eventKey',

@@ -10,6 +10,9 @@ export const PLATFORM_OPERATOR_PROTECTED_QUERY_ROOTS = {
   members: ['platform-operator', 'members'],
   memberSupportCases: ['platform-operator', 'member-support-cases'],
   auditEvents: ['platform-operator', 'audit-events'],
+  operatorAccounts: ['platform-operator', 'operator-accounts'],
+  currentOperator: ['platform-operator', 'me'],
+  stores: ['platform-operator', 'stores'],
 } as const
 
 /**

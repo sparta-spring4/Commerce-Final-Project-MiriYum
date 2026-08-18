@@ -20,6 +20,7 @@ export const PO_INITIAL_PASSWORD_PATH =
   '/api/v1/platform-operators/auth/initial-password'
 export const PO_MEMBERS_PATH = '/api/v1/platform-operators/members'
 export const PO_AUDIT_EVENTS_PATH = '/api/v1/platform-operators/audit-events'
+export const PO_ME_PATH = '/api/v1/platform-operators/me'
 
 /**
  * 토큰 응답.
@@ -56,6 +57,27 @@ export const unauthenticatedPlatformOperator = http.post(
 export function authenticatedPlatformOperator(accessToken?: string) {
   return http.post(PO_REFRESH_PATH, () =>
     successResponse(platformOperatorTokenData({ accessToken })),
+  )
+}
+
+/** 현재 중앙 RBAC 원장에서 읽은 운영자 snapshot. */
+export function currentPlatformOperator(
+  overrides: {
+    permissions?: string[]
+    displayName?: string
+    roles?: string[]
+  } = {},
+) {
+  return http.get(PO_ME_PATH, () =>
+    successResponse({
+      operatorId: '1001',
+      displayName: overrides.displayName ?? '김운영',
+      status: 'ACTIVE',
+      authorityVersion: 3,
+      roles: overrides.roles ?? ['MEMBER_SUPPORT_OPERATOR'],
+      permissions: overrides.permissions ?? ['MEMBER_READ_MINIMAL'],
+      passwordChangeRequired: false,
+    }),
   )
 }
 

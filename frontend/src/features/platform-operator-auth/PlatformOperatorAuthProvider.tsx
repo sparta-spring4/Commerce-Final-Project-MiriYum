@@ -8,7 +8,7 @@ import {
   useState,
 } from 'react'
 import type { ReactNode } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createApiClient, type ApiClient } from '../../shared/api/client'
 import { isApiError, isNetworkError } from '../../shared/api/apiError'
 import { clearPlatformOperatorProtectedQueries } from '../../shared/api/platformOperatorSession'
@@ -33,6 +33,11 @@ import {
   resolveCapabilities,
   type CapabilityState,
 } from './model/capabilities'
+import {
+  fetchCurrentOperator,
+  operatorAccountQueryKeys,
+  type CurrentOperatorData,
+} from '../platform-operator-console/api/operatorAccountApi'
 
 /**
  * 플랫폼 운영자 shell의 인증 상태.
@@ -65,8 +70,10 @@ export interface PlatformOperatorAuthContextValue {
   status: PlatformOperatorAuthStatus
   /** 보호 API 호출용 client. Access Token과 401 재발급이 이미 걸려 있다. */
   apiClient: ApiClient
-  /** 현재 운영자의 권한. 계약(#403) 전에는 `unknown`이다. */
+  /** 중앙 RBAC snapshot. 조회 중·실패에는 `unknown`으로 실패 폐쇄한다. */
   capabilities: CapabilityState
+  currentOperator: CurrentOperatorData | null
+  retryCapabilities: () => void
   sessionDeadlines: PlatformOperatorSessionDeadlines | null
   signIn: (credentials: PlatformOperatorLoginRequest) => Promise<void>
   changeInitialPassword: (
@@ -295,17 +302,48 @@ export function PlatformOperatorAuthProvider({
 
   const dismissSignOutNotice = useCallback(() => setSignOutNotice(null), [])
 
-  /**
-   * 권한은 아직 서버에서 읽지 못한다. 판정 자체를 이 모듈이 소유하므로
-   * #403이 들어오면 여기만 바뀐다.
-   */
-  const capabilities = useMemo(() => resolveCapabilities(), [])
+  const currentOperatorQuery = useQuery({
+    queryKey: operatorAccountQueryKeys.me(),
+    queryFn: ({ signal }) => fetchCurrentOperator(apiClient, signal),
+    enabled: status === 'authenticated',
+  })
+
+  const capabilities = useMemo<CapabilityState>(() => {
+    if (status !== 'authenticated' || currentOperatorQuery.isPending) {
+      return { status: 'unknown', reason: 'loading' }
+    }
+    if (currentOperatorQuery.isError) {
+      return {
+        status: 'unknown',
+        reason: 'loadFailed',
+        error: currentOperatorQuery.error,
+      }
+    }
+    return resolveCapabilities(currentOperatorQuery.data)
+  }, [
+    status,
+    currentOperatorQuery.data,
+    currentOperatorQuery.error,
+    currentOperatorQuery.isError,
+    currentOperatorQuery.isPending,
+  ])
+
+  const retryCapabilities = useCallback(() => {
+    void currentOperatorQuery.refetch()
+  }, [currentOperatorQuery])
+
+  const currentOperator =
+    status === 'authenticated' && currentOperatorQuery.data !== undefined
+      ? currentOperatorQuery.data
+      : null
 
   const value = useMemo(
     () => ({
       status,
       apiClient,
       capabilities,
+      currentOperator,
+      retryCapabilities,
       sessionDeadlines,
       signIn,
       changeInitialPassword,
@@ -317,6 +355,8 @@ export function PlatformOperatorAuthProvider({
       status,
       apiClient,
       capabilities,
+      currentOperator,
+      retryCapabilities,
       sessionDeadlines,
       signIn,
       changeInitialPassword,

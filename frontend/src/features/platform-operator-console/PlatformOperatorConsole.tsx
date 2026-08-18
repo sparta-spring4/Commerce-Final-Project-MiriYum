@@ -8,6 +8,13 @@ import {
   RequirePlatformOperatorAuth,
 } from '../platform-operator-auth'
 import { AuditDetailPage } from './ui/AuditDetailPage'
+import { MemberSanctionApprovalPage } from './ui/MemberSanctionApprovalPage'
+import { StoreDetailPage } from './ui/StoreDetailPage'
+import { StoreListPage } from './ui/StoreListPage'
+import { StoreSanctionCasePage } from './ui/StoreSanctionCasePage'
+import { OperatorCreatePage } from './ui/OperatorCreatePage'
+import { OperatorDetailPage } from './ui/OperatorDetailPage'
+import { OperatorListPage } from './ui/OperatorListPage'
 import { AuditSearchPage } from './ui/AuditSearchPage'
 import { ConsoleHomePage } from './ui/ConsoleHomePage'
 import { ConsoleLayout } from './ui/ConsoleLayout'
@@ -26,9 +33,8 @@ import { SupportCaseListPage } from './ui/SupportCaseListPage'
  * provider도 여기 있다. 앱 최상단에 두면 flag와 무관하게 항상 로드되고,
  * 일반 사용자 화면에서도 운영자 세션 복구 요청이 나간다.
  *
- * 계약이 있는 화면만 등록한다. 대시보드·입점 심사·매장·예약·웨이팅·결제 복구와
- * 운영자 목록·권한 관리는 route를 만들지 않았다. 없는 화면으로 가는 링크가
- * 없으므로 자리표시자도 필요 없다.
+ * 계약이 있는 화면만 등록한다. 대시보드·입점 심사·매장·예약·웨이팅·결제
+ * 복구는 route를 만들지 않았다. 없는 화면으로 가는 링크도 두지 않는다.
  */
 export default function PlatformOperatorConsole() {
   return (
@@ -60,6 +66,39 @@ export default function PlatformOperatorConsole() {
             <Route
               path={relative(ROUTES.platformOperatorSupportCaseDetail)}
               element={<SupportCaseDetailPage />}
+            />
+            {/*
+              생성 route를 상세보다 먼저 둔다. `/operators/new`가
+              `/operators/:operatorId`에도 맞으므로 순서가 뒤바뀌면
+              "new"를 운영자 ID로 조회한다.
+            */}
+            <Route
+              path={relative(ROUTES.platformOperatorOperators)}
+              element={<OperatorListPage />}
+            />
+            <Route
+              path={relative(ROUTES.platformOperatorCreate)}
+              element={<OperatorCreatePage />}
+            />
+            <Route
+              path={relative(ROUTES.platformOperatorDetail)}
+              element={<OperatorDetailPage />}
+            />
+            <Route
+              path={relative(ROUTES.platformOperatorStores)}
+              element={<StoreListPage />}
+            />
+            <Route
+              path={relative(ROUTES.platformOperatorStoreDetail)}
+              element={<StoreDetailPage />}
+            />
+            <Route
+              path={relative(ROUTES.platformOperatorStoreSanctionCase)}
+              element={<StoreSanctionCasePage />}
+            />
+            <Route
+              path={relative(ROUTES.platformOperatorMemberSanctionApproval)}
+              element={<MemberSanctionApprovalPage />}
             />
             <Route
               path={relative(ROUTES.platformOperatorAudit)}

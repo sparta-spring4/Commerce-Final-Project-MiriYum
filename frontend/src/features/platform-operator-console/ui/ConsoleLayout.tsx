@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router'
 import { ROUTES } from '../../../app/routes'
-import { Alert } from '../../../shared/ui/Feedback'
+import { ErrorState, Loading } from '../../../shared/ui/Feedback'
 import {
   decideAnyCapability,
   usePlatformOperatorAuth,
 } from '../../platform-operator-auth'
 import { CONSOLE_NAVIGATION } from '../model/navigation'
+import { OPERATOR_ROLE_LABEL } from '../model/operatorLabels'
 import './console.css'
 
 /**
@@ -16,12 +17,16 @@ import './console.css'
  * 서버 계약이 있는 3개만 둔다. 전역 검색 입력과 알림 종은 계약이 없어서
  * 넣지 않는다. 누를 수 있게 그려 두면 동작하지 않는 컨트롤이 된다.
  *
- * 운영자 식별 배지도 시안에는 "운영자-092 / 최고 관리자"로 그려져 있지만,
- * 현재 계약에는 자기 자신을 조회하는 endpoint가 없어 이름도 역할도 알 수 없다.
- * 모르는 값을 그럴듯하게 채우지 않는다. #403이 들어오면 이 자리에 넣는다.
+ * 운영자 식별정보는 `/me`가 반환한 표시명과 현재 역할만 사용한다.
  */
 export function ConsoleLayout() {
-  const { capabilities, sessionDeadlines, signOut } = usePlatformOperatorAuth()
+  const {
+    capabilities,
+    currentOperator,
+    retryCapabilities,
+    sessionDeadlines,
+    signOut,
+  } = usePlatformOperatorAuth()
   const navigate = useNavigate()
   const [signingOut, setSigningOut] = useState(false)
 
@@ -47,8 +52,6 @@ export function ConsoleLayout() {
     }
   }
 
-  const capabilitiesUnknown = capabilities.status === 'unknown'
-
   return (
     <div className="po-console">
       <aside className="po-console__nav" aria-label="운영 콘솔 메뉴">
@@ -59,7 +62,7 @@ export function ConsoleLayout() {
 
         <nav>
           <ul className="po-console__nav-list">
-            {CONSOLE_NAVIGATION.map((item) => {
+            {capabilities.status === 'loaded' && CONSOLE_NAVIGATION.map((item) => {
               const decision = decideAnyCapability(
                 capabilities,
                 item.permissions,
@@ -99,6 +102,17 @@ export function ConsoleLayout() {
 
       <div className="po-console__main">
         <header className="po-console__header">
+          {currentOperator !== null && (
+            <p className="po-console__session">
+              <span className="po-console__session-label">현재 운영자</span>
+              <strong>{currentOperator.displayName}</strong>
+              <span>
+                {currentOperator.roles
+                  .map((role) => OPERATOR_ROLE_LABEL[role])
+                  .join(', ')}
+              </span>
+            </p>
+          )}
           {sessionDeadlines !== null && (
             <p className="po-console__session">
               <span className="po-console__session-label">세션 만료</span>
@@ -110,17 +124,19 @@ export function ConsoleLayout() {
         </header>
 
         <div className="po-console__content">
-          {capabilitiesUnknown && (
-            <Alert
-              tone="info"
-              title="권한별 메뉴 표시가 아직 적용되지 않았습니다."
-            >
-              현재 운영자의 권한을 조회하는 API가 준비되면 권한 없는 메뉴가
-              자동으로 숨겨집니다. 지금은 모든 메뉴가 보이며, 권한이 없는 업무는
-              서버가 거절합니다.
-            </Alert>
+          {capabilities.status === 'unknown' ? (
+            capabilities.reason === 'loading' ? (
+              <Loading label="현재 운영자 권한을 확인하는 중입니다." />
+            ) : (
+              <ErrorState
+                error={capabilities.error}
+                message="현재 운영자 권한을 불러오지 못했습니다."
+                onRetry={retryCapabilities}
+              />
+            )
+          ) : (
+            <Outlet />
           )}
-          <Outlet />
         </div>
       </div>
     </div>

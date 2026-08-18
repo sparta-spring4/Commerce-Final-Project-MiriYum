@@ -280,3 +280,163 @@
   font-size: 1rem;
   font-weight: 600;
 }
+
+/* 운영자 계정 화면 */
+
+.po-fieldset--stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.po-filters__search {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+/*
+ * 목록 헤더의 등록 링크. 시각적으로는 primary 버튼이지만 실제로는 이동이므로
+ * 앵커로 둔다. 버튼으로 만들면 새 탭 열기·주소 복사가 안 된다.
+ */
+.po-button-link {
+  display: inline-flex;
+  align-items: center;
+  padding-inline: 1rem;
+  padding-block: 0.625rem;
+  border-radius: 0.5rem;
+  background-color: var(--po-navy, #1a237e);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.po-button-link:hover {
+  background-color: var(--po-navy-deep, #000666);
+}
+
+.po-button-link:focus-visible {
+  outline: 2px solid var(--po-navy, #1a237e);
+  outline-offset: 2px;
+}
+
+/* 상태 뱃지 옆의 보조 설명. 색만으로 뜻을 전하지 않도록 문구로 둔다. */
+.po-table__note {
+  display: inline-block;
+  margin-inline-start: 0.5rem;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.75rem;
+}
+
+.po-subsection__title {
+  margin-block: 1.5rem 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.po-list {
+  margin-block: 0.5rem 0;
+  padding-inline-start: 1.25rem;
+  font-size: 0.875rem;
+}
+
+/* 매장 제재 사건 카드 */
+
+.po-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.po-card {
+  padding-inline: 1.25rem;
+  padding-block: 1.25rem;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card, #fff);
+}
+
+.po-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block-end: 1rem;
+}
+
+.po-card__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-block-start: 1rem;
+  padding-block-start: 1rem;
+  border-block-start: 1px solid var(--po-border, #e9ecef);
+}
+
+.po-inline-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.po-textarea {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.po-textarea__label {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.po-textarea__hint {
+  color: var(--po-text-muted, #454652);
+  font-size: 0.75rem;
+}
+
+.po-textarea__control {
+  padding-inline: 0.75rem;
+  padding-block: 0.5rem;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 0.5rem;
+  font: inherit;
+  resize: vertical;
+}
+
+.po-textarea__control:focus-visible {
+  outline: 2px solid var(--po-navy, #1a237e);
+  outline-offset: 1px;
+}
+
+.po-textarea__error {
+  color: #d32f2f;
+  font-size: 0.8125rem;
+}
+
+/*
+ * 모바일에서는 상세·폼을 한 열로 재배치한다. 표는 이미 `.po-table-scroll`이
+ * 자기 컨테이너 안에서만 가로 스크롤하므로 페이지 본문은 밀리지 않는다.
+ */
+@media (width <= 40rem) {
+  .po-filters,
+  .po-filters__search {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .po-card__header {
+    flex-direction: row;
+  }
+
+  .po-page__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

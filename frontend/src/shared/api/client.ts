@@ -4,6 +4,7 @@ import { checkSuccessEnvelope, isApiErrorBody, type ApiSuccess } from './envelop
 import type {
   AdminAuditContextOf,
   AdminCaseRefOf,
+  AdminReasonOnlyOf,
   AdminReauthenticationOf,
   ApiPath,
   CsrfOf,
@@ -61,6 +62,7 @@ export type RequestOptions<P extends ApiPath, M extends MethodOf<P>> = {
   AdminReauthenticationOf<P, OperationOf<P, M>> &
   AdminAuditContextOf<OperationOf<P, M>> &
   AdminCaseRefOf<OperationOf<P, M>> &
+  AdminReasonOnlyOf<OperationOf<P, M>> &
   CommonRequestOptions
 
 /** 성공 응답은 봉투 그대로 노출한다. 화면이 code·message·data를 구분해 쓴다. */
@@ -145,6 +147,7 @@ export function createApiClient(
         reasonCode: string
       }
       adminCaseRef?: { caseId: string; caseVersion: number }
+      adminReasonCode?: string
       signal?: AbortSignal
     },
   ): Promise<Response> {
@@ -172,6 +175,10 @@ export function createApiClient(
         options.adminAuditContext.caseVersion,
       )
       headers[ADMIN_REASON_CODE_HEADER] = options.adminAuditContext.reasonCode
+    }
+    // 사건 맥락 없이 조회 사유만 남기는 요청이다.
+    if (options.adminReasonCode) {
+      headers[ADMIN_REASON_CODE_HEADER] = options.adminReasonCode
     }
     // 사유 코드 없이 사건만 참조하는 명령이다. 조회와 헤더 구성이 다르다.
     if (options.adminCaseRef) {
@@ -243,6 +250,7 @@ export function createApiClient(
       adminReauthentication,
       adminAuditContext,
       adminCaseRef,
+      adminReasonCode,
       query,
       signal,
     } = options as RequestOptions<P, M> & {
@@ -258,6 +266,7 @@ export function createApiClient(
         reasonCode: string
       }
       adminCaseRef?: { caseId: string; caseVersion: number }
+      adminReasonCode?: string
     }
 
     const url = buildUrl(path, pathParams, query)
@@ -270,6 +279,7 @@ export function createApiClient(
       adminReauthentication,
       adminAuditContext,
       adminCaseRef,
+      adminReasonCode,
       signal,
     }
 

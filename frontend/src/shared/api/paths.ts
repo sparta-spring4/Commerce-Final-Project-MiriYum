@@ -1,3 +1,4 @@
+import type { paths as AdminStorePaths } from './generated/admin-store'
 import type { paths as AuthAccountPaths } from './generated/auth-account'
 import type { paths as MemberSupportPaths } from './generated/member-support'
 import type { paths as MenuHoldPickupPaths } from './generated/menu-hold-pickup'
@@ -30,6 +31,7 @@ type PathDocs = [
   PlatformOperatorAuthorizationPaths,
   MemberSupportPaths,
   PlatformOperatorManagementAuditPaths,
+  AdminStorePaths,
 ]
 
 /**
@@ -205,6 +207,26 @@ export type AdminCaseRefOf<Op> = Op extends {
     : { adminCaseRef?: never }
 
 /**
+ * 사유 코드만 요구하는 조회의 헤더.
+ *
+ * 매장 목록·상세는 `X-Admin-Reason-Code` 하나만 요구한다. 감사 조회처럼
+ * 사건 ID·version까지 묶인 맥락이 아니라, 조회 사유만 남기는 형태다.
+ *
+ * 사건 맥락을 함께 요구하는 operation에서는 `adminAuditContext`가 사유까지
+ * 담으므로 여기서는 막는다. 두 옵션이 같은 헤더를 두 번 쓰게 두면 어느 쪽이
+ * 실제로 전송됐는지 호출부에서 알 수 없다.
+ */
+export type AdminReasonOnlyOf<Op> = Op extends {
+  parameters: { header: { 'X-Admin-Case-Id': unknown } }
+}
+  ? { adminReasonCode?: never }
+  : Op extends {
+        parameters: { header: { 'X-Admin-Reason-Code': unknown } }
+      }
+    ? { adminReasonCode: string }
+    : { adminReasonCode?: never }
+
+/**
  * 재인증 승인 헤더를 요구하는 operation.
  *
  * 원칙은 다른 헤더와 같이 생성 타입에서 파생하는 것이다. 그런데
@@ -241,4 +263,14 @@ export type AdminReauthenticationOf<P extends ApiPath, Op> = Op extends {
   ? { adminReauthentication: string }
   : P extends ReauthenticationRequiredPath
     ? { adminReauthentication: string }
-    : { adminReauthentication?: never }
+    : /*
+       * 계약이 조건부로 요구하는 경우다. 매장 제재 생성은 고위험 제재일 때만
+       * 재인증을 요구하므로 헤더가 optional로 선언된다. 항상 필수로 만들면
+       * 경고 제재까지 불필요한 재인증을 거치고, 아예 막으면 고위험 제재를
+       * 보낼 수 없다. 어느 쪽인지는 화면이 제재 유형을 보고 판단한다.
+       */
+      Op extends {
+          parameters: { header: { 'X-Admin-Reauthentication'?: unknown } }
+        }
+      ? { adminReauthentication?: string }
+      : { adminReauthentication?: never }

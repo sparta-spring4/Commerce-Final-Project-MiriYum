@@ -32,9 +32,8 @@ export const ROUTES = {
   /**
    * 플랫폼 운영자 운영 콘솔. 고도화 전용이며 공개 가입이 없다.
    *
-   * 계약이 있는 화면만 등록한다. 대시보드·입점 심사·매장·예약·웨이팅·결제 복구와
-   * 운영자 목록·권한 관리는 읽기 계약이 없어 route를 만들지 않는다. 자리표시자
-   * route를 미리 깔면 메뉴에서 눌러 빈 화면에 도달한다.
+   * 계약이 있는 화면만 등록한다. 대시보드·입점 심사·매장·예약·웨이팅·결제
+   * 복구는 route를 만들지 않는다.
    */
   platformOperatorSignIn: '/admin/login',
   platformOperatorInitialPassword: '/admin/first-password-change',
@@ -42,6 +41,14 @@ export const ROUTES = {
   platformOperatorMemberDetail: '/admin/members/:accountType/:accountId',
   platformOperatorSupportCases: '/admin/member-support-cases',
   platformOperatorSupportCaseDetail: '/admin/member-support-cases/:caseId',
+  platformOperatorOperators: '/admin/operators',
+  platformOperatorCreate: '/admin/operators/new',
+  platformOperatorDetail: '/admin/operators/:operatorId',
+  platformOperatorStores: '/admin/stores',
+  platformOperatorStoreDetail: '/admin/stores/:storeId',
+  platformOperatorStoreSanctionCase:
+    '/admin/stores/:storeId/sanction-cases/:caseId',
+  platformOperatorMemberSanctionApproval: '/admin/member-sanctions/approvals',
   platformOperatorAudit: '/admin/audit',
   platformOperatorAuditDetail: '/admin/audit/:eventKey',
   forbidden: '/forbidden',

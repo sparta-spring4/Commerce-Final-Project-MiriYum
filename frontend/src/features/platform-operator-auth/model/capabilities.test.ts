@@ -14,17 +14,17 @@ function loaded(
 }
 
 describe('운영자 권한 판정', () => {
-  it('권한 계약이 없는 동안에는 모른다고 답한다', () => {
-    // 빈 권한 집합을 돌려주면 호출자가 "권한 없음"으로 오해하고 메뉴를 숨긴다.
-    // 계약이 생기기 전까지 콘솔이 통째로 빈 화면이 되는 경로다.
-    expect(resolveCapabilities()).toEqual({
-      status: 'unknown',
-      reason: 'contractPending',
+  it('현재 운영자 응답의 유효 권한만 로드한다', () => {
+    expect(
+      resolveCapabilities({ permissions: ['MEMBER_READ_MINIMAL'] }),
+    ).toEqual({
+      status: 'loaded',
+      permissions: new Set(['MEMBER_READ_MINIMAL']),
     })
   })
 
-  it('모르는 상태에서는 허용도 거부도 하지 않는다', () => {
-    const state = resolveCapabilities()
+  it('조회 중에는 허용도 거부도 추정하지 않는다', () => {
+    const state: CapabilityState = { status: 'unknown', reason: 'loading' }
 
     expect(decideCapability(state, 'AUDIT_READ')).toBe('undetermined')
     expect(decideAnyCapability(state, ['MEMBER_READ_MINIMAL'])).toBe(
