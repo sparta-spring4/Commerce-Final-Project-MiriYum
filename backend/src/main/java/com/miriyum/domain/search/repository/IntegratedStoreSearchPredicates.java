@@ -10,7 +10,6 @@ import com.miriyum.domain.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.menu.enums.MenuVisibility;
 import com.miriyum.domain.search.interpreter.PriceRange;
 import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
-import com.miriyum.domain.search.semantic.SemanticMenuHit;
 import com.querydsl.core.BooleanBuilder;
 import com.querydsl.core.types.dsl.BooleanExpression;
 import com.querydsl.core.types.dsl.CaseBuilder;
@@ -32,19 +31,6 @@ final class IntegratedStoreSearchPredicates {
                 .and(store.operationStatus.ne(OperationStatus.CLOSED));
         addStoreConditions(predicate, store, query);
         addMenuAndKeywordConditions(predicate, store, query);
-        return predicate;
-    }
-
-    static BooleanBuilder createSemantic(
-            QStore store,
-            IntegratedStoreSearchQuery query,
-            List<SemanticMenuHit> hits
-    ) {
-        BooleanBuilder predicate = new BooleanBuilder()
-                .and(store.verificationStatus.eq(VerificationStatus.APPROVED))
-                .and(store.operationStatus.ne(OperationStatus.CLOSED));
-        addStoreConditions(predicate, store, query);
-        predicate.and(currentSemanticMenuExists(store, query, hits));
         return predicate;
     }
 
@@ -95,38 +81,6 @@ final class IntegratedStoreSearchPredicates {
                 .from(menu)
                 .join(menu.versions, version)
                 .where(expandedMenu)
-                .exists();
-    }
-
-    private static BooleanExpression currentSemanticMenuExists(
-            QStore store,
-            IntegratedStoreSearchQuery query,
-            List<SemanticMenuHit> hits
-    ) {
-        QMenu menu = new QMenu("semanticMenu");
-        QMenuVersion version = new QMenuVersion("semanticMenuVersion");
-        BooleanBuilder selectedVersions = new BooleanBuilder();
-        hits.forEach(hit -> selectedVersions.or(
-                menu.id.eq(hit.menuId())
-                        .and(menu.storeId.eq(hit.storeId()))
-                        .and(version.versionNumber.eq(hit.versionNumber()))));
-        BooleanBuilder semanticMenu = new BooleanBuilder()
-                .and(menu.storeId.eq(store.id))
-                .and(menu.retired.isFalse())
-                .and(menu.visibility.eq(MenuVisibility.VISIBLE))
-                .and(menu.publishedVersionNumber.eq(version.versionNumber))
-                .and(version.status.eq(MenuVersionStatus.PUBLISHED))
-                .and(selectedVersions);
-        if (!query.menuCategoryCodes().isEmpty()) {
-            semanticMenu.and(version.primaryCategoryCode.in(query.menuCategoryCodes())
-                    .or(version.secondaryCategoryCodes.any()
-                            .in(query.menuCategoryCodes())));
-        }
-        addPricePredicate(semanticMenu, version, query.priceRange());
-        return JPAExpressions.selectOne()
-                .from(menu)
-                .join(menu.versions, version)
-                .where(semanticMenu)
                 .exists();
     }
 

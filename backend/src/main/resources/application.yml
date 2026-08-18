@@ -159,26 +159,6 @@ miriyum:
       max-output-tokens: ${MIRIYUM_STORE_SEARCH_LLM_MAX_OUTPUT_TOKENS:100}
       max-concepts: ${MIRIYUM_STORE_SEARCH_LLM_MAX_CONCEPTS:8}
       supplement-candidate-limit: ${MIRIYUM_STORE_SEARCH_LLM_CANDIDATE_LIMIT:200}
-    semantic:
-      enabled: ${MIRIYUM_STORE_SEARCH_SEMANTIC_ENABLED:false}
-      rebuild-enabled: ${MIRIYUM_SEMANTIC_REBUILD_ENABLED:false}
-      rebuild-batch-size: ${MIRIYUM_SEMANTIC_REBUILD_BATCH_SIZE:100}
-      rebuild-delay-ms: ${MIRIYUM_SEMANTIC_REBUILD_DELAY_MS:21600000}
-      rebuild-initial-delay-ms: ${MIRIYUM_SEMANTIC_REBUILD_INITIAL_DELAY_MS:60000}
-      openai:
-        base-url: ${MIRIYUM_OPENAI_BASE_URL:https://api.openai.com}
-        api-key: ${MIRIYUM_OPENAI_API_KEY:}
-        model: ${MIRIYUM_OPENAI_EMBEDDING_MODEL:text-embedding-3-small}
-        dimensions: ${MIRIYUM_OPENAI_EMBEDDING_DIMENSIONS:1536}
-        connect-timeout-ms: ${MIRIYUM_OPENAI_CONNECT_TIMEOUT_MS:1000}
-        response-timeout-ms: ${MIRIYUM_OPENAI_RESPONSE_TIMEOUT_MS:2000}
-      qdrant:
-        base-url: ${MIRIYUM_QDRANT_BASE_URL:http://localhost:6333}
-        api-key: ${MIRIYUM_QDRANT_API_KEY:}
-        collection: ${MIRIYUM_QDRANT_COLLECTION:miriyum_menus_v1}
-        score-threshold: ${MIRIYUM_QDRANT_SCORE_THRESHOLD:0.55}
-        connect-timeout-ms: ${MIRIYUM_QDRANT_CONNECT_TIMEOUT_MS:500}
-        response-timeout-ms: ${MIRIYUM_QDRANT_RESPONSE_TIMEOUT_MS:1000}
   storage:
     s3:
       enabled: ${MIRIYUM_STORAGE_S3_ENABLED:false}

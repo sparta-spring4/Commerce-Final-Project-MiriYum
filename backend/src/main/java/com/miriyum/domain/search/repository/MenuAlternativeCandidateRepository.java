@@ -10,9 +10,6 @@ import com.miriyum.domain.search.dto.contract.MenuAlternativeAllergenView;
 import com.miriyum.domain.search.dto.contract.MenuAlternativeCandidateView;
 import com.miriyum.domain.search.dto.contract.MenuAlternativeSourceView;
 import com.miriyum.domain.search.geo.BoundingBox;
-import com.miriyum.domain.search.semantic.SemanticMenuDocument;
-import com.miriyum.domain.search.semantic.SemanticMenuDocumentSource;
-import com.miriyum.domain.search.semantic.SemanticMenuHit;
 import com.miriyum.domain.store.entity.QStore;
 import com.miriyum.domain.store.enums.GeocodingStatus;
 import com.miriyum.domain.store.enums.OperationStatus;
@@ -33,7 +30,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public class MenuAlternativeCandidateRepository implements SemanticMenuDocumentSource {
+public class MenuAlternativeCandidateRepository {
     private final JPAQueryFactory queryFactory;
 
     public MenuAlternativeCandidateRepository(EntityManager entityManager) {
@@ -78,95 +75,15 @@ public class MenuAlternativeCandidateRepository implements SemanticMenuDocumentS
         return candidateViews(rows);
     }
 
-    public List<MenuAlternativeCandidateView> findSameStoreSemanticCandidates(
+    public Optional<MenuAlternativeInterpretationText> findInterpretationText(
             long storeId,
-            long sourceMenuId,
-            List<SemanticMenuHit> hits,
-            int limit
-    ) {
-        if (hits.isEmpty()) {
-            return List.of();
-        }
-        List<BaseRow> rows = baseQuery(new BooleanBuilder()
-                        .and(QStore.store.id.eq(storeId))
-                        .and(QMenu.menu.id.ne(sourceMenuId))
-                        .and(currentSemanticCoordinates(hits)), true)
-                .limit(limit).fetch();
-        return orderSemantic(candidateViews(rows), hits, limit);
-    }
-
-    public List<MenuAlternativeCandidateView> findNearbySemanticCandidates(
-            long sourceStoreId,
-            long sourceMenuId,
-            BoundingBox box,
-            List<SemanticMenuHit> hits,
-            int limit
-    ) {
-        if (hits.isEmpty()) {
-            return List.of();
-        }
-        QStore store = QStore.store;
-        BooleanBuilder where = new BooleanBuilder()
-                .and(store.id.ne(sourceStoreId))
-                .and(QMenu.menu.id.ne(sourceMenuId))
-                .and(currentSemanticCoordinates(hits))
-                .and(store.geocodingStatus.eq(GeocodingStatus.VERIFIED))
-                .and(store.geocodingAddressVersion.eq(store.addressVersion))
-                .and(store.latitude.between(BigDecimal.valueOf(box.minLatitude()),
-                        BigDecimal.valueOf(box.maxLatitude())))
-                .and(store.longitude.between(BigDecimal.valueOf(box.minLongitude()),
-                        BigDecimal.valueOf(box.maxLongitude())));
-        return orderSemantic(candidateViews(baseQuery(where, true).limit(limit).fetch()),
-                hits, limit);
-    }
-
-    private static List<MenuAlternativeCandidateView> orderSemantic(
-            List<MenuAlternativeCandidateView> candidates,
-            List<SemanticMenuHit> hits,
-            int limit
-    ) {
-        Map<Long, Integer> rankByMenu = new LinkedHashMap<>();
-        hits.forEach(hit -> rankByMenu.putIfAbsent(hit.menuId(), rankByMenu.size()));
-        return candidates.stream()
-                .sorted(java.util.Comparator.comparingInt(candidate ->
-                        rankByMenu.getOrDefault(candidate.menuId(), Integer.MAX_VALUE)))
-                .limit(limit)
-                .toList();
-    }
-
-    private static BooleanBuilder currentSemanticCoordinates(List<SemanticMenuHit> hits) {
-        BooleanBuilder coordinates = new BooleanBuilder();
-        for (SemanticMenuHit hit : hits) {
-            coordinates.or(QMenu.menu.id.eq(hit.menuId())
-                    .and(QStore.store.id.eq(hit.storeId()))
-                    .and(QMenuVersion.menuVersion.versionNumber.eq(hit.versionNumber())));
-        }
-        return coordinates;
-    }
-
-    @Override
-    public Optional<SemanticMenuDocument> findCurrent(long menuId) {
-        List<SemanticRow> rows = semanticRows(QMenu.menu.id.eq(menuId), 1);
-        return rows.isEmpty() ? Optional.empty() : Optional.of(semanticDocuments(rows).getFirst());
-    }
-
-    @Override
-    public List<SemanticMenuDocument> findBatchAfter(long menuId, int limit) {
-        if (limit < 1) {
-            throw new IllegalArgumentException("limit must be positive");
-        }
-        return semanticDocuments(semanticRows(QMenu.menu.id.gt(menuId), limit));
-    }
-
-    private List<SemanticRow> semanticRows(
-            com.querydsl.core.types.Predicate additional,
-            int limit
+            long menuId
     ) {
         QStore store = QStore.store;
         QMenu menu = QMenu.menu;
         QMenuVersion version = QMenuVersion.menuVersion;
-        return queryFactory.select(Projections.constructor(
-                        SemanticRow.class,
+        InterpretationRow row = queryFactory.select(Projections.constructor(
+                        InterpretationRow.class,
                         menu.id,
                         store.id,
                         version.versionNumber,
@@ -177,72 +94,104 @@ public class MenuAlternativeCandidateRepository implements SemanticMenuDocumentS
                 .from(menu)
                 .join(version).on(version.menu.eq(menu))
                 .join(store).on(store.id.eq(menu.storeId))
-                .where(store.verificationStatus.eq(VerificationStatus.APPROVED)
+                .where(store.id.eq(storeId)
+                        .and(menu.id.eq(menuId))
+                        .and(store.verificationStatus.eq(VerificationStatus.APPROVED))
                         .and(store.operationStatus.ne(OperationStatus.CLOSED))
                         .and(menu.retired.isFalse())
                         .and(menu.visibility.eq(MenuVisibility.VISIBLE))
                         .and(menu.sellingStatus.in(
                                 MenuSellingStatus.SELLING,
-                                MenuSellingStatus.SOLD_OUT))
+                                MenuSellingStatus.SOLD_OUT,
+                                MenuSellingStatus.PAUSED))
                         .and(menu.publishedVersionNumber.eq(version.versionNumber))
-                        .and(version.status.eq(MenuVersionStatus.PUBLISHED))
-                        .and(additional))
-                .orderBy(menu.id.asc())
-                .limit(limit)
-                .fetch();
+                        .and(version.status.eq(MenuVersionStatus.PUBLISHED)))
+                .fetchFirst();
+        if (row == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new MenuAlternativeInterpretationText(
+                row.name(),
+                row.description(),
+                row.primaryCategoryCode(),
+                stringValues(version, row.versionId(), false),
+                stringValues(version, row.versionId(), true)));
     }
 
-    private List<SemanticMenuDocument> semanticDocuments(List<SemanticRow> rows) {
-        if (rows.isEmpty()) {
+    public List<MenuAlternativeCandidateView> findSameStoreExpandedCandidates(
+            long storeId,
+            long sourceMenuId,
+            List<String> concepts,
+            int limit
+    ) {
+        if (concepts.isEmpty()) {
             return List.of();
         }
-        QMenuVersion version = QMenuVersion.menuVersion;
-        StringPath secondary = Expressions.stringPath("semanticSecondaryCategory");
-        StringPath localTag = Expressions.stringPath("semanticLocalTag");
-        List<Long> versionIds = rows.stream().map(SemanticRow::versionId).toList();
-        Map<Long, List<String>> secondaryByVersion = new LinkedHashMap<>();
-        queryFactory.select(version.id, secondary).from(version)
-                .join(version.secondaryCategoryCodes, secondary)
-                .where(version.id.in(versionIds))
-                .orderBy(version.id.asc(), secondary.asc())
-                .fetch()
-                .forEach(tuple -> secondaryByVersion.computeIfAbsent(
-                        tuple.get(version.id), ignored -> new ArrayList<>())
-                        .add(tuple.get(secondary)));
-        Map<Long, List<String>> tagsByVersion = new LinkedHashMap<>();
-        queryFactory.select(version.id, localTag).from(version)
-                .join(version.localTags, localTag)
-                .where(version.id.in(versionIds))
-                .orderBy(version.id.asc(), localTag.asc())
-                .fetch()
-                .forEach(tuple -> tagsByVersion.computeIfAbsent(
-                        tuple.get(version.id), ignored -> new ArrayList<>())
-                        .add(tuple.get(localTag)));
-        return rows.stream().map(row -> new SemanticMenuDocument(
-                row.menuId(),
-                row.storeId(),
-                row.versionNumber(),
-                semanticText(row,
-                        secondaryByVersion.getOrDefault(row.versionId(), List.of()),
-                        tagsByVersion.getOrDefault(row.versionId(), List.of()))))
-                .toList();
+        List<BaseRow> rows = baseQuery(new BooleanBuilder()
+                        .and(QStore.store.id.eq(storeId))
+                        .and(QMenu.menu.id.ne(sourceMenuId))
+                        .and(expandedConceptMatches(concepts)), true)
+                .orderBy(QMenu.menu.id.asc())
+                .limit(limit)
+                .fetch();
+        return candidateViews(rows);
     }
 
-    private static String semanticText(
-            SemanticRow row,
-            List<String> secondaryCategories,
-            List<String> localTags
+    public List<MenuAlternativeCandidateView> findNearbyExpandedCandidates(
+            long sourceStoreId,
+            long sourceMenuId,
+            BoundingBox box,
+            List<String> concepts,
+            int limit
     ) {
-        List<String> parts = new ArrayList<>();
-        parts.add(row.name());
-        parts.add(row.description());
-        parts.add(row.primaryCategoryCode());
-        parts.addAll(secondaryCategories);
-        parts.addAll(localTags);
-        return parts.stream()
-                .filter(value -> value != null && !value.isBlank())
-                .map(String::trim)
-                .collect(java.util.stream.Collectors.joining(" "));
+        if (concepts.isEmpty()) {
+            return List.of();
+        }
+        QStore store = QStore.store;
+        BooleanBuilder where = new BooleanBuilder()
+                .and(store.id.ne(sourceStoreId))
+                .and(QMenu.menu.id.ne(sourceMenuId))
+                .and(expandedConceptMatches(concepts))
+                .and(store.geocodingStatus.eq(GeocodingStatus.VERIFIED))
+                .and(store.geocodingAddressVersion.eq(store.addressVersion))
+                .and(store.latitude.between(BigDecimal.valueOf(box.minLatitude()),
+                        BigDecimal.valueOf(box.maxLatitude())))
+                .and(store.longitude.between(BigDecimal.valueOf(box.minLongitude()),
+                        BigDecimal.valueOf(box.maxLongitude())));
+        return candidateViews(baseQuery(where, true)
+                .orderBy(store.id.asc(), QMenu.menu.id.asc())
+                .limit(limit)
+                .fetch());
+    }
+
+    private static BooleanBuilder expandedConceptMatches(List<String> concepts) {
+        QMenuVersion version = QMenuVersion.menuVersion;
+        BooleanBuilder matches = new BooleanBuilder();
+        for (String concept : concepts) {
+            String pattern = IntegratedStoreSearchPredicates.literalContainsPattern(concept);
+            matches.or(version.name.likeIgnoreCase(pattern, '!')
+                    .or(version.description.likeIgnoreCase(pattern, '!'))
+                    .or(version.primaryCategoryCode.likeIgnoreCase(pattern, '!'))
+                    .or(version.secondaryCategoryCodes.any().likeIgnoreCase(pattern, '!'))
+                    .or(version.localTags.any().likeIgnoreCase(pattern, '!')));
+        }
+        return matches;
+    }
+
+    private List<String> stringValues(
+            QMenuVersion version,
+            long versionId,
+            boolean localTags
+    ) {
+        StringPath value = Expressions.stringPath(
+                localTags ? "alternativeInterpretationTag" : "alternativeInterpretationCategory");
+        var query = queryFactory.select(value).from(version);
+        if (localTags) {
+            query.join(version.localTags, value);
+        } else {
+            query.join(version.secondaryCategoryCodes, value);
+        }
+        return query.where(version.id.eq(versionId)).orderBy(value.asc()).fetch();
     }
 
     private com.querydsl.jpa.impl.JPAQuery<BaseRow> baseQuery(
@@ -349,7 +298,7 @@ public class MenuAlternativeCandidateRepository implements SemanticMenuDocumentS
             com.miriyum.domain.menu.model.DisclosureRegistrationStatus allergenInformationStatus,
             BigDecimal latitude, BigDecimal longitude) {}
 
-    public record SemanticRow(
+    public record InterpretationRow(
             long menuId,
             long storeId,
             int versionNumber,
@@ -358,4 +307,17 @@ public class MenuAlternativeCandidateRepository implements SemanticMenuDocumentS
             String description,
             String primaryCategoryCode
     ) {}
+
+    public record MenuAlternativeInterpretationText(
+            String name,
+            String description,
+            String primaryCategoryCode,
+            List<String> secondaryCategoryCodes,
+            List<String> localTags
+    ) {
+        public MenuAlternativeInterpretationText {
+            secondaryCategoryCodes = List.copyOf(secondaryCategoryCodes);
+            localTags = List.copyOf(localTags);
+        }
+    }
 }

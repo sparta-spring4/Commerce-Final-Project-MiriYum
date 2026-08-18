@@ -39,7 +39,6 @@ import java.util.Objects;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -66,7 +65,6 @@ public class MenuCommandService {
     private final RepresentativeMenuService representativeMenuService;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
-    private final ApplicationEventPublisher applicationEventPublisher;
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public MenuCommandResult create(
@@ -155,7 +153,6 @@ public class MenuCommandService {
                         type = MenuPublicationEventType.PUBLISHED_IMMEDIATELY;
                         effectiveAt = now;
                         confirmedAt = now;
-                        publishSemanticIndexChange(menu.getId(), now);
                     } else {
                         version = menu.schedule(request.effectiveAt(), now);
                         type = MenuPublicationEventType.PUBLICATION_SCHEDULED;
@@ -245,7 +242,6 @@ public class MenuCommandService {
                             menu.getSellingStatus(), menu.getSellingStatus(),
                             MenuImpactCheckStatus.NOT_EVALUATED,
                             MenuRecoveryResult.NOT_EVALUATED);
-                    publishSemanticIndexChange(menu.getId(), now);
                     return success(HttpStatus.OK, menu);
                 });
     }
@@ -281,7 +277,6 @@ public class MenuCommandService {
                             previousSellingStatus, menu.getSellingStatus(),
                             MenuImpactCheckStatus.NOT_EVALUATED,
                             MenuRecoveryResult.NOT_EVALUATED);
-                    publishSemanticIndexChange(menu.getId(), now);
                     return success(HttpStatus.OK, menu);
                 });
     }
@@ -317,7 +312,6 @@ public class MenuCommandService {
                             previousSellingStatus, menu.getSellingStatus(),
                             MenuImpactCheckStatus.NOT_EVALUATED,
                             MenuRecoveryResult.NOT_EVALUATED);
-                    publishSemanticIndexChange(menu.getId(), now);
                     return success(HttpStatus.OK, menu);
                 });
     }
@@ -447,17 +441,6 @@ public class MenuCommandService {
                 || (request.mode() == MenuPublicationMode.SCHEDULED
                 && request.effectiveAt() == null)) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
-        }
-    }
-
-    private void publishSemanticIndexChange(long menuId, Instant signaledAt) {
-        applicationEventPublisher.publishEvent(new SemanticIndexChanged(menuId, signaledAt));
-    }
-
-    /** 메뉴 커밋 후 Search 인덱스를 재검증하게 하는 식별자 전용 신호다. */
-    public record SemanticIndexChanged(long menuId, Instant signaledAt) {
-        public SemanticIndexChanged(long menuId) {
-            this(menuId, Instant.now());
         }
     }
 }

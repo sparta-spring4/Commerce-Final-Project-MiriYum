@@ -345,6 +345,50 @@ class IntegratedStoreSearchServiceTest {
                 org.mockito.ArgumentMatchers.eq(clock.instant()));
     }
 
+    @Test
+    void recommendationAppendsSeparatelyRankedExpandedTierAfterExactTier() {
+        InterpretedSearchCondition condition = condition(null, null, null, "얼큰한 국물");
+        RecommendationSearchSignals signals = new RecommendationSearchSignals(
+                condition.storeCategoryCodes(),
+                condition.menuCategoryCodes(),
+                condition.tagCodes());
+        given(interpreter.interpret("얼큰한 국물")).willReturn(result(condition));
+        IntegratedStoreSearchCandidate exact = candidate(1L, "정확 후보");
+        IntegratedStoreSearchCandidate expanded = candidate(2L, "김치찌개집");
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(exact), null));
+        given(repository.refreshCurrentlyPublic(any()))
+                .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
+        given(expansionService.expand(new SearchConceptRequest(
+                "얼큰한 국물",
+                com.miriyum.domain.search.expansion.SearchConceptPurpose.STORE_SEARCH)))
+                .willReturn(new SearchConceptExpansion(List.of("김치찌개"), 130, 20));
+        given(repository.searchExpanded(any(), any(),
+                org.mockito.ArgumentMatchers.eq(200)))
+                .willReturn(List.of(exact, expanded));
+        given(recommendationService.rank(
+                org.mockito.ArgumentMatchers.isNull(),
+                any(),
+                org.mockito.ArgumentMatchers.eq(signals),
+                org.mockito.ArgumentMatchers.eq(clock.instant())))
+                .willReturn(List.of(ranked(exact, 10)))
+                .willReturn(List.of(ranked(expanded, 50)));
+
+        var data = service().search(
+                null, "얼큰한 국물", false, false,
+                "recommendation,desc", null, 3);
+
+        assertThat(data.items()).extracting(item -> item.storeId())
+                .containsExactly("1", "2");
+        assertThat(data.nextCursor()).isNull();
+        then(expansionService).should(times(1)).expand(any());
+        then(recommendationService).should(times(2)).rank(
+                org.mockito.ArgumentMatchers.isNull(),
+                any(),
+                org.mockito.ArgumentMatchers.eq(signals),
+                org.mockito.ArgumentMatchers.eq(clock.instant()));
+    }
+
     private IntegratedStoreSearchService service() {
         return new IntegratedStoreSearchService(
                 interpreter,

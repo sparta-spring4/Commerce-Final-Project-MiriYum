@@ -265,6 +265,7 @@ public class IntegratedStoreSearchService {
         }
         int scannedCandidates = 0;
         String scanCursor = null;
+        boolean exactExhausted = false;
         List<RecommendationSearchCandidate> rankingCandidates = new ArrayList<>();
         Map<Long, CandidateState> stateById = new LinkedHashMap<>();
 
@@ -328,17 +329,19 @@ public class IntegratedStoreSearchService {
 
             scanCursor = slice.nextCursor();
             if (scanCursor == null || original.isEmpty()) {
+                exactExhausted = true;
                 break;
             }
         }
 
+        RecommendationSearchSignals signals = new RecommendationSearchSignals(
+                condition.storeCategoryCodes(),
+                condition.menuCategoryCodes(),
+                condition.tagCodes());
         List<RankedRecommendation> ranked = recommendationService.rank(
                 consumerAccountId,
                 rankingCandidates,
-                new RecommendationSearchSignals(
-                        condition.storeCategoryCodes(),
-                        condition.menuCategoryCodes(),
-                        condition.tagCodes()),
+                signals,
                 clock.instant());
         RecommendationCursorKey pageKey = requestQuery.cursor()
                 .map(decoded -> parseRecommendationCursor(
@@ -349,7 +352,7 @@ public class IntegratedStoreSearchService {
                 .toList();
         int pageSize = Math.min(requestQuery.size(), remaining.size());
         List<RankedRecommendation> page = remaining.subList(0, pageSize);
-        List<IntegratedStoreSearchItem> items = page.stream()
+        List<IntegratedStoreSearchItem> items = new ArrayList<>(page.stream()
                 .map(result -> new RankedCandidateState(
                         result,
                         stateById.get(result.candidate().storeId())))
@@ -358,10 +361,24 @@ public class IntegratedStoreSearchService {
                         result.state().candidate(),
                         result.state().availability(),
                         result.ranked().reason()))
-                .toList();
+                .toList());
         String nextCursor = remaining.size() > pageSize && !page.isEmpty()
                 ? recommendationCursor(requestQuery, page.getLast())
                 : null;
+        if (requestQuery.cursor().isEmpty()
+                && exactExhausted
+                && items.size() < requestQuery.size()
+                && !condition.remainingKeyword().isBlank()) {
+            appendRankedExpandedCandidates(
+                    consumerAccountId,
+                    items,
+                    stateById.keySet(),
+                    requestQuery,
+                    condition,
+                    includesInfants,
+                    availableOnly,
+                    signals);
+        }
         return new IntegratedStoreSearchData(
                 items,
                 normalized(condition),
@@ -370,6 +387,81 @@ public class IntegratedStoreSearchService {
                 interpretation.vocabularyVersion(),
                 StoreRecommendationService.RULE_VERSION,
                 nextCursor);
+    }
+
+    private void appendRankedExpandedCandidates(
+            Long consumerAccountId,
+            List<IntegratedStoreSearchItem> items,
+            Set<Long> exactStoreIds,
+            IntegratedStoreSearchQuery query,
+            InterpretedSearchCondition condition,
+            boolean includesInfants,
+            boolean availableOnly,
+            RecommendationSearchSignals signals
+    ) {
+        SearchConceptExpansion expansion = expansionService.expand(new SearchConceptRequest(
+                condition.remainingKeyword(), SearchConceptPurpose.STORE_SEARCH));
+        if (expansion == null || expansion.concepts().isEmpty()) {
+            return;
+        }
+        List<IntegratedStoreSearchCandidate> expanded = repository.searchExpanded(
+                        query,
+                        expansion.concepts(),
+                        llmProperties.supplementCandidateLimit())
+                .stream()
+                .filter(candidate -> !exactStoreIds.contains(candidate.storeId()))
+                .toList();
+        List<IntegratedStoreSearchCandidate> before =
+                repository.refreshCurrentlyPublic(expanded);
+        AvailabilityBatch availability = availabilityById(
+                before, condition, includesInfants);
+        if (!availability.valid()) {
+            return;
+        }
+        List<IntegratedStoreSearchCandidate> after =
+                repository.refreshCurrentlyPublic(before);
+        Map<Long, CandidateState> supplementalStates = new LinkedHashMap<>();
+        List<RecommendationSearchCandidate> supplementalRanking = new ArrayList<>();
+        for (IntegratedStoreSearchCandidate candidate : after) {
+            ReservationAvailability candidateAvailability = availability.values().getOrDefault(
+                    candidate.storeId(),
+                    hasReservationDate(condition)
+                            ? ReservationAvailability.UNAVAILABLE
+                            : ReservationAvailability.NOT_REQUESTED);
+            candidateAvailability = reconcileCurrentState(
+                    candidate, candidateAvailability, hasReservationDate(condition));
+            if (availableOnly
+                    && candidateAvailability != ReservationAvailability.AVAILABLE) {
+                continue;
+            }
+            if (supplementalStates.putIfAbsent(
+                    candidate.storeId(),
+                    new CandidateState(candidate, candidateAvailability)) != null) {
+                continue;
+            }
+            supplementalRanking.add(new RecommendationSearchCandidate(
+                    candidate.storeId(),
+                    candidate.relevanceTier(),
+                    toRecommendationAvailability(candidateAvailability),
+                    null));
+        }
+        List<RankedRecommendation> supplementalRanked = recommendationService.rank(
+                consumerAccountId,
+                supplementalRanking,
+                signals,
+                clock.instant());
+        for (RankedRecommendation ranked : supplementalRanked) {
+            if (items.size() >= query.size()) {
+                return;
+            }
+            CandidateState state = supplementalStates.get(ranked.candidate().storeId());
+            if (state != null) {
+                items.add(toItem(
+                        state.candidate(),
+                        state.availability(),
+                        ranked.reason()));
+            }
+        }
     }
 
     private String recommendationCursor(

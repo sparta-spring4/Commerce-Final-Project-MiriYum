@@ -30,7 +30,6 @@ import com.miriyum.domain.search.query.IntegratedSearchCursorCodec;
 import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
 import com.miriyum.domain.search.service.IntegratedSearchInterpreter;
 import com.miriyum.domain.search.service.IntegratedStoreSearchService;
-import com.miriyum.domain.search.semantic.SemanticMenuHit;
 import com.miriyum.domain.storeoperator.dto.auth.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAuthService;
 import jakarta.persistence.EntityManager;
@@ -229,38 +228,6 @@ class IntegratedStoreSearchRepositoryIT {
 
     @Test
     @Transactional
-    void semanticHitsAreRevalidatedAgainstCurrentPublishedMenuVersion() {
-        Store store = createStore(
-                "의미 검색 매장", Region.SEOUL, "KOREAN", Set.of(), false);
-        Menu menu = publishMenu(
-                store, "김치찌개", 10_000, "BEVERAGE", List.of(),
-                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
-        int currentVersion = menu.getPublishedVersionNumber();
-        flushAndClear();
-        IntegratedStoreSearchQuery query = query(condition(
-                List.of("SEOUL"), List.of(), List.of(), List.of(), null,
-                "얼큰한 국물"), null, null, 20);
-
-        IntegratedStoreSearchSlice current = repository.searchSemantic(
-                query, List.of(new SemanticMenuHit(
-                        menu.getId(), store.getId(), currentVersion, 0.91)));
-        IntegratedStoreSearchSlice stale = repository.searchSemantic(
-                query, List.of(new SemanticMenuHit(
-                        menu.getId(), store.getId(), currentVersion + 1, 0.99)));
-
-        assertThat(ids(current)).containsExactly(store.getId());
-        assertThat(stale.content()).isEmpty();
-        assertThat(alternativeCandidateRepository.findCurrent(menu.getId()))
-                .get()
-                .satisfies(document -> {
-                    assertThat(document.storeId()).isEqualTo(store.getId());
-                    assertThat(document.versionNumber()).isEqualTo(currentVersion);
-                    assertThat(document.text()).contains("김치찌개", "BEVERAGE");
-                });
-    }
-
-    @Test
-    @Transactional
     void expandedConceptsFindCurrentMenuWhilePreservingStructuredRegion() {
         Store seoulKimchi = createStore(
                 "서울 김치찌개", Region.SEOUL, "KOREAN", Set.of(), false);
@@ -294,7 +261,7 @@ class IntegratedStoreSearchRepositoryIT {
 
     @Test
     @Transactional
-    void semanticAlternativeHitsRequireCurrentStoreAndPublishedVersionCoordinates() {
+    void expandedAlternativeCandidatesUseCurrentSellingMenusInSameAndNearbyStores() {
         Store sourceStore = createStore(
                 "대체 원본 매장", Region.SEOUL, "KOREAN", Set.of(), false);
         Menu source = publishMenu(
@@ -313,16 +280,15 @@ class IntegratedStoreSearchRepositoryIT {
         flushAndClear();
         BoundingBox box = new BoundingBox(37.5, 37.6, 126.9, 127.1);
 
-        assertThat(alternativeCandidateRepository.findSameStoreSemanticCandidates(
-                sourceStore.getId(), source.getId(), List.of(new SemanticMenuHit(
-                        sameStoreCandidate.getId(), sourceStore.getId(),
-                        sameStoreCandidate.getPublishedVersionNumber() + 1, 0.99)), 20))
-                .isEmpty();
-        assertThat(alternativeCandidateRepository.findNearbySemanticCandidates(
-                sourceStore.getId(), source.getId(), box, List.of(new SemanticMenuHit(
-                        nearbyCandidate.getId(), nearbyStore.getId() + 1,
-                        nearbyCandidate.getPublishedVersionNumber(), 0.99)), 20))
-                .isEmpty();
+        assertThat(alternativeCandidateRepository.findSameStoreExpandedCandidates(
+                sourceStore.getId(), source.getId(), List.of("동일 매장 후보"), 20))
+                .extracting(candidate -> candidate.menuId())
+                .containsExactly(sameStoreCandidate.getId());
+        assertThat(alternativeCandidateRepository.findNearbyExpandedCandidates(
+                sourceStore.getId(), source.getId(), box,
+                List.of("인근 매장 후보"), 20))
+                .extracting(candidate -> candidate.menuId())
+                .containsExactly(nearbyCandidate.getId());
     }
 
     @Test

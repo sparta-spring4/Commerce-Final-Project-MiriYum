@@ -26,7 +26,10 @@ import tools.jackson.databind.ObjectMapper;
 public class OpenAiSearchConceptInterpreter implements SearchConceptInterpreter {
 
     private static final String SYSTEM_INSTRUCTION =
-            "검색 표현을 한국어 메뉴명, 재료, 맛, 조리형태 개념으로만 변환하세요. "
+            "사용자가 실제 등록 메뉴를 찾도록 검색 표현을 짧은 한국어 음식명과 "
+                    + "검색 동의어로 변환하세요. 가장 가능성 높은 구체적 메뉴명을 먼저 두고 "
+                    + "'메뉴명:', '재료:', '맛:', '조리형태:' 같은 라벨이나 설명 문장을 "
+                    + "쓰지 마세요. 예: '얼큰한 국물'은 '김치찌개', '찌개', '매운 국물'. "
                     + "알레르기, 식이 안전, 재고, 예약 가능 여부를 추론하지 마세요.";
 
     private final RestClient restClient;

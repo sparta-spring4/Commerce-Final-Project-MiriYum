@@ -96,7 +96,7 @@ QueryDSL은 선택 조합과 projection을 만들고 최종 후보는 MySQL에�
 
 매장 목록·검색의 `availableOnly`·`reservationAvailability`는 날짜가 있을 때 `ReservationSearchAvailabilityService` 부분 조건 공개 계약을 사용한다. 같은 매장 대체 메뉴 후보가 없을 때만 원 매장의 검증된 저장 좌표를 기준으로 bounding box와 Java Haversine을 적용하며, 거리가 **3km 이내**인 후보만 허용하고 3km를 초과하면 거부한다. 사용자 현재 위치는 요청·저장·사용하지 않는다. Kakao Local REST는 입점·주소 변경 시 좌표 변환 포트 뒤에서만 호출하고 추천 요청 중에는 호출하지 않는다.
 
-OpenAI `text-embedding-3-small`과 Qdrant는 규칙 해석과 MySQL 정확 검색 뒤의 보완 후보 생성에만 사용한다. MySQL이 원본이며 Qdrant payload는 메뉴·매장·게시 버전 식별자만 가진다. 외부 장애에는 정확 검색으로 폴백하고 모든 의미 후보는 MySQL 현재 상태와 예약·재고 계약을 다시 통과해야 한다. 생성형 LLM은 후보·순위·설명을 직접 만들지 않는다.
+OpenAI `gpt-4o-mini` Structured Outputs는 규칙 해석과 MySQL 정확 검색 뒤, 최초 응답이 부족할 때 잔여 표현을 최대 8개의 음식 개념으로 바꾸는 데만 사용한다. 개념은 허용된 QueryDSL 조건으로 현재 MySQL 게시 메뉴에 대조하며 외부 벡터 저장소·색인·캐시는 두지 않는다. 외부 장애에는 정확 검색 또는 일반 대체 후보로 폴백하고 모든 후보는 MySQL 현재 상태와 예약·재고·알레르기 계약을 다시 통과해야 한다. LLM은 후보 ID·순위·가용성·안전 판단을 직접 만들지 않는다.
 
 ## `고도화` 외부 어댑터 계약
 

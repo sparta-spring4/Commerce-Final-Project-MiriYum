@@ -60,15 +60,10 @@ services:
       MIRIYUM_VALKEY_PORT: 6379
       MIRIYUM_VALKEY_PASSWORD: ${MIRIYUM_VALKEY_PASSWORD}
       MIRIYUM_QR_STORAGE_GENERATION: ${MIRIYUM_QR_STORAGE_GENERATION}
-      MIRIYUM_STORE_SEARCH_SEMANTIC_ENABLED: ${MIRIYUM_STORE_SEARCH_SEMANTIC_ENABLED:-false}
-      MIRIYUM_OPENAI_API_KEY: ${MIRIYUM_OPENAI_API_KEY:-}
-      MIRIYUM_QDRANT_BASE_URL: http://qdrant:6333
-      MIRIYUM_QDRANT_API_KEY: ${MIRIYUM_QDRANT_API_KEY:-}
-      MIRIYUM_SEMANTIC_REBUILD_ENABLED: ${MIRIYUM_SEMANTIC_REBUILD_ENABLED:-false}
+      MIRIYUM_STORE_SEARCH_LLM_ENABLED: ${MIRIYUM_STORE_SEARCH_LLM_ENABLED:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     depends_on:
       mysql:
-        condition: service_healthy
-      qdrant:
         condition: service_healthy
     ports:
       # 로컬 전용이므로 127.0.0.1에만 바인딩한다.
@@ -97,21 +92,6 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  qdrant:
-    image: qdrant/qdrant:v1.18.3
-    ports:
-      - "127.0.0.1:6333:6333"
-    volumes:
-      - qdrant-data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c ': >/dev/tcp/127.0.0.1/6333'"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-      start_period: 5s
-    restart: unless-stopped
-
 volumes:
   mysql-data:
   valkey-data:
-  qdrant-data:
