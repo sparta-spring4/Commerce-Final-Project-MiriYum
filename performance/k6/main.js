@@ -27,6 +27,7 @@ const prerequisiteSmokeProof = config.profile === 'smoke'
     targetEnv: config.targetEnv,
     baseUrl: config.baseUrl,
     commitSha: config.commitSha,
+    harnessCommitSha: config.harnessCommitSha,
     fixtureText,
     smokeRunId: config.prerequisiteSmokeRunId,
     scenarioNames: config.scenarioNames,
@@ -109,7 +110,7 @@ export const options = {
   setupTimeout: '2m',
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)'],
   summaryTimeUnit: 'ms',
-  userAgent: `miriyum-k6-baseline/${config.commitSha.slice(0, 12)}`,
+  userAgent: `miriyum-k6-baseline/${config.harnessCommitSha.slice(0, 12)}`,
   ...COOKIE_LIFETIME_OPTIONS,
 }
 
@@ -242,6 +243,7 @@ export function handleSummary(data) {
     runId: config.runId,
     prerequisiteSmokeRunId: prerequisiteSmokeProof === null ? null : prerequisiteSmokeProof.runId,
     commitSha: config.commitSha,
+    harnessCommitSha: config.harnessCommitSha,
     scenarioNames: config.scenarioNames,
     targetFingerprint,
     fixtureSha256,
