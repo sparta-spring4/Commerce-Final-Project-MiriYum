@@ -19,7 +19,7 @@ Issue #285의 인증·공개 검색·예약 생성·알림 이력 기준선을 �
 - `auth.accountAliases`, 예약 template, `notification.accountAliases`가 서로 겹치지 않도록 분리한 합성 계정과 각 계정의 email/password 환경변수 이름
 - baseline 인증 계정 풀은 전역 VU ID 충돌을 막기 위해 전체 `MAX_VUS` 이상이어야 하며, 한 VU는 실행 중 같은 계정으로 login과 refresh를 이어서 수행
 - 공백이 아닌 1~100자 공개 검색 입력
-- 예약별 account alias와 충돌하지 않는 store/date/time/offset 조합. 같은 account alias·store·slot은 party 또는 menu가 달라도 충돌로 취급
+- 예약별 account alias와 충돌하지 않는 store/date/time 조합. 같은 account alias·store·현지 slot은 offset의 생략·명시, party 또는 menu가 달라도 충돌로 취급
 - `notification.accountAliases`에 지정한 서로 다른 최소 2개 계정과, 각 계정의 `pageSize + 1`개 이상 공개 `IN_APP` 전달 완료 알림
 
 예약 baseline은 `reservationCreate`에 배분된 `ARRIVAL_RATE × DURATION_SECONDS + 1`만큼 서로 충돌하지 않는 template이 필요하다. 마지막 `+ 1`은 duration 경계에서 executor가 예약할 수 있는 iteration guard이며, 예를 들어 예약 단독 `1 iteration/s × 30초`에는 31개가 필요하다. template을 순환 재사용하지 않으므로 부족하면 init context에서 실패한다.

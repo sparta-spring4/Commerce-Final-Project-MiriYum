@@ -185,6 +185,18 @@ function reservationFixtureWithZeroOffsetDuplicate(templateCount) {
   return fixture
 }
 
+function reservationFixtureWithOmittedAndExplicitOffsetAtSameLocalSlot(templateCount) {
+  const fixture = reservationCapacityFixture(templateCount)
+  const originalIndex = templateCount - 2
+  const duplicateIndex = templateCount - 1
+  delete fixture.reservationTemplates[originalIndex].startOffset
+  fixture.reservationTemplates[duplicateIndex] = {
+    ...fixture.reservationTemplates[originalIndex],
+    startOffset: '+09:00',
+  }
+  return fixture
+}
+
 function responseClient(status, data) {
   return {
     get() {
@@ -401,6 +413,15 @@ export default function () {
         reservationFixtureWithZeroOffsetDuplicate(singleScenarioRequired),
       ),
     ))
+  const omittedAndExplicitOffsetAtSameLocalSlotRejected =
+    typeof buildExecutionScenarios === 'function'
+    && Number.isInteger(singleScenarioRequired)
+    && throws(() => buildExecutionScenarios(
+      singleScenarioConfig,
+      fixtureContracts.validateFixture(
+        reservationFixtureWithOmittedAndExplicitOffsetAtSameLocalSlot(singleScenarioRequired),
+      ),
+    ))
   const mixedScenarioFirstScenarios = typeof buildExecutionScenarios === 'function'
     ? buildExecutionScenarios({
       ...singleScenarioConfig,
@@ -535,6 +556,8 @@ export default function () {
       menuDifferenceAtSameSlotRejected,
     'equivalent zero-offset reservation templates are rejected before execution': () =>
       zeroOffsetDuplicateFixtureRejected,
+    'offset presence does not bypass same-local-slot reservation conflict validation': () =>
+      omittedAndExplicitOffsetAtSameLocalSlotRejected,
     'mixed scenario allocation includes the remainder and boundary guard': () =>
       mixedScenarioFirstRequired === 61
       && mixedScenarioFirstScenarios?.reservationCreate.rate === 2,

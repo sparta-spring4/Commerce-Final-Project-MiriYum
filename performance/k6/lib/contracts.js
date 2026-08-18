@@ -231,18 +231,12 @@ export function requiredReservationTemplateCount({
     * durationSeconds + 1
 }
 
-function canonicalStartOffset(startOffset) {
-  if (startOffset === undefined) return ''
-  return startOffset === '+00:00' || startOffset === '-00:00' ? 'Z' : startOffset
-}
-
 function reservationTemplateKey(template) {
   return JSON.stringify([
     template.accountAlias,
     template.storeId,
     template.serviceDate,
     template.startTime,
-    canonicalStartOffset(template.startOffset),
   ])
 }
 
