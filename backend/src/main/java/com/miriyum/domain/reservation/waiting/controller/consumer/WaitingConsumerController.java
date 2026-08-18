@@ -7,9 +7,11 @@ import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingReceptionAvailability;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.dto.WaitingLocationProofContracts;
+import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerCommandFacade;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerQueryService;
 import com.miriyum.domain.reservation.waiting.service.WaitingLocationProofService;
+import com.miriyum.domain.reservation.waiting.service.WaitingPartyService;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -34,6 +36,7 @@ public class WaitingConsumerController {
     private final WaitingConsumerQueryService queryService;
     private final WaitingConsumerCommandFacade commandFacade;
     private final WaitingLocationProofService locationProofService;
+    private final WaitingPartyService partyService;
 
     @GetMapping("/stores/{storeId}/waiting-availabilities")
     public ApiResponse<WaitingReceptionAvailability> getAvailability(
@@ -54,6 +57,74 @@ public class WaitingConsumerController {
         return ApiResponse.success(
                 "웨이팅 위치를 판정했습니다.",
                 locationProofService.issue(principal.accountId(), storeId, request));
+    }
+
+    @PostMapping("/waiting-teams/{teamId}/invitations")
+    public ResponseEntity<ApiResponse<WaitingPartyContracts.InvitationSnapshot>> issueInvitation(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable @Positive long teamId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody WaitingPartyContracts.ExpectedVersionRequest request
+    ) {
+        var result = partyService.issueInvitation(
+                principal.accountId(), teamId, IdempotencyKey.parse(rawKey), request);
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("일행 초대를 발급했습니다.", result.data()));
+    }
+
+    @PostMapping("/waiting-teams/{teamId}/invitations/{invitationId}/revocations")
+    public ResponseEntity<ApiResponse<WaitingPartyContracts.InvitationSnapshot>> revokeInvitation(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable @Positive long teamId,
+            @PathVariable @Positive long invitationId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody WaitingPartyContracts.ExpectedVersionRequest request
+    ) {
+        var result = partyService.revokeInvitation(
+                principal.accountId(), teamId, invitationId,
+                IdempotencyKey.parse(rawKey), request);
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("일행 초대를 철회했습니다.", result.data()));
+    }
+
+    @PostMapping("/waiting-invitation-acceptances")
+    public ResponseEntity<ApiResponse<WaitingConsumerSnapshot>> acceptInvitation(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody WaitingPartyContracts.InvitationAcceptanceRequest request
+    ) {
+        var result = partyService.acceptInvitation(
+                principal.accountId(), IdempotencyKey.parse(rawKey), request);
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("일행 초대에 참여했습니다.", result.data()));
+    }
+
+    @PostMapping("/waiting-teams/{teamId}/membership-departures")
+    public ResponseEntity<ApiResponse<WaitingConsumerSnapshot>> departMembership(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable @Positive long teamId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody WaitingPartyContracts.ExpectedVersionRequest request
+    ) {
+        var result = partyService.depart(
+                principal.accountId(), teamId, IdempotencyKey.parse(rawKey), request);
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("일행에서 이탈했습니다.", result.data()));
+    }
+
+    @PostMapping("/waiting-teams/{teamId}/memberships/{membershipId}/removals")
+    public ResponseEntity<ApiResponse<WaitingConsumerSnapshot>> removeMembership(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable @Positive long teamId,
+            @PathVariable @Positive long membershipId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody WaitingPartyContracts.ExpectedVersionRequest request
+    ) {
+        var result = partyService.removeMember(
+                principal.accountId(), teamId, membershipId,
+                IdempotencyKey.parse(rawKey), request);
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("일행 구성원을 제거했습니다.", result.data()));
     }
 
     @PostMapping("/stores/{storeId}/waiting-teams")

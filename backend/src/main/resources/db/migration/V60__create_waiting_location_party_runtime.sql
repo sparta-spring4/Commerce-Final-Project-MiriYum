@@ -172,10 +172,6 @@ CREATE TABLE waiting_party_audits (
         FOREIGN KEY (actor_consumer_account_id)
         REFERENCES consumer_accounts (consumer_account_id)
         ON DELETE RESTRICT,
-    CONSTRAINT fk_waiting_party_audits_subject_membership
-        FOREIGN KEY (subject_membership_id)
-        REFERENCES waiting_active_memberships (waiting_active_membership_id)
-        ON DELETE RESTRICT,
     CONSTRAINT ck_waiting_party_audits_event
         CHECK (event_type IN (
             'INVITATION_ISSUED', 'INVITATION_REVOKED', 'MEMBER_JOINED',

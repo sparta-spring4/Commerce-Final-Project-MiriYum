@@ -51,6 +51,8 @@ public class ReservationSecurityConfig {
             "/api/v1/consumers/me/waiting-teams";
     private static final String CONSUMER_WAITING_ME_FAMILY =
             CONSUMER_WAITING_ME_ROOT + "/**";
+    private static final String CONSUMER_WAITING_INVITATION_ACCEPTANCE =
+            "/api/v1/consumers/me/waiting-invitation-acceptances";
     private static final String STORE_RESERVATION_ROOT =
             "/api/v1/store-operators/stores/*/reservations";
     private static final String STORE_RESERVATION_FAMILY = STORE_RESERVATION_ROOT + "/**";
@@ -158,7 +160,8 @@ public class ReservationSecurityConfig {
                         CONSUMER_WAITING_AVAILABILITY,
                         CONSUMER_WAITING_LOCATION_PROOF,
                         CONSUMER_WAITING_ME_ROOT,
-                        CONSUMER_WAITING_ME_FAMILY)
+                        CONSUMER_WAITING_ME_FAMILY,
+                        CONSUMER_WAITING_INVITATION_ACCEPTANCE)
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -180,6 +183,19 @@ public class ReservationSecurityConfig {
                                 CONSUMER_WAITING_ME_ROOT + "/current").authenticated()
                         .requestMatchers(HttpMethod.POST,
                                 CONSUMER_WAITING_ME_ROOT + "/*/cancellations").authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_ME_ROOT + "/*/invitations").authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_ME_ROOT + "/*/invitations/*/revocations")
+                        .authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_ME_ROOT + "/*/membership-departures")
+                        .authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_ME_ROOT + "/*/memberships/*/removals")
+                        .authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_INVITATION_ACCEPTANCE).authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint(new JwtAuthenticationEntryPoint(objectMapper))

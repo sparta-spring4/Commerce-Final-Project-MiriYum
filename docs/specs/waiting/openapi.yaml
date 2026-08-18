@@ -508,6 +508,137 @@ paths:
           $ref: "#/components/responses/WaitingConsumerCancelConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/consumers/me/waiting-teams/{teamId}/invitations:
+    post:
+      tags: [Consumer Waiting]
+      summary: 일행 초대 발급
+      operationId: issueWaitingPartyInvitation
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingExpectedVersionRequest" }
+      responses:
+        "200":
+          description: 새 초대 또는 멱등 재생
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingInvitationSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations:
+    post:
+      tags: [Consumer Waiting]
+      summary: 일행 초대 철회
+      operationId: revokeWaitingPartyInvitation
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "#/components/parameters/InvitationId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingExpectedVersionRequest" }
+      responses:
+        "200":
+          description: 철회된 초대
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingInvitationSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-invitation-acceptances:
+    post:
+      tags: [Consumer Waiting]
+      summary: 일행 초대 수락
+      operationId: acceptWaitingPartyInvitation
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingInvitationAcceptanceRequest" }
+      responses:
+        "200":
+          description: 참여한 기존 팀 snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingConsumerSnapshotSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCreateConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-teams/{teamId}/membership-departures:
+    post:
+      tags: [Consumer Waiting]
+      summary: 일행 구성원 이탈
+      operationId: departWaitingPartyMembership
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingExpectedVersionRequest" }
+      responses:
+        "200":
+          description: 이탈 후 팀 snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingConsumerSnapshotSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals:
+    post:
+      tags: [Consumer Waiting]
+      summary: 대표자의 일행 구성원 제거
+      operationId: removeWaitingPartyMembership
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "#/components/parameters/MembershipId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingExpectedVersionRequest" }
+      responses:
+        "200":
+          description: 제거 후 팀 snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingConsumerSnapshotSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
 components:
   securitySchemes:
     bearerAuth:
@@ -527,6 +658,21 @@ components:
       description: 조회하거나 전이할 웨이팅 팀의 공개 문자열 ID
       schema:
         $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+    PartyTeamId:
+      name: teamId
+      in: path
+      required: true
+      schema: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+    InvitationId:
+      name: invitationId
+      in: path
+      required: true
+      schema: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+    MembershipId:
+      name: membershipId
+      in: path
+      required: true
+      schema: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
     WaitingCloseJobId:
       name: jobId
       in: path
@@ -843,6 +989,7 @@ components:
         - arrivedAt
         - cancelledAt
         - version
+        - memberships
       properties:
         waitingTeamId:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
@@ -882,6 +1029,46 @@ components:
           type: integer
           format: int64
           minimum: 0
+        memberships:
+          type: array
+          items: { $ref: "#/components/schemas/WaitingPartyMember" }
+    WaitingExpectedVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion: { type: integer, format: int64, minimum: 0 }
+    WaitingInvitationAcceptanceRequest:
+      type: object
+      additionalProperties: false
+      required: [invitationCode]
+      properties:
+        invitationCode: { type: string, minLength: 1, maxLength: 128 }
+    WaitingPartyMember:
+      type: object
+      additionalProperties: false
+      required: [membershipId, role, joinedAt, self]
+      properties:
+        membershipId: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+        role: { type: string, enum: [REPRESENTATIVE, MEMBER] }
+        joinedAt: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime" }
+        self: { type: boolean }
+    WaitingInvitation:
+      type: object
+      additionalProperties: false
+      required: [invitationId, expiresAt, invitationCode]
+      properties:
+        invitationId: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+        expiresAt: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime" }
+        invitationCode: { type: [string, "null"], description: 신규 발급 응답에서만 반환 }
+    WaitingInvitationSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code: { type: string, const: SUCCESS }
+        message: { type: string }
+        data: { $ref: "#/components/schemas/WaitingInvitation" }
     WaitingTeamListItem:
       type: object
       additionalProperties: false

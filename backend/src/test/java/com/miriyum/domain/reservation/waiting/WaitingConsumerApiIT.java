@@ -178,6 +178,10 @@ class WaitingConsumerApiIT {
         var first = consumerCommandFacade.create(
                 fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, proofId, createKey);
         long teamId = Long.parseLong(first.data().waitingTeamId());
+        assertThat(first.data().memberships()).singleElement().satisfies(member -> {
+            assertThat(member.role().name()).isEqualTo("REPRESENTATIVE");
+            assertThat(member.self()).isTrue();
+        });
         operatorCommandFacade.call(
                 fixture.operatorId(), fixture.firstStoreId(), teamId, key(31),
                 new WaitingTeamTransitionRequest(0L));

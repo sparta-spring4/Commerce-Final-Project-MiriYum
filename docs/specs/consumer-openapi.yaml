@@ -56,6 +56,16 @@ paths:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1current"
   /api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{waitingTeamId}~1cancellations"
+  /api/v1/consumers/me/waiting-invitation-acceptances:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-invitation-acceptances"
+  /api/v1/consumers/me/waiting-teams/{teamId}/invitations:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1invitations"
+  /api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1invitations~1{invitationId}~1revocations"
+  /api/v1/consumers/me/waiting-teams/{teamId}/membership-departures:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1membership-departures"
+  /api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1memberships~1{membershipId}~1removals"
   /api/v1/consumers/me/reservations:
     $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations"
   /api/v1/consumers/me/reservations/{reservationId}:

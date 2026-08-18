@@ -236,7 +236,6 @@ class WaitingMigrationTest {
                 "waiting_location_proof_sessions.consumer_account_id->consumer_accounts.consumer_account_id",
                 "waiting_location_proof_sessions.store_id->stores.store_id",
                 "waiting_party_audits.actor_consumer_account_id->consumer_accounts.consumer_account_id",
-                "waiting_party_audits.subject_membership_id->waiting_active_memberships.waiting_active_membership_id",
                 "waiting_party_audits.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_party_invitations.accepted_by_consumer_account_id->consumer_accounts.consumer_account_id",
                 "waiting_party_invitations.inviter_consumer_account_id->consumer_accounts.consumer_account_id",

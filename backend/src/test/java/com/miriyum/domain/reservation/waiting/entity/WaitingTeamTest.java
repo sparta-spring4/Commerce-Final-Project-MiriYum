@@ -59,6 +59,21 @@ class WaitingTeamTest {
     }
 
     @Test
+    void partyCompositionChangesOnlyWhileWaitingAndIncrementsVersionOnce() {
+        WaitingTeam team = newTeam();
+
+        team.partyChanged(0L);
+
+        assertThat(team.getVersion()).isOne();
+        team.call(1L, CALLED_AT);
+        assertThatThrownBy(() -> team.partyChanged(2L))
+                .isInstanceOfSatisfying(ServiceException.class, failure ->
+                        assertThat(failure.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.PARTY_MUTATION_NOT_ALLOWED));
+        assertThat(team.getVersion()).isEqualTo(2L);
+    }
+
+    @Test
     @DisplayName("매장 영업일 순번 행은 현재 순번을 반환한 뒤 단조 증가한다")
     void allocatesMonotonicStoreBusinessDateSequence() {
         // given

@@ -22,12 +22,16 @@ import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingReceptionAvailability;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.dto.WaitingLocationProofContracts.Snapshot;
+import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.InvitationCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.InvitationSnapshot;
+import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.PartyCommandResult;
 import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession.AccuracyCategory;
 import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession.ResultCategory;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerCommandFacade;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerQueryService;
 import com.miriyum.domain.reservation.waiting.service.WaitingLocationProofService;
+import com.miriyum.domain.reservation.waiting.service.WaitingPartyService;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import java.time.Instant;
@@ -55,6 +59,7 @@ class WaitingConsumerControllerTest {
     @MockitoBean WaitingConsumerQueryService queryService;
     @MockitoBean WaitingConsumerCommandFacade commandFacade;
     @MockitoBean WaitingLocationProofService locationProofService;
+    @MockitoBean WaitingPartyService partyService;
     @MockitoBean JwtTokenProvider jwtTokenProvider;
 
     @Test
@@ -190,6 +195,53 @@ class WaitingConsumerControllerTest {
                 .andExpect(jsonPath("$.code").value("AUTH_004"));
 
         then(locationProofService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void consumerCanIssueAndAcceptPartyInvitationThroughIdempotentRoutes() throws Exception {
+        authenticateConsumer(200L);
+        given(partyService.issueInvitation(eq(200L), eq(300L), any(), any()))
+                .willReturn(new InvitationCommandResult(200, new InvitationSnapshot(
+                        "701", Instant.parse("2026-08-19T03:15:00Z"), "fresh-code")));
+        WaitingConsumerSnapshot joined = snapshot(WaitingTeamStatus.WAITING, 1L);
+        given(partyService.acceptInvitation(eq(200L), any(), any()))
+                .willReturn(new PartyCommandResult(200, joined));
+
+        mockMvc.perform(post("/api/v1/consumers/me/waiting-teams/300/invitations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\":0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.invitationId").value("701"))
+                .andExpect(jsonPath("$.data.invitationCode").value("fresh-code"));
+
+        mockMvc.perform(post("/api/v1/consumers/me/waiting-invitation-acceptances")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"invitationCode\":\"fresh-code\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.waitingTeamId").value("300"));
+    }
+
+    @Test
+    void partyMutationRoutesRequireConsumerAuthenticationAndIdempotency() throws Exception {
+        mockMvc.perform(post("/api/v1/consumers/me/waiting-teams/300/membership-departures")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\":0}"))
+                .andExpect(status().isUnauthorized());
+
+        authenticateConsumer(200L);
+        mockMvc.perform(post("/api/v1/consumers/me/waiting-teams/300/memberships/402/removals")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\":0}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_003"));
+
+        then(partyService).shouldHaveNoInteractions();
     }
 
     @Test

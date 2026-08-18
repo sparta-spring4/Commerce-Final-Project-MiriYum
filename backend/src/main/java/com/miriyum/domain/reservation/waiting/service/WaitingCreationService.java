@@ -217,7 +217,7 @@ public class WaitingCreationService {
         Instant occurredAt = clock.instant();
         IdempotentOutcome outcome = executeWithRetry(() -> createInTransaction(
                 storeId, consumerAccountId, businessDate, partySize, source, command, occurredAt,
-                this::consumerSnapshot,
+                team -> consumerSnapshot(team, consumerAccountId),
                 locationProofSessionId));
         return new WaitingConsumerCommandResult(outcome.httpStatus(),
                 objectMapper.treeToValue(outcome.data(), WaitingConsumerSnapshot.class));
@@ -270,10 +270,12 @@ public class WaitingCreationService {
         });
     }
 
-    private WaitingConsumerSnapshot consumerSnapshot(WaitingTeam team) {
+    private WaitingConsumerSnapshot consumerSnapshot(WaitingTeam team, long viewerAccountId) {
         long teamsAhead = teamRepository.countActiveAhead(
                 team.getStoreId(), team.getBusinessDate(), team.getQueueSequence());
-        return WaitingConsumerSnapshot.from(team, teamsAhead);
+        return WaitingConsumerSnapshot.from(team, teamsAhead,
+                membershipRepository.findAllByWaitingTeamIdOrderById(team.getId()),
+                viewerAccountId);
     }
 
     private static IdempotencyCommand createCommand(
