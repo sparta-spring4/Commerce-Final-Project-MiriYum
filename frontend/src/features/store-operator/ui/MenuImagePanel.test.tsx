@@ -204,6 +204,48 @@ describe('메뉴 대표 이미지 패널', () => {
     expect(screen.queryByRole('button', { name: '다시 업로드' })).not.toBeInTheDocument()
   })
 
+  it('삭제·업로드 응답이 유실된 뒤 새 삭제 멱등 키를 발급한다', async () => {
+    const deleteKeys: string[] = []
+    let deleteAttempts = 0
+    let uploadAttempts = 0
+    server.use(
+      authenticatedOperator(),
+      http.delete(IMAGE_PATH, ({ request }) => {
+        deleteKeys.push(request.headers.get('idempotency-key') ?? '')
+        deleteAttempts += 1
+        return deleteAttempts === 1
+          ? HttpResponse.error()
+          : new HttpResponse(null, { status: 204 })
+      }),
+      http.put(IMAGE_PATH, () => {
+        uploadAttempts += 1
+        return uploadAttempts === 1
+          ? HttpResponse.error()
+          : HttpResponse.json({
+              code: 'SUCCESS',
+              message: '업로드했습니다.',
+              data: { url: 'https://cdn.example/menu-11.webp' },
+            })
+      }),
+    )
+
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: '이미지 삭제' }))
+    await screen.findByText(
+      '서버에 연결하지 못했습니다. 처리 여부가 확정되지 않았으니 상태를 다시 확인해 주세요.',
+    )
+
+    const file = new File(['image'], 'menu.webp', { type: 'image/webp' })
+    fireEvent.change(screen.getByLabelText('이미지 등록'), {
+      target: { files: [file] },
+    })
+    await screen.findByRole('button', { name: '다시 업로드' })
+    fireEvent.click(screen.getByRole('button', { name: '이미지 삭제' }))
+
+    await waitFor(() => expect(deleteKeys).toHaveLength(2))
+    expect(deleteKeys[0]).not.toBe(deleteKeys[1])
+  })
+
   it('업로드 중에는 파일 입력과 삭제를 잠근다', async () => {
     let releaseUpload!: () => void
     server.use(

@@ -44,6 +44,8 @@ export function MenuImagePanel({
   }
 
   async function uploadFile(file: File) {
+    // 새 업로드는 이전 삭제 시도의 결과를 재사용하면 안 된다.
+    deleteKey.current = null
     try {
       const url = await upload.mutateAsync({
         file,
