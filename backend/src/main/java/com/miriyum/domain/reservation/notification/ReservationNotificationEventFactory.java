@@ -48,6 +48,38 @@ public class ReservationNotificationEventFactory {
         );
     }
 
+    public NotificationSourceEventV1 visitCompleted(
+            Reservation reservation,
+            Instant occurredAt,
+            String correlationId
+    ) {
+        requireState(reservation, ReservationStatus.FULFILLED);
+        return event(
+                reservation,
+                "visit-completed",
+                NotificationPurpose.RESERVATION_VISIT_COMPLETED,
+                2L,
+                occurredAt,
+                correlationId
+        );
+    }
+
+    public NotificationSourceEventV1 noShow(
+            Reservation reservation,
+            Instant occurredAt,
+            String correlationId
+    ) {
+        requireState(reservation, ReservationStatus.NO_SHOW);
+        return event(
+                reservation,
+                "no-show",
+                NotificationPurpose.RESERVATION_NO_SHOW,
+                2L,
+                occurredAt,
+                correlationId
+        );
+    }
+
     private static NotificationSourceEventV1 event(
             Reservation reservation,
             String eventName,
