@@ -1,7 +1,7 @@
 package com.miriyum.domain.reservation.waiting.service;
 
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
-import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.global.exception.CommonErrorCode;
@@ -72,7 +72,7 @@ public class WaitingConsumerCommandFacade {
         this.retrySleeper = Objects.requireNonNull(retrySleeper);
     }
 
-    public WaitingCommandResult create(
+    public WaitingConsumerCommandResult create(
             long storeId,
             long consumerAccountId,
             LocalDate businessDate,
@@ -82,7 +82,7 @@ public class WaitingConsumerCommandFacade {
         Objects.requireNonNull(businessDate, "businessDate must not be null");
         Objects.requireNonNull(key, "key must not be null");
         accountService.requireActiveAccount(consumerAccountId);
-        return creationService.create(
+        return creationService.createForConsumer(
                 storeId,
                 consumerAccountId,
                 businessDate,
@@ -91,7 +91,7 @@ public class WaitingConsumerCommandFacade {
                 key);
     }
 
-    public WaitingCommandResult cancel(
+    public WaitingConsumerCommandResult cancel(
             long consumerAccountId,
             long waitingTeamId,
             IdempotencyKey key,

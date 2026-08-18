@@ -1,9 +1,11 @@
 package com.miriyum.domain.reservation.waiting.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.lenient;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -14,10 +16,9 @@ import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.reservation.config.ReservationSecurityConfig;
 import com.miriyum.domain.reservation.waiting.controller.consumer.WaitingConsumerController;
-import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingReceptionAvailability;
-import com.miriyum.domain.reservation.waiting.dto.WaitingTeamSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerCommandFacade;
@@ -34,6 +35,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 @WebMvcTest(WaitingConsumerController.class)
 @Import({ReservationSecurityConfig.class, GlobalExceptionHandler.class})
@@ -56,13 +58,12 @@ class WaitingConsumerControllerTest {
         given(commandFacade.create(
                 eq(100L), eq(200L), eq(LocalDate.of(2026, 8, 17)), eq(2),
                 argThat(key -> KEY.equals(key.value()))))
-                .willReturn(new WaitingCommandResult(200, teamSnapshot()));
-        given(queryService.getOwned(200L, 300L)).willReturn(waiting, cancelled);
+                .willReturn(new WaitingConsumerCommandResult(200, waiting));
         given(queryService.getCurrent(200L)).willReturn(waiting);
         given(commandFacade.cancel(
                 eq(200L), eq(300L), argThat(key -> KEY.equals(key.value())),
                 eq(new WaitingTeamTransitionRequest(0L))))
-                .willReturn(new WaitingCommandResult(200, teamSnapshot()));
+                .willReturn(new WaitingConsumerCommandResult(200, cancelled));
 
         mockMvc.perform(get("/api/v1/consumers/me/stores/100/waiting-availabilities")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
@@ -137,6 +138,70 @@ class WaitingConsumerControllerTest {
         then(queryService).shouldHaveNoInteractions();
     }
 
+    @Test
+    void createReplayReturnsTheExactFirstHttpBodyWithoutASecondSnapshotQuery() throws Exception {
+        authenticateConsumer(200L);
+        WaitingConsumerSnapshot firstSnapshot = snapshot(WaitingTeamStatus.WAITING, 0L);
+        given(commandFacade.create(
+                eq(100L), eq(200L), eq(LocalDate.of(2026, 8, 17)), eq(2),
+                argThat(key -> KEY.equals(key.value()))))
+                .willReturn(new WaitingConsumerCommandResult(200, firstSnapshot));
+
+        MvcResult first = performCreate();
+        MvcResult replay = performCreate();
+
+        assertThat(replay.getResponse().getStatus())
+                .isEqualTo(first.getResponse().getStatus());
+        assertThat(replay.getResponse().getContentAsString())
+                .isEqualTo(first.getResponse().getContentAsString());
+    }
+
+    @Test
+    void cancellationReplayReturnsTheExactFirstHttpBodyAfterTheQueueChanges() throws Exception {
+        authenticateConsumer(200L);
+        WaitingConsumerSnapshot firstSnapshot = snapshot(WaitingTeamStatus.CANCELLED, 1L);
+        WaitingConsumerSnapshot recalculatedSnapshot = new WaitingConsumerSnapshot(
+                "300", "100", LocalDate.of(2026, 8, 17), WaitingTeamStatus.CANCELLED,
+                3L, 0L, 2, Instant.parse("2026-08-17T00:00:00Z"), null, null, null,
+                Instant.parse("2026-08-17T00:01:00Z"), 1L);
+        given(commandFacade.cancel(
+                eq(200L), eq(300L), argThat(key -> KEY.equals(key.value())),
+                eq(new WaitingTeamTransitionRequest(0L))))
+                .willReturn(new WaitingConsumerCommandResult(200, firstSnapshot));
+        lenient().when(queryService.getOwned(200L, 300L))
+                .thenReturn(firstSnapshot, recalculatedSnapshot);
+
+        MvcResult first = performCancel();
+        MvcResult replay = performCancel();
+
+        assertThat(replay.getResponse().getStatus())
+                .isEqualTo(first.getResponse().getStatus());
+        assertThat(replay.getResponse().getContentAsString())
+                .isEqualTo(first.getResponse().getContentAsString());
+    }
+
+    private MvcResult performCreate() throws Exception {
+        return mockMvc.perform(post("/api/v1/consumers/me/stores/100/waiting-teams")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"businessDate":"2026-08-17","partySize":2}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+    }
+
+    private MvcResult performCancel() throws Exception {
+        return mockMvc.perform(post("/api/v1/consumers/me/waiting-teams/300/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\":0}"))
+                .andExpect(status().isOk())
+                .andReturn();
+    }
+
     private void authenticateConsumer(long accountId) {
         given(jwtTokenProvider.parseAccessToken("consumer-token"))
                 .willReturn(new ParsedToken(TokenNamespace.CONSUMER, accountId));
@@ -151,9 +216,4 @@ class WaitingConsumerControllerTest {
                 version);
     }
 
-    private static WaitingTeamSnapshot teamSnapshot() {
-        return new WaitingTeamSnapshot(
-                "300", "100", WaitingTeamStatus.WAITING, 3L, 2,
-                Instant.parse("2026-08-17T00:00:00Z"), null, null, null, null, 0L);
-    }
 }

@@ -1,7 +1,7 @@
 package com.miriyum.domain.reservation.waiting.controller.consumer;
 
 import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
-import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCreateRequest;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingReceptionAvailability;
@@ -50,16 +50,14 @@ public class WaitingConsumerController {
             @Valid @RequestBody WaitingConsumerCreateRequest request
     ) {
         IdempotencyKey key = IdempotencyKey.parse(rawKey);
-        WaitingCommandResult result = commandFacade.create(
+        WaitingConsumerCommandResult result = commandFacade.create(
                 storeId,
                 principal.accountId(),
                 request.businessDate(),
                 request.partySize(),
                 key);
-        WaitingConsumerSnapshot snapshot = queryService.getOwned(
-                principal.accountId(), Long.parseLong(result.data().waitingTeamId()));
         return ResponseEntity.status(result.httpStatus())
-                .body(ApiResponse.success("웨이팅을 등록했습니다.", snapshot));
+                .body(ApiResponse.success("웨이팅을 등록했습니다.", result.data()));
     }
 
     @GetMapping("/waiting-teams/current")
@@ -78,11 +76,9 @@ public class WaitingConsumerController {
             @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
             @Valid @RequestBody WaitingTeamTransitionRequest request
     ) {
-        WaitingCommandResult result = commandFacade.cancel(
+        WaitingConsumerCommandResult result = commandFacade.cancel(
                 principal.accountId(), waitingTeamId, IdempotencyKey.parse(rawKey), request);
-        WaitingConsumerSnapshot snapshot = queryService.getOwned(
-                principal.accountId(), Long.parseLong(result.data().waitingTeamId()));
         return ResponseEntity.status(result.httpStatus())
-                .body(ApiResponse.success("웨이팅을 취소했습니다.", snapshot));
+                .body(ApiResponse.success("웨이팅을 취소했습니다.", result.data()));
     }
 }

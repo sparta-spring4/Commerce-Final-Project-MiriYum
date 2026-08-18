@@ -20,6 +20,7 @@ import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
+import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
@@ -53,6 +54,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 @Testcontainers
 @Tag("integration")
@@ -95,6 +98,7 @@ class WaitingConsumerApiIT {
     @Autowired StoreRepository stores;
     @Autowired StoreOperatorAccountRepository operators;
     @Autowired JdbcTemplate jdbc;
+    @Autowired ObjectMapper objectMapper;
     @MockitoBean WaitingOperatingIntervalPort intervalPort;
 
     @BeforeEach
@@ -137,9 +141,9 @@ class WaitingConsumerApiIT {
                         assertThat(failure.getErrorCode())
                                 .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
 
-        WaitingCommandResult cancelled = consumerCommandFacade.cancel(
+        var cancelled = consumerCommandFacade.cancel(
                 fixture.consumerId(), teamId, key(2), new WaitingTeamTransitionRequest(0L));
-        WaitingCommandResult cancelReplay = consumerCommandFacade.cancel(
+        var cancelReplay = consumerCommandFacade.cancel(
                 fixture.consumerId(), teamId, key(2), new WaitingTeamTransitionRequest(0L));
 
         assertThat(cancelReplay).isEqualTo(cancelled);
@@ -150,6 +154,75 @@ class WaitingConsumerApiIT {
                 SELECT COUNT(*) FROM waiting_transition_audits
                  WHERE waiting_team_id=? AND actor_type='CONSUMER' AND after_status='CANCELLED'
                 """, Long.class, teamId)).isOne();
+    }
+
+    @Test
+    void registrationReplayKeepsTheFirstConsumerSnapshotAfterTheTeamChanges() {
+        Fixture fixture = fixture();
+        IdempotencyKey createKey = key(30);
+
+        var first = consumerCommandFacade.create(
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, createKey);
+        long teamId = Long.parseLong(first.data().waitingTeamId());
+        operatorCommandFacade.call(
+                fixture.operatorId(), fixture.firstStoreId(), teamId, key(31),
+                new WaitingTeamTransitionRequest(0L));
+        var replay = consumerCommandFacade.create(
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, createKey);
+
+        JsonNode firstData = objectMapper.valueToTree(first.data());
+        JsonNode replayData = objectMapper.valueToTree(replay.data());
+        assertThat(replay.httpStatus()).isEqualTo(first.httpStatus());
+        assertThat(replayData).isEqualTo(firstData);
+        assertThat(firstData.path("businessDate").asText()).isEqualTo("2026-08-17");
+        assertThat(firstData.path("status").asText()).isEqualTo("WAITING");
+        assertThat(firstData.path("teamsAhead").asLong()).isZero();
+        assertThat(firstData.path("version").asLong()).isZero();
+        assertThat(teams.findById(teamId).orElseThrow().getStatus())
+                .isEqualTo(WaitingTeamStatus.CALLED);
+    }
+
+    @Test
+    void cancellationReplayKeepsTeamsAheadFromTheFirstResponseAfterTheQueueChanges() {
+        Fixture fixture = fixture();
+        long aheadConsumerId = createConsumer();
+        var ahead = consumerCommandFacade.create(
+                fixture.firstStoreId(), aheadConsumerId, BUSINESS_DATE, 2, key(40));
+        var target = consumerCommandFacade.create(
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, key(41));
+        long aheadTeamId = Long.parseLong(ahead.data().waitingTeamId());
+        long targetTeamId = Long.parseLong(target.data().waitingTeamId());
+        IdempotencyKey cancelKey = key(42);
+
+        var first = consumerCommandFacade.cancel(
+                fixture.consumerId(), targetTeamId, cancelKey,
+                new WaitingTeamTransitionRequest(0L));
+        consumerCommandFacade.cancel(
+                aheadConsumerId, aheadTeamId, key(43),
+                new WaitingTeamTransitionRequest(0L));
+        var replay = consumerCommandFacade.cancel(
+                fixture.consumerId(), targetTeamId, cancelKey,
+                new WaitingTeamTransitionRequest(0L));
+
+        JsonNode firstData = objectMapper.valueToTree(first.data());
+        JsonNode replayData = objectMapper.valueToTree(replay.data());
+        assertThat(replay.httpStatus()).isEqualTo(first.httpStatus());
+        assertThat(replayData).isEqualTo(firstData);
+        assertThat(firstData.path("status").asText()).isEqualTo("CANCELLED");
+        assertThat(firstData.path("teamsAhead").asLong()).isOne();
+        assertThat(teams.countActiveAhead(
+                fixture.firstStoreId(), BUSINESS_DATE, target.data().queueSequence())).isZero();
+    }
+
+    @Test
+    void availabilityRejectsAnUnknownStoreWithTheDocumentedCode() {
+        Fixture fixture = fixture();
+
+        assertThatThrownBy(() -> consumerQueryService.getAvailability(
+                fixture.consumerId(), Long.MAX_VALUE))
+                .isInstanceOfSatisfying(ServiceException.class, failure ->
+                        assertThat(failure.getErrorCode())
+                                .isEqualTo(StoreErrorCode.STORE_NOT_FOUND));
     }
 
     @Test
@@ -200,7 +273,7 @@ class WaitingConsumerApiIT {
                 WaitingSource.REMOTE, key(20));
         long teamId = Long.parseLong(created.data().waitingTeamId());
 
-        List<Attempt<WaitingCommandResult>> attempts = runTogether(2, index -> index == 0
+        List<Attempt<Object>> attempts = this.<Object>runTogether(2, index -> index == 0
                 ? consumerCommandFacade.cancel(
                         fixture.consumerId(), teamId, key(21), new WaitingTeamTransitionRequest(0L))
                 : operatorCommandFacade.call(

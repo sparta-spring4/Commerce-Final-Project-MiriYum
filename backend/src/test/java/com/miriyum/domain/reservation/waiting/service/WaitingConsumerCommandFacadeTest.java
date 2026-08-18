@@ -9,8 +9,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
-import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
-import com.miriyum.domain.reservation.waiting.dto.WaitingTeamSnapshot;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -32,9 +32,9 @@ class WaitingConsumerCommandFacadeTest {
         WaitingLedgerService ledger = mock(WaitingLedgerService.class);
         IdempotencyKey key = IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440200");
         LocalDate businessDate = LocalDate.of(2026, 8, 17);
-        WaitingCommandResult expected = new WaitingCommandResult(
-                200, mock(WaitingTeamSnapshot.class));
-        when(creation.create(100L, 200L, businessDate, 2, WaitingSource.REMOTE, key))
+        WaitingConsumerCommandResult expected = new WaitingConsumerCommandResult(
+                200, mock(WaitingConsumerSnapshot.class));
+        when(creation.createForConsumer(100L, 200L, businessDate, 2, WaitingSource.REMOTE, key))
                 .thenReturn(expected);
         WaitingConsumerCommandFacade facade = new WaitingConsumerCommandFacade(
                 accounts,
@@ -44,12 +44,13 @@ class WaitingConsumerCommandFacadeTest {
                 attempt -> 0L,
                 millis -> { });
 
-        WaitingCommandResult result = facade.create(100L, 200L, businessDate, 2, key);
+        WaitingConsumerCommandResult result = facade.create(100L, 200L, businessDate, 2, key);
 
         assertThat(result).isSameAs(expected);
         InOrder order = inOrder(accounts, creation);
         order.verify(accounts).requireActiveAccount(200L);
-        order.verify(creation).create(100L, 200L, businessDate, 2, WaitingSource.REMOTE, key);
+        order.verify(creation).createForConsumer(
+                100L, 200L, businessDate, 2, WaitingSource.REMOTE, key);
     }
 
     @Test
@@ -58,8 +59,8 @@ class WaitingConsumerCommandFacadeTest {
         WaitingCreationService creation = mock(WaitingCreationService.class);
         WaitingLedgerService ledger = mock(WaitingLedgerService.class);
         Instant now = Instant.parse("2026-08-17T03:00:00Z");
-        WaitingCommandResult expected = new WaitingCommandResult(
-                200, mock(WaitingTeamSnapshot.class));
+        WaitingConsumerCommandResult expected = new WaitingConsumerCommandResult(
+                200, mock(WaitingConsumerSnapshot.class));
         when(ledger.cancelByConsumer(
                 eq(200L), eq(300L), eq(4L), any(IdempotencyCommand.class), eq(now)))
                 .thenReturn(expected);
@@ -71,7 +72,7 @@ class WaitingConsumerCommandFacadeTest {
                 attempt -> 0L,
                 millis -> { });
 
-        WaitingCommandResult result = facade.cancel(
+        WaitingConsumerCommandResult result = facade.cancel(
                 200L,
                 300L,
                 IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440201"),

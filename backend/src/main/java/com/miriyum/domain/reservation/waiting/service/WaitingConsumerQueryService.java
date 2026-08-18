@@ -8,6 +8,7 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingActiveMembership;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
+import com.miriyum.domain.store.service.StoreAdministrationService;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.util.Objects;
@@ -22,6 +23,7 @@ public class WaitingConsumerQueryService {
     private final WaitingActiveMembershipRepository membershipRepository;
     private final WaitingTeamRepository teamRepository;
     private final WaitingReceptionGate receptionGate;
+    private final StoreAdministrationService storeAdministrationService;
     private final Clock clock;
 
     public WaitingConsumerQueryService(
@@ -29,12 +31,14 @@ public class WaitingConsumerQueryService {
             WaitingActiveMembershipRepository membershipRepository,
             WaitingTeamRepository teamRepository,
             WaitingReceptionGate receptionGate,
+            StoreAdministrationService storeAdministrationService,
             Clock clock
     ) {
         this.accountService = Objects.requireNonNull(accountService);
         this.membershipRepository = Objects.requireNonNull(membershipRepository);
         this.teamRepository = Objects.requireNonNull(teamRepository);
         this.receptionGate = Objects.requireNonNull(receptionGate);
+        this.storeAdministrationService = Objects.requireNonNull(storeAdministrationService);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -44,6 +48,7 @@ public class WaitingConsumerQueryService {
             long storeId
     ) {
         accountService.requireActiveAccount(consumerAccountId);
+        storeAdministrationService.requireStoreExists(storeId);
         return receptionGate.inspect(storeId, clock.instant());
     }
 

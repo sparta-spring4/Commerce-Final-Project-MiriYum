@@ -482,6 +482,11 @@ version CAS는 Issue #380이 별도로 소유한다.
 사이에 설정이나 영업 구간이 닫힐 수 있으므로 등록 트랜잭션은 Store/Schedule 접수 게이트를
 다시 잠그고 검사하며, 닫힌 경우 어떤 팀·membership·감사·상태 사건도 기록하지 않는다.
 
+availability는 Waiting 설정 유무를 접수 가능 여부로 해석하기 전에 Store 존재를 확인한다. 없는
+매장은 `404 STORE_001`, 설정이 없거나 접수가 닫힌 기존 매장은 `200 accepting=false`다. 등록의
+Store 잠금 검증은 운영 상태 `STORE_005`, 입점 검증 `STORE_007`, Waiting 기능 제재
+`STORE_015`를 각각 원래 HTTP 상태와 코드로 반환한다.
+
 활성 membership은 계정당 하나뿐이다. 서로 다른 매장을 향한 병렬 등록도 DB unique 제약과
 bounded retry를 거쳐 하나만 성공하고 나머지는 `409 WAITING_011`이다. 소비자 취소와 운영자
 call/cancel이 같은 version으로 경합하면 팀 row lock에서 먼저 확정된 전이만 성공하며 나머지는

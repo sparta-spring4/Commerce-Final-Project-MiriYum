@@ -369,11 +369,9 @@ paths:
         "401":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+          $ref: "#/components/responses/WaitingConsumerAccountForbidden"
         "404":
-          $ref: "#/components/responses/WaitingLedgerNotFound"
-        "409":
-          $ref: "#/components/responses/WaitingConsumerConflict"
+          $ref: "#/components/responses/WaitingConsumerStoreNotFound"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/consumers/me/stores/{storeId}/waiting-teams:
@@ -404,11 +402,11 @@ paths:
         "401":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+          $ref: "#/components/responses/WaitingConsumerCreateForbidden"
         "404":
-          $ref: "#/components/responses/WaitingLedgerNotFound"
+          $ref: "#/components/responses/WaitingConsumerStoreNotFound"
         "409":
-          $ref: "#/components/responses/WaitingConsumerConflict"
+          $ref: "#/components/responses/WaitingConsumerCreateConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/consumers/me/waiting-teams/current:
@@ -425,16 +423,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WaitingConsumerSnapshotSuccessResponse"
-        "400":
-          $ref: "#/components/responses/WaitingLedgerBadRequest"
         "401":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+          $ref: "#/components/responses/WaitingConsumerAccountForbidden"
         "404":
-          $ref: "#/components/responses/WaitingLedgerNotFound"
-        "409":
-          $ref: "#/components/responses/WaitingConsumerConflict"
+          $ref: "#/components/responses/WaitingConsumerTeamNotFound"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations:
@@ -465,11 +459,11 @@ paths:
         "401":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+          $ref: "#/components/responses/WaitingConsumerAccountForbidden"
         "404":
-          $ref: "#/components/responses/WaitingLedgerNotFound"
+          $ref: "#/components/responses/WaitingConsumerTeamNotFound"
         "409":
-          $ref: "#/components/responses/WaitingConsumerConflict"
+          $ref: "#/components/responses/WaitingConsumerCancelConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
 components:
@@ -1149,8 +1143,81 @@ components:
               value:
                 code: COMMON_008
                 message: 동시 요청 충돌로 처리하지 못했습니다. 다시 시도해 주세요.
-    WaitingConsumerConflict:
-      description: 접수 상태, 단일 활성 웨이팅, 팀 버전·상태, 멱등성 또는 동시 요청 충돌
+    WaitingConsumerStoreNotFound:
+      description: 대상 매장을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_001
+            message: 매장을 찾을 수 없습니다.
+    WaitingConsumerTeamNotFound:
+      description: 본인 소유 웨이팅 팀을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: WAITING_003
+            message: 웨이팅 팀을 찾을 수 없습니다.
+    WaitingConsumerAccountForbidden:
+      description: 현재 소비자 계정 상태가 이용을 허용하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_011
+            message: 현재 계정 상태로는 이용할 수 없습니다.
+    WaitingConsumerCreateForbidden:
+      description: 소비자 계정이 제한됐거나 매장 웨이팅 기능이 제재로 제한됨
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            accountRestricted:
+              value:
+                code: AUTH_011
+                message: 현재 계정 상태로는 이용할 수 없습니다.
+            waitingFeatureRestricted:
+              value:
+                code: STORE_015
+                message: 제재로 제한된 매장 기능입니다.
+    WaitingConsumerCreateConflict:
+      description: 매장·입점·접수 상태, 단일 활성 웨이팅, 멱등성 또는 동시 요청 충돌
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            storeStateConflict:
+              value:
+                code: STORE_005
+                message: 현재 매장 상태에서 요청한 작업을 수행할 수 없습니다.
+            verificationStateConflict:
+              value:
+                code: STORE_007
+                message: 현재 입점 검증 상태에서 운영할 수 없습니다.
+            accountActiveWaitingExists:
+              value:
+                code: WAITING_011
+                message: 계정에 이미 활성 웨이팅이 있습니다. 기존 웨이팅을 종료한 후 다시 시도해 주세요.
+            receptionClosed:
+              value:
+                code: WAITING_012
+                message: 현재 매장은 신규 웨이팅 접수를 받지 않습니다.
+            idempotencyKeyReused:
+              value:
+                code: COMMON_007
+                message: 동일한 Idempotency-Key를 다른 요청에 사용할 수 없습니다.
+            concurrentModification:
+              value:
+                code: COMMON_008
+                message: 동시 요청 충돌로 처리하지 못했습니다. 다시 시도해 주세요.
+    WaitingConsumerCancelConflict:
+      description: 팀 버전·상태, 활성 membership, 멱등성 또는 동시 요청 충돌
       content:
         application/json:
           schema:
@@ -1168,14 +1235,6 @@ components:
               value:
                 code: WAITING_008
                 message: 활성 웨이팅 멤버십과 요청 전제가 충돌합니다.
-            accountActiveWaitingExists:
-              value:
-                code: WAITING_011
-                message: 계정에 이미 활성 웨이팅이 있습니다. 기존 웨이팅을 종료한 후 다시 시도해 주세요.
-            receptionClosed:
-              value:
-                code: WAITING_012
-                message: 현재 매장은 신규 웨이팅 접수를 받지 않습니다.
             idempotencyKeyReused:
               value:
                 code: COMMON_007

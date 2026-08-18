@@ -15,6 +15,7 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
+import com.miriyum.domain.store.service.StoreAdministrationService;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.Instant;
@@ -31,17 +32,20 @@ class WaitingConsumerQueryServiceTest {
         WaitingActiveMembershipRepository memberships = mock(WaitingActiveMembershipRepository.class);
         WaitingTeamRepository teams = mock(WaitingTeamRepository.class);
         WaitingReceptionGate receptionGate = mock(WaitingReceptionGate.class);
+        StoreAdministrationService storeAdministration = mock(StoreAdministrationService.class);
         Instant now = Instant.parse("2026-08-17T00:00:00Z");
         WaitingReceptionAvailability expected = WaitingReceptionAvailability.open(
                 100L, LocalDate.of(2026, 8, 17));
         when(receptionGate.inspect(100L, now)).thenReturn(expected);
 
         WaitingReceptionAvailability result = new WaitingConsumerQueryService(
-                accounts, memberships, teams, receptionGate, Clock.fixed(now, ZoneOffset.UTC))
+                accounts, memberships, teams, receptionGate, storeAdministration,
+                Clock.fixed(now, ZoneOffset.UTC))
                 .getAvailability(200L, 100L);
 
         assertThat(result).isEqualTo(expected);
         verify(accounts).requireActiveAccount(200L);
+        verify(storeAdministration).requireStoreExists(100L);
         verify(receptionGate).inspect(100L, now);
     }
 
@@ -51,6 +55,7 @@ class WaitingConsumerQueryServiceTest {
         WaitingActiveMembershipRepository memberships = mock(WaitingActiveMembershipRepository.class);
         WaitingTeamRepository teams = mock(WaitingTeamRepository.class);
         WaitingReceptionGate receptionGate = mock(WaitingReceptionGate.class);
+        StoreAdministrationService storeAdministration = mock(StoreAdministrationService.class);
         WaitingActiveMembership membership = mock(WaitingActiveMembership.class);
         WaitingTeam team = waitingTeam(300L, 100L, 200L, 9L);
         when(membership.getWaitingTeamId()).thenReturn(300L);
@@ -59,7 +64,7 @@ class WaitingConsumerQueryServiceTest {
         when(teams.countActiveAhead(100L, LocalDate.of(2026, 8, 17), 9L)).thenReturn(3L);
 
         WaitingConsumerSnapshot result = new WaitingConsumerQueryService(
-                accounts, memberships, teams, receptionGate,
+                accounts, memberships, teams, receptionGate, storeAdministration,
                 Clock.fixed(Instant.parse("2026-08-17T00:00:00Z"), ZoneOffset.UTC))
                 .getCurrent(200L);
 
@@ -76,6 +81,7 @@ class WaitingConsumerQueryServiceTest {
         WaitingActiveMembershipRepository memberships = mock(WaitingActiveMembershipRepository.class);
         WaitingTeamRepository teams = mock(WaitingTeamRepository.class);
         WaitingReceptionGate receptionGate = mock(WaitingReceptionGate.class);
+        StoreAdministrationService storeAdministration = mock(StoreAdministrationService.class);
         WaitingActiveMembership membership = mock(WaitingActiveMembership.class);
         WaitingTeam other = waitingTeam(300L, 100L, 999L, 9L);
         when(membership.getWaitingTeamId()).thenReturn(300L);
@@ -83,7 +89,7 @@ class WaitingConsumerQueryServiceTest {
         when(teams.findById(300L)).thenReturn(Optional.of(other));
 
         WaitingConsumerQueryService service = new WaitingConsumerQueryService(
-                accounts, memberships, teams, receptionGate,
+                accounts, memberships, teams, receptionGate, storeAdministration,
                 Clock.fixed(Instant.parse("2026-08-17T00:00:00Z"), ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.getCurrent(200L))
