@@ -54,6 +54,10 @@ function renderSignUp() {
 
 function seedProtectedCache(queryClient: QueryClient) {
   queryClient.setQueryData(consumerAccountKeys.me(), { nickname: '이전 사용자' })
+  queryClient.setQueryData(
+    ['consumer', 'notification-history', 0],
+    { items: [{ title: '이전 사용자' }] },
+  )
   queryClient.setQueryData(reservationKeys.detail('r-1'), { storeName: '이전 사용자' })
   queryClient.setQueryData(pickupKeys.detail('p-1'), { storeName: '이전 사용자' })
 }
@@ -61,6 +65,7 @@ function seedProtectedCache(queryClient: QueryClient) {
 function protectedCache(queryClient: QueryClient) {
   return [
     queryClient.getQueryData(consumerAccountKeys.me()),
+    queryClient.getQueryData(['consumer', 'notification-history', 0]),
     queryClient.getQueryData(reservationKeys.detail('r-1')),
     queryClient.getQueryData(pickupKeys.detail('p-1')),
   ]
@@ -106,7 +111,7 @@ describe('일반 사용자 카카오 가입 완료', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: '(필수) 만 14세 이상입니다.' }))
     fireEvent.click(screen.getByRole('button', { name: '가입 완료' }))
 
-    await waitFor(() => expect(queryClient.cancelQueries).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(queryClient.cancelQueries).toHaveBeenCalledTimes(4))
     expect(screen.getByTestId('auth-status')).toHaveTextContent('unauthenticated')
     expect(screen.getByRole('heading', { name: '카카오로 가입하기' })).toBeInTheDocument()
     expect(protectedCache(queryClient)).not.toContain(undefined)
@@ -121,6 +126,11 @@ describe('일반 사용자 카카오 가입 완료', () => {
       ageConfirmed: true,
       nickname: '카카오사용자',
     })
-    expect(protectedCache(queryClient)).toEqual([undefined, undefined, undefined])
+    expect(protectedCache(queryClient)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ])
   })
 })

@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Link } from 'react-router'
 
 import { ROUTES } from '../../app/routes'
@@ -12,10 +12,11 @@ import {
 } from './notificationHistoryApi'
 import { getNotificationPurposeLabel } from './notificationPurposeLabel'
 
-const NOTIFICATION_HISTORY_QUERY_KEY = ['consumer', 'notification-history']
+const NOTIFICATION_HISTORY_QUERY_ROOT = ['consumer', 'notification-history'] as const
 
 type NotificationHistoryPageProps = {
   apiClient: ApiClient
+  sessionKey: number
 }
 
 function formatDeliveredAt(deliveredAt: string): string {
@@ -116,10 +117,15 @@ function HistoryError({
 
 export function NotificationHistoryPage({
   apiClient,
+  sessionKey,
 }: NotificationHistoryPageProps) {
   const queryClient = useQueryClient()
+  const queryKey = useMemo(
+    () => [...NOTIFICATION_HISTORY_QUERY_ROOT, sessionKey] as const,
+    [sessionKey],
+  )
   const history = useInfiniteQuery({
-    queryKey: NOTIFICATION_HISTORY_QUERY_KEY,
+    queryKey,
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam, signal }) =>
       readNotificationHistoryPage(apiClient, {
@@ -135,16 +141,16 @@ export function NotificationHistoryPage({
   useEffect(
     () => () => {
       queryClient.removeQueries({
-        queryKey: NOTIFICATION_HISTORY_QUERY_KEY,
+        queryKey,
         exact: true,
       })
     },
-    [queryClient],
+    [queryClient, queryKey],
   )
 
   const resetToNewest = () => {
     void queryClient.resetQueries({
-      queryKey: NOTIFICATION_HISTORY_QUERY_KEY,
+      queryKey,
       exact: true,
     })
   }

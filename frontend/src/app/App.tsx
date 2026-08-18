@@ -9,8 +9,10 @@ import {
   ConsumerSignInPage,
   ConsumerSignUpPage,
   RequireConsumerAuth,
+  useConsumerAuth,
 } from '../features/auth'
 import { MyPage, MyReservationsPage } from '../features/consumer-account'
+import { NotificationHistoryPage } from '../features/notification-history/NotificationHistoryPage'
 import {
   PickupCompletePage,
   PickupCreatePage,
@@ -60,6 +62,17 @@ import { NotFoundPage } from './NotFoundPage'
 import { ROUTES } from './routes'
 
 const queryClient = createQueryClient()
+
+function ConsumerNotificationHistoryRoute() {
+  const { apiClient, sessionKey } = useConsumerAuth()
+
+  return (
+    <NotificationHistoryPage
+      apiClient={apiClient}
+      sessionKey={sessionKey}
+    />
+  )
+}
 
 /**
  * 일반 사용자 셸의 provider 경계.
@@ -153,6 +166,10 @@ export default function App() {
                   <Route
                     path={ROUTES.myReservations}
                     element={<MyReservationsPage />}
+                  />
+                  <Route
+                    path={ROUTES.notificationHistory}
+                    element={<ConsumerNotificationHistoryRoute />}
                   />
                   <Route
                     path={ROUTES.reservationCreate}

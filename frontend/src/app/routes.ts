@@ -18,6 +18,7 @@ export const ROUTES = {
   consumerKakaoSignUp: '/auth/kakao/sign-up',
   myPage: '/mypage',
   myReservations: '/mypage/reservations',
+  notificationHistory: '/mypage/notifications',
   reservationCreate: '/stores/:storeId/reserve',
   reservationDetail: '/reservations/:reservationId',
   reservationComplete: '/reservations/:reservationId/complete',
