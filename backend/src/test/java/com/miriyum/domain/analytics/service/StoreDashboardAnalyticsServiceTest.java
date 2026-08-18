@@ -172,11 +172,35 @@ class StoreDashboardAnalyticsServiceTest {
                 .isEqualTo(2L);
         assertThat(noShow.metadata().definitionVersion()).isEqualTo("analytics-004-no-show-v2");
         assertThat(noShow.metadata().completeness()).isEqualTo(PARTIAL);
-        assertThat(noShow.metadata().aggregationVersion()).isEqualTo(9L);
+        assertThat(noShow.metadata().aggregationVersion()).isEqualTo(16L);
         assertThat(noShow.metadata().dataThrough()).isEqualTo(AS_OF.minusSeconds(1));
         assertThat(noShow.metadata().inputCheckpoint())
                 .isEqualTo("2fcd6f736e634ca3427ac1877c6c7c229d94fd445082e1a668384038b043ed2e");
         assertThat(noShow.metadata().corrected()).isFalse();
+    }
+
+    @Test
+    void topNoShowVersionAdvancesWhenTheSmallerSourceVersionAdvances() {
+        given(reservationSource.getDashboardSnapshot(STORE_ID, DATE, AS_OF))
+                .willReturn(
+                        new ReservationAnalyticsSnapshot(
+                                STORE_ID, DATE, AS_OF, 4, 6, 10, 3, 5, 1, 4, 1,
+                                "a".repeat(64), AS_OF.minusSeconds(2), 7, false),
+                        new ReservationAnalyticsSnapshot(
+                                STORE_ID, DATE, AS_OF, 4, 6, 10, 3, 5, 1, 4, 2,
+                                "c".repeat(64), AS_OF.minusSeconds(2), 8, false));
+        given(waitingSource.getDashboardSnapshot(STORE_ID, DATE, AS_OF))
+                .willReturn(new WaitingAnalyticsSnapshot(
+                        STORE_ID, DATE, AS_OF, 1, 0, 3, 0, 1800L, 2,
+                        "b".repeat(64), AS_OF.minusSeconds(1), 20, false));
+
+        service.getDashboard(41L, STORE_ID);
+        long firstVersion = metric("NO_SHOW_STATUS").metadata().aggregationVersion();
+        service.getDashboard(41L, STORE_ID);
+        long secondVersion = metric("NO_SHOW_STATUS").metadata().aggregationVersion();
+
+        assertThat(firstVersion).isEqualTo(27L);
+        assertThat(secondVersion).isEqualTo(28L);
     }
 
     @Test

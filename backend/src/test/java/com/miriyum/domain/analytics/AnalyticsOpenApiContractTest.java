@@ -137,6 +137,30 @@ class AnalyticsOpenApiContractTest {
     }
 
     @Test
+    void successExampleUsesTheRuntimeDefinitionVersions() throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> components = map(document.get("components"));
+        Map<String, Object> response = map(
+                map(components.get("responses")).get("DashboardSnapshotSuccess"));
+        Map<String, Object> json = map(map(response.get("content")).get("application/json"));
+        Map<String, Object> example = map(
+                map(json.get("examples")).get("reservationNoShowPending"));
+        Map<String, Object> data = map(map(example.get("value")).get("data"));
+        Map<String, Object> metrics = map(data.get("metrics"));
+
+        assertThat(map(metrics.get("todayReservationTeams")))
+                .containsEntry("definitionVersion", "ANALYTICS-001-v1");
+        assertThat(map(metrics.get("reservationRate")))
+                .containsEntry("definitionVersion", "ANALYTICS-002-v1");
+        assertThat(map(metrics.get("teamCapacityUsageRate")))
+                .containsEntry("definitionVersion", "ANALYTICS-002-v1");
+        assertThat(map(metrics.get("cancellationRate")))
+                .containsEntry("definitionVersion", "ANALYTICS-003-v1");
+        assertThat(map(metrics.get("waiting")))
+                .containsEntry("definitionVersion", "ANALYTICS-004-waiting-v1");
+    }
+
+    @Test
     void accessErrorsDistinguishForeignStoreFromMissingPublicStore() throws IOException {
         Map<String, Object> document = load(CONTRACT);
         Map<String, Object> operation = map(map(map(document.get("paths"))

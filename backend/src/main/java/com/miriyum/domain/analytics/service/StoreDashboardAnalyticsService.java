@@ -255,7 +255,7 @@ public class StoreDashboardAnalyticsService {
                     waiting.confirmedNoShowTeams(), waitingMetadata);
         }
 
-        long version = Math.max(
+        long version = Math.addExact(
                 reservation == null ? 1L : reservation.sourceVersion(),
                 waiting == null ? 1L : waiting.sourceVersion());
         Instant dataThrough = Stream.of(

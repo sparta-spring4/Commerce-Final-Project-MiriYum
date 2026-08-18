@@ -365,7 +365,7 @@ components:
                   metrics:
                     todayReservationTeams:
                       value: 12
-                      definitionVersion: analytics-004-today-reservation-teams-v1
+                      definitionVersion: ANALYTICS-001-v1
                       aggregationVersion: 3
                       asOf: "2026-08-16T18:00:00+09:00"
                       dataThrough: "2026-08-16T17:59:40+09:00"
@@ -378,7 +378,7 @@ components:
                         numerator: 48
                         denominator: 80
                         ratio: 0.6
-                      definitionVersion: analytics-004-reservation-rate-v1
+                      definitionVersion: ANALYTICS-002-v1
                       aggregationVersion: 3
                       asOf: "2026-08-16T18:00:00+09:00"
                       dataThrough: "2026-08-16T17:59:40+09:00"
@@ -391,7 +391,7 @@ components:
                         numerator: 12
                         denominator: 20
                         ratio: 0.6
-                      definitionVersion: analytics-004-team-capacity-usage-rate-v1
+                      definitionVersion: ANALYTICS-002-v1
                       aggregationVersion: 3
                       asOf: "2026-08-16T18:00:00+09:00"
                       dataThrough: "2026-08-16T17:59:40+09:00"
@@ -404,7 +404,7 @@ components:
                         numerator: 2
                         denominator: 14
                         ratio: 0.142857142857
-                      definitionVersion: analytics-004-cancellation-rate-v1
+                      definitionVersion: ANALYTICS-003-v1
                       aggregationVersion: 3
                       asOf: "2026-08-16T18:00:00+09:00"
                       dataThrough: "2026-08-16T17:59:40+09:00"
@@ -419,7 +419,7 @@ components:
                         waitingPeople: 8
                         calledPeople: 2
                         longestWaitSeconds: 1260
-                      definitionVersion: analytics-004-waiting-v1
+                      definitionVersion: ANALYTICS-004-waiting-v1
                       aggregationVersion: 2
                       asOf: "2026-08-16T18:00:00+09:00"
                       dataThrough: "2026-08-16T17:59:54+09:00"
