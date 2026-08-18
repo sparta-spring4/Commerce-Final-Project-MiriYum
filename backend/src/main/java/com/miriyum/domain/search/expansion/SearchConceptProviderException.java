@@ -12,6 +12,14 @@ public final class SearchConceptProviderException extends RuntimeException {
         this.reason = Objects.requireNonNull(reason, "reason must not be null");
     }
 
+    SearchConceptProviderException(
+            SearchConceptFailureReason reason,
+            RuntimeException cause
+    ) {
+        super("search concept provider unavailable", cause);
+        this.reason = Objects.requireNonNull(reason, "reason must not be null");
+    }
+
     public SearchConceptFailureReason reason() {
         return reason;
     }
