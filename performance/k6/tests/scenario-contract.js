@@ -151,6 +151,37 @@ function reservationCapacityFixture(templateCount) {
   }
 }
 
+function reservationFixtureWithNormalizedDuplicate(templateCount) {
+  const fixture = reservationCapacityFixture(templateCount)
+  const originalIndex = templateCount - 2
+  const duplicateIndex = templateCount - 1
+  fixture.reservationTemplates[originalIndex].menuSelections = [
+    { menuId: '701', quantity: 1 },
+    { menuId: '702', quantity: 2 },
+  ]
+  fixture.reservationTemplates[duplicateIndex] = {
+    ...fixture.reservationTemplates[originalIndex],
+    menuSelections: [
+      { menuId: '702', quantity: 1 },
+      { menuId: '701', quantity: 1 },
+      { menuId: '702', quantity: 1 },
+    ],
+  }
+  return fixture
+}
+
+function reservationFixtureWithZeroOffsetDuplicate(templateCount) {
+  const fixture = reservationCapacityFixture(templateCount)
+  const originalIndex = templateCount - 2
+  const duplicateIndex = templateCount - 1
+  fixture.reservationTemplates[originalIndex].startOffset = '+00:00'
+  fixture.reservationTemplates[duplicateIndex] = {
+    ...fixture.reservationTemplates[originalIndex],
+    startOffset: '-00:00',
+  }
+  return fixture
+}
+
 function responseClient(status, data) {
   return {
     get() {
@@ -343,6 +374,22 @@ export default function () {
       fixtureContracts.validateFixture(reservationCapacityFixture(singleScenarioRequired)),
     )
     : null
+  const normalizedDuplicateFixtureRejected = typeof buildExecutionScenarios === 'function'
+    && Number.isInteger(singleScenarioRequired)
+    && throws(() => buildExecutionScenarios(
+      singleScenarioConfig,
+      fixtureContracts.validateFixture(
+        reservationFixtureWithNormalizedDuplicate(singleScenarioRequired),
+      ),
+    ))
+  const zeroOffsetDuplicateFixtureRejected = typeof buildExecutionScenarios === 'function'
+    && Number.isInteger(singleScenarioRequired)
+    && throws(() => buildExecutionScenarios(
+      singleScenarioConfig,
+      fixtureContracts.validateFixture(
+        reservationFixtureWithZeroOffsetDuplicate(singleScenarioRequired),
+      ),
+    ))
   const mixedScenarioFirstScenarios = typeof buildExecutionScenarios === 'function'
     ? buildExecutionScenarios({
       ...singleScenarioConfig,
@@ -471,6 +518,10 @@ export default function () {
     'the exact boundary-inclusive reservation capacity is accepted': () =>
       sufficientScenarios?.reservationCreate.rate === 1
       && sufficientScenarios.reservationCreate.duration === '30s',
+    'normalized duplicate reservation templates are rejected before execution': () =>
+      normalizedDuplicateFixtureRejected,
+    'equivalent zero-offset reservation templates are rejected before execution': () =>
+      zeroOffsetDuplicateFixtureRejected,
     'mixed scenario allocation includes the remainder and boundary guard': () =>
       mixedScenarioFirstRequired === 61
       && mixedScenarioFirstScenarios?.reservationCreate.rate === 2,
