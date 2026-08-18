@@ -35,7 +35,8 @@ jobs:
           if [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
             changed_files=$(git ls-tree -r --name-only "$HEAD_SHA")
           else
-            changed_files=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+            # PR base가 진행돼도 PR 자체 변경만 보고, rename의 삭제·추가 경로를 모두 보존한다.
+            changed_files=$(git diff --name-only --no-renames "$BASE_SHA...$HEAD_SHA")
           fi
           test_scope=$(printf '%s\n' "$changed_files" | python3 scripts/backend-ci-path-filter.py)
           echo "test_scope=$test_scope" >> "$GITHUB_OUTPUT"

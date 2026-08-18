@@ -2,7 +2,8 @@ import sys
 
 
 FULL_TEST_PREFIXES = ("backend/",)
-SAFE_SKIP_PREFIXES = ("deploy/", "docs/", "frontend/", "performance/k6/")
+UNIT_TEST_PREFIXES = ("deploy/",)
+SAFE_SKIP_PREFIXES = ("docs/", "frontend/", "performance/k6/")
 SAFE_SKIP_PATHS = (
     ".github/workflows/backend-cd.yml",
     ".github/workflows/backend-production-ecs-cd.yml",
@@ -22,7 +23,7 @@ def classify(paths):
     if any(
         path.startswith("docs/specs/") and path.endswith("openapi.yaml")
         for path in normalized_paths
-    ):
+    ) or any(path.startswith(UNIT_TEST_PREFIXES) for path in normalized_paths):
         return "unit"
     if all(path in SAFE_SKIP_PATHS or path.startswith(SAFE_SKIP_PREFIXES) for path in normalized_paths):
         return "contract"
