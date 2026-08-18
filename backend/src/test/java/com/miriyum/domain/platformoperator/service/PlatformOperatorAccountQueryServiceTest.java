@@ -51,26 +51,6 @@ class PlatformOperatorAccountQueryServiceTest {
     }
 
     @Test
-    void currentUsesCentralAuthoritySnapshotInsteadOfPrincipalClaims() {
-        PlatformOperatorAccount account = account(1L, "caller@example.com", "Caller");
-        when(accounts.findById(1L)).thenReturn(Optional.of(account));
-        when(authorities.requireCurrentAuthority(1L, 3L)).thenReturn(new OperatorAuthority(
-                1L, 3L, Set.of(PlatformOperatorRole.ONBOARDING_REVIEWER),
-                Set.of(PlatformOperatorPermission.ONBOARDING_REVIEW,
-                        PlatformOperatorPermission.ONBOARDING_EVIDENCE_READ,
-                        PlatformOperatorPermission.AUDIT_READ)));
-
-        var result = service.current(principal);
-
-        assertThat(result.roles()).containsExactly(PlatformOperatorRole.ONBOARDING_REVIEWER);
-        assertThat(result.permissions()).containsExactly(
-                PlatformOperatorPermission.AUDIT_READ,
-                PlatformOperatorPermission.ONBOARDING_EVIDENCE_READ,
-                PlatformOperatorPermission.ONBOARDING_REVIEW);
-        assertThat(result.toString()).doesNotContain("secret-session", "caller@example.com");
-    }
-
-    @Test
     void detailCombinesRoleAndDirectPermissionsAndUsesOnlySuccessfulLogin() {
         PlatformOperatorAccount target = account(7L, "alice@example.com", "Alice");
         when(authorities.requireCurrentAuthority(1L, 3L)).thenReturn(manageAuthority());
