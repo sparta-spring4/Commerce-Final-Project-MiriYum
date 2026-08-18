@@ -1,22 +1,28 @@
 package com.miriyum.domain.reservation.service;
 
 import com.miriyum.domain.auth.qrepoch.ConsumerQrEpochService;
+import com.miriyum.domain.reservation.dto.response.ReservationDepositDispositionResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCheckInAudit;
 import com.miriyum.domain.reservation.entity.ReservationCheckInQrGrant;
+import com.miriyum.domain.reservation.entity.ReservationDepositDispositionObligation;
+import com.miriyum.domain.reservation.entity.ReservationDepositProcessStatus;
 import com.miriyum.domain.reservation.entity.ReservationFulfillmentActorType;
 import com.miriyum.domain.reservation.entity.ReservationFulfillmentAudit;
 import com.miriyum.domain.reservation.entity.ReservationNoShowAudit;
 import com.miriyum.domain.reservation.entity.ReservationNoShowReason;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.notification.ReservationNotificationPublisher;
 import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldItemSnapshot;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldTerminationPresence;
 import com.miriyum.domain.reservation.repository.ReservationCheckInAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationCheckInQrGrantRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositDispositionObligationRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
 import com.miriyum.domain.reservation.repository.ReservationFulfillmentAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationNoShowAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
@@ -30,6 +36,8 @@ import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -52,6 +60,10 @@ public class ReservationVisitService {
     private final ReservationFulfillmentAuditRepository fulfillmentAuditRepository;
     private final ReservationCheckInAuditRepository checkInAuditRepository;
     private final ReservationNoShowAuditRepository noShowAuditRepository;
+    private final ReservationDepositProcessRepository depositProcessRepository;
+    private final ReservationDepositDispositionObligationRepository
+            dispositionObligationRepository;
+    private final ReservationNotificationPublisher notificationPublisher;
     private final Clock clock;
     private final ObjectMapper objectMapper;
 
@@ -65,6 +77,9 @@ public class ReservationVisitService {
             ReservationFulfillmentAuditRepository fulfillmentAuditRepository,
             ReservationCheckInAuditRepository checkInAuditRepository,
             ReservationNoShowAuditRepository noShowAuditRepository,
+            ReservationDepositProcessRepository depositProcessRepository,
+            ReservationDepositDispositionObligationRepository dispositionObligationRepository,
+            ReservationNotificationPublisher notificationPublisher,
             Clock clock,
             ObjectMapper objectMapper
     ) {
@@ -77,6 +92,9 @@ public class ReservationVisitService {
         this.fulfillmentAuditRepository = fulfillmentAuditRepository;
         this.checkInAuditRepository = checkInAuditRepository;
         this.noShowAuditRepository = noShowAuditRepository;
+        this.depositProcessRepository = depositProcessRepository;
+        this.dispositionObligationRepository = dispositionObligationRepository;
+        this.notificationPublisher = notificationPublisher;
         this.clock = clock;
         this.objectMapper = objectMapper;
     }
@@ -175,6 +193,13 @@ public class ReservationVisitService {
         epochService.requireCurrent(reservation.getConsumerAccountId(), grant.epochSnapshot());
         requireCheckInWindow(reservation, occurredAt);
         requireConfirmed(reservation);
+        VisitDispositionPlan dispositionPlan = dispositionPlan(
+                reservation,
+                correlationId,
+                "RESERVATION_FULFILLED",
+                "CONSUMER",
+                10_000
+        );
 
         ReservationMenuHoldTerminationPresence presence = lockMenuHold(reservationId);
         reservation.fulfill(occurredAt);
@@ -207,7 +232,11 @@ public class ReservationVisitService {
                 correlationId
         ));
         grant.consume(occurredAt);
-        return success(reservation, presence);
+        ReservationDepositDispositionResponse depositDisposition =
+                persistDispositionObligation(dispositionPlan, occurredAt);
+        notificationPublisher.recordVisitCompleted(
+                reservation, occurredAt, correlationId);
+        return success(reservation, presence, depositDisposition);
     }
 
     private BusinessResult<ReservationDetailResponse> noShowFresh(
@@ -227,6 +256,11 @@ public class ReservationVisitService {
                 ))) {
             throw new ServiceException(ReservationErrorCode.NO_SHOW_TOO_EARLY);
         }
+        VisitDispositionPlan dispositionPlan = noShowDispositionPlan(
+                reservation,
+                reason,
+                correlationId
+        );
         ReservationMenuHoldTerminationPresence presence = lockMenuHold(reservationId);
         reservation.markNoShow(occurredAt);
         if (presence == ReservationMenuHoldTerminationPresence.HOLD_PRESENT) {
@@ -247,7 +281,142 @@ public class ReservationVisitService {
                 reservation.getCapacityPolicyVersion(),
                 correlationId
         ));
-        return success(reservation, presence);
+        ReservationDepositDispositionResponse depositDisposition =
+                persistDispositionObligation(dispositionPlan, occurredAt);
+        notificationPublisher.recordNoShow(reservation, occurredAt, correlationId);
+        return success(reservation, presence, depositDisposition);
+    }
+
+    private VisitDispositionPlan noShowDispositionPlan(
+            Reservation reservation,
+            ReservationNoShowReason reason,
+            String sourceEventId
+    ) {
+        if (!Long.valueOf(2L).equals(reservation.getCancellationPolicyVersion())) {
+            return null;
+        }
+        ReservationDepositProcessRepository.DepositProcessLink link =
+                requireCompletedDepositProcessLink(reservation);
+        return switch (reason) {
+            case USER_CAUSE_CANDIDATE -> dispositionPlan(
+                    reservation,
+                    link,
+                    sourceEventId,
+                    "RESERVATION_NO_SHOW",
+                    "CONSUMER",
+                    0
+            );
+            case STORE_CAUSE_CANDIDATE -> dispositionPlan(
+                    reservation,
+                    link,
+                    sourceEventId,
+                    "RESERVATION_NO_SHOW",
+                    "STORE_RESPONSIBLE",
+                    10_000
+            );
+            case PLATFORM_EXTERNAL_CAUSE_CANDIDATE -> dispositionPlan(
+                    reservation,
+                    link,
+                    sourceEventId,
+                    "RESERVATION_NO_SHOW",
+                    "PLATFORM_RESPONSIBLE",
+                    10_000
+            );
+            case UNCLEAR -> null;
+        };
+    }
+
+    private VisitDispositionPlan dispositionPlan(
+            Reservation reservation,
+            String sourceEventId,
+            String sourceEventType,
+            String responsibilityCode,
+            int targetRefundRateBasisPoints
+    ) {
+        if (!Long.valueOf(2L).equals(reservation.getCancellationPolicyVersion())) {
+            return null;
+        }
+        return dispositionPlan(
+                reservation,
+                requireCompletedDepositProcessLink(reservation),
+                sourceEventId,
+                sourceEventType,
+                responsibilityCode,
+                targetRefundRateBasisPoints
+        );
+    }
+
+    private VisitDispositionPlan dispositionPlan(
+            Reservation reservation,
+            ReservationDepositProcessRepository.DepositProcessLink link,
+            String sourceEventId,
+            String sourceEventType,
+            String responsibilityCode,
+            int targetRefundRateBasisPoints
+    ) {
+        if (dispositionObligationRepository == null) {
+            throw new IllegalStateException(
+                    "reservation deposit disposition dependencies are required");
+        }
+        return new VisitDispositionPlan(
+                link.getProcessId(),
+                reservation.getId(),
+                link.getPaymentId(),
+                sourceEventId,
+                sourceEventType,
+                responsibilityCode,
+                targetRefundRateBasisPoints,
+                UUID.randomUUID().toString()
+        );
+    }
+
+    private ReservationDepositProcessRepository.DepositProcessLink
+            requireCompletedDepositProcessLink(Reservation reservation) {
+        if (depositProcessRepository == null) {
+            throw new IllegalStateException(
+                    "reservation deposit disposition dependencies are required");
+        }
+        ReservationDepositProcessRepository.DepositProcessLink link =
+                depositProcessRepository
+                        .findDepositProcessLinkByFinalReservationId(reservation.getId())
+                        .orElseThrow(() -> new IllegalStateException(
+                                "completed reservation deposit process link is required"));
+        if (link.getProcessId() <= 0
+                || link.getStatus() != ReservationDepositProcessStatus.COMPLETED
+                || link.getFinalReservationId() == null
+                || !Objects.equals(link.getFinalReservationId(), reservation.getId())
+                || link.getPaymentId() == null
+                || !link.getPaymentId().matches("^[1-9][0-9]{0,18}$")) {
+            throw new IllegalStateException(
+                    "completed reservation deposit process link is required");
+        }
+        return link;
+    }
+
+    private ReservationDepositDispositionResponse persistDispositionObligation(
+            VisitDispositionPlan plan,
+            Instant now
+    ) {
+        if (plan == null) {
+            return null;
+        }
+        ReservationDepositDispositionObligation obligation =
+                ReservationDepositDispositionObligation.pending(
+                        plan.processId(),
+                        plan.reservationId(),
+                        plan.paymentId(),
+                        plan.sourceEventId(),
+                        plan.sourceEventType(),
+                        null,
+                        2L,
+                        plan.responsibilityCode(),
+                        plan.targetRefundRateBasisPoints(),
+                        plan.obligationKey(),
+                        plan.obligationKey(),
+                        now
+                );
+        return ReservationDepositDispositionResponse.from(
+                dispositionObligationRepository.saveAndFlush(obligation));
     }
 
     private Reservation lockedStoreReservation(long reservationId, long storeId) {
@@ -268,7 +437,8 @@ public class ReservationVisitService {
 
     private BusinessResult<ReservationDetailResponse> success(
             Reservation reservation,
-            ReservationMenuHoldTerminationPresence presence
+            ReservationMenuHoldTerminationPresence presence,
+            ReservationDepositDispositionResponse depositDisposition
     ) {
         List<ReservationMenuHoldItemSnapshot> snapshots =
                 presence == ReservationMenuHoldTerminationPresence.HOLD_PRESENT
@@ -282,8 +452,26 @@ public class ReservationVisitService {
                 SUCCESS,
                 "RESERVATION",
                 String.valueOf(reservation.getId()),
-                ReservationDetailResponse.from(reservation, snapshots)
+                ReservationDetailResponse.from(
+                        reservation,
+                        snapshots,
+                        null,
+                        null,
+                        depositDisposition
+                )
         );
+    }
+
+    private record VisitDispositionPlan(
+            long processId,
+            long reservationId,
+            String paymentId,
+            String sourceEventId,
+            String sourceEventType,
+            String responsibilityCode,
+            int targetRefundRateBasisPoints,
+            String obligationKey
+    ) {
     }
 
     private ReservationVisitCommandResult visitResult(IdempotentOutcome outcome) {

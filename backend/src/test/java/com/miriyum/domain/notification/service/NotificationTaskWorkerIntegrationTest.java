@@ -2,6 +2,7 @@ package com.miriyum.domain.notification.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.notification.dto.source.NotificationSourceContextV1;
@@ -21,6 +22,7 @@ import java.time.ZoneOffset;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
@@ -103,6 +105,9 @@ class NotificationTaskWorkerIntegrationTest {
         jdbcTemplate.execute("DELETE FROM notification_task_transition_audits");
         jdbcTemplate.execute("DELETE FROM notification_channel_attempts");
         jdbcTemplate.execute("DELETE FROM notification_tasks");
+        jdbcTemplate.execute("DELETE FROM reservations");
+        jdbcTemplate.execute("DELETE FROM stores");
+        jdbcTemplate.execute("DELETE FROM store_operator_accounts");
         jdbcTemplate.execute("DELETE FROM consumer_accounts");
         jdbcTemplate.update("""
                 INSERT INTO consumer_accounts (
@@ -202,6 +207,59 @@ class NotificationTaskWorkerIntegrationTest {
 
         assertThat(worker.deliverDueBatch()).isOne();
         assertThat(channelString("failure_code")).isEqualTo("RECIPIENT_NOT_ELIGIBLE");
+    }
+
+    @Test
+    void reservationDeliveryHoldsTheSourceLockUntilTaskCompletion() throws Exception {
+        insertConfirmedReservation();
+        recordReservationConfirmed("reservation:77:confirmed");
+        titleRenderer.blockNextRender();
+        CountDownLatch terminalStarted = new CountDownLatch(1);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var delivery = executor.submit(worker::deliverDueBatch);
+            assertThat(titleRenderer.awaitRender()).isTrue();
+            var terminalUpdate = executor.submit(() -> {
+                terminalStarted.countDown();
+                transactions.executeWithoutResult(ignored -> jdbcTemplate.update("""
+                        UPDATE reservations
+                           SET status = 'FULFILLED', fulfilled_at = UTC_TIMESTAMP(6)
+                         WHERE reservation_id = 77
+                        """));
+            });
+            assertThat(terminalStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> terminalUpdate.get(1, TimeUnit.SECONDS))
+                    .isInstanceOf(TimeoutException.class);
+
+            titleRenderer.releaseRender();
+            assertThat(delivery.get(10, TimeUnit.SECONDS)).isOne();
+            terminalUpdate.get(10, TimeUnit.SECONDS);
+        } finally {
+            titleRenderer.releaseRender();
+        }
+
+        assertThat(taskString("status")).isEqualTo("DELIVERED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM reservations WHERE reservation_id = 77",
+                String.class
+        )).isEqualTo("FULFILLED");
+    }
+
+    @Test
+    void terminalCommitBeforeReservationDeliveryCancelsThePendingConfirmation() {
+        insertConfirmedReservation();
+        recordReservationConfirmed("reservation:77:confirmed");
+        jdbcTemplate.update("""
+                UPDATE reservations
+                   SET status = 'FULFILLED', fulfilled_at = UTC_TIMESTAMP(6)
+                 WHERE reservation_id = 77
+                """);
+
+        assertThat(worker.deliverDueBatch()).isOne();
+
+        assertThat(taskString("status")).isEqualTo("CANCELLED");
+        assertThat(channelString("failure_code")).isEqualTo("SOURCE_SUPERSEDED");
+        assertThat(taskTimestampCount("delivered_at")).isZero();
     }
 
     @Test
@@ -511,6 +569,66 @@ class NotificationTaskWorkerIntegrationTest {
                 null,
                 "correlation-" + sourceEventId
         )));
+    }
+
+    private void recordReservationConfirmed(String sourceEventId) {
+        OffsetDateTime occurredAt = OffsetDateTime.parse("2026-08-12T01:02:03Z");
+        transactions.executeWithoutResult(ignored -> recorder.record(new NotificationSourceEventV1(
+                sourceEventId,
+                NotificationSourceDomain.RESERVATION,
+                NotificationPurpose.RESERVATION_CONFIRMED,
+                "11",
+                1L,
+                NotificationResourceType.RESERVATION,
+                "77",
+                1L,
+                "CONFIRMED",
+                occurredAt,
+                occurredAt,
+                null,
+                null,
+                "correlation-" + sourceEventId
+        )));
+    }
+
+    private void insertConfirmedReservation() {
+        jdbcTemplate.update("""
+                INSERT INTO store_operator_accounts (
+                    store_operator_account_id, email, password_hash, display_name, status,
+                    created_at, updated_at
+                ) VALUES (31, 'worker-store@example.com', 'hash', 'worker store', 'ACTIVE',
+                          NOW(6), NOW(6))
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO stores (
+                    store_id, store_operator_account_id, business_registration_number,
+                    business_type, name, description, region, address, store_category_code,
+                    time_zone_id, verification_status, operation_status,
+                    reservation_enabled, menu_hold_enabled, pickup_enabled,
+                    applicant_self_attested_at, required_terms_agreed_at,
+                    required_terms_version, created_at, updated_at
+                ) VALUES (
+                    22, 31, '1234567890', 'CAFE', 'MiriYum Reservation', '', 'SEOUL',
+                    'fixture-address', 'CAFE_BAKERY', 'Asia/Seoul', 'APPROVED', 'OPEN',
+                    TRUE, TRUE, TRUE, NOW(6), NOW(6),
+                    'STORE_ONBOARDING_REQUIRED_TERMS_V1', NOW(6), NOW(6)
+                )
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO reservations (
+                    reservation_id, consumer_account_id, store_id, store_name_snapshot,
+                    service_date, start_time, end_time,
+                    adult_count, child_count, infant_count,
+                    notification_target_reference, contact_available_at_confirmation,
+                    capacity_policy_version, reservation_policy_version,
+                    cancellation_policy_version, status, created_at
+                ) VALUES (
+                    77, 11, 22, 'MiriYum Reservation',
+                    '2026-08-12', '12:00:00', '13:00:00',
+                    2, 0, 0, 'consumer:11:channel:primary', TRUE,
+                    1, 1, 1, 'CONFIRMED', '2026-08-12 01:00:00'
+                )
+                """);
     }
 
     private void makeRetryDue() {

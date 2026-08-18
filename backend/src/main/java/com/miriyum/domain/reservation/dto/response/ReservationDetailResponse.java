@@ -23,7 +23,8 @@ public record ReservationDetailResponse(
         List<ReservationMenuSelectionResponse> menuSelections,
         OffsetDateTime createdAt,
         String cancelledBy,
-        String cancellationReason
+        String cancellationReason,
+        ReservationDepositDispositionResponse depositDisposition
 ) {
 
     public ReservationDetailResponse {
@@ -34,7 +35,7 @@ public record ReservationDetailResponse(
             Reservation reservation,
             List<ReservationMenuHoldItemSnapshot> menuSnapshots
     ) {
-        return from(reservation, menuSnapshots, null, null);
+        return from(reservation, menuSnapshots, null, null, null);
     }
 
     public static ReservationDetailResponse from(
@@ -42,6 +43,16 @@ public record ReservationDetailResponse(
             List<ReservationMenuHoldItemSnapshot> menuSnapshots,
             ReservationCancellationActorType cancelledBy,
             String cancellationReason
+    ) {
+        return from(reservation, menuSnapshots, cancelledBy, cancellationReason, null);
+    }
+
+    public static ReservationDetailResponse from(
+            Reservation reservation,
+            List<ReservationMenuHoldItemSnapshot> menuSnapshots,
+            ReservationCancellationActorType cancelledBy,
+            String cancellationReason,
+            ReservationDepositDispositionResponse depositDisposition
     ) {
         if (reservation == null || menuSnapshots == null) {
             throw new IllegalArgumentException("reservation and menu snapshots are required");
@@ -67,7 +78,43 @@ public record ReservationDetailResponse(
                 menuSelections,
                 reservation.getCreatedAt().atOffset(ZoneOffset.UTC),
                 cancelledBy == null ? null : cancelledBy.name(),
-                cancellationReason
+                cancellationReason,
+                depositDisposition
+        );
+    }
+
+    public ReservationDetailResponse(
+            String reservationId,
+            String storeId,
+            String storeName,
+            LocalDate serviceDate,
+            CustomerReservationTimeStatus timeStatus,
+            OffsetDateTime startAt,
+            OffsetDateTime serviceEndAt,
+            String timeZoneId,
+            ReservationPartyResponse party,
+            String status,
+            List<ReservationMenuSelectionResponse> menuSelections,
+            OffsetDateTime createdAt,
+            String cancelledBy,
+            String cancellationReason
+    ) {
+        this(
+                reservationId,
+                storeId,
+                storeName,
+                serviceDate,
+                timeStatus,
+                startAt,
+                serviceEndAt,
+                timeZoneId,
+                party,
+                status,
+                menuSelections,
+                createdAt,
+                cancelledBy,
+                cancellationReason,
+                null
         );
     }
 
@@ -98,6 +145,7 @@ public record ReservationDetailResponse(
                 status,
                 menuSelections,
                 createdAt,
+                null,
                 null,
                 null
         );

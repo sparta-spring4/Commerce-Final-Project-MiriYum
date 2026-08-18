@@ -63,6 +63,76 @@ class PaymentMigrationTest {
         }
     }
 
+    @Test
+    @DisplayName("V53의 기존 환불을 보존하며 V58 처분 원장과 재시도 횟수를 추가한다")
+    void upgradesExistingRefundToReservationDepositDispositionV58() throws Exception {
+        try (MySQLContainer mysql = new MySQLContainer(MYSQL_IMAGE)
+                .withCommand("--log-bin-trust-function-creators=1")) {
+            mysql.start();
+            Flyway.configure()
+                    .dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())
+                    .target(MigrationVersion.fromVersion("53"))
+                    .load()
+                    .migrate();
+            insertExistingConsumer(mysql);
+            try (Connection connection = mysql.createConnection("")) {
+                insertPayment(
+                        connection,
+                        "900000000000000001",
+                        "payment-reservation-900000000000000001");
+                insertExistingFailedRefund(connection);
+            }
+
+            Flyway upgraded = Flyway.configure()
+                    .dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())
+                    .load();
+            upgraded.migrate();
+
+            assertThat(upgraded.info().applied())
+                    .extracting(MigrationInfo::getScript)
+                    .contains("V58__create_reservation_deposit_dispositions.sql");
+            try (Connection connection = mysql.createConnection("")) {
+                assertThat(singleLong(connection, """
+                        SELECT attempt_count FROM payment_refunds
+                         WHERE refund_id = '910000000000000001'
+                        """)).isEqualTo(1L);
+                assertThat(singleLong(connection, """
+                        SELECT COUNT(*) FROM payment_refunds
+                         WHERE processing_started_at = requested_at
+                        """)).isEqualTo(1L);
+                assertThat(singleLong(connection, """
+                        SELECT COUNT(*) FROM information_schema.tables
+                         WHERE table_schema = DATABASE()
+                           AND table_name = 'reservation_deposit_dispositions'
+                        """)).isEqualTo(1L);
+                insertUuidV7Disposition(connection);
+                insertCorrectionDisposition(
+                        connection,
+                        "019198c0-2e2a-7f7b-8e1c-123456789abd",
+                        "reservation:123:correction:1",
+                        "PROCESSING",
+                        null);
+                assertThatThrownBy(() -> insertCorrectionDisposition(
+                        connection,
+                        "019198c0-2e2a-7f7b-8e1c-123456789abe",
+                        "reservation:123:correction:2",
+                        "PROCESSING",
+                        null)).isInstanceOf(Exception.class);
+                insertCorrectionDisposition(
+                        connection,
+                        "019198c0-2e2a-7f7b-8e1c-123456789abf",
+                        "reservation:123:correction:rejected",
+                        "FAILED",
+                        "PERMANENT");
+                insertRefundRetryLedger(connection);
+                assertThat(singleLong(connection, """
+                        SELECT COUNT(*) FROM payment_ledger_entries
+                         WHERE entry_type = 'REFUND_RETRY_REQUESTED'
+                        """)).isEqualTo(1L);
+            }
+        }
+    }
+
     private static void insertExistingConsumer(MySQLContainer mysql) throws Exception {
         try (Connection connection = mysql.createConnection("");
              PreparedStatement statement = connection.prepareStatement("""
@@ -115,6 +185,91 @@ class PaymentMigrationTest {
             statement.setString(1, paymentId);
             statement.setString(2, "550e8400-e29b-41d4-a716-" + paymentId.substring(7));
             statement.setString(3, portOnePaymentId);
+            statement.executeUpdate();
+        }
+    }
+
+    private static void insertExistingFailedRefund(Connection connection) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO payment_refunds (
+                    refund_id, payment_pk, idempotency_key, request_fingerprint,
+                    source_event_id, amount_minor, currency, status, reason_code,
+                    policy_version, requested_at, updated_at, version
+                ) SELECT '910000000000000001', payment_pk,
+                         '550e8400-e29b-41d4-a716-446655440001', REPEAT('b', 64),
+                         'reservation:123:cancelled', 10000, 'KRW', 'FAILED',
+                         'RESERVATION_CANCELLED', 7, NOW(6), NOW(6), 0
+                    FROM payments WHERE payment_id = '900000000000000001'
+                """)) {
+            statement.executeUpdate();
+        }
+    }
+
+    private static void insertRefundRetryLedger(Connection connection) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO payment_ledger_entries (
+                    payment_pk, payment_refund_pk, event_key, entry_type,
+                    amount_minor, currency, occurred_at
+                ) SELECT payment_pk, payment_refund_pk,
+                         'refund-retry-requested:910000000000000001:2',
+                         'REFUND_RETRY_REQUESTED', 10000, 'KRW', NOW(6)
+                    FROM payment_refunds WHERE refund_id = '910000000000000001'
+                """)) {
+            statement.executeUpdate();
+        }
+    }
+
+    private static void insertUuidV7Disposition(Connection connection) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO reservation_deposit_dispositions (
+                    disposition_id, payment_pk, source_event_id, source_event_type,
+                    policy_version, responsibility_code,
+                    target_refund_rate_basis_points, original_amount_minor,
+                    target_refund_amount_minor, incremental_refund_amount_minor,
+                    completed_refund_amount_minor, withheld_amount_minor, currency,
+                    idempotency_key, request_fingerprint, status,
+                    attempt_count, requested_at, updated_at, completed_at, version
+                ) SELECT '019198c0-2e2a-7f7b-8e1c-123456789abc', payment_pk,
+                         'reservation:123:no-refund', 'RESERVATION_CANCELLED',
+                         7, 'CONSUMER', 0, 30000, 0, 0, 0, 30000, 'KRW',
+                         '019198c0-2e2a-7f7b-8e1c-123456789abc', REPEAT('c', 64),
+                         'COMPLETED', 0, NOW(6), NOW(6), NOW(6), 0
+                    FROM payments WHERE payment_id = '900000000000000001'
+                """)) {
+            statement.executeUpdate();
+        }
+    }
+
+    private static void insertCorrectionDisposition(
+            Connection connection,
+            String dispositionId,
+            String sourceEventId,
+            String status,
+            String failureClassification
+    ) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO reservation_deposit_dispositions (
+                    disposition_id, payment_pk, source_event_id, source_event_type,
+                    corrects_source_event_id, policy_version, responsibility_code,
+                    target_refund_rate_basis_points, original_amount_minor,
+                    target_refund_amount_minor, incremental_refund_amount_minor,
+                    completed_refund_amount_minor, withheld_amount_minor, currency,
+                    idempotency_key, request_fingerprint, status, failure_classification,
+                    attempt_count, requested_at, updated_at, version
+                ) SELECT ?, payment_pk, ?, 'RESERVATION_CANCELLATION_CORRECTED',
+                         'reservation:123:no-refund', 7, 'CONSUMER',
+                         5000, 30000, 15000, 15000, 0, 15000, 'KRW',
+                         ?, REPEAT('d', 64), ?, ?,
+                         CASE WHEN ? = 'PROCESSING' THEN 1 ELSE 0 END,
+                         NOW(6), NOW(6), 0
+                    FROM payments WHERE payment_id = '900000000000000001'
+                """)) {
+            statement.setString(1, dispositionId);
+            statement.setString(2, sourceEventId);
+            statement.setString(3, dispositionId);
+            statement.setString(4, status);
+            statement.setString(5, failureClassification);
+            statement.setString(6, status);
             statement.executeUpdate();
         }
     }

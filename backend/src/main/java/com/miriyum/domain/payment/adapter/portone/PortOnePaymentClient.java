@@ -2,7 +2,9 @@ package com.miriyum.domain.payment.adapter.portone;
 
 import com.miriyum.domain.payment.config.PaymentSettings;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpHeaders;
@@ -45,6 +47,7 @@ public class PortOnePaymentClient implements PaymentProviderClient {
                     .body(String.class);
             JsonNode payment = requiredContent(objectMapper.readTree(body));
             ProviderStatus status = mapPaymentStatus(requiredText(payment, "status"));
+            String currency = requiredText(payment, "currency");
             return new ProviderPayment(
                     requiredText(payment, "id"),
                     status == ProviderStatus.PAID
@@ -52,7 +55,8 @@ public class PortOnePaymentClient implements PaymentProviderClient {
                             : optionalText(payment, "transactionId"),
                     status,
                     requiredLong(payment.path("amount"), "total"),
-                    requiredText(payment, "currency")
+                    currency,
+                    cancellations(payment, currency)
             );
         } catch (RestClientException | JacksonException | IllegalArgumentException exception) {
             throw new ProviderUnavailableException("PortOne payment lookup was inconclusive", exception);
@@ -71,7 +75,7 @@ public class PortOnePaymentClient implements PaymentProviderClient {
             Map<String, Object> request = new LinkedHashMap<>();
             request.put("storeId", settings.getPortone().requireStoreId());
             request.put("amount", amountMinor);
-            request.put("reason", reason);
+            request.put("reason", PaymentProviderClient.cancellationReason(reason, refundId));
             request.put("requester", "CUSTOMER");
             String body = restClient.post()
                     .uri("/payments/{paymentId}/cancel", portOnePaymentId)
@@ -109,6 +113,39 @@ public class PortOnePaymentClient implements PaymentProviderClient {
             case "PAY_PENDING", "PENDING" -> ProviderStatus.PAY_PENDING;
             case "CANCELLED" -> ProviderStatus.CANCELLED;
             case "PARTIAL_CANCELLED" -> ProviderStatus.PARTIALLY_CANCELLED;
+            default -> ProviderStatus.UNKNOWN;
+        };
+    }
+
+    private static List<ProviderCancellation> cancellations(
+            JsonNode payment,
+            String currency
+    ) {
+        JsonNode cancellations = payment.path("cancellations");
+        if (cancellations.isMissingNode() || cancellations.isNull()) {
+            return List.of();
+        }
+        if (!cancellations.isArray()) {
+            throw new IllegalArgumentException("PortOne cancellations field is invalid");
+        }
+        List<ProviderCancellation> snapshots = new ArrayList<>();
+        for (JsonNode cancellation : cancellations) {
+            snapshots.add(new ProviderCancellation(
+                    requiredText(cancellation, "id"),
+                    mapCancellationStatus(requiredText(cancellation, "status")),
+                    requiredLong(cancellation, "totalAmount"),
+                    currency,
+                    requiredText(cancellation, "reason")
+            ));
+        }
+        return List.copyOf(snapshots);
+    }
+
+    private static ProviderStatus mapCancellationStatus(String status) {
+        return switch (status) {
+            case "SUCCEEDED" -> ProviderStatus.PARTIALLY_CANCELLED;
+            case "REQUESTED" -> ProviderStatus.PAY_PENDING;
+            case "FAILED" -> ProviderStatus.FAILED;
             default -> ProviderStatus.UNKNOWN;
         };
     }

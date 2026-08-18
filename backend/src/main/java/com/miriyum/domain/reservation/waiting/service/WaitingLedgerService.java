@@ -3,6 +3,8 @@ package com.miriyum.domain.reservation.waiting.service;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.dto.WaitingActiveTeamImpact;
 import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamSnapshot;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActorType;
 import com.miriyum.domain.reservation.waiting.entity.WaitingStatusEvent;
@@ -113,7 +115,8 @@ public class WaitingLedgerService {
             WaitingTeamStatus before = team.getStatus();
             team.call(expectedVersion, occurredAt);
             appendTransition(
-                    team, operatorAccountId, before, expectedVersion,
+                    team, WaitingActorType.STORE_OPERATOR, operatorAccountId,
+                    before, expectedVersion,
                     "CALLED", command, occurredAt
             );
             return success(team);
@@ -169,6 +172,33 @@ public class WaitingLedgerService {
         );
     }
 
+    /** 소비자 본인 소유 활성 팀을 동일한 원장 잠금과 멱등 경계에서 취소한다. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public WaitingConsumerCommandResult cancelByConsumer(
+            long consumerAccountId,
+            long waitingTeamId,
+            long expectedVersion,
+            IdempotencyCommand command,
+            Instant occurredAt
+    ) {
+        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+            WaitingTeam team = teamRepository.findByIdForUpdate(waitingTeamId)
+                    .filter(candidate -> candidate.getConsumerAccountId() == consumerAccountId)
+                    .orElseThrow(WaitingLedgerService::notFound);
+            requireVersion(team, expectedVersion);
+            WaitingTeamStatus before = team.getStatus();
+            team.cancel(expectedVersion, occurredAt);
+            removeMembership(team);
+            appendTransition(
+                    team, WaitingActorType.CONSUMER, consumerAccountId,
+                    before, expectedVersion, "CANCELLED_BY_CONSUMER", command, occurredAt);
+            return consumerSuccess(team);
+        });
+        return new WaitingConsumerCommandResult(
+                outcome.httpStatus(),
+                objectMapper.treeToValue(outcome.data(), WaitingConsumerSnapshot.class));
+    }
+
     private WaitingCommandResult transition(
             long operatorAccountId,
             long storeId,
@@ -190,7 +220,8 @@ public class WaitingLedgerService {
                 removeMembership(team);
             }
             appendTransition(
-                    team, operatorAccountId, before, expectedVersion,
+                    team, WaitingActorType.STORE_OPERATOR, operatorAccountId,
+                    before, expectedVersion,
                     reason, command, occurredAt
             );
             return success(team);
@@ -245,7 +276,8 @@ public class WaitingLedgerService {
 
     private void appendTransition(
             WaitingTeam team,
-            long operatorAccountId,
+            WaitingActorType actorType,
+            long actorId,
             WaitingTeamStatus before,
             long expectedVersion,
             String reason,
@@ -255,8 +287,8 @@ public class WaitingLedgerService {
         Instant createdAt = clock.instant();
         auditRepository.save(WaitingTransitionAudit.record(
                 team.getId(),
-                WaitingActorType.STORE_OPERATOR,
-                operatorAccountId,
+                actorType,
+                actorId,
                 before,
                 team.getStatus(),
                 expectedVersion,
@@ -288,6 +320,17 @@ public class WaitingLedgerService {
                 Long.toString(team.getId()),
                 WaitingTeamSnapshot.from(team)
         );
+    }
+
+    private BusinessResult<WaitingConsumerSnapshot> consumerSuccess(WaitingTeam team) {
+        long teamsAhead = teamRepository.countActiveAhead(
+                team.getStoreId(), team.getBusinessDate(), team.getQueueSequence());
+        return new BusinessResult<>(
+                HttpStatus.OK.value(),
+                SUCCESS,
+                RESOURCE_TYPE,
+                Long.toString(team.getId()),
+                WaitingConsumerSnapshot.from(team, teamsAhead));
     }
 
     private WaitingCommandResult result(IdempotentOutcome outcome) {

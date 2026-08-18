@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import com.miriyum.domain.notification.dto.source.NotificationTaskReceipt;
 import com.miriyum.domain.notification.service.NotificationTaskRecorder;
 import com.miriyum.domain.reservation.entity.Reservation;
@@ -51,6 +52,30 @@ class ReservationNotificationPublisherTest {
                 ReservationNotificationEventFactoryTest.CREATED_AT,
                 "request-create-1"
         )).isSameAs(failure);
+    }
+
+    @Test
+    void recordsVisitCompletedAndNoShowThroughTheSamePublicRecorder() {
+        CapturingRecorder recorder = new CapturingRecorder();
+        ReservationNotificationPublisher publisher = new ReservationNotificationPublisher(
+                new ReservationNotificationEventFactory(), recorder
+        );
+        Reservation fulfilled = ReservationNotificationEventFactoryTest.confirmedReservation();
+        fulfilled.fulfill(ReservationNotificationEventFactoryTest.TERMINAL_AT);
+        Reservation noShow = ReservationNotificationEventFactoryTest.confirmedReservation();
+        noShow.markNoShow(ReservationNotificationEventFactoryTest.TERMINAL_AT);
+
+        publisher.recordVisitCompleted(
+                fulfilled, ReservationNotificationEventFactoryTest.TERMINAL_AT,
+                "request-fulfill-1");
+        publisher.recordNoShow(
+                noShow, ReservationNotificationEventFactoryTest.TERMINAL_AT,
+                "request-no-show-1");
+
+        assertThat(recorder.events).extracting(NotificationSourceEventV1::purpose)
+                .containsExactly(
+                        NotificationPurpose.RESERVATION_VISIT_COMPLETED,
+                        NotificationPurpose.RESERVATION_NO_SHOW);
     }
 
     private static final class CapturingRecorder implements NotificationTaskRecorder {

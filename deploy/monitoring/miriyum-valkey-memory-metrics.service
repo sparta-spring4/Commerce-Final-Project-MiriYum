@@ -1,0 +1,10 @@
+[Unit]
+Description=MiriYum Auth Valkey memory metrics publisher
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/miriyum
+EnvironmentFile=/opt/miriyum/.env
+ExecStart=/opt/miriyum/monitoring/publish-valkey-memory-metrics.sh

@@ -11,6 +11,7 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.repository.query.Param;
 
 /** 파일 메타데이터의 영속 상태를 관리한다. */
@@ -49,4 +50,22 @@ public interface FileMetadataRepository extends JpaRepository<FileMetadata, Stri
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT metadata FROM FileMetadata metadata WHERE metadata.fileId = :fileId")
     Optional<FileMetadata> findByFileIdForUpdate(@Param("fileId") String fileId);
+
+    List<FileMetadata> findAllByStorageStatusAndObjectCleanupCompletedAtIsNullAndObjectCleanupNextAttemptAtLessThanEqualOrderByDeletedAtAsc(
+            FileStorageStatus storageStatus,
+            java.time.Instant nextAttemptAt,
+            Pageable pageable);
+
+    List<FileMetadata> findAllByStorageStatusAndCreatedAtLessThanEqualOrderByCreatedAtAsc(
+            FileStorageStatus storageStatus,
+            java.time.Instant createdAt,
+            Pageable pageable);
+
+    long countByStorageStatusAndObjectCleanupCompletedAtIsNullAndDeletedAtLessThanEqual(
+            FileStorageStatus storageStatus,
+            java.time.Instant deletedAt);
+
+    long countByStorageStatusAndCreatedAtLessThanEqual(
+            FileStorageStatus storageStatus,
+            java.time.Instant createdAt);
 }

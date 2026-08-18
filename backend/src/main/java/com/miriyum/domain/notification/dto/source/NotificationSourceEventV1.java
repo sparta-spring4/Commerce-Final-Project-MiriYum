@@ -99,7 +99,9 @@ public record NotificationSourceEventV1(
                     RESERVATION_CANCELLED,
                     RESERVATION_EXPIRED,
                     RESERVATION_VISIT_REMINDER,
-                    RESERVATION_COORDINATION_REQUIRED ->
+                    RESERVATION_COORDINATION_REQUIRED,
+                    RESERVATION_VISIT_COMPLETED,
+                    RESERVATION_NO_SHOW ->
                     sourceDomain == NotificationSourceDomain.RESERVATION
                             && resourceType == NotificationResourceType.RESERVATION;
             case PICKUP_RESERVATION_CONFIRMED,
