@@ -349,7 +349,7 @@ Force a post-proof failure by closing reception or creating an account-wide memb
 
 ```powershell
 .\gradlew.bat test --tests com.miriyum.domain.reservation.waiting.service.WaitingConsumerCommandFacadeTest --tests com.miriyum.domain.reservation.waiting.service.WaitingCreationServiceTest --console=plain
-.\gradlew.bat integrationTest --tests com.miriyum.domain.reservation.waiting.WaitingConsumerApiIT --console=plain
+.\gradlew.bat integrationTest --tests com.miriyum.domain.reservation.waiting.service.WaitingConsumerApiIT --console=plain
 ```
 
 Expected: focused unit tests fail for the missing session argument/guard; the single integration class fails because registration still uses the boolean gate.
@@ -561,7 +561,7 @@ Do not introduce cross-service refactoring outside the allowlist.
 
 ```powershell
 .\gradlew.bat test --tests com.miriyum.domain.reservation.waiting.service.WaitingLedgerServiceTest --tests com.miriyum.domain.reservation.waiting.service.WaitingClosureServiceTest --tests com.miriyum.domain.reservation.waiting.service.WaitingReservationConversionServiceTest --console=plain
-.\gradlew.bat integrationTest --tests com.miriyum.domain.reservation.waiting.WaitingConsumerApiIT --console=plain
+.\gradlew.bat integrationTest --tests com.miriyum.domain.reservation.waiting.service.WaitingConsumerApiIT --console=plain
 ```
 
 Expected: PASS; terminal teams leave zero memberships and every former member may later register/join another team.
@@ -605,7 +605,7 @@ For transfer/cancel, accept exactly two legal final shapes: active `WAITING` tea
 - [ ] **Step 3: Run the two integration classes to verify RED**
 
 ```powershell
-.\gradlew.bat integrationTest --tests com.miriyum.domain.reservation.waiting.WaitingConsumerApiIT --tests com.miriyum.domain.reservation.waiting.WaitingPartyConcurrencyIT --console=plain
+.\gradlew.bat integrationTest --tests com.miriyum.domain.reservation.waiting.service.WaitingConsumerApiIT --tests com.miriyum.domain.reservation.waiting.WaitingPartyConcurrencyIT --console=plain
 ```
 
 Expected: new concurrency/privacy tests fail before missing synchronization or assertions are satisfied.
@@ -655,7 +655,7 @@ Expected: PASS. This is a focused selection, not the full backend unit suite.
 - [ ] **Step 3: Run only the affected integration classes**
 
 ```powershell
-.\gradlew.bat integrationTest --tests com.miriyum.domain.reservation.waiting.WaitingConsumerApiIT --tests com.miriyum.domain.reservation.waiting.WaitingPartyConcurrencyIT --console=plain
+.\gradlew.bat integrationTest --tests com.miriyum.domain.reservation.waiting.service.WaitingConsumerApiIT --tests com.miriyum.domain.reservation.waiting.WaitingPartyConcurrencyIT --console=plain
 ```
 
 Expected: PASS. Do not run any other integration shard/class unless a focused failure proves it is directly affected.

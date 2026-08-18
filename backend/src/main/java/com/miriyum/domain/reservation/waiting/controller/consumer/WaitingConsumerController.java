@@ -69,6 +69,7 @@ public class WaitingConsumerController {
                 principal.accountId(),
                 request.businessDate(),
                 request.partySize(),
+                request.locationProofSessionId(),
                 key);
         return ResponseEntity.status(result.httpStatus())
                 .body(ApiResponse.success("웨이팅을 등록했습니다.", result.data()));

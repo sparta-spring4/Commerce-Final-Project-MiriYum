@@ -130,17 +130,26 @@ public class WaitingLocationProofSession {
             long waitingTeamId,
             Instant now
     ) {
+        requireConsumable(accountId, requestedStoreId, requestedPurpose, now);
+        consumedWaitingTeamId = requirePositive(waitingTeamId, "waitingTeamId");
+        consumedAt = now;
+    }
+
+    public void requireConsumable(
+            long accountId,
+            long requestedStoreId,
+            Purpose requestedPurpose,
+            Instant now
+    ) {
         if (consumerAccountId != accountId
                 || storeId != requestedStoreId
                 || purpose != requestedPurpose
                 || resultCategory != ResultCategory.VERIFIED
                 || consumedAt != null
                 || now == null
-                || now.isAfter(expiresAt)) {
+                || !now.isBefore(expiresAt)) {
             throw new IllegalStateException("location proof is not consumable");
         }
-        consumedWaitingTeamId = requirePositive(waitingTeamId, "waitingTeamId");
-        consumedAt = now;
     }
 
     public UUID getId() { return UUID.fromString(id); }

@@ -168,9 +168,8 @@ class WaitingOpenApiContractTest {
 
         Map<String, Object> create = map(map(paths.get(CONSUMER_CREATE_PATH)).get("post"));
         assertThat(create)
-                .containsEntry("x-runtime-default", "disabled")
-                .containsEntry("x-activation-owner-issue", 409)
                 .containsEntry("x-location-proof-required", true);
+        assertThat(create).doesNotContainKeys("x-runtime-default", "x-activation-owner-issue");
         assertThat(map(create.get("responses")).keySet())
                 .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "409", "429");
         assertThat(list(create.get("parameters"))).anySatisfy(parameter ->
@@ -196,9 +195,9 @@ class WaitingOpenApiContractTest {
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
         Map<String, Object> createRequest = map(schemas.get("WaitingConsumerCreateRequest"));
         assertThat(list(createRequest.get("required")))
-                .containsExactly("businessDate", "partySize");
+                .containsExactly("businessDate", "partySize", "locationProofSessionId");
         assertThat(map(createRequest.get("properties")))
-                .containsOnlyKeys("businessDate", "partySize");
+                .containsOnlyKeys("businessDate", "partySize", "locationProofSessionId");
 
         Map<String, Object> snapshot = map(schemas.get("WaitingConsumerSnapshot"));
         assertThat(map(snapshot.get("properties"))).containsOnlyKeys(

@@ -48,6 +48,8 @@ import org.springframework.test.web.servlet.MvcResult;
 class WaitingConsumerControllerTest {
 
     private static final String KEY = "550e8400-e29b-41d4-a716-446655440301";
+    private static final UUID LOCATION_PROOF_ID =
+            UUID.fromString("d276a024-71f5-4f98-9682-89f16df4fbd0");
 
     @Autowired MockMvc mockMvc;
     @MockitoBean WaitingConsumerQueryService queryService;
@@ -64,6 +66,7 @@ class WaitingConsumerControllerTest {
                 WaitingReceptionAvailability.open(100L, LocalDate.of(2026, 8, 17)));
         given(commandFacade.create(
                 eq(100L), eq(200L), eq(LocalDate.of(2026, 8, 17)), eq(2),
+                eq(LOCATION_PROOF_ID),
                 argThat(key -> KEY.equals(key.value()))))
                 .willReturn(new WaitingConsumerCommandResult(200, waiting));
         given(queryService.getCurrent(200L)).willReturn(waiting);
@@ -83,7 +86,8 @@ class WaitingConsumerControllerTest {
                         .header("Idempotency-Key", KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"businessDate":"2026-08-17","partySize":2}
+                                {"businessDate":"2026-08-17","partySize":2,
+                                 "locationProofSessionId":"d276a024-71f5-4f98-9682-89f16df4fbd0"}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.waitingTeamId").value("300"))
@@ -105,6 +109,7 @@ class WaitingConsumerControllerTest {
 
         then(commandFacade).should().create(
                 eq(100L), eq(200L), eq(LocalDate.of(2026, 8, 17)), eq(2),
+                eq(LOCATION_PROOF_ID),
                 argThat(key -> KEY.equals(key.value())));
     }
 
@@ -113,7 +118,8 @@ class WaitingConsumerControllerTest {
         mockMvc.perform(post("/api/v1/consumers/me/stores/100/waiting-teams")
                         .header("Idempotency-Key", KEY)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"businessDate\":\"2026-08-17\",\"partySize\":2}"))
+                        .content("{\"businessDate\":\"2026-08-17\",\"partySize\":2,"
+                                + "\"locationProofSessionId\":\"d276a024-71f5-4f98-9682-89f16df4fbd0\"}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("AUTH_001"));
 
@@ -193,7 +199,8 @@ class WaitingConsumerControllerTest {
         mockMvc.perform(post("/api/v1/consumers/me/stores/100/waiting-teams")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"businessDate\":\"2026-08-17\",\"partySize\":2}"))
+                        .content("{\"businessDate\":\"2026-08-17\",\"partySize\":2,"
+                                + "\"locationProofSessionId\":\"d276a024-71f5-4f98-9682-89f16df4fbd0\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_003"));
 
@@ -207,6 +214,7 @@ class WaitingConsumerControllerTest {
         WaitingConsumerSnapshot firstSnapshot = snapshot(WaitingTeamStatus.WAITING, 0L);
         given(commandFacade.create(
                 eq(100L), eq(200L), eq(LocalDate.of(2026, 8, 17)), eq(2),
+                eq(LOCATION_PROOF_ID),
                 argThat(key -> KEY.equals(key.value()))))
                 .willReturn(new WaitingConsumerCommandResult(200, firstSnapshot));
 
@@ -249,7 +257,8 @@ class WaitingConsumerControllerTest {
                         .header("Idempotency-Key", KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"businessDate":"2026-08-17","partySize":2}
+                                {"businessDate":"2026-08-17","partySize":2,
+                                 "locationProofSessionId":"d276a024-71f5-4f98-9682-89f16df4fbd0"}
                                 """))
                 .andExpect(status().isOk())
                 .andReturn();

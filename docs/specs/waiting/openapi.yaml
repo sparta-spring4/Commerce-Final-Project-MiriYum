@@ -418,11 +418,8 @@ paths:
       summary: 웨이팅 등록
       operationId: createConsumerWaitingTeam
       description: >-
-        위치 증명 세션을 등록과 같은 원자 경계에서 소비하는 #409가 연결되기 전에는
-        기본 비활성 상태다. 신규 멱등 요청은 팀·순번·membership을 만들지 않고
-        409 WAITING_012를 반환하되, 이미 성공한 같은 키·지문은 최초 응답을 재생한다.
-      x-runtime-default: disabled
-      x-activation-owner-issue: 409
+        계정·매장·WAITING_REGISTRATION 목적에 결속된 VERIFIED 위치 증명 세션을
+        팀·순번·대표자 membership 생성과 같은 멱등 트랜잭션에서 한 번만 소비한다.
       x-location-proof-required: true
       security:
         - bearerAuth: []
@@ -722,7 +719,7 @@ components:
     WaitingConsumerCreateRequest:
       type: object
       additionalProperties: false
-      required: [businessDate, partySize]
+      required: [businessDate, partySize, locationProofSessionId]
       properties:
         businessDate:
           type: string
@@ -732,6 +729,10 @@ components:
           type: integer
           minimum: 1
           description: 대표자가 등록하는 팀 인원수
+        locationProofSessionId:
+          type: string
+          format: uuid
+          description: 같은 계정·매장·등록 목적에 결속된 미소비 VERIFIED 위치 증명 세션
     WaitingLocationProofRequest:
       type: object
       additionalProperties: false
