@@ -84,8 +84,8 @@ class NotificationOpenApiContractTest {
                 .containsEntry("x-miriyum-owner-issue", 250);
 
         Map<String, Object> operation = map(path.get("get"));
-        assertThat(list(operation.get("security"))).anySatisfy(requirement ->
-                assertThat(map(requirement)).containsKey("bearerAuth"));
+        assertThat(list(operation.get("security")))
+                .containsExactly(Map.of("bearerAuth", List.of()));
         assertThat(list(operation.get("parameters"))).anySatisfy(parameter ->
                 assertThat(map(parameter)).containsEntry(
                         "$ref", "#/components/parameters/NotificationLastEventId"));
@@ -107,6 +107,22 @@ class NotificationOpenApiContractTest {
                         "GET /api/v1/consumers/me/notifications",
                         "keepalive",
                         "PENDING·실패·취소 작업은 신호 대상이 아니다");
+        assertThat(streamSchema).containsKey("example");
+        assertThat(streamSchema.get("example").toString())
+                .contains(
+                        "event: notifications.changed",
+                        "id: opaque-notification-cursor",
+                        "data: {}")
+                .doesNotContain("accountId", "notificationId", "purpose", "status");
+
+        Map<String, Object> lastEventId =
+                map(map(components.get("parameters")).get("NotificationLastEventId"));
+        assertThat(lastEventId.get("description").toString())
+                .contains("consumer audience", "인증 계정", "계약 version", "최초 연결");
+        assertThat(map(lastEventId.get("schema")))
+                .containsEntry("minLength", 1)
+                .containsEntry("maxLength", 512)
+                .containsEntry("pattern", "^[A-Za-z0-9_-]+$");
 
         assertThat(map(responses.get("400"))).containsEntry(
                 "$ref", "#/components/responses/InvalidEventCursor");
@@ -117,6 +133,8 @@ class NotificationOpenApiContractTest {
         assertThat(map(invalidCursorJson.get("schema"))).containsEntry(
                 "$ref",
                 "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse");
+        assertThat(map(invalidCursorJson.get("example")))
+                .containsEntry("code", "COMMON_001");
     }
 
     @Test

@@ -152,7 +152,8 @@ class WaitingOpenApiContractTest {
     void waitingChangedSseContractsAreAudienceScopedChangeSignals() throws IOException {
         Map<String, Object> document = load(CONTRACT);
         Map<String, Object> paths = map(document.get("paths"));
-        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> components = map(document.get("components"));
+        Map<String, Object> schemas = map(components.get("schemas"));
 
         assertWaitingEventStream(
                 map(paths.get(CONSUMER_EVENTS_PATH)),
@@ -165,10 +166,24 @@ class WaitingOpenApiContractTest {
                 Set.of("200", "400", "401", "403", "404", "429", "503"),
                 true);
 
-        Map<String, Object> invalidCursor = map(map(map(document.get("components"))
-                .get("responses")).get("WaitingEventCursorBadRequest"));
-        assertThat(map(invalidCursor.get("content"))).containsKey("application/json");
+        Map<String, Object> invalidCursor =
+                map(map(components.get("responses")).get("WaitingEventCursorBadRequest"));
+        Map<String, Object> invalidCursorJson =
+                map(map(invalidCursor.get("content")).get("application/json"));
+        assertThat(map(invalidCursorJson.get("example")))
+                .containsEntry("code", "COMMON_001");
 
+        Map<String, Object> lastEventId =
+                map(map(components.get("parameters")).get("WaitingLastEventId"));
+        assertThat(lastEventId.get("description").toString())
+                .contains("audience", "인증 계정", "store scope", "계약 version", "최초 연결");
+        assertThat(map(lastEventId.get("schema")))
+                .containsEntry("minLength", 1)
+                .containsEntry("maxLength", 512)
+                .containsEntry("pattern", "^[A-Za-z0-9_-]+$");
+
+        assertThat(map(schemas.get("WaitingConsumerChangedEventStream")))
+                .containsKey("example");
         assertThat(map(schemas.get("WaitingConsumerChangedEventStream"))
                 .get("description").toString())
                 .contains(
@@ -177,6 +192,12 @@ class WaitingOpenApiContractTest {
                         "GET /api/v1/consumers/me/waiting-teams/current",
                         "teamsAhead",
                         "keepalive");
+        assertThat(map(schemas.get("WaitingConsumerChangedEventStream"))
+                .get("example").toString())
+                .contains("event: waiting.changed", "id: opaque-waiting-cursor", "data: {}")
+                .doesNotContain("accountId", "waitingTeamId", "storeId", "status", "teamsAhead");
+        assertThat(map(schemas.get("WaitingStoreOperatorChangedEventStream")))
+                .containsKey("example");
         assertThat(map(schemas.get("WaitingStoreOperatorChangedEventStream"))
                 .get("description").toString())
                 .contains(
@@ -185,6 +206,10 @@ class WaitingOpenApiContractTest {
                         "해당 store",
                         "목록·상세",
                         "keepalive");
+        assertThat(map(schemas.get("WaitingStoreOperatorChangedEventStream"))
+                .get("example").toString())
+                .contains("event: waiting.changed", "id: opaque-waiting-cursor", "data: {}")
+                .doesNotContain("accountId", "waitingTeamId", "storeId", "status");
     }
 
     private static void assertWaitingEventStream(
@@ -197,8 +222,8 @@ class WaitingOpenApiContractTest {
                 .containsEntry("x-miriyum-runtime-status", "contract-only")
                 .containsEntry("x-miriyum-owner-issue", 250);
         Map<String, Object> operation = map(path.get("get"));
-        assertThat(list(operation.get("security"))).anySatisfy(requirement ->
-                assertThat(map(requirement)).containsKey("bearerAuth"));
+        assertThat(list(operation.get("security")))
+                .containsExactly(Map.of("bearerAuth", List.of()));
         assertThat(list(operation.get("parameters"))).anySatisfy(parameter ->
                 assertThat(map(parameter)).containsEntry(
                         "$ref", "#/components/parameters/WaitingLastEventId"));

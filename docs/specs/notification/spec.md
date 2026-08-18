@@ -262,8 +262,9 @@ Accept: text/event-stream
 - 브라우저는 Authorization header를 전달할 수 있는 fetch streaming을 사용한다. 성공 media type은 `text/event-stream`이며 이 계약 PR에서는 production route를 만들지 않고 path item에 `x-miriyum-runtime-status: contract-only`, `x-miriyum-owner-issue: 250`을 유지한다.
 - 업무 event 이름은 `notifications.changed` 하나다. event data는 알림 상태 본문이나 전달 성공의 근거가 아니며, client는 신호를 받으면 `GET /api/v1/consumers/me/notifications`를 다시 조회한다.
 - `Last-Event-ID`가 없으면 최초 연결이다. 연결 직후와 유효한 재연결 뒤 현재 MySQL high-watermark에 결속된 changed signal을 한 번 보내며 이후 신호는 중복 병합할 수 있다.
-- `id`는 consumer audience·인증 계정·계약 version에 결속한 무결성 보호 opaque cursor다. 형식·무결성이 잘못됐거나 다른 audience·계정 cursor면 `400 COMMON_001` JSON 오류 envelope로 거절한다.
-- 공개 이력에 새 `IN_APP DELIVERED`가 보이게 된 경우만 신호 대상이다. 내부 `PENDING`, `FAILED`, `CANCELLED`, channel attempt와 provider 결과는 제외한다. keepalive comment는 업무 event나 성공 근거가 아니며 cursor를 전진시키지 않는다.
+- wire frame은 `event: notifications.changed`, opaque `id`, 고정 `data: {}` 세 줄만 사용한다. 빈 data 객체에 계정·알림·목적·자원·상태 필드를 추가하지 않는다.
+- `id`는 consumer audience·인증 계정·계약 version에 결속한 1~512자의 base64url 문자 집합 opaque cursor다. 형식·무결성이 잘못됐거나 다른 audience·계정 cursor면 `400 COMMON_001` JSON 오류 envelope로 거절한다.
+- 최초 연결·유효한 재연결의 수렴 신호는 이력이 비어 있거나 high-watermark가 바뀌지 않았어도 한 번 보낸다. 그 뒤에는 공개 이력에 새 `IN_APP DELIVERED`가 보이게 된 경우만 신호 대상이다. 내부 `PENDING`, `FAILED`, `CANCELLED`, channel attempt와 provider 결과는 제외한다. keepalive comment는 업무 event나 성공 근거가 아니며 cursor를 전진시키지 않는다.
 - Valkey Pub/Sub은 인스턴스 간 wake-up hint이고 MySQL이 유일한 재연결·보정 원본이다. 신호 유실·중복·역순과 구독 재시작 뒤에도 유한한 MySQL correction과 HTTP 재조회로 수렴한다.
 
 Waiting consumer·store-operator SSE endpoint와 `waiting.changed`의 영향 범위는 Waiting 기능 명세가 소유한다. 공통 transport·cursor·connection registry·Valkey·MySQL correction Runtime은 이 계약이 `dev`에 병합된 뒤 #250의 별도 Runtime exact allowlist에서 구현한다.
@@ -283,13 +284,13 @@ Waiting consumer·store-operator SSE endpoint와 `waiting.changed`의 영향 범
 
 ## Migration·호환성 요구
 
-- `#248`이 만든 Notification 원장·worker·조회 Runtime과 repository는 계속 Notification 도메인이 소유한다. `#250` contract-first PR은 Waiting 목적·자원·조회·재판정 경계만 확정하며 production Java, migration과 별도 worker 설정을 만들지 않는다. `#250` Runtime은 이 계약 PR이 `dev`에 병합된 뒤 최신 migration 번호와 exact allowlist를 Issue에 추가하고, 기존 Notification worker와 repository를 확장하는 별도 PR로 구현한다.
-- `#250` Runtime의 Notification 소유 변경은 작업 version fencing, Waiting 보류와 공개 재판정 Service를 구현한다. Waiting 소유 변경은 상태 사건 dispatcher에서 그 Service를 호출하고 `PUBLISHED`를 같은 원자 경계에 두는 것뿐이다. 기존 일반 일시 장애의 재시도·최종 실패 의미를 Waiting 보류에 재사용하거나 Waiting이 Notification Entity·Repository를 직접 접근하지 않는다.
+- `#248`이 만든 Notification 원장·worker·조회 Runtime과 repository는 계속 Notification 도메인이 소유한다. 앞선 #250 IN_APP 계약 PR #384는 Waiting 목적·자원·조회·재판정 경계만 확정했고 production 구현은 Runtime PR #399가 기존 Notification worker와 repository를 확장해 제공한다.
+- #250 IN_APP Runtime PR #399의 Notification 소유 변경은 작업 version fencing, Waiting 보류와 공개 재판정 Service를 구현한다. Waiting 소유 변경은 상태 사건 dispatcher에서 그 Service를 호출하고 `PUBLISHED`를 같은 원자 경계에 두는 것뿐이다. 기존 일반 일시 장애의 재시도·최종 실패 의미를 Waiting 보류에 재사용하거나 Waiting이 Notification Entity·Repository를 직접 접근하지 않는다.
 - `#426` contract-first PR은 예약 방문 완료·노쇼 목적과 source 상태·대체 규칙만 확정하며 production Java, migration과 worker 설정을 변경하지 않는다. Runtime은 이 계약 PR이 `dev`에 병합된 뒤 최신 `dev`의 충돌과 migration 번호를 확인해 exact allowlist를 Issue에 추가하고, 기존 Notification 원장·worker·Reservation producer를 확장하는 별도 PR로 구현한다.
 - 목적·source event·cursor는 버전 필드를 가져야 한다. 새 목적과 nullable 필드는 하위 호환 추가만 허용하고 기존 enum 의미를 재사용하지 않는다.
 - `NOTI-009` 확정 전에도 보관 만료를 적용할 수 있는 구조를 갖추되 영구 보존이나 임의 삭제 기간을 기본값으로 넣지 않는다.
 - 외부 채널 추가는 논리 알림과 `IN_APP` 이력이 공유하는 `notificationId`를 바꾸지 않고 같은 논리 알림 아래 내부 채널 시도만 추가한다.
-- SSE path는 Runtime 병합 전까지 `contract-only`와 owner Issue #250을 함께 표시한다. Runtime PR은 세 path의 production 구현과 함께 이 두 확장 필드를 제거하며, frontend 생성 타입과 소비 구현은 #251·#410·#411이 각각 소유한다.
+- 현재 #250 SSE 계약 PR은 세 변경 신호 path·재연결 cursor·HTTP 수렴 의미만 확정하고 production Java, migration, runtime 설정을 변경하지 않는다. SSE path는 Runtime 병합 전까지 `contract-only`와 owner Issue #250을 함께 표시한다. 후속 Runtime PR은 세 path의 production 구현과 함께 이 두 확장 필드를 제거하며, frontend 생성 타입과 소비 구현은 #251·#410·#411이 각각 소유한다.
 
 ## 인수 조건
 
