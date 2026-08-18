@@ -3,7 +3,7 @@ package com.miriyum.domain.platformoperator;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.platformoperator.controller.auth.PlatformOperatorAuthController;
-import com.miriyum.domain.platformoperator.controller.authorization.PlatformOperatorCapabilitiesController;
+import com.miriyum.domain.platformoperator.controller.account.PlatformOperatorCapabilitiesController;
 import com.miriyum.domain.platformoperator.controller.management.PlatformOperatorAccountQueryController;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;

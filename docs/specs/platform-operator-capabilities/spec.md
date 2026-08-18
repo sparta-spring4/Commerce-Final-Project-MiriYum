@@ -71,7 +71,7 @@
 - `docs/specs/platform-operator-management-audit/{spec.md,openapi.yaml}`
 - `docs/specs/platform-operator-openapi.yaml`
 - `redocly.yaml`
-- `backend/src/main/java/com/miriyum/domain/platformoperator/controller/authorization/PlatformOperatorCapabilitiesController.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/controller/account/PlatformOperatorCapabilitiesController.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/dto/authorization/PlatformOperatorCapabilitiesData.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/service/PlatformOperatorCapabilitiesService.java`
 - `/me` 중복 소유권 제거에 필요한 기존 management Controller·Service·DTO

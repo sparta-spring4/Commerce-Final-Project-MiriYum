@@ -9,7 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.platformoperator.controller.auth.PlatformOperatorAuthController;
-import com.miriyum.domain.platformoperator.controller.authorization.PlatformOperatorCapabilitiesController;
+import com.miriyum.domain.platformoperator.controller.account.PlatformOperatorCapabilitiesController;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorCapabilitiesService;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;

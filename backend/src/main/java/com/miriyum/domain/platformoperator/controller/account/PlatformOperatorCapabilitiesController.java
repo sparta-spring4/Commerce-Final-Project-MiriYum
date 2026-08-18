@@ -1,4 +1,4 @@
-package com.miriyum.domain.platformoperator.controller.authorization;
+package com.miriyum.domain.platformoperator.controller.account;
 
 import com.miriyum.domain.platformoperator.dto.authorization.PlatformOperatorCapabilitiesData;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorCapabilitiesService;
