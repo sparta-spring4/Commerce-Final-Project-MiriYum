@@ -3,12 +3,15 @@ package com.miriyum.domain.platformoperator.repository;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorRoleGrant;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import java.util.List;
+import java.util.Collection;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface PlatformOperatorRoleGrantRepository extends JpaRepository<PlatformOperatorRoleGrant, Long> {
     List<PlatformOperatorRoleGrant> findAllByPlatformOperatorAccountId(Long platformOperatorAccountId);
+
+    List<PlatformOperatorRoleGrant> findAllByPlatformOperatorAccountIdIn(Collection<Long> platformOperatorAccountIds);
 
     boolean existsByPlatformOperatorAccountIdAndRole(Long platformOperatorAccountId, PlatformOperatorRole role);
 
