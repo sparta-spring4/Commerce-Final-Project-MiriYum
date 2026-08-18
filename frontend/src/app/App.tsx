@@ -9,8 +9,10 @@ import {
   ConsumerSignInPage,
   ConsumerSignUpPage,
   RequireConsumerAuth,
+  useConsumerAuth,
 } from '../features/auth'
 import { MyPage, MyReservationsPage } from '../features/consumer-account'
+import { NotificationHistoryPage } from '../features/notification-history/NotificationHistoryPage'
 import {
   PickupCompletePage,
   PickupCreatePage,
@@ -33,6 +35,12 @@ import { NotFoundPage } from './NotFoundPage'
 import { ROUTES } from './routes'
 
 const queryClient = createQueryClient()
+
+function ConsumerNotificationHistoryRoute() {
+  const { apiClient } = useConsumerAuth()
+
+  return <NotificationHistoryPage apiClient={apiClient} />
+}
 
 /**
  * 앱 셸. 화면 Issue는 routes.ts에 자기 route를 등록하고 여기에 element를 붙인다.
@@ -93,6 +101,10 @@ export default function App() {
                   <Route
                     path={ROUTES.myReservations}
                     element={<MyReservationsPage />}
+                  />
+                  <Route
+                    path={ROUTES.notificationHistory}
+                    element={<ConsumerNotificationHistoryRoute />}
                   />
                   <Route
                     path={ROUTES.reservationCreate}
