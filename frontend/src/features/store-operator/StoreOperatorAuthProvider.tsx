@@ -76,29 +76,89 @@ export function StoreOperatorAuthProvider({
    */
   const refreshInFlight = useRef<Promise<boolean> | null>(null)
 
-  const clearSession = useCallback(() => {
-    accessTokenRef.current = null
-    setStatus('unauthenticated')
+  /**
+   * 초기 복구와 유효한 세션에서만 재발급을 허용한다. 명시적
+   * 로그아웃이나 실패한 로그인 뒤 늦게 도착한 401이 남아 있는
+   * Refresh 쿠키로 세션을 되살리지 못하게 한다.
+   */
+  const refreshEligible = useRef(true)
+
+  /**
+   * Refresh·로그인·로그아웃은 모두 HttpOnly Refresh 쿠키를 바꿀 수 있다.
+   * 호출 순서대로 실행해야 이전 응답이 새 쿠키를 덮거나 이전 로그아웃이 새
+   * 로그인 세션을 폐기하지 않는다. 실패는 호출자에게 반환하되 큐는 이어 간다.
+   */
+  const serverSessionCommandTail = useRef<Promise<void>>(Promise.resolve())
+  const runServerSessionCommand = useCallback(
+    <T,>(command: () => Promise<T>): Promise<T> => {
+      const result = serverSessionCommandTail.current.then(command)
+      serverSessionCommandTail.current = result.then(
+        () => undefined,
+        () => undefined,
+      )
+      return result
+    },
+    [],
+  )
+
+  /**
+   * 세션 세대. 로그인·로그아웃으로 세션이 바뀌면 이전 재발급 결과를 버린다.
+   * 그렇지 않으면 늦은 성공이 로그아웃을 되돌리거나, 늦은 실패가 새 로그인의
+   * Access Token을 지울 수 있다.
+   */
+  const sessionGeneration = useRef(0)
+
+  const beginSessionTransition = useCallback(() => {
+    sessionGeneration.current += 1
+    refreshInFlight.current = null
+    return sessionGeneration.current
   }, [])
 
+  const clearSession = useCallback(() => {
+    const generation = beginSessionTransition()
+    refreshEligible.current = false
+    accessTokenRef.current = null
+    setStatus('unauthenticated')
+    return generation
+  }, [beginSessionTransition])
+
   const runRefresh = useCallback(async (): Promise<boolean> => {
+    const generation = sessionGeneration.current
     try {
-      const token = await refreshStoreOperatorToken()
+      const token = await runServerSessionCommand(refreshStoreOperatorToken)
+      if (generation !== sessionGeneration.current) {
+        return false
+      }
+      refreshEligible.current = true
       accessTokenRef.current = token.accessToken
       setStatus('authenticated')
       return true
     } catch {
+      if (generation !== sessionGeneration.current) {
+        return false
+      }
       // 재발급 실패는 오류 화면이 아니라 비로그인 상태다.
       clearSession()
       return false
     }
-  }, [clearSession])
+  }, [clearSession, runServerSessionCommand])
 
   const refreshOnce = useCallback((): Promise<boolean> => {
-    refreshInFlight.current ??= runRefresh().finally(() => {
-      refreshInFlight.current = null
+    if (!refreshEligible.current) {
+      return Promise.resolve(false)
+    }
+    if (refreshInFlight.current !== null) {
+      return refreshInFlight.current
+    }
+
+    const attempt: Promise<boolean> = runRefresh().finally(() => {
+      // 이전 세션의 늦은 완료가 현재 세션의 재발급 참조를 지우지 않는다.
+      if (refreshInFlight.current === attempt) {
+        refreshInFlight.current = null
+      }
     })
-    return refreshInFlight.current
+    refreshInFlight.current = attempt
+    return attempt
   }, [runRefresh])
 
   const apiClient = useMemo(
@@ -123,28 +183,56 @@ export function StoreOperatorAuthProvider({
   }, [refreshOnce])
 
   const signIn = useCallback(async (credentials: LoginRequest) => {
-    const token = await signInStoreOperator(credentials)
+    // 로그인 시도도 새 세션 경계다. 실패해도 restoring에 남지 않는다.
+    const generation = clearSession()
+
+    let token: Awaited<ReturnType<typeof signInStoreOperator>>
+    try {
+      token = await runServerSessionCommand(() =>
+        signInStoreOperator(credentials),
+      )
+    } catch (error) {
+      // 로그인 대기 중 401이 뒤에 재발급을 큐잉했을 수 있다.
+      // 더 최신의 세션 전환이 없을 때만 실패한 세대를 닫는다.
+      if (generation === sessionGeneration.current) {
+        beginSessionTransition()
+      }
+      throw error
+    }
+    // 로그인 응답을 기다리는 사이 로그아웃했다면 늦은 결과를 남기지 않는다.
+    if (generation !== sessionGeneration.current) {
+      return
+    }
+    refreshEligible.current = true
     accessTokenRef.current = token.accessToken
     setStatus('authenticated')
-  }, [])
+  }, [beginSessionTransition, clearSession, runServerSessionCommand])
 
   const signOut = useCallback(async () => {
-    try {
-      // 서버가 쿠키를 내려주므로 값을 읽기 전에 준비를 먼저 요청한다.
-      await prepareStoreOperatorCsrfToken()
-      const csrfToken = readCookie(STORE_OPERATOR_CSRF_COOKIE)
-      if (csrfToken !== null) {
-        await signOutStoreOperator(csrfToken)
+    // 서버 정리를 기다리는 동안에도 이전 재발급이 세션을 되살리지 못하게 한다.
+    const generation = clearSession()
+    await runServerSessionCommand(async () => {
+      try {
+        // 서버가 쿠키를 내려주므로 값을 읽기 전에 준비를 먼저 요청한다.
+        await prepareStoreOperatorCsrfToken()
+        const csrfToken = readCookie(STORE_OPERATOR_CSRF_COOKIE)
+        if (csrfToken !== null) {
+          await signOutStoreOperator(csrfToken)
+        }
+      } catch (error) {
+        // 서버 정리에 실패해도 클라이언트 메모리는 이미 비웠다.
+        if (!isApiError(error)) {
+          throw error
+        }
+      } finally {
+        // 로그아웃 중 401이 시작한 재발급도 다음에 실행될 수 있다.
+        // 더 최신의 로그인이 없을 때만 세대를 닫아 그 결과를 버린다.
+        if (generation === sessionGeneration.current) {
+          beginSessionTransition()
+        }
       }
-    } catch (error) {
-      // 서버 정리에 실패해도 클라이언트 메모리는 반드시 비운다.
-      if (!isApiError(error)) {
-        throw error
-      }
-    } finally {
-      clearSession()
-    }
-  }, [clearSession])
+    })
+  }, [beginSessionTransition, clearSession, runServerSessionCommand])
 
   const value = useMemo(
     () => ({ status, apiClient, signIn, signOut }),
