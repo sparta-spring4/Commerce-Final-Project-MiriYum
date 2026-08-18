@@ -34,6 +34,25 @@ recover_http() {
     MIRIYUM_STAGING_FORCE_HTTP=true compose up -d --force-recreate nginx
 }
 
+activate_tls() {
+    # A previous recovery leaves the container with FORCE_HTTP=true. Recreate it with
+    # the explicit TLS selector instead of restarting the old container environment.
+    if ! MIRIYUM_STAGING_FORCE_HTTP=false compose up -d --force-recreate nginx; then
+        return 1
+    fi
+
+    if ! compose ps --status running --services nginx | grep -qx nginx; then
+        return 1
+    fi
+
+    if ! compose exec -T nginx nginx -t; then
+        return 1
+    fi
+
+    # nginx -t alone also accepts the HTTP template, so assert that TLS was selected.
+    compose exec -T nginx grep -Fqx '    listen 443 ssl;' /etc/nginx/conf.d/default.conf
+}
+
 issue() {
     if ! run_certbot certonly \
         --webroot \
@@ -48,12 +67,15 @@ issue() {
         return 1
     fi
 
-    if ! test -r "${LETSENCRYPT_DIR}/live/${STAGING_DOMAIN}/fullchain.pem"; then
+    if ! test -f "${LETSENCRYPT_DIR}/live/${STAGING_DOMAIN}/fullchain.pem" \
+        || ! test -r "${LETSENCRYPT_DIR}/live/${STAGING_DOMAIN}/fullchain.pem" \
+        || ! test -f "${LETSENCRYPT_DIR}/live/${STAGING_DOMAIN}/privkey.pem" \
+        || ! test -r "${LETSENCRYPT_DIR}/live/${STAGING_DOMAIN}/privkey.pem"; then
         recover_http
         return 1
     fi
-    # Restart runs the Nginx selector again so it can switch from HTTP-only to TLS.
-    if ! compose restart nginx; then
+
+    if ! activate_tls; then
         recover_http
         return 1
     fi

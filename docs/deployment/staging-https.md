@@ -31,7 +31,7 @@ set +a
 ./certbot.sh issue
 ```
 
-The Nginx container restarts after Certbot succeeds and selects the TLS configuration. If certificate issuance, certificate verification, or the TLS transition fails, the helper force-recreates Nginx with the HTTP-only configuration and exits non-zero.
+After Certbot succeeds, the helper verifies both certificate files and force-recreates Nginx with `MIRIYUM_STAGING_FORCE_HTTP=false`. It then verifies that the container is running, `nginx -t` passes, and the rendered configuration contains the TLS listener. If certificate issuance, file verification, or TLS transition fails, the helper force-recreates Nginx with the HTTP-only configuration and exits non-zero.
 
 ## Verify
 
