@@ -88,6 +88,7 @@ export function SanctionForm({
     attempt,
     beginAttempt,
     clearAttempt,
+    isAttemptCurrent,
     markInputChanged,
   } = useLogicalCommandAttempt(
     () => ({ idempotencyKey: createIdempotencyKey() }),
@@ -123,8 +124,12 @@ export function SanctionForm({
   }
 
   async function handleApproved(approval: string) {
-    if (attempt === null) {
-      setFormError('제재 입력을 다시 확인해 주세요.')
+    if (attempt === null || !isAttemptCurrent()) {
+      setAwaitingReauthentication(false)
+      clearAttempt()
+      setFormError(
+        '재인증 중 명령 입력이 변경됐습니다. 변경된 내용으로 다시 제출해 주세요.',
+      )
       return
     }
     setAwaitingReauthentication(false)
@@ -202,6 +207,7 @@ export function SanctionForm({
         className="po-form"
         onSubmit={handleRequestReauthentication}
         aria-label="제재 적용"
+        inert={awaitingReauthentication}
         noValidate
       >
         <SelectField

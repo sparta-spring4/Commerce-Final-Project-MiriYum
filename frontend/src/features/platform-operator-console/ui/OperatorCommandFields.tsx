@@ -65,6 +65,14 @@ export function useLogicalCommandAttempt<T>(
     return value
   }
 
+  function isAttemptCurrent(): boolean {
+    return (
+      attempt !== null &&
+      attempt.inputRevision === inputRevision.current &&
+      attempt.scope === scope
+    )
+  }
+
   function clearAttempt() {
     setAttempt(null)
   }
@@ -73,6 +81,7 @@ export function useLogicalCommandAttempt<T>(
     attempt: attempt?.value ?? null,
     beginAttempt,
     clearAttempt,
+    isAttemptCurrent,
     markInputChanged,
   }
 }

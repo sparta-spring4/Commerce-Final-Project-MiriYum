@@ -68,6 +68,7 @@ export function OperatorCreatePage() {
     attempt,
     beginAttempt,
     clearAttempt,
+    isAttemptCurrent,
     markInputChanged,
   } = useLogicalCommandAttempt(() => ({
     provisioningId: crypto.randomUUID(),
@@ -118,8 +119,12 @@ export function OperatorCreatePage() {
   }
 
   async function handleApproved(approval: string) {
-    if (attempt === null) {
-      setFormError('명령 입력을 다시 확인해 주세요.')
+    if (attempt === null || !isAttemptCurrent()) {
+      setAwaitingReauthentication(false)
+      clearAttempt()
+      setFormError(
+        '재인증 중 명령 입력이 변경됐습니다. 변경된 내용으로 다시 제출해 주세요.',
+      )
       return
     }
     setAwaitingReauthentication(false)
@@ -197,6 +202,7 @@ export function OperatorCreatePage() {
         className="po-form"
         onSubmit={handleRequestReauthentication}
         aria-label="운영자 등록"
+        inert={awaitingReauthentication}
         noValidate
       >
         <TextField

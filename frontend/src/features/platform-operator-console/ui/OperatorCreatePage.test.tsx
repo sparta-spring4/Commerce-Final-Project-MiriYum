@@ -129,4 +129,62 @@ describe('운영자 계정 생성 권한', () => {
     expect(attempts[2].provisioningId).not.toBe(attempts[1].provisioningId)
     expect(reauthenticationTargets[2]).toBe(attempts[2].provisioningId)
   })
+
+  it('재인증 다이얼로그를 연 뒤 입력이 바뀌면 생성 명령을 보내지 않는다', async () => {
+    const createRequests: Request[] = []
+    server.use(
+      authenticatedPlatformOperator(),
+      currentPlatformOperator({ permissions: ['OPERATOR_CREATE'] }),
+      http.post(REAUTH_PATH, () =>
+        successResponse({
+          approval: 'approval-1',
+          expiresAt: '2026-08-18T15:05:00Z',
+        }),
+      ),
+      http.post(CREATE_PATH, ({ request }) => {
+        createRequests.push(request)
+        return errorResponse(
+          503,
+          'COMMON_012',
+          '일시적으로 처리할 수 없습니다.',
+        )
+      }),
+    )
+    renderCreate()
+
+    const form = await screen.findByRole('form', { name: '운영자 등록' })
+    fireEvent.change(screen.getByLabelText('이메일'), {
+      target: { value: 'operator@miriyum.test' },
+    })
+    fireEvent.change(screen.getByLabelText('표시명'), {
+      target: { value: '신규 운영자' },
+    })
+    fireEvent.change(screen.getByLabelText('임시 비밀번호'), {
+      target: { value: 'Miriyum1!' },
+    })
+    fireEvent.click(screen.getByLabelText('회원지원'))
+    fireEvent.change(screen.getByLabelText('사건 ID'), {
+      target: { value: 'case-100' },
+    })
+    fireEvent.change(screen.getByLabelText('사건 version'), {
+      target: { value: '1' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '운영자 등록' }))
+    await screen.findByRole('dialog', { name: '재인증이 필요합니다' })
+
+    // 실제 브라우저에서는 inert가 막지만, DOM 조작이나 미지원 환경에서도
+    // 명령 경계가 안전한지 확인하기 위해 대기 중 입력 변경을 강제로 발생시킨다.
+    fireEvent.change(screen.getByLabelText('이메일'), {
+      target: { value: 'changed@miriyum.test' },
+    })
+    fireEvent.change(screen.getByLabelText('현재 비밀번호'), {
+      target: { value: 'Miriyum1!' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '확인' }))
+
+    await screen.findByText(/재인증 중 명령 입력이 변경됐습니다/)
+    expect(form).not.toHaveAttribute('inert')
+    expect(createRequests).toHaveLength(0)
+  })
 })
