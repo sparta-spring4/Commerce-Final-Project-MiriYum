@@ -40,11 +40,11 @@
 | `keyword` | 매장명·게시 메뉴명·지역 표시명에 대한 1차 MVP 텍스트 포함 검색 |
 | `region` | `SEOUL`, `BUSAN`, `DAEGU`, `DAEJEON`, `GWANGJU` |
 | `storeCategoryCode` | 중앙 catalog에서 받은 매장 주 카테고리 코드 |
-| 예약 조건 | `serviceDate`, `startTime`, `partySize`를 모두 보낸 경우에만 가용성 판정 |
+| 예약 조건 | `serviceDate`가 있으면 입력된 시각·인원만 제약으로 사용해 가용성 판정 |
 | `includesInfants` | 영유아가 한 명 이상 포함되면 `true`, 생략하면 `false` |
-| `availableOnly` | 완전한 예약 조건이 있을 때만 `true` 허용 |
+| `availableOnly` | `serviceDate`가 있을 때만 `true` 허용 |
 
-예약 조건 일부만 보내거나 `availableOnly=true`인데 완전한 예약 조건이 없으면 `COMMON_001`로 거부한다. 임의 기본 날짜·시간·인원으로 가용성을 추측하지 않는다.
+날짜가 없으면 Reservation을 호출하지 않고 `NOT_REQUESTED`를 반환한다. 날짜가 있으면 시각·인원은 각각 선택 조건이며 누락값을 임의 기본값으로 채우지 않는다. `availableOnly=true`인데 날짜가 없으면 `COMMON_001`로 거부한다.
 `endTime`은 클라이언트가 보내지 않으며 서버가 해당 매장의 현재 예약 접수 시간대·서비스 소요·전환 정책으로 계산한다. 이 계산은 실제 예약 생성과 같은 예약 도메인 계약을 사용한다.
 
 ### 예약 가능 매장 검색 후보 상한
@@ -71,7 +71,7 @@
 - `AVAILABLE`: 요청한 모든 구간에서 인원 수와 팀 1건을 확보할 수 있음
 - `UNAVAILABLE`: 영업·접수 시간·수용량 가운데 하나 이상이 부족
 
-2번 도메인은 수용량을 직접 계산하거나 저장하지 않고 3번 도메인의 `ReservationService`가 제공하는 예약 가능 일괄 조회 공개 메서드를 사용한다. `partySize`와 `includesInfants`는 이 공개 DTO에 그대로 전달한다. 메뉴 홀드 가능 수량이 상세에 필요하면 4번 도메인의 조회 계약을 사용하며 메뉴 재고 repository를 직접 참조하지 않는다.
+2번 도메인은 수용량을 직접 계산하거나 저장하지 않고 3번 도메인의 `ReservationSearchAvailabilityService` 부분 조건 일괄 조회 공개 메서드를 사용한다. 입력된 `serviceDate`, 선택 `startTime`, 선택 `partySize`와 `includesInfants`를 공개 DTO에 그대로 전달한다. 메뉴 홀드 가능 수량이 상세에 필요하면 4번 도메인의 조회 계약을 사용하며 메뉴 재고 repository를 직접 참조하지 않는다.
 
 ### 검색 구현 선택
 
@@ -86,7 +86,7 @@
 `GET /api/v1/stores`는 1차 MVP 페이지 검색과 2차 MVP 통합 검색을 같은 공개 경로에서 제공한다. `searchInput`이 없으면 기존 `keyword`, `region`, `storeCategoryCode`, 예약 조건과 `page` 계약을 그대로 사용한다. 공백이 아닌 1~100자의 `searchInput`이 있으면 다음 통합 검색 계약을 사용한다.
 
 - 통합 검색은 `searchInput`, `includesInfants`, `availableOnly`, `sort`, `cursor`, `size`만 허용한다. 1차 MVP의 `keyword`, `region`, `storeCategoryCode`, `serviceDate`, `startTime`, `partySize`, `page`와 혼용하면 `COMMON_001`로 거부한다.
-- `includesInfants=true`와 `availableOnly=true`는 해석 결과에 날짜·시각·인원이 모두 있을 때만 허용한다. 일부 예약 조건은 추측으로 채우지 않고 warning과 남은 일반 키워드로 축소한다.
+- 날짜·시각·인원은 독립적으로 해석해 인식한 토큰을 남은 키워드에서 제거한다. 날짜가 있으면 시각·인원 누락만으로 `INCOMPLETE_RESERVATION_CONDITION`을 만들지 않는다. `includesInfants=true`와 `availableOnly=true`는 날짜가 있을 때만 허용한다.
 - 통합 검색의 기본 정렬은 `relevance,desc`, 기본 크기는 20, 최대 크기는 50이다. `recommendation,desc`는 현재 검색 필수 조건을 통과한 후보를 `history-v1`으로 재정렬한다. cursor는 서버 비밀키로 HMAC 인증한 불투명 문자열이며 payload가 변조되거나 정규화 입력 조건, `includesInfants`, `availableOnly`, 정렬, 크기 또는 인증 주체 범위가 달라진 요청에 재사용하면 `COMMON_001`로 거부한다. 인증 주체 범위는 원본 사용자 ID를 payload에 노출하지 않고 별도 HMAC 문맥에서 만든 익명 또는 소비자별 불투명 값으로 결합한다. 서버 비밀키가 회전하면 기존 cursor는 만료된 것으로 취급한다.
 - `GET /api/v1/stores`는 인증 헤더가 없는 요청도 허용한다. 유효한 소비자 Access Bearer가 있으면 추천 정렬에 자기 이력을 가산하고, 헤더를 제출했지만 형식·서명·만료·용도·namespace가 유효하지 않으면 익명으로 축소하지 않고 `AUTH_###` 401로 거부한다.
 - 통합 검색 응답은 기존 페이지 응답과 구분되는 `IntegratedStoreSearchData`를 사용한다. `items`, `normalizedCondition`, `warnings`, `ruleVersion`, `vocabularyVersion`, `rankingRuleVersion`, `nextCursor`를 반환하고 정확한 전체 건수나 페이지 번호를 추측하지 않는다. `rankingRuleVersion`은 추천 정렬에서 `history-v1`, 다른 정렬에서 `null`이다. 각 항목의 `recommendationReason`은 추천 정렬에서 실제 최고 양의 기여 요인의 코드·문구, 다른 정렬에서 `null`이며 내부 점수·가중치·이용 횟수는 노출하지 않는다.
@@ -102,11 +102,13 @@
 
 1. QueryDSL은 승인된 구조화 조건과 남은 일반 키워드로 MySQL 공개 후보를 조회한다.
 2. 관련도는 남은 키워드의 `매장명 정확 일치 → 매장명 포함 → 게시 메뉴명 포함 → 지역·주소 포함 → 구조화 조건만 일치`의 고정 tier로 계산하고, 같은 tier는 매장명 오름차순과 매장 ID 오름차순으로 정렬한다. 임의 실수 가중치나 개인 이력은 사용하지 않는다.
-3. 후보를 최대 200개씩 Store 공개 상태와 `ReservationService.getAvailabilities`로 일괄 재검증한다. 응답 직전에 Store 공개·운영·예약 모드를 다시 읽고 불일치, 누락 또는 순서 오류는 해당 후보를 실패 폐쇄한다.
+3. 후보를 Store 공개 상태와 `ReservationSearchAvailabilityService.getAvailabilities`로 일괄 재검증한다. 응답 직전에 Store 공개·운영·예약 모드를 다시 읽고 불일치, 누락 또는 순서 오류는 해당 후보를 실패 폐쇄한다.
 4. `availableOnly=true`는 같은 정적 관련도 순서를 계속 스캔하며 `AVAILABLE` 후보만 응답 크기까지 채운다. 예약 시각은 모든 후보에 동일한 요청 조건이므로 정렬 숫자로 만들지 않는다. 다음 가능 시간 탐색은 Reservation의 별도 공개 계약 없이는 제공하지 않는다.
 5. cursor는 마지막으로 스캔한 정적 후보의 관련도 tier·매장명·매장 ID와 검색 fingerprint를 담고 전체 payload를 HMAC-SHA-256으로 인증한다. 최신 가용성 변경은 표시·제외 여부만 바꾸고 seek 순서를 바꾸지 않는다.
 6. 공개 좌표는 현재 주소 버전의 `VERIFIED` latitude·longitude만 반환한다. `UNVERIFIED` 또는 주소 버전 불일치 좌표는 `null`이며 검색 요청 중 Kakao Local API를 호출하지 않는다.
 7. `recommendation,desc`는 정적 관련도 순으로 최대 5,000개 후보를 같은 요청 스냅샷에서 수집·최신 검증한 뒤 `history-v1`으로 전체 재정렬한다. 추천 cursor는 완전한 추천 동점 키와 검색 fingerprint를 HMAC 인증하며 다음 페이지에서도 같은 bounded 후보 집합을 재계산해 seek한다.
+8. 첫 정확 검색이 현재 상태·예약 필터까지 소진된 뒤 응답 크기보다 작고 잔여 표현이 있으면 `gpt-4o-mini` Structured Outputs를 한 번 호출해 최대 8개의 음식 개념을 받는다. 현재 MySQL 공개 게시 메뉴의 이름·설명·주/보조 카테고리·태그에 개념을 대조해 최대 200개 보완 후보를 조회한다. 정확 후보가 항상 앞서며 중복 매장은 제거하고, 보완 후보 풀은 최신 상태와 예약 조건을 재검증한 뒤 응답 크기를 채울 때까지 스캔한다. `recommendation,desc`도 정확 후보와 보완 후보를 별도 랭킹해 정확 tier를 먼저 둔다. 보완은 최초 응답에 한정하고 보완 후보만을 위한 다음 cursor는 발급하지 않는다.
+9. OpenAI가 비활성, timeout, 429, 오류, 거절 또는 형식 불일치이면 보완 후보를 비우고 기존 MySQL 정확 검색 응답을 유지하며 자동 재시도하지 않는다. 외부 벡터 저장소·색인·캐시는 사용하지 않는다. 외부 요청은 최대 500자의 잔여 표현 또는 품절 메뉴의 공개 문맥만 포함하고 사용자 식별자·연락처·예약 이력·정밀 위치·알레르기 정보와 Secret은 요청·로그에 넣지 않는다. 호출 수·결과·지연·입출력 토큰만 목적별 지표로 남긴다.
 
 `reservationAvailability`는 조회 시점의 발견 보조 정보이며 수량 확보나 예약 성공을 보장하지 않는다. 실제 예약 생성은 Reservation 도메인의 쓰기 트랜잭션에서 현재 영업·접수 시간·수용량을 다시 검증한다.
 
@@ -313,7 +315,9 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 
 - 지역 필터가 승인된 다섯 지역만 허용한다.
 - 키워드가 매장명·게시 메뉴명·지역 표시명을 검색하고 SQL 표현을 직접 받지 않는다.
-- 완전한 예약 조건 없이 가용성을 추측하지 않는다.
+- 날짜가 없으면 가용성을 판정하지 않고, 날짜가 있으면 입력된 시각·인원만 제약으로 판정한다.
+- 정확 검색이 우선이며 의미 후보는 MySQL 최신 메뉴·매장 상태와 예약 가용성을 재검증한다.
+- 품절·판매 중단 메뉴의 대체 후보는 의미 유사 후보를 우선하되 기존 카테고리·가격·알레르기·재고·예약 정책을 모두 통과한다.
 - 수용량·재고를 매장 repository에 중복 저장하거나 직접 차감하지 않는다.
 - 카테고리와 공식 업종 검증값을 서로 변환하지 않는다.
 - 매장 등록 요청에 파일·이미지·플랫폼 운영자 승인 필드가 없다.
@@ -346,4 +350,4 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 | 2026-08-05 | 세 공개 매장 GET 경로가 IP당 60초에 60회의 중앙 공개 조회 한도를 공유 | `SCALE-005`를 적용하고 비용이 큰 가용성 검색을 컨트롤러 실행 전에 제한하며 경로별 우회 한도를 만들지 않음 |
 # 품절 메뉴 대안 검색
 
-`POST /api/v1/stores/{storeId}/menus/{menuId}/alternative-searches`는 원본 메뉴와 요청 수량을 기준으로 현재 대안을 조회한다. 원본 메뉴는 게시·공개 상태라면 수동 판매 상태가 `SELLING` 또는 `SOLD_OUT`일 때 조회할 수 있지만, 대안 후보에는 `SELLING` 메뉴만 포함한다. 같은 매장의 적격·재고 충분 메뉴가 하나라도 있으면 그 결과만 반환하며, 없을 때에만 원본 매장의 검증 좌표 기준 3km 이내 다른 매장을 검색한다. 알레르기 제외 코드가 있으면 정보가 등록되지 않았거나 `CONTAINS`/`MAY_CONTAIN`인 후보를 제외한다. 이 조회는 재고 확보나 예약 성공을 보장하지 않으며 사용자 현재 위치와 전체 요청 body를 저장하거나 로그로 남기지 않는다.
+`POST /api/v1/stores/{storeId}/menus/{menuId}/alternative-searches`는 원본 메뉴와 요청 수량을 기준으로 현재 대안을 조회한다. 원본 메뉴는 게시·공개 상태라면 수동 판매 상태가 `SELLING` 또는 `SOLD_OUT`일 때 조회할 수 있지만, 대안 후보에는 `SELLING` 메뉴만 포함한다. 같은 주 분류와 원본 가격의 ±20% 조건은 점수와 무관한 필수 조건이다. 통과한 후보는 LLM 개념 우선순위 50점, 보조 분류 일치 20점, 가격 유사도 30점으로 합산한 설명 가능한 100점 점수로 정렬한다. LLM 실패 시 개념 점수만 0점이 되고 나머지 필터·점수·일반 후보 조회는 유지한다. 같은 매장의 적격·재고 충분 메뉴가 하나라도 있으면 그 결과만 반환하며, 없을 때에만 원본 매장의 검증 좌표 기준 3km 이내 다른 매장을 검색한다. 다른 매장 후보도 적합도 점수를 먼저 비교하고 점수가 같을 때 거리를 비교한다. 알레르기 제외 코드가 있으면 정보가 등록되지 않았거나 `CONTAINS`/`MAY_CONTAIN`인 후보를 제외한다. 응답은 총점, 가장 큰 점수 기여 사유와 세부 점수를 공개한다. 이 조회는 재고 확보나 예약 성공을 보장하지 않으며 사용자 현재 위치와 전체 요청 body를 저장하거나 로그로 남기지 않는다.

@@ -15,6 +15,7 @@ import com.querydsl.core.types.dsl.BooleanExpression;
 import com.querydsl.core.types.dsl.CaseBuilder;
 import com.querydsl.core.types.dsl.StringExpression;
 import com.querydsl.jpa.JPAExpressions;
+import java.util.List;
 
 /** 공개 상태와 승인 검색 조건을 타입 안전한 QueryDSL predicate로 조립한다. */
 final class IntegratedStoreSearchPredicates {
@@ -31,6 +32,56 @@ final class IntegratedStoreSearchPredicates {
         addStoreConditions(predicate, store, query);
         addMenuAndKeywordConditions(predicate, store, query);
         return predicate;
+    }
+
+    static BooleanBuilder createExpanded(
+            QStore store,
+            IntegratedStoreSearchQuery query,
+            List<String> concepts
+    ) {
+        BooleanBuilder predicate = new BooleanBuilder()
+                .and(store.verificationStatus.eq(VerificationStatus.APPROVED))
+                .and(store.operationStatus.ne(OperationStatus.CLOSED));
+        addStoreConditions(predicate, store, query);
+        predicate.and(currentExpandedMenuExists(store, query, concepts));
+        return predicate;
+    }
+
+    private static BooleanExpression currentExpandedMenuExists(
+            QStore store,
+            IntegratedStoreSearchQuery query,
+            List<String> concepts
+    ) {
+        QMenu menu = new QMenu("expandedMenu");
+        QMenuVersion version = new QMenuVersion("expandedMenuVersion");
+        BooleanBuilder conceptMatches = new BooleanBuilder();
+        for (String concept : concepts) {
+            String pattern = literalContainsPattern(concept);
+            conceptMatches.or(version.name.likeIgnoreCase(pattern, LIKE_ESCAPE)
+                    .or(version.description.likeIgnoreCase(pattern, LIKE_ESCAPE))
+                    .or(version.primaryCategoryCode.likeIgnoreCase(pattern, LIKE_ESCAPE))
+                    .or(version.secondaryCategoryCodes.any()
+                            .likeIgnoreCase(pattern, LIKE_ESCAPE))
+                    .or(version.localTags.any().likeIgnoreCase(pattern, LIKE_ESCAPE)));
+        }
+        BooleanBuilder expandedMenu = new BooleanBuilder()
+                .and(menu.storeId.eq(store.id))
+                .and(menu.retired.isFalse())
+                .and(menu.visibility.eq(MenuVisibility.VISIBLE))
+                .and(menu.publishedVersionNumber.eq(version.versionNumber))
+                .and(version.status.eq(MenuVersionStatus.PUBLISHED))
+                .and(conceptMatches);
+        if (!query.menuCategoryCodes().isEmpty()) {
+            expandedMenu.and(version.primaryCategoryCode.in(query.menuCategoryCodes())
+                    .or(version.secondaryCategoryCodes.any()
+                            .in(query.menuCategoryCodes())));
+        }
+        addPricePredicate(expandedMenu, version, query.priceRange());
+        return JPAExpressions.selectOne()
+                .from(menu)
+                .join(menu.versions, version)
+                .where(expandedMenu)
+                .exists();
     }
 
     private static void addStoreConditions(
