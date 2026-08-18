@@ -10,13 +10,17 @@ import org.junit.jupiter.api.Test;
 class ReservationCancellationPolicySelectorTest {
 
     @Test
-    void selectsKnownVersionOneDeterministically() {
+    void selectsVersionOneForDirectReservationsAndVersionTwoForDeposits() {
         ReservationCancellationPolicySelector selector =
                 new ReservationCancellationPolicySelector(
                         new ReservationCancellationPolicyRegistry());
 
         assertThat(selector.select()).isEqualTo(new ReservationCancellationPolicyVersion(1L));
         assertThat(selector.select()).isEqualTo(new ReservationCancellationPolicyVersion(1L));
+        assertThat(selector.selectDeposit())
+                .isEqualTo(new ReservationCancellationPolicyVersion(2L));
+        assertThat(selector.selectDeposit())
+                .isEqualTo(new ReservationCancellationPolicyVersion(2L));
     }
 
     @Test
@@ -25,12 +29,29 @@ class ReservationCancellationPolicySelectorTest {
                 new ReservationCancellationPolicySelector(new MissingVersionOneRegistry()));
     }
 
+    @Test
+    void failsFastWhenTheRegistryDoesNotProvideVersionTwo() {
+        assertThatIllegalStateException().isThrownBy(() ->
+                new ReservationCancellationPolicySelector(new MissingVersionTwoRegistry()));
+    }
+
     private static class MissingVersionOneRegistry extends ReservationCancellationPolicyRegistry {
 
         @Override
         public Optional<ReservationCancellationPolicyVersion> findByStoredVersion(
                 Long storedVersion) {
             return Optional.empty();
+        }
+    }
+
+    private static class MissingVersionTwoRegistry extends ReservationCancellationPolicyRegistry {
+
+        @Override
+        public Optional<ReservationCancellationPolicyVersion> findByStoredVersion(
+                Long storedVersion) {
+            return storedVersion != null && storedVersion == 1L
+                    ? Optional.of(new ReservationCancellationPolicyVersion(1L))
+                    : Optional.empty();
         }
     }
 }

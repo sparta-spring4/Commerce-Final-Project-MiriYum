@@ -75,6 +75,43 @@ class ReservationNotificationEventFactoryTest {
         assertThat(event.correlationId()).isEqualTo("request-cancel-1");
     }
 
+    @Test
+    void visitCompletedEventConvergesOnStableTerminalIdentity() {
+        Reservation reservation = confirmedReservation();
+        reservation.fulfill(TERMINAL_AT);
+
+        NotificationSourceEventV1 event = factory.visitCompleted(
+                reservation,
+                Instant.parse("2026-08-01T10:00:00.123Z"),
+                "request-fulfill-1"
+        );
+
+        assertThat(event.sourceEventId()).isEqualTo("reservation:77:visit-completed");
+        assertThat(event.purpose()).isEqualTo(
+                NotificationPurpose.RESERVATION_VISIT_COMPLETED);
+        assertThat(event.resourceVersion()).isEqualTo(2L);
+        assertThat(event.sourceState()).isEqualTo("FULFILLED");
+        assertThat(event.occurredAt())
+                .isEqualTo(OffsetDateTime.parse("2026-08-01T10:00:00Z"));
+    }
+
+    @Test
+    void noShowEventUsesStableTerminalIdentity() {
+        Reservation reservation = confirmedReservation();
+        reservation.markNoShow(TERMINAL_AT);
+
+        NotificationSourceEventV1 event = factory.noShow(
+                reservation,
+                TERMINAL_AT,
+                "request-no-show-1"
+        );
+
+        assertThat(event.sourceEventId()).isEqualTo("reservation:77:no-show");
+        assertThat(event.purpose()).isEqualTo(NotificationPurpose.RESERVATION_NO_SHOW);
+        assertThat(event.resourceVersion()).isEqualTo(2L);
+        assertThat(event.sourceState()).isEqualTo("NO_SHOW");
+    }
+
     static Reservation confirmedReservation() {
         ReservationTimePolicyVersion policy = ReservationTimePolicyVersion.createDraft(
                 22L, 4L, 30, 60, 15

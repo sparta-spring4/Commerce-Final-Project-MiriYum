@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.miriyum.domain.notification.config.NotificationSettings;
@@ -124,5 +125,41 @@ class NotificationDeliveryServiceTest {
                 11L
         )).isSameAs(deliveryContext);
         verifyNoInteractions(reservation, menuHold, pickup);
+    }
+
+    @Test
+    void reservationSourceReceivesTheNotificationPurpose() {
+        ReservationNotificationSource reservation = mock(ReservationNotificationSource.class);
+        NotificationSourceContextV1 context = mock(NotificationSourceContextV1.class);
+        NotificationSourceContextV1 deliveryContext = mock(NotificationSourceContextV1.class);
+        given(reservation.readContext(
+                NotificationPurpose.RESERVATION_VISIT_COMPLETED, "77", 2L, "11"))
+                .willReturn(context);
+        given(reservation.readContextForDelivery(
+                NotificationPurpose.RESERVATION_VISIT_COMPLETED, "77", 2L, "11"))
+                .willReturn(deliveryContext);
+        NotificationSourceRegistry registry = new NotificationSourceRegistry(
+                Optional.of(reservation), Optional.empty(), Optional.empty(), Optional.empty());
+
+        assertThat(registry.readContext(
+                NotificationSourceDomain.RESERVATION,
+                NotificationPurpose.RESERVATION_VISIT_COMPLETED,
+                NotificationResourceType.RESERVATION,
+                77L,
+                2L,
+                11L
+        )).isSameAs(context);
+        assertThat(registry.readContextForDelivery(
+                NotificationSourceDomain.RESERVATION,
+                NotificationPurpose.RESERVATION_VISIT_COMPLETED,
+                NotificationResourceType.RESERVATION,
+                77L,
+                2L,
+                11L
+        )).isSameAs(deliveryContext);
+        verify(reservation).readContext(
+                NotificationPurpose.RESERVATION_VISIT_COMPLETED, "77", 2L, "11");
+        verify(reservation).readContextForDelivery(
+                NotificationPurpose.RESERVATION_VISIT_COMPLETED, "77", 2L, "11");
     }
 }

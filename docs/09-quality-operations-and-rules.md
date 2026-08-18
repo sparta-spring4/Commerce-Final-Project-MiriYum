@@ -58,7 +58,7 @@
 - 순수 JUnit·Mockito 및 `@WebMvcTest` slice 테스트는 태그 없이 빠른 `test` task에서 실행한다.
 - `@SpringBootTest`, `@Testcontainers` 또는 `MySQLContainer`를 사용하는 테스트 클래스에는 class-level `@Tag("integration")`을 선언한다.
 - `integrationTest` task는 `@Tag("integration")` 테스트를 모두 실행하며, CI 전용 `integrationTestShardA`~`integrationTestShardD` task는 각각 `integration-shard-a`~`integration-shard-d` 태그를 실행한다. `test` task는 integration 태그를 제외하고, `build`는 전체 통합 테스트를 포함한다.
-- `Backend CI`는 unit job과 네 integration shard job을 병렬 실행하고, 모두 성공한 뒤에만 required check 이름인 `backend-ci`를 성공 처리한다. 새 통합 테스트가 기본 태그 또는 정확히 하나의 shard 태그를 빠뜨리면 Gradle 검증 task가 실패한다.
+- `Backend CI`의 required check 이름인 `backend-ci`는 모든 PR에서 실행한다. 백엔드 코드·migration·Gradle·Backend CI 변경, `deploy/deploy.sh`, 미분류 경로는 unit job과 네 integration shard job이 모두 성공해야 한다. OpenAPI와 그 밖의 `deploy/` 변경은 unit test와 계약 검증이 성공해야 하며, 프론트·k6·일반 문서·런북 전용 변경은 계약 검증만 성공하면 된다. 새 통합 테스트가 기본 태그 또는 정확히 하나의 shard 태그를 빠뜨리면 Gradle 검증 task가 실패한다.
 - 새 통합 테스트의 shard는 최근 CI 실행 시간과 테스트 구성 정보를 함께 보고 균형 있게 고른다. `@SpringBootTest` 속성·`@AutoConfigureMockMvc`·`@Testcontainers` 조합은 배치 힌트일 뿐, 실제 Spring ApplicationContext 캐시 키는 `@DynamicPropertySource`, `@MockitoBean` 등 context customizer까지 포함하므로 정적 어노테이션만으로 컨텍스트 공유를 단정하지 않는다. 컨텍스트 재사용을 근거로 배치하려면 cache debug log 또는 동등한 실행 증거를 남긴다. Gradle 검증 task는 태그 개수만 확인하고 shard별 균형은 검사하지 않으므로 새 테스트 추가 뒤 한 shard의 실측 시간이 치우치면 재배치한다(#288).
 - 위 marker를 직접 사용하지 않아도 외부 DB, Docker 또는 느린 Spring runtime에 의존하는 테스트는 통합 테스트로 분류하고 그 근거를 PR에 기록한다.
 

@@ -8,8 +8,10 @@ import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersio
 public class ReservationCancellationPolicySelector {
 
     private static final long VERSION_ONE = 1L;
+    private static final long VERSION_TWO = 2L;
 
-    private final ReservationCancellationPolicyVersion selectedVersion;
+    private final ReservationCancellationPolicyVersion directReservationVersion;
+    private final ReservationCancellationPolicyVersion depositReservationVersion;
 
     public ReservationCancellationPolicySelector(
             ReservationCancellationPolicyRegistry registry) {
@@ -17,14 +19,22 @@ public class ReservationCancellationPolicySelector {
                 registry,
                 "registry"
         );
-        this.selectedVersion = validatedRegistry.findByStoredVersion(VERSION_ONE)
+        this.directReservationVersion = validatedRegistry.findByStoredVersion(VERSION_ONE)
                 .orElseThrow(() -> new IllegalStateException(
                         "reservation cancellation policy version 1 is not registered"
+                ));
+        this.depositReservationVersion = validatedRegistry.findByStoredVersion(VERSION_TWO)
+                .orElseThrow(() -> new IllegalStateException(
+                        "reservation cancellation policy version 2 is not registered"
                 ));
     }
 
     public ReservationCancellationPolicyVersion select() {
-        return selectedVersion;
+        return directReservationVersion;
+    }
+
+    public ReservationCancellationPolicyVersion selectDeposit() {
+        return depositReservationVersion;
     }
 
     private static <T> T requireNonNull(T value, String fieldName) {

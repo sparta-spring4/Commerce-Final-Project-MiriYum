@@ -39,4 +39,24 @@ public class ReservationNotificationPublisher {
                 reservation, occurredAt, correlationId
         ));
     }
+
+    public NotificationTaskReceipt recordVisitCompleted(
+            Reservation reservation,
+            Instant occurredAt,
+            String correlationId
+    ) {
+        return taskRecorder.record(eventFactory.visitCompleted(
+                reservation, occurredAt, correlationId
+        ));
+    }
+
+    public NotificationTaskReceipt recordNoShow(
+            Reservation reservation,
+            Instant occurredAt,
+            String correlationId
+    ) {
+        return taskRecorder.record(eventFactory.noShow(
+                reservation, occurredAt, correlationId
+        ));
+    }
 }
