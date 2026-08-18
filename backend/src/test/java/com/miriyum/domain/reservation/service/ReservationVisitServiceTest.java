@@ -62,6 +62,7 @@ import tools.jackson.databind.ObjectMapper;
 class ReservationVisitServiceTest {
 
     private static final String KEY = "550e8400-e29b-41d4-a716-446655440000";
+    private static final long DEPOSIT_RESERVATION_ID = 1_000L;
     private static final Instant START_AT = Instant.parse("2026-08-16T01:00:00Z");
     private static final Instant REQUESTED_AT = START_AT.plusSeconds(60);
     private static final byte[] DIGEST = new byte[32];
@@ -123,22 +124,24 @@ class ReservationVisitServiceTest {
     }
 
     @Test
-    @DisplayName("V2 QR 체크인은 전액 환불 처분 obligation을 응답과 함께 저장한다")
+    @DisplayName("V2 QR 체크인은 Long 캐시 밖 ID의 전액 환불 obligation을 저장한다")
     void v2QrCheckInCreatesPendingFullRefundDisposition() {
         Reservation reservation = depositReservation();
         ReservationCheckInQrGrant grant = ReservationCheckInQrGrant.issue(
-                77L, DIGEST, EPOCH, REQUESTED_AT.minusSeconds(10)
+                DEPOSIT_RESERVATION_ID, DIGEST, EPOCH, REQUESTED_AT.minusSeconds(10)
         );
         given(fulfillmentAuditRepository.saveAndFlush(any()))
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(checkInAuditRepository.save(any()))
                 .willAnswer(invocation -> invocation.getArgument(0));
         stubFreshExecutor();
-        given(grantRepository.findReservationIdByTokenDigest(DIGEST)).willReturn(Optional.of(77L));
-        given(reservationRepository.findByIdAndStoreIdForUpdate(77L, 22L))
+        given(grantRepository.findReservationIdByTokenDigest(DIGEST))
+                .willReturn(Optional.of(DEPOSIT_RESERVATION_ID));
+        given(reservationRepository.findByIdAndStoreIdForUpdate(DEPOSIT_RESERVATION_ID, 22L))
                 .willReturn(Optional.of(reservation));
-        given(grantRepository.findByReservationIdForUpdate(77L)).willReturn(Optional.of(grant));
-        given(menuHoldPort.lockForTermination(77L))
+        given(grantRepository.findByReservationIdForUpdate(DEPOSIT_RESERVATION_ID))
+                .willReturn(Optional.of(grant));
+        given(menuHoldPort.lockForTermination(DEPOSIT_RESERVATION_ID))
                 .willReturn(ReservationMenuHoldTerminationPresence.NO_HOLD);
         stubDepositProcessLink();
 
@@ -158,7 +161,7 @@ class ReservationVisitServiceTest {
 
     @ParameterizedTest(name = "{0} -> {1}")
     @MethodSource("approvedNoShowDispositionCases")
-    @DisplayName("V2 노쇼는 승인된 reason별 목표 환불률만 obligation으로 저장한다")
+    @DisplayName("V2 노쇼는 Long 캐시 밖 ID에도 승인된 reason별 obligation만 저장한다")
     void v2NoShowCreatesApprovedDisposition(
             ReservationNoShowReason reason,
             String responsibilityCode,
@@ -166,9 +169,9 @@ class ReservationVisitServiceTest {
     ) {
         Reservation reservation = depositReservation();
         stubFreshExecutor();
-        given(reservationRepository.findByIdAndStoreIdForUpdate(77L, 22L))
+        given(reservationRepository.findByIdAndStoreIdForUpdate(DEPOSIT_RESERVATION_ID, 22L))
                 .willReturn(Optional.of(reservation));
-        given(menuHoldPort.lockForTermination(77L))
+        given(menuHoldPort.lockForTermination(DEPOSIT_RESERVATION_ID))
                 .willReturn(ReservationMenuHoldTerminationPresence.NO_HOLD);
         given(noShowAuditRepository.save(any()))
                 .willAnswer(invocation -> invocation.getArgument(0));
@@ -179,7 +182,7 @@ class ReservationVisitServiceTest {
         ReservationVisitCommandResult result = serviceAt(START_AT.plusSeconds(300)).markNoShow(
                 33L,
                 22L,
-                77L,
+                DEPOSIT_RESERVATION_ID,
                 reason,
                 noShowCommand(),
                 START_AT.plusSeconds(300),
@@ -287,9 +290,10 @@ class ReservationVisitServiceTest {
                 mock(ReservationDepositProcessRepository.DepositProcessLink.class);
         given(link.getProcessId()).willReturn(31L);
         given(link.getStatus()).willReturn(ReservationDepositProcessStatus.COMPLETED);
-        given(link.getFinalReservationId()).willReturn(77L);
+        given(link.getFinalReservationId()).willReturn(DEPOSIT_RESERVATION_ID);
         given(link.getPaymentId()).willReturn("51");
-        given(depositProcessRepository.findDepositProcessLinkByFinalReservationId(77L))
+        given(depositProcessRepository.findDepositProcessLinkByFinalReservationId(
+                DEPOSIT_RESERVATION_ID))
                 .willReturn(Optional.of(link));
         given(dispositionObligationRepository.saveAndFlush(
                 any(ReservationDepositDispositionObligation.class)))
@@ -360,6 +364,7 @@ class ReservationVisitServiceTest {
 
     private static Reservation depositReservation() {
         Reservation reservation = reservation();
+        ReflectionTestUtils.setField(reservation, "id", DEPOSIT_RESERVATION_ID);
         ReflectionTestUtils.setField(reservation, "cancellationPolicyVersion", 2L);
         return reservation;
     }

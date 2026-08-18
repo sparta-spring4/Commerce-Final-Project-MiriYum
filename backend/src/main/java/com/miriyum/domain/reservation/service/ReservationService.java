@@ -1074,7 +1074,7 @@ public class ReservationService {
         if (link.getProcessId() <= 0
                 || link.getStatus() != ReservationDepositProcessStatus.COMPLETED
                 || link.getFinalReservationId() == null
-                || link.getFinalReservationId() != reservation.getId()
+                || !Objects.equals(link.getFinalReservationId(), reservation.getId())
                 || link.getPaymentId() == null
                 || !link.getPaymentId().matches("^[1-9][0-9]{0,18}$")) {
             throw new IllegalStateException(

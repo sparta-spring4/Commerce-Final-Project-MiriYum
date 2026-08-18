@@ -35,6 +35,7 @@ import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -332,7 +333,7 @@ public class ReservationVisitService {
         if (link.getProcessId() <= 0
                 || link.getStatus() != ReservationDepositProcessStatus.COMPLETED
                 || link.getFinalReservationId() == null
-                || link.getFinalReservationId() != reservation.getId()
+                || !Objects.equals(link.getFinalReservationId(), reservation.getId())
                 || link.getPaymentId() == null
                 || !link.getPaymentId().matches("^[1-9][0-9]{0,18}$")) {
             throw new IllegalStateException(

@@ -4013,16 +4013,18 @@ class ReservationServiceTest {
     }
 
     @Test
-    @DisplayName("V2 직접 방문 완료는 기존 처분 worker용 전액 환불 obligation을 함께 저장한다")
+    @DisplayName("V2 직접 방문 완료는 Long 캐시 밖 ID의 전액 환불 obligation을 함께 저장한다")
     void v2FulfillmentCreatesPendingFullRefundDisposition() {
+        long reservationId = 1_000L;
         Reservation reservation = confirmedReservation();
+        ReflectionTestUtils.setField(reservation, "id", reservationId);
         ReflectionTestUtils.setField(reservation, "cancellationPolicyVersion", 2L);
         stubFreshIdempotency(fulfillmentCommand(), null);
         given(reservationRepository.findByIdAndStoreIdForUpdate(
-                RESERVATION_ID,
+                reservationId,
                 STORE_ID
         )).willReturn(Optional.of(reservation));
-        given(menuHoldPort.lockForTermination(RESERVATION_ID))
+        given(menuHoldPort.lockForTermination(reservationId))
                 .willReturn(ReservationMenuHoldTerminationPresence.NO_HOLD);
         given(fulfillmentAuditRepository.saveAndFlush(any()))
                 .willAnswer(invocation -> invocation.getArgument(0));
@@ -4030,10 +4032,10 @@ class ReservationServiceTest {
                 mock(ReservationDepositProcessRepository.DepositProcessLink.class);
         given(link.getProcessId()).willReturn(31L);
         given(link.getStatus()).willReturn(ReservationDepositProcessStatus.COMPLETED);
-        given(link.getFinalReservationId()).willReturn(RESERVATION_ID);
+        given(link.getFinalReservationId()).willReturn(reservationId);
         given(link.getPaymentId()).willReturn("51");
         given(depositProcessRepository.findDepositProcessLinkByFinalReservationId(
-                RESERVATION_ID
+                reservationId
         )).willReturn(Optional.of(link));
         given(dispositionObligationRepository.saveAndFlush(any()))
                 .willAnswer(invocation -> invocation.getArgument(0));
@@ -4042,7 +4044,7 @@ class ReservationServiceTest {
                 reservationService.fulfillStoreReservation(
                         OPERATOR_ID,
                         STORE_ID,
-                        RESERVATION_ID,
+                        reservationId,
                         fulfillmentCommand(),
                         REQUESTED_AT,
                         FULFILLMENT_CORRELATION
