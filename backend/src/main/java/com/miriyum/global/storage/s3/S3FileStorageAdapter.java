@@ -1,6 +1,7 @@
 package com.miriyum.global.storage.s3;
 
 import com.miriyum.global.storage.FileStorageObject;
+import com.miriyum.global.storage.FileStorageOutcomeUnknownException;
 import com.miriyum.global.storage.FileStoragePort;
 import com.miriyum.global.storage.FileStorageRequest;
 import com.miriyum.global.storage.FileStorageSaveResult;
@@ -12,12 +13,15 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
+import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.ChecksumAlgorithm;
 import software.amazon.awssdk.services.s3.model.ChecksumMode;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetBucketVersioningRequest;
+import software.amazon.awssdk.services.s3.model.GetBucketVersioningResponse;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
@@ -25,6 +29,7 @@ import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
+@Slf4j
 public class S3FileStorageAdapter implements FileStoragePort {
 
     private static final int BUFFER_SIZE = 8 * 1024;
@@ -32,16 +37,28 @@ public class S3FileStorageAdapter implements FileStoragePort {
     private final S3Client s3Client;
     private final String bucket;
     private final long maxSizeBytes;
+    private final TemporaryFileDeleter temporaryFileDeleter;
 
     public S3FileStorageAdapter(S3Client s3Client, String bucket, long maxSizeBytes) {
+        this(s3Client, bucket, maxSizeBytes, Files::deleteIfExists);
+    }
+
+    S3FileStorageAdapter(
+            S3Client s3Client,
+            String bucket,
+            long maxSizeBytes,
+            TemporaryFileDeleter temporaryFileDeleter
+    ) {
         this.s3Client = s3Client;
         this.bucket = bucket;
         this.maxSizeBytes = maxSizeBytes;
+        this.temporaryFileDeleter = temporaryFileDeleter;
     }
 
     @Override
     public FileStorageSaveResult save(FileStorageRequest request) {
         validateSizeLimit(request.sizeBytes());
+        requireVersioningDisabled();
         PreparedUpload preparedUpload = prepareUpload(request);
         RuntimeException failure = null;
         boolean uploaded = false;
@@ -55,10 +72,7 @@ public class S3FileStorageAdapter implements FileStoragePort {
                     .checksumAlgorithm(ChecksumAlgorithm.SHA256)
                     .checksumSHA256(preparedUpload.checksumBase64())
                     .build();
-            PutObjectResponse putObjectResponse = s3Client.putObject(
-                    putObjectRequest,
-                    RequestBody.fromFile(preparedUpload.file())
-            );
+            PutObjectResponse putObjectResponse = putObject(putObjectRequest, preparedUpload.file());
             uploaded = true;
             uploadedVersionId = putObjectResponse.versionId();
 
@@ -77,8 +91,9 @@ public class S3FileStorageAdapter implements FileStoragePort {
             );
         } catch (RuntimeException exception) {
             failure = exception;
-            if (uploaded && isCompensatableVersionId(uploadedVersionId)) {
-                deleteUploadedObject(request.objectKey(), uploadedVersionId, exception);
+            if (uploaded && !deleteUploadedObject(request.objectKey(), uploadedVersionId, exception)) {
+                throw new FileStorageOutcomeUnknownException(
+                        "uploaded object outcome cannot be determined safely", exception);
             }
             throw exception;
         } finally {
@@ -117,11 +132,30 @@ public class S3FileStorageAdapter implements FileStoragePort {
 
     @Override
     public void delete(String objectKey) {
+        requireVersioningDisabled();
         DeleteObjectRequest request = DeleteObjectRequest.builder()
                 .bucket(bucket)
                 .key(objectKey)
                 .build();
         s3Client.deleteObject(request);
+    }
+
+    private PutObjectResponse putObject(PutObjectRequest request, Path content) {
+        try {
+            return s3Client.putObject(request, RequestBody.fromFile(content));
+        } catch (RuntimeException exception) {
+            // S3 may persist the object even when the response is lost, so reconciliation must retain PENDING.
+            throw new FileStorageOutcomeUnknownException("PutObject outcome cannot be determined safely", exception);
+        }
+    }
+
+    private void requireVersioningDisabled() {
+        GetBucketVersioningResponse response = s3Client.getBucketVersioning(GetBucketVersioningRequest.builder()
+                .bucket(bucket)
+                .build());
+        if (response != null && response.status() != null) {
+            throw new IllegalStateException("S3 bucket Versioning must be disabled for file cleanup");
+        }
     }
 
     private PreparedUpload prepareUpload(FileStorageRequest request) {
@@ -199,15 +233,20 @@ public class S3FileStorageAdapter implements FileStoragePort {
         }
     }
 
-    private void deleteUploadedObject(String objectKey, String versionId, RuntimeException failure) {
+    private boolean deleteUploadedObject(String objectKey, String versionId, RuntimeException failure) {
+        if (!isCompensatableVersionId(versionId)) {
+            return false;
+        }
         try {
             s3Client.deleteObject(DeleteObjectRequest.builder()
                     .bucket(bucket)
                     .key(objectKey)
                     .versionId(versionId)
                     .build());
+            return true;
         } catch (RuntimeException cleanupException) {
             failure.addSuppressed(cleanupException);
+            return false;
         }
     }
 
@@ -217,15 +256,22 @@ public class S3FileStorageAdapter implements FileStoragePort {
 
     private void deleteTemporaryFile(Path temporaryFile, RuntimeException failure) {
         try {
-            Files.deleteIfExists(temporaryFile);
+            temporaryFileDeleter.deleteIfExists(temporaryFile);
         } catch (IOException exception) {
             IllegalStateException cleanupException = new IllegalStateException("failed to delete temporary file", exception);
             if (failure != null) {
                 failure.addSuppressed(cleanupException);
                 return;
             }
-            throw cleanupException;
+            // A remote object was already verified. Local temp-file cleanup must not turn that success into FAILED.
+            log.warn("event=file_storage_temporary_file_cleanup_failed");
         }
+    }
+
+    @FunctionalInterface
+    interface TemporaryFileDeleter {
+
+        boolean deleteIfExists(Path temporaryFile) throws IOException;
     }
 
     private MessageDigest messageDigest() {
