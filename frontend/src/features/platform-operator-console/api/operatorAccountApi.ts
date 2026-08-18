@@ -23,7 +23,6 @@ export type OperatorAccountSummary =
 export type OperatorAccountPage = components['schemas']['OperatorAccountPage']
 export type OperatorAccountDetail =
   components['schemas']['OperatorAccountDetail']
-export type CurrentOperatorData = components['schemas']['CurrentOperatorData']
 
 /**
  * 부여할 수 있는 역할·권한은 조회 결과보다 좁다.
@@ -80,24 +79,6 @@ export const operatorAccountQueryKeys = {
       ...PLATFORM_OPERATOR_PROTECTED_QUERY_ROOTS.operatorAccounts,
       operatorId,
     ] as const,
-  me: () => [...PLATFORM_OPERATOR_PROTECTED_QUERY_ROOTS.currentOperator] as const,
-}
-
-/**
- * 현재 운영자와 중앙 유효 권한.
- *
- * 권한은 JWT claims가 아니라 서버가 RBAC 원장에서 읽은 snapshot이다.
- * `capabilities.ts`가 이 결과를 소비하도록 연결하는 것이 후속 작업이다.
- */
-export async function fetchCurrentOperator(
-  apiClient: ApiClient,
-  signal?: AbortSignal,
-): Promise<CurrentOperatorData> {
-  const response = await apiClient('/api/v1/platform-operators/me', {
-    method: 'get',
-    signal,
-  })
-  return response.data
 }
 
 export async function fetchOperatorAccounts(

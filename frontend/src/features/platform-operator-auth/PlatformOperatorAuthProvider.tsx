@@ -24,6 +24,11 @@ import {
   type PlatformOperatorLoginRequest,
   type PlatformOperatorTokenData,
 } from './api/platformOperatorAuthApi'
+import {
+  fetchPlatformOperatorCapabilities,
+  platformOperatorCapabilitiesQueryKey,
+  type PlatformOperatorCapabilitiesData,
+} from './api/platformOperatorCapabilitiesApi'
 import { PLATFORM_OPERATOR_CSRF_COOKIE } from './model/csrfCookie'
 import {
   isRefreshablePlatformOperatorAuthError,
@@ -33,11 +38,6 @@ import {
   resolveCapabilities,
   type CapabilityState,
 } from './model/capabilities'
-import {
-  fetchCurrentOperator,
-  operatorAccountQueryKeys,
-  type CurrentOperatorData,
-} from '../platform-operator-console/api/operatorAccountApi'
 
 /**
  * 플랫폼 운영자 shell의 인증 상태.
@@ -72,7 +72,7 @@ export interface PlatformOperatorAuthContextValue {
   apiClient: ApiClient
   /** 중앙 RBAC snapshot. 조회 중·실패에는 `unknown`으로 실패 폐쇄한다. */
   capabilities: CapabilityState
-  currentOperator: CurrentOperatorData | null
+  currentCapabilities: PlatformOperatorCapabilitiesData | null
   retryCapabilities: () => void
   sessionDeadlines: PlatformOperatorSessionDeadlines | null
   signIn: (credentials: PlatformOperatorLoginRequest) => Promise<void>
@@ -302,39 +302,40 @@ export function PlatformOperatorAuthProvider({
 
   const dismissSignOutNotice = useCallback(() => setSignOutNotice(null), [])
 
-  const currentOperatorQuery = useQuery({
-    queryKey: operatorAccountQueryKeys.me(),
-    queryFn: ({ signal }) => fetchCurrentOperator(apiClient, signal),
+  const currentCapabilitiesQuery = useQuery({
+    queryKey: platformOperatorCapabilitiesQueryKey,
+    queryFn: ({ signal }) =>
+      fetchPlatformOperatorCapabilities(apiClient, signal),
     enabled: status === 'authenticated',
   })
 
   const capabilities = useMemo<CapabilityState>(() => {
-    if (status !== 'authenticated' || currentOperatorQuery.isPending) {
+    if (status !== 'authenticated' || currentCapabilitiesQuery.isPending) {
       return { status: 'unknown', reason: 'loading' }
     }
-    if (currentOperatorQuery.isError) {
+    if (currentCapabilitiesQuery.isError) {
       return {
         status: 'unknown',
         reason: 'loadFailed',
-        error: currentOperatorQuery.error,
+        error: currentCapabilitiesQuery.error,
       }
     }
-    return resolveCapabilities(currentOperatorQuery.data)
+    return resolveCapabilities(currentCapabilitiesQuery.data)
   }, [
     status,
-    currentOperatorQuery.data,
-    currentOperatorQuery.error,
-    currentOperatorQuery.isError,
-    currentOperatorQuery.isPending,
+    currentCapabilitiesQuery.data,
+    currentCapabilitiesQuery.error,
+    currentCapabilitiesQuery.isError,
+    currentCapabilitiesQuery.isPending,
   ])
 
   const retryCapabilities = useCallback(() => {
-    void currentOperatorQuery.refetch()
-  }, [currentOperatorQuery])
+    void currentCapabilitiesQuery.refetch()
+  }, [currentCapabilitiesQuery])
 
-  const currentOperator =
-    status === 'authenticated' && currentOperatorQuery.data !== undefined
-      ? currentOperatorQuery.data
+  const currentCapabilities =
+    status === 'authenticated' && currentCapabilitiesQuery.data !== undefined
+      ? currentCapabilitiesQuery.data
       : null
 
   const value = useMemo(
@@ -342,7 +343,7 @@ export function PlatformOperatorAuthProvider({
       status,
       apiClient,
       capabilities,
-      currentOperator,
+      currentCapabilities,
       retryCapabilities,
       sessionDeadlines,
       signIn,
@@ -355,7 +356,7 @@ export function PlatformOperatorAuthProvider({
       status,
       apiClient,
       capabilities,
-      currentOperator,
+      currentCapabilities,
       retryCapabilities,
       sessionDeadlines,
       signIn,

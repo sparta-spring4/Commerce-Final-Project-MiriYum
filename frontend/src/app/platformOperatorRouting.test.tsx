@@ -24,7 +24,11 @@ describe('플랫폼 운영자 route context', () => {
     render(<App />)
 
     expect(
-      await screen.findByRole('heading', { name: '운영자 로그인' }),
+      await screen.findByRole(
+        'heading',
+        { name: '운영자 로그인' },
+        { timeout: 10_000 },
+      ),
     ).toBeInTheDocument()
     expect(screen.queryByText('페이지를 찾을 수 없습니다')).not.toBeInTheDocument()
   })

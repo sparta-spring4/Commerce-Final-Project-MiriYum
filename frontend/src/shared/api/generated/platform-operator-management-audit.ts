@@ -5,10 +5,6 @@
 
 
 export interface paths {
-  "/api/v1/platform-operators/me": {
-    /** 현재 플랫폼 운영자와 중앙 유효 권한 조회 */
-    get: operations["getCurrentPlatformOperator"];
-  };
   "/api/v1/platform-operators/accounts": {
     /** 플랫폼 운영자 계정 목록 조회 */
     get: operations["searchPlatformOperatorAccounts"];
@@ -96,16 +92,6 @@ export interface components {
       roles: components["schemas"]["NonSuperAdminRole"][];
       directPermissions: components["schemas"]["NonCorePermission"][];
     };
-    CurrentOperatorData: {
-      operatorId: components["schemas"]["PublicId"];
-      displayName: string;
-      status: components["schemas"]["OperatorAccountStatus"];
-      /** Format: int64 */
-      authorityVersion: number;
-      roles: components["schemas"]["OperatorRole"][];
-      permissions: components["schemas"]["OperatorPermission"][];
-      passwordChangeRequired: boolean;
-    };
     OperatorAccountSummary: {
       operatorId: components["schemas"]["PublicId"];
       email: components["schemas"]["MaskedEmail"];
@@ -176,11 +162,6 @@ export interface components {
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["AccountData"];
     };
-    CurrentOperatorResponse: {
-      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
-      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
-      data: components["schemas"]["CurrentOperatorData"];
-    };
     OperatorAccountSearchResponse: {
       code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
@@ -214,12 +195,6 @@ export interface components {
     };
   };
   responses: {
-    /** @description 현재 운영자와 중앙 유효 권한 */
-    CurrentOperatorResult: {
-      content: {
-        "application/json": components["schemas"]["CurrentOperatorResponse"];
-      };
-    };
     /** @description 마스킹된 운영자 계정 페이지 */
     OperatorAccountSearchResult: {
       content: {
@@ -270,12 +245,6 @@ export interface components {
     };
     /** @description 최초 비밀번호 변경 제한 또는 singleton·권한·배정·재인증·조회 범위가 유효하지 않음 */
     AuthorizationDenied: {
-      content: {
-        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
-      };
-    };
-    /** @description 최초 비밀번호 변경 전 제한 세션은 운영 읽기에 접근할 수 없음 */
-    InitialPasswordChangeRequired: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -662,15 +631,6 @@ export interface external {
 
 export interface operations {
 
-  /** 현재 플랫폼 운영자와 중앙 유효 권한 조회 */
-  getCurrentPlatformOperator: {
-    responses: {
-      200: components["responses"]["CurrentOperatorResult"];
-      401: components["responses"]["SessionUnauthorized"];
-      403: components["responses"]["InitialPasswordChangeRequired"];
-      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
-    };
-  };
   /** 플랫폼 운영자 계정 목록 조회 */
   searchPlatformOperatorAccounts: {
     parameters: {

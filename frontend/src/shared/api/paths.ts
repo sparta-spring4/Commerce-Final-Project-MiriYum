@@ -5,6 +5,7 @@ import type { paths as MenuHoldPickupPaths } from './generated/menu-hold-pickup'
 import type { paths as NotificationPaths } from './generated/notification'
 import type { paths as PlatformOperatorAuthPaths } from './generated/platform-operator-auth'
 import type { paths as PlatformOperatorAuthorizationPaths } from './generated/platform-operator-authorization'
+import type { paths as PlatformOperatorCapabilitiesPaths } from './generated/platform-operator-capabilities'
 import type { paths as PlatformOperatorManagementAuditPaths } from './generated/platform-operator-management-audit'
 import type { paths as ReservationPaths } from './generated/reservation'
 import type { paths as StoreSearchPaths } from './generated/store-search'
@@ -30,6 +31,7 @@ type PathDocs = [
   NotificationPaths,
   PlatformOperatorAuthPaths,
   PlatformOperatorAuthorizationPaths,
+  PlatformOperatorCapabilitiesPaths,
   MemberSupportPaths,
   PlatformOperatorManagementAuditPaths,
   AdminStorePaths,

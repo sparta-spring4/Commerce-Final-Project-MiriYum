@@ -35,7 +35,7 @@ const REASON_CODE_PATTERN = /^[A-Z0-9_]+$/
  * 그대로 보여 준다.
  */
 export function MemberSanctionApprovalPage() {
-  const { apiClient, capabilities, currentOperator } =
+  const { apiClient, capabilities, currentCapabilities } =
     usePlatformOperatorAuth()
 
   const [accountType, setAccountType] = useState<AccountType>('CONSUMER')
@@ -70,7 +70,8 @@ export function MemberSanctionApprovalPage() {
     'ACCOUNT_PERMANENT_SANCTION_APPROVE',
   )
 
-  const isSuperAdmin = currentOperator?.roles.includes('SUPER_ADMIN') === true
+  const isSuperAdmin =
+    currentCapabilities?.roles.includes('SUPER_ADMIN') === true
 
   if (decision === 'denied' || (decision === 'allowed' && !isSuperAdmin)) {
     return (

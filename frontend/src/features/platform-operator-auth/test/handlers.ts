@@ -1,6 +1,7 @@
 import { http } from 'msw'
 import { errorResponse, successResponse } from '../../../test/msw/envelope'
 import { AuthErrorCode } from '../../auth/model/authErrors'
+import type { PlatformOperatorCapabilitiesData } from '../api/platformOperatorCapabilitiesApi'
 
 /**
  * 플랫폼 운영자 shell 테스트용 MSW 핸들러.
@@ -63,21 +64,16 @@ export function authenticatedPlatformOperator(accessToken?: string) {
 /** 현재 중앙 RBAC 원장에서 읽은 운영자 snapshot. */
 export function currentPlatformOperator(
   overrides: {
-    permissions?: string[]
-    displayName?: string
-    roles?: string[]
+    permissions?: PlatformOperatorCapabilitiesData['permissions']
+    roles?: PlatformOperatorCapabilitiesData['roles']
   } = {},
 ) {
   return http.get(PO_ME_PATH, () =>
     successResponse({
-      operatorId: '1001',
-      displayName: overrides.displayName ?? '김운영',
-      status: 'ACTIVE',
       authorityVersion: 3,
       roles: overrides.roles ?? ['MEMBER_SUPPORT_OPERATOR'],
       permissions: overrides.permissions ?? ['MEMBER_READ_MINIMAL'],
-      passwordChangeRequired: false,
-    }),
+    } satisfies PlatformOperatorCapabilitiesData),
   )
 }
 

@@ -56,7 +56,8 @@ describe('운영 콘솔 권한 경계', () => {
     renderLayout()
 
     expect(await screen.findByText('업무 화면')).toBeInTheDocument()
-    expect(screen.getByText('김운영')).toBeInTheDocument()
+    expect(screen.queryByText('김운영')).not.toBeInTheDocument()
+    expect(screen.getByText('회원지원')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '회원 관리' })).toBeInTheDocument()
     expect(
       screen.queryByRole('link', { name: '운영자 관리' }),

@@ -17,12 +17,12 @@ import './console.css'
  * 서버 계약이 있는 3개만 둔다. 전역 검색 입력과 알림 종은 계약이 없어서
  * 넣지 않는다. 누를 수 있게 그려 두면 동작하지 않는 컨트롤이 된다.
  *
- * 운영자 식별정보는 `/me`가 반환한 표시명과 현재 역할만 사용한다.
+ * `/me`는 개인정보 없이 현재 역할과 최종 권한만 반환한다.
  */
 export function ConsoleLayout() {
   const {
     capabilities,
-    currentOperator,
+    currentCapabilities,
     retryCapabilities,
     sessionDeadlines,
     signOut,
@@ -102,17 +102,17 @@ export function ConsoleLayout() {
 
       <div className="po-console__main">
         <header className="po-console__header">
-          {currentOperator !== null && (
-            <p className="po-console__session">
-              <span className="po-console__session-label">현재 운영자</span>
-              <strong>{currentOperator.displayName}</strong>
-              <span>
-                {currentOperator.roles
-                  .map((role) => OPERATOR_ROLE_LABEL[role])
-                  .join(', ')}
-              </span>
-            </p>
-          )}
+          {currentCapabilities !== null &&
+            currentCapabilities.roles.length > 0 && (
+              <p className="po-console__session">
+                <span className="po-console__session-label">현재 역할</span>
+                <strong>
+                  {currentCapabilities.roles
+                    .map((role) => OPERATOR_ROLE_LABEL[role])
+                    .join(', ')}
+                </strong>
+              </p>
+            )}
           {sessionDeadlines !== null && (
             <p className="po-console__session">
               <span className="po-console__session-label">세션 만료</span>
