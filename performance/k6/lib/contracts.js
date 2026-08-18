@@ -236,7 +236,6 @@ function reservationTemplateKey(template) {
     template.accountAlias,
     template.storeId,
     template.serviceDate,
-    template.startTime,
   ])
 }
 

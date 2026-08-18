@@ -137,8 +137,8 @@ function reservationCapacityFixture(templateCount) {
     reservationTemplates: Array.from({ length: templateCount }, (_, index) => ({
       accountAlias: 'reservation-contract',
       storeId: '301',
-      serviceDate: `2026-09-${String(Math.floor(index / 24) + 1).padStart(2, '0')}`,
-      startTime: `${String(index % 24).padStart(2, '0')}:00:00`,
+      serviceDate: new Date(Date.UTC(2026, 8, index + 1)).toISOString().slice(0, 10),
+      startTime: '18:00:00',
       startOffset: '+09:00',
       party: { adultCount: 2, childCount: 0, infantCount: 0 },
       menuSelections: [],
@@ -193,6 +193,18 @@ function reservationFixtureWithOmittedAndExplicitOffsetAtSameLocalSlot(templateC
   fixture.reservationTemplates[duplicateIndex] = {
     ...fixture.reservationTemplates[originalIndex],
     startOffset: '+09:00',
+  }
+  return fixture
+}
+
+function reservationFixtureWithSameAccountStoreDateDifferentStartTimes(templateCount) {
+  const fixture = reservationCapacityFixture(templateCount)
+  const originalIndex = templateCount - 2
+  const duplicateIndex = templateCount - 1
+  fixture.reservationTemplates[originalIndex].startTime = '18:00:00'
+  fixture.reservationTemplates[duplicateIndex] = {
+    ...fixture.reservationTemplates[originalIndex],
+    startTime: '18:30:00',
   }
   return fixture
 }
@@ -422,6 +434,15 @@ export default function () {
         reservationFixtureWithOmittedAndExplicitOffsetAtSameLocalSlot(singleScenarioRequired),
       ),
     ))
+  const sameAccountStoreDateDifferentStartTimesRejected =
+    typeof buildExecutionScenarios === 'function'
+    && Number.isInteger(singleScenarioRequired)
+    && throws(() => buildExecutionScenarios(
+      singleScenarioConfig,
+      fixtureContracts.validateFixture(
+        reservationFixtureWithSameAccountStoreDateDifferentStartTimes(singleScenarioRequired),
+      ),
+    ))
   const mixedScenarioFirstScenarios = typeof buildExecutionScenarios === 'function'
     ? buildExecutionScenarios({
       ...singleScenarioConfig,
@@ -547,7 +568,7 @@ export default function () {
       singleScenarioRequired === 31,
     'one fewer reservation template is rejected before execution': () =>
       oneShortFixtureRejected,
-    'the exact boundary-inclusive reservation capacity is accepted': () =>
+    'distinct-date boundary-inclusive reservation capacity is accepted': () =>
       sufficientScenarios?.reservationCreate.rate === 1
       && sufficientScenarios.reservationCreate.duration === '30s',
     'party differences do not bypass same-slot reservation conflict validation': () =>
@@ -558,6 +579,8 @@ export default function () {
       zeroOffsetDuplicateFixtureRejected,
     'offset presence does not bypass same-local-slot reservation conflict validation': () =>
       omittedAndExplicitOffsetAtSameLocalSlotRejected,
+    'different start times do not bypass same-date reservation conflict validation': () =>
+      sameAccountStoreDateDifferentStartTimesRejected,
     'mixed scenario allocation includes the remainder and boundary guard': () =>
       mixedScenarioFirstRequired === 61
       && mixedScenarioFirstScenarios?.reservationCreate.rate === 2,
