@@ -127,6 +127,18 @@ put_alarm() {
     "$@"
 }
 
+put_missing_data_alarm() {
+  local name="$1"
+  shift
+  aws cloudwatch put-metric-alarm \
+    --region "$AWS_REGION" \
+    --alarm-name "$name" \
+    --alarm-actions "$topic_arn" \
+    --ok-actions "$topic_arn" \
+    --treat-missing-data breaching \
+    "$@"
+}
+
 put_alarm "miriyum-staging-cpu-high" \
   --namespace AWS/EC2 \
   --metric-name CPUUtilization \
@@ -203,6 +215,16 @@ put_alarm "miriyum-staging-auth-valkey-memory-collection-failed" \
   --evaluation-periods 1 \
   --threshold 0 \
   --comparison-operator GreaterThanThreshold
+
+put_missing_data_alarm "miriyum-staging-auth-valkey-memory-collection-missing" \
+  --namespace "$NAMESPACE" \
+  --metric-name AuthValkeyMemoryCollectionHeartbeat \
+  --dimensions "Name=InstanceId,Value=$EC2_INSTANCE_ID" \
+  --statistic Minimum \
+  --period 300 \
+  --evaluation-periods 1 \
+  --threshold 0.5 \
+  --comparison-operator LessThanThreshold
 
 put_alarm "miriyum-staging-reservation-hold-reconciliation-stalled" \
   --namespace "$NAMESPACE" \
@@ -355,6 +377,24 @@ dashboard_body=$(cat <<EOF
         "stat": "Maximum",
         "metrics": [
           ["MiriYum/Staging", "AuthValkeyMemoryUtilizationPercent", "InstanceId", "$EC2_INSTANCE_ID"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 30,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum Auth Valkey memory collection health",
+        "period": 60,
+        "stat": "Sum",
+        "metrics": [
+          ["MiriYum/Staging", "AuthValkeyMemoryCollectionHeartbeat", "InstanceId", "$EC2_INSTANCE_ID"],
+          [".", "AuthValkeyMemoryCollectionFailure", ".", "."]
         ]
       }
     }

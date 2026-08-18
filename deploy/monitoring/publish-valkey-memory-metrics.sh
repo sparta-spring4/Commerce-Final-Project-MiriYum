@@ -35,6 +35,8 @@ if ! memory_info="$(REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" \
   exit 1
 fi
 
+# valkey-cli emits CRLF on some hosts; parse the same values on every host.
+memory_info="${memory_info//$'\r'/}"
 used_memory="$(printf '%s\n' "$memory_info" | sed -n 's/^used_memory:\([0-9][0-9]*\)$/\1/p')"
 maxmemory="$(printf '%s\n' "$memory_info" | sed -n 's/^maxmemory:\([0-9][0-9]*\)$/\1/p')"
 
@@ -53,6 +55,7 @@ if ! "$AWS_BIN" cloudwatch put-metric-data \
     "MetricName=AuthValkeyUsedMemoryBytes,Value=$used_memory,Unit=Bytes,Dimensions=[{Name=InstanceId,Value=$instance_id}]" \
     "MetricName=AuthValkeyMaxMemoryBytes,Value=$maxmemory,Unit=Bytes,Dimensions=[{Name=InstanceId,Value=$instance_id}]" \
     "MetricName=AuthValkeyMemoryUtilizationPercent,Value=$utilization_percent,Unit=Percent,Dimensions=[{Name=InstanceId,Value=$instance_id}]" \
+    "MetricName=AuthValkeyMemoryCollectionHeartbeat,Value=1,Unit=Count,Dimensions=[{Name=InstanceId,Value=$instance_id}]" \
     >/dev/null; then
   publish_failure
   exit 1
