@@ -471,8 +471,8 @@ version CAS는 Issue #380이 별도로 소유한다.
 
 | path | method | 의미 |
 |---|---|---|
-| `/api/v1/consumers/stores/{storeId}/waiting-availability` | `GET` | 중앙 시각 기준 접수 가능 여부와 등록에 사용할 `businessDate` 조회 |
-| `/api/v1/consumers/stores/{storeId}/waiting-teams` | `POST` | `businessDate`, `partySize`로 원격 웨이팅 등록 |
+| `/api/v1/consumers/me/stores/{storeId}/waiting-availabilities` | `GET` | 중앙 시각 기준 접수 가능 여부와 등록에 사용할 `businessDate` 조회 |
+| `/api/v1/consumers/me/stores/{storeId}/waiting-teams` | `POST` | `businessDate`, `partySize`로 원격 웨이팅 등록 |
 | `/api/v1/consumers/me/waiting-teams/current` | `GET` | 인증 소비자의 단일 활성 웨이팅 조회 |
 | `/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations` | `POST` | 본인 웨이팅을 `expectedVersion`으로 취소 |
 

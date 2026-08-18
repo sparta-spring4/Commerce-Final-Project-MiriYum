@@ -23,9 +23,9 @@ class WaitingOpenApiContractTest {
             "/api/v1/store-operators/stores/{storeId}/waiting-settings";
     private static final String DISABLE_IMPACT_PATH = SETTINGS_PATH + "/deactivation-impact";
     private static final String CONSUMER_AVAILABILITY_PATH =
-            "/api/v1/consumers/stores/{storeId}/waiting-availability";
+            "/api/v1/consumers/me/stores/{storeId}/waiting-availabilities";
     private static final String CONSUMER_CREATE_PATH =
-            "/api/v1/consumers/stores/{storeId}/waiting-teams";
+            "/api/v1/consumers/me/stores/{storeId}/waiting-teams";
     private static final String CONSUMER_CURRENT_PATH =
             "/api/v1/consumers/me/waiting-teams/current";
     private static final String CONSUMER_CANCEL_PATH =

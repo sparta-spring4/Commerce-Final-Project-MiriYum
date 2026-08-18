@@ -1,16 +1,13 @@
 package com.miriyum.domain.reservation.waiting.controller.consumer;
 
 import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
-import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCreateRequest;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingReceptionAvailability;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
-import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerCommandFacade;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerQueryService;
-import com.miriyum.domain.reservation.waiting.service.WaitingCreationService;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -28,16 +25,14 @@ import org.springframework.web.bind.annotation.RestController;
 
 /** 소비자 JWT 주체의 웨이팅 등록·현재 조회·취소 HTTP 경계다. */
 @RestController
-@RequestMapping("/api/v1/consumers")
+@RequestMapping("/api/v1/consumers/me")
 @RequiredArgsConstructor
 public class WaitingConsumerController {
 
-    private final WaitingCreationService creationService;
     private final WaitingConsumerQueryService queryService;
     private final WaitingConsumerCommandFacade commandFacade;
-    private final ConsumerAccountService accountService;
 
-    @GetMapping("/stores/{storeId}/waiting-availability")
+    @GetMapping("/stores/{storeId}/waiting-availabilities")
     public ApiResponse<WaitingReceptionAvailability> getAvailability(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId
@@ -55,13 +50,11 @@ public class WaitingConsumerController {
             @Valid @RequestBody WaitingConsumerCreateRequest request
     ) {
         IdempotencyKey key = IdempotencyKey.parse(rawKey);
-        accountService.requireActiveAccount(principal.accountId());
-        WaitingCommandResult result = creationService.create(
+        WaitingCommandResult result = commandFacade.create(
                 storeId,
                 principal.accountId(),
                 request.businessDate(),
                 request.partySize(),
-                WaitingSource.REMOTE,
                 key);
         WaitingConsumerSnapshot snapshot = queryService.getOwned(
                 principal.accountId(), Long.parseLong(result.data().waitingTeamId()));
@@ -69,7 +62,7 @@ public class WaitingConsumerController {
                 .body(ApiResponse.success("웨이팅을 등록했습니다.", snapshot));
     }
 
-    @GetMapping("/me/waiting-teams/current")
+    @GetMapping("/waiting-teams/current")
     public ApiResponse<WaitingConsumerSnapshot> getCurrent(
             @AuthenticationPrincipal AuthenticatedPrincipal principal
     ) {
@@ -78,7 +71,7 @@ public class WaitingConsumerController {
                 queryService.getCurrent(principal.accountId()));
     }
 
-    @PostMapping("/me/waiting-teams/{waitingTeamId}/cancellations")
+    @PostMapping("/waiting-teams/{waitingTeamId}/cancellations")
     public ResponseEntity<ApiResponse<WaitingConsumerSnapshot>> cancel(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long waitingTeamId,

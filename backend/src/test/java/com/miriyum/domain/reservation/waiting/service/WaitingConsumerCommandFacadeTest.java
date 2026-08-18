@@ -12,10 +12,12 @@ import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
+import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -24,8 +26,36 @@ import org.mockito.InOrder;
 class WaitingConsumerCommandFacadeTest {
 
     @Test
+    void createRevalidatesTheConsumerAndFixesThePublicSourceToRemote() {
+        ConsumerAccountService accounts = mock(ConsumerAccountService.class);
+        WaitingCreationService creation = mock(WaitingCreationService.class);
+        WaitingLedgerService ledger = mock(WaitingLedgerService.class);
+        IdempotencyKey key = IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440200");
+        LocalDate businessDate = LocalDate.of(2026, 8, 17);
+        WaitingCommandResult expected = new WaitingCommandResult(
+                200, mock(WaitingTeamSnapshot.class));
+        when(creation.create(100L, 200L, businessDate, 2, WaitingSource.REMOTE, key))
+                .thenReturn(expected);
+        WaitingConsumerCommandFacade facade = new WaitingConsumerCommandFacade(
+                accounts,
+                creation,
+                ledger,
+                Clock.fixed(Instant.parse("2026-08-17T03:00:00Z"), ZoneOffset.UTC),
+                attempt -> 0L,
+                millis -> { });
+
+        WaitingCommandResult result = facade.create(100L, 200L, businessDate, 2, key);
+
+        assertThat(result).isSameAs(expected);
+        InOrder order = inOrder(accounts, creation);
+        order.verify(accounts).requireActiveAccount(200L);
+        order.verify(creation).create(100L, 200L, businessDate, 2, WaitingSource.REMOTE, key);
+    }
+
+    @Test
     void cancelRevalidatesTheConsumerAndBuildsAConsumerScopedCanonicalCommand() {
         ConsumerAccountService accounts = mock(ConsumerAccountService.class);
+        WaitingCreationService creation = mock(WaitingCreationService.class);
         WaitingLedgerService ledger = mock(WaitingLedgerService.class);
         Instant now = Instant.parse("2026-08-17T03:00:00Z");
         WaitingCommandResult expected = new WaitingCommandResult(
@@ -35,6 +65,7 @@ class WaitingConsumerCommandFacadeTest {
                 .thenReturn(expected);
         WaitingConsumerCommandFacade facade = new WaitingConsumerCommandFacade(
                 accounts,
+                creation,
                 ledger,
                 Clock.fixed(now, ZoneOffset.UTC),
                 attempt -> 0L,

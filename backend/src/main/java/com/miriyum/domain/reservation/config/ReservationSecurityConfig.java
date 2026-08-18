@@ -42,9 +42,9 @@ public class ReservationSecurityConfig {
     private static final String RESERVATION_REQUEST_ABANDONMENT =
             RESERVATION_REQUEST_ROOT + "/*/abandonments";
     private static final String CONSUMER_WAITING_STORE_ROOT =
-            "/api/v1/consumers/stores/*/waiting-teams";
+            "/api/v1/consumers/me/stores/*/waiting-teams";
     private static final String CONSUMER_WAITING_AVAILABILITY =
-            "/api/v1/consumers/stores/*/waiting-availability";
+            "/api/v1/consumers/me/stores/*/waiting-availabilities";
     private static final String CONSUMER_WAITING_ME_ROOT =
             "/api/v1/consumers/me/waiting-teams";
     private static final String CONSUMER_WAITING_ME_FAMILY =

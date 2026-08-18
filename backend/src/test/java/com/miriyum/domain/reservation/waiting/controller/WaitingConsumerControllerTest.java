@@ -12,7 +12,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
-import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.reservation.config.ReservationSecurityConfig;
 import com.miriyum.domain.reservation.waiting.controller.consumer.WaitingConsumerController;
 import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
@@ -20,11 +19,9 @@ import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingReceptionAvailability;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
-import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerCommandFacade;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerQueryService;
-import com.miriyum.domain.reservation.waiting.service.WaitingCreationService;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import java.time.Instant;
@@ -45,10 +42,8 @@ class WaitingConsumerControllerTest {
     private static final String KEY = "550e8400-e29b-41d4-a716-446655440301";
 
     @Autowired MockMvc mockMvc;
-    @MockitoBean WaitingCreationService creationService;
     @MockitoBean WaitingConsumerQueryService queryService;
     @MockitoBean WaitingConsumerCommandFacade commandFacade;
-    @MockitoBean ConsumerAccountService accountService;
     @MockitoBean JwtTokenProvider jwtTokenProvider;
 
     @Test
@@ -58,9 +53,9 @@ class WaitingConsumerControllerTest {
         WaitingConsumerSnapshot cancelled = snapshot(WaitingTeamStatus.CANCELLED, 1L);
         given(queryService.getAvailability(200L, 100L)).willReturn(
                 WaitingReceptionAvailability.open(100L, LocalDate.of(2026, 8, 17)));
-        given(creationService.create(
+        given(commandFacade.create(
                 eq(100L), eq(200L), eq(LocalDate.of(2026, 8, 17)), eq(2),
-                eq(WaitingSource.REMOTE), argThat(key -> KEY.equals(key.value()))))
+                argThat(key -> KEY.equals(key.value()))))
                 .willReturn(new WaitingCommandResult(200, teamSnapshot()));
         given(queryService.getOwned(200L, 300L)).willReturn(waiting, cancelled);
         given(queryService.getCurrent(200L)).willReturn(waiting);
@@ -69,13 +64,13 @@ class WaitingConsumerControllerTest {
                 eq(new WaitingTeamTransitionRequest(0L))))
                 .willReturn(new WaitingCommandResult(200, teamSnapshot()));
 
-        mockMvc.perform(get("/api/v1/consumers/stores/100/waiting-availability")
+        mockMvc.perform(get("/api/v1/consumers/me/stores/100/waiting-availabilities")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.accepting").value(true))
                 .andExpect(jsonPath("$.data.businessDate").value("2026-08-17"));
 
-        mockMvc.perform(post("/api/v1/consumers/stores/100/waiting-teams")
+        mockMvc.perform(post("/api/v1/consumers/me/stores/100/waiting-teams")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
                         .header("Idempotency-Key", KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -100,12 +95,14 @@ class WaitingConsumerControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("CANCELLED"));
 
-        then(accountService).should().requireActiveAccount(200L);
+        then(commandFacade).should().create(
+                eq(100L), eq(200L), eq(LocalDate.of(2026, 8, 17)), eq(2),
+                argThat(key -> KEY.equals(key.value())));
     }
 
     @Test
     void missingTokenAndStoreOperatorTokenCannotCallConsumerCommands() throws Exception {
-        mockMvc.perform(post("/api/v1/consumers/stores/100/waiting-teams")
+        mockMvc.perform(post("/api/v1/consumers/me/stores/100/waiting-teams")
                         .header("Idempotency-Key", KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"businessDate\":\"2026-08-17\",\"partySize\":2}"))
@@ -122,7 +119,6 @@ class WaitingConsumerControllerTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("AUTH_004"));
 
-        then(creationService).shouldHaveNoInteractions();
         then(commandFacade).shouldHaveNoInteractions();
     }
 
@@ -130,15 +126,14 @@ class WaitingConsumerControllerTest {
     void missingIdempotencyKeyIsRejectedBeforeEnteringConsumerBusinessLogic() throws Exception {
         authenticateConsumer(200L);
 
-        mockMvc.perform(post("/api/v1/consumers/stores/100/waiting-teams")
+        mockMvc.perform(post("/api/v1/consumers/me/stores/100/waiting-teams")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"businessDate\":\"2026-08-17\",\"partySize\":2}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_003"));
 
-        then(accountService).shouldHaveNoInteractions();
-        then(creationService).shouldHaveNoInteractions();
+        then(commandFacade).shouldHaveNoInteractions();
         then(queryService).shouldHaveNoInteractions();
     }
 

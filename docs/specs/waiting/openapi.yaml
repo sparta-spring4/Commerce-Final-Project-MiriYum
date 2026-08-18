@@ -348,7 +348,7 @@ paths:
           $ref: "#/components/responses/WaitingLedgerConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/consumers/stores/{storeId}/waiting-availability:
+  /api/v1/consumers/me/stores/{storeId}/waiting-availabilities:
     get:
       tags: [Consumer Waiting]
       summary: 현재 웨이팅 접수 가능 상태 조회
@@ -376,7 +376,7 @@ paths:
           $ref: "#/components/responses/WaitingConsumerConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/consumers/stores/{storeId}/waiting-teams:
+  /api/v1/consumers/me/stores/{storeId}/waiting-teams:
     post:
       tags: [Consumer Waiting]
       summary: 웨이팅 등록

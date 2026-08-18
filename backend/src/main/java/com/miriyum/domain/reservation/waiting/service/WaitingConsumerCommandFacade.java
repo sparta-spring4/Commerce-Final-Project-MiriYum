@@ -3,6 +3,7 @@ package com.miriyum.domain.reservation.waiting.service;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
+import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -11,6 +12,7 @@ import com.miriyum.global.idempotency.RequestFingerprint;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Objects;
@@ -34,6 +36,7 @@ public class WaitingConsumerCommandFacade {
             "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations";
 
     private final ConsumerAccountService accountService;
+    private final WaitingCreationService creationService;
     private final WaitingLedgerService ledgerService;
     private final Clock clock;
     private final IntToLongFunction retryDelayMillis;
@@ -45,25 +48,47 @@ public class WaitingConsumerCommandFacade {
     @Autowired
     public WaitingConsumerCommandFacade(
             ConsumerAccountService accountService,
+            WaitingCreationService creationService,
             WaitingLedgerService ledgerService,
             Clock clock
     ) {
-        this(accountService, ledgerService, clock,
+        this(accountService, creationService, ledgerService, clock,
                 WaitingConsumerCommandFacade::defaultDelayMillis, Thread::sleep);
     }
 
     WaitingConsumerCommandFacade(
             ConsumerAccountService accountService,
+            WaitingCreationService creationService,
             WaitingLedgerService ledgerService,
             Clock clock,
             IntToLongFunction retryDelayMillis,
             RetrySleeper retrySleeper
     ) {
         this.accountService = Objects.requireNonNull(accountService);
+        this.creationService = Objects.requireNonNull(creationService);
         this.ledgerService = Objects.requireNonNull(ledgerService);
         this.clock = Objects.requireNonNull(clock);
         this.retryDelayMillis = Objects.requireNonNull(retryDelayMillis);
         this.retrySleeper = Objects.requireNonNull(retrySleeper);
+    }
+
+    public WaitingCommandResult create(
+            long storeId,
+            long consumerAccountId,
+            LocalDate businessDate,
+            int partySize,
+            IdempotencyKey key
+    ) {
+        Objects.requireNonNull(businessDate, "businessDate must not be null");
+        Objects.requireNonNull(key, "key must not be null");
+        accountService.requireActiveAccount(consumerAccountId);
+        return creationService.create(
+                storeId,
+                consumerAccountId,
+                businessDate,
+                partySize,
+                WaitingSource.REMOTE,
+                key);
     }
 
     public WaitingCommandResult cancel(
