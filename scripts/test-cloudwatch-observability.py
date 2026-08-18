@@ -15,6 +15,9 @@ WORKFLOW_PATH = ROOT / ".github" / "workflows" / "backend-cd.yml"
 COMPOSE_PATH = ROOT / "deploy" / "docker-compose.prod.yml"
 ENV_EXAMPLE_PATH = ROOT / "deploy" / ".env.example"
 DEPLOY_SCRIPT_PATH = ROOT / "deploy" / "deploy.sh"
+NGINX_SELECTOR_PATH = (
+    ROOT / "deploy" / "nginx" / "entrypoint" / "40-select-server-config.sh"
+)
 OBSERVABILITY_DOCUMENT_PATH = ROOT / "docs" / "deployment" / "cloudwatch-staging-observability.md"
 DEPLOYMENT_DOCUMENT_PATH = ROOT / "docs" / "deployment" / "docker-ecr-ssm-cd.md"
 VALKEY_MEMORY_METRICS_SCRIPT_PATH = (
@@ -54,6 +57,7 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         cls.workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         cls.compose = COMPOSE_PATH.read_text(encoding="utf-8")
         cls.deploy_script = DEPLOY_SCRIPT_PATH.read_text(encoding="utf-8")
+        cls.nginx_selector = NGINX_SELECTOR_PATH.read_text(encoding="utf-8")
         cls.observability_document = OBSERVABILITY_DOCUMENT_PATH.read_text(encoding="utf-8")
         cls.deployment_document = DEPLOYMENT_DOCUMENT_PATH.read_text(encoding="utf-8")
         cls.valkey_memory_metrics_script = VALKEY_MEMORY_METRICS_SCRIPT_PATH.read_text(
@@ -445,6 +449,74 @@ esac
         self.assertIn('grep -qx PONG', self.deploy_script)
         self.assertIn('port valkey 6379', self.deploy_script)
         self.assertIn('docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey', self.deploy_script)
+
+    def test_nginx_selector_requires_certificate_and_private_key_for_tls(self):
+        self.assertIn('private_key="/etc/letsencrypt/live/${STAGING_DOMAIN}/privkey.pem"', self.nginx_selector)
+        self.assertIn(
+            'elif [ -r "${certificate}" ] && [ -r "${private_key}" ]; then',
+            self.nginx_selector,
+        )
+
+    def test_deployment_fails_and_recovers_http_when_nginx_tls_validation_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            metric_path = temporary_path / "metric-arguments"
+            compose_path = temporary_path / "compose-arguments"
+            environment_file = temporary_path / ".env"
+            environment_file.write_text("placeholder=true\n", encoding="utf-8")
+            result = self.run_deploy_script(
+                """
+aws() {
+  if [[ "$1 $2" == "sts get-caller-identity" ]]; then
+    echo 123456789012
+  elif [[ "$1 $2" == "ecr get-login-password" ]]; then
+    echo token
+  elif [[ "$1 $2" == "cloudwatch put-metric-data" ]]; then
+    printf '%s\\n' "$@" > "$NGINX_TEST_METRIC"
+  fi
+  return 0
+}
+docker() {
+  if [[ "$1" == "login" ]]; then
+    cat >/dev/null
+    return 0
+  fi
+  if [[ "$1" == "compose" ]]; then
+    if [[ "$*" == *"ps --status running --services nginx"* ]]; then
+      echo nginx
+      return 0
+    fi
+    if [[ "$*" == *"exec -T nginx nginx -t"* ]]; then
+      printf '%s\\n' "$*" >> "$NGINX_TEST_COMPOSE"
+      return 1
+    fi
+    printf '%s\\n' "$*" >> "$NGINX_TEST_COMPOSE"
+  fi
+  return 0
+}
+curl() { return 0; }
+wait_for_mysql_health() { return 0; }
+verify_valkey() { return 0; }
+backfill_pending_risk_event_index() { return 0; }
+backfill_risk_event_occurrence_counters() { return 0; }
+main
+""",
+                {
+                    "AWS_REGION": "ap-northeast-2",
+                    "BACKEND_IMAGE": "example.invalid/backend:sha",
+                    "ENV_FILE": self.to_bash_path(environment_file),
+                    "COMPOSE_FILE": self.to_bash_path(temporary_path / "docker-compose.yml"),
+                    "NGINX_TEST_METRIC": self.to_bash_path(metric_path),
+                    "NGINX_TEST_COMPOSE": self.to_bash_path(compose_path),
+                },
+            )
+
+            commands = compose_path.read_text(encoding="utf-8")
+            self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("Value=0", metric_path.read_text(encoding="utf-8"))
+            self.assertIn("exec -T nginx nginx -t", commands)
+            self.assertIn("up -d --force-recreate nginx", commands)
+            self.assertIn("logs --tail 100 nginx", commands)
 
     def test_deployment_stops_before_registry_login_when_runtime_environment_is_invalid(self):
         with tempfile.TemporaryDirectory() as directory:

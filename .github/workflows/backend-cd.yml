@@ -258,8 +258,11 @@ jobs:
         run: |
           # 실행 .env는 EC2의 제한된 권한으로만 유지하므로 의도적으로 전송 대상에서 제외한다.
           compose_base64=$(base64 --wrap=0 deploy/docker-compose.prod.yml)
-          nginx_base64=$(base64 --wrap=0 deploy/nginx/default.conf)
+          nginx_http_base64=$(base64 --wrap=0 deploy/nginx/templates/http.conf.template)
+          nginx_https_base64=$(base64 --wrap=0 deploy/nginx/templates/https.conf.template)
+          nginx_entrypoint_base64=$(base64 --wrap=0 deploy/nginx/entrypoint/40-select-server-config.sh)
           script_base64=$(base64 --wrap=0 deploy/deploy.sh)
+          certbot_script_base64=$(base64 --wrap=0 deploy/certbot.sh)
           cloudwatch_base64=$(base64 --wrap=0 deploy/monitoring/cloudwatch-agent-config.json)
           valkey_memory_metrics_base64=$(base64 --wrap=0 deploy/monitoring/publish-valkey-memory-metrics.sh)
           valkey_memory_service_base64=$(base64 --wrap=0 deploy/monitoring/miriyum-valkey-memory-metrics.service)
@@ -274,10 +277,13 @@ jobs:
             "Parameters": {
               "commands": [
                 "set -Eeuo pipefail",
-                "install -d -m 0755 /opt/miriyum/nginx",
+                "install -d -m 0755 /opt/miriyum/nginx/templates /opt/miriyum/nginx/entrypoint",
                 "echo '$compose_base64' | base64 --decode > /opt/miriyum/docker-compose.prod.yml",
-                "echo '$nginx_base64' | base64 --decode > /opt/miriyum/nginx/default.conf",
+                "echo '$nginx_http_base64' | base64 --decode > /opt/miriyum/nginx/templates/http.conf.template",
+                "echo '$nginx_https_base64' | base64 --decode > /opt/miriyum/nginx/templates/https.conf.template",
+                "echo '$nginx_entrypoint_base64' | base64 --decode > /opt/miriyum/nginx/entrypoint/40-select-server-config.sh",
                 "echo '$script_base64' | base64 --decode > /opt/miriyum/deploy.sh",
+                "echo '$certbot_script_base64' | base64 --decode > /opt/miriyum/certbot.sh",
                 "install -d -m 0755 /opt/miriyum/monitoring",
                 "echo '$cloudwatch_base64' | base64 --decode > /opt/miriyum/monitoring/cloudwatch-agent.json",
                 "echo '$valkey_memory_metrics_base64' | base64 --decode > /opt/miriyum/monitoring/publish-valkey-memory-metrics.sh",
@@ -289,6 +295,8 @@ jobs:
                 "systemctl daemon-reload",
                 "systemd-analyze verify /etc/systemd/system/miriyum-valkey-memory-metrics.service /etc/systemd/system/miriyum-valkey-memory-metrics.timer",
                 "systemctl enable --now miriyum-valkey-memory-metrics.timer",
+                "chmod 700 /opt/miriyum/certbot.sh",
+                "chmod 755 /opt/miriyum/nginx/entrypoint/40-select-server-config.sh",
                 "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' /opt/miriyum/deploy.sh"
               ]
             }
