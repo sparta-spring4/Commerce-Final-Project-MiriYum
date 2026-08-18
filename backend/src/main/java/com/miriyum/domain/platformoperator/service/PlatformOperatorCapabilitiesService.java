@@ -2,10 +2,13 @@ package com.miriyum.domain.platformoperator.service;
 
 import com.miriyum.domain.platformoperator.dto.authorization.PlatformOperatorCapabilitiesData;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
+import com.miriyum.global.exception.CommonErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,9 +25,13 @@ public class PlatformOperatorCapabilitiesService {
     /** principal의 권한 version과 현재 중앙 version이 일치하는 capabilities를 반환한다. */
     @Transactional(readOnly = true)
     public PlatformOperatorCapabilitiesData current(PlatformOperatorPrincipal principal) {
-        var authority = authorities.requireCurrentAuthority(principal.accountId(), principal.authorityVersion());
-        return new PlatformOperatorCapabilitiesData(
-                authority.authorityVersion(), sorted(authority.roles()), sorted(authority.permissions()));
+        try {
+            var authority = authorities.requireCurrentAuthority(principal.accountId(), principal.authorityVersion());
+            return new PlatformOperatorCapabilitiesData(
+                    authority.authorityVersion(), sorted(authority.roles()), sorted(authority.permissions()));
+        } catch (DataAccessException exception) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
     }
 
     private static <E extends Enum<E>> List<E> sorted(Collection<E> values) {

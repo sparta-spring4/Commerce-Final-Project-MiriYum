@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.miriyum.domain.platformoperator.dto.authorization.PlatformOperatorCapabilitiesData;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
+import com.miriyum.domain.platformoperator.service.OperatorAuthorityReader;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorCapabilitiesService;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.global.exception.GlobalExceptionHandler;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.MethodParameter;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -58,6 +60,23 @@ class PlatformOperatorCapabilitiesControllerTest {
                         org.hamcrest.Matchers.containsString("secret@example.com"))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(
                         org.hamcrest.Matchers.containsString("session-secret"))));
+    }
+
+    @Test
+    void authorityStoreFailureReturnsServiceUnavailableContract() throws Exception {
+        OperatorAuthorityReader authorities = mock(OperatorAuthorityReader.class);
+        when(authorities.requireCurrentAuthority(1L, 3L))
+                .thenThrow(new DataAccessResourceFailureException("authority store unavailable"));
+        MockMvc actualMvc = MockMvcBuilders
+                .standaloneSetup(new PlatformOperatorCapabilitiesController(
+                        new PlatformOperatorCapabilitiesService(authorities)))
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .setCustomArgumentResolvers(new PrincipalResolver())
+                .build();
+
+        actualMvc.perform(get("/api/v1/platform-operators/me"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("COMMON_012"));
     }
 
     @Test
