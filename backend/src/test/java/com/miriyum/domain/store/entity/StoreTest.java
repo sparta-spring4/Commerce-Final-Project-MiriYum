@@ -51,6 +51,7 @@ class StoreTest {
     void legacyCreateHasUnverifiedGeocodingShape() {
         Store store = cafeStore("미리윰");
 
+        assertThat(store.getDashboardAuthorityVersion()).isEqualTo(1L);
         assertThat(store.getAddressVersion()).isEqualTo(1L);
         assertThat(store.getGeocodingStatus()).isEqualTo(GeocodingStatus.UNVERIFIED);
         assertThat(store.getLatitude()).isNull();
