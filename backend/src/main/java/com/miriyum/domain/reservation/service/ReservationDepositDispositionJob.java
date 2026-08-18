@@ -91,13 +91,18 @@ public class ReservationDepositDispositionJob {
                         claim, RETRY_DELAY, MAX_ATTEMPTS);
                 continue;
             }
-            if (dispositionService.recordResult(
-                    claim,
-                    result,
-                    RETRY_DELAY,
-                    QUERY_DELAY,
-                    MAX_ATTEMPTS)) {
-                completed++;
+            try {
+                if (dispositionService.recordResult(
+                        claim,
+                        result,
+                        RETRY_DELAY,
+                        QUERY_DELAY,
+                        MAX_ATTEMPTS)) {
+                    completed++;
+                }
+            } catch (IllegalStateException failure) {
+                dispositionService.recordRetryableFailure(
+                        claim, RETRY_DELAY, MAX_ATTEMPTS);
             }
         }
         return completed;

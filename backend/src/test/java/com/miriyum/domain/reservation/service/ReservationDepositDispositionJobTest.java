@@ -187,6 +187,54 @@ class ReservationDepositDispositionJobTest {
     }
 
     @Test
+    void malformedResultRequeuesClaimAndContinuesBatch() {
+        ReservationDepositDispositionService service =
+                mock(ReservationDepositDispositionService.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositDispositionService.Claim malformed = claim(
+                ReservationDepositDispositionObligation.Operation.APPLY);
+        ReservationDepositDispositionService.Claim completedClaim = new
+                ReservationDepositDispositionService.Claim(
+                        malformed.obligationId() + 1,
+                        malformed.processId() + 1,
+                        malformed.reservationId() + 1,
+                        "52",
+                        malformed.sourceEventId() + "-next",
+                        malformed.sourceEventType(),
+                        null,
+                        2L,
+                        "STORE_RESPONSIBLE",
+                        10_000,
+                        "550e8400-e29b-41d4-a716-446655440241",
+                        ReservationDepositDispositionObligation.Operation.APPLY,
+                        "worker-a",
+                        1L,
+                        1);
+        DispositionResult result = completed();
+        given(service.claimDue("worker-a", 10))
+                .willReturn(List.of(malformed, completedClaim));
+        given(paymentService.applyReservationDepositDisposition(
+                malformed.toApplyCommand())).willReturn(result);
+        given(service.recordResult(
+                malformed, result, RETRY_DELAY, QUERY_DELAY, 3))
+                .willThrow(new IllegalStateException(
+                        "payment disposition result identity mismatch"));
+        given(paymentService.applyReservationDepositDisposition(
+                completedClaim.toApplyCommand())).willReturn(result);
+        given(service.recordResult(
+                completedClaim, result, RETRY_DELAY, QUERY_DELAY, 3))
+                .willReturn(true);
+        ReservationDepositDispositionJob job = new ReservationDepositDispositionJob(
+                service, paymentService);
+
+        assertThat(job.runOnce("worker-a", 10)).isOne();
+
+        then(service).should().recordRetryableFailure(malformed, RETRY_DELAY, 3);
+        then(service).should().recordResult(
+                completedClaim, result, RETRY_DELAY, QUERY_DELAY, 3);
+    }
+
+    @Test
     void queryRuntimeFailureRetriesWithQueryAndNeverAppliesDisposition() {
         ReservationDepositDispositionObligationRepository repository = mock(
                 ReservationDepositDispositionObligationRepository.class);
