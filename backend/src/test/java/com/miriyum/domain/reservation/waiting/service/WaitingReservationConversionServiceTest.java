@@ -194,7 +194,7 @@ class WaitingReservationConversionServiceTest {
                     assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
                     return verified(PaymentStatus.PAID);
                 });
-        given(memberships.deleteByWaitingTeamId(TEAM_ID)).willReturn(1L);
+        given(memberships.deleteByWaitingTeamId(TEAM_ID)).willReturn(2L);
 
         assertThat(newService().completeVerified(
                 new WaitingReservationConversionService.CompletionCommand(
