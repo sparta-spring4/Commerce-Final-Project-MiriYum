@@ -1,6 +1,6 @@
 import { Suspense, lazy } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter, Route, Routes } from 'react-router'
+import { BrowserRouter, Route, Routes, useLocation } from 'react-router'
 import { createQueryClient } from '../shared/api/queryClient'
 import { Loading } from '../shared/ui/Feedback'
 import {
@@ -70,26 +70,49 @@ export default function App() {
     <AppErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <ConsumerAuthProvider>
-            <Routes>
-              {/*
-                운영 콘솔은 독립 셸이라 AppLayout·ConsumerAuthProvider의 화면
-                구성을 쓰지 않는다. `/admin/*`를 통째로 넘겨 자기 provider와
-                가드로 하위 route를 스스로 구성하게 한다.
-              */}
-              {PlatformOperatorConsole !== null && (
-                <Route
-                  path="/admin/*"
-                  element={
-                    <Suspense
-                      fallback={<Loading label="운영 콘솔을 여는 중입니다." />}
-                    >
-                      <PlatformOperatorConsole />
-                    </Suspense>
-                  }
-                />
-              )}
+          <ShellRouter />
+        </BrowserRouter>
+      </QueryClientProvider>
+    </AppErrorBoundary>
+  )
+}
 
+/** `/admin`과 그 하위 경로인지 판정한다. `/administrators` 같은 접두사 우연 일치를 막는다. */
+function isConsolePath(pathname: string): boolean {
+  return pathname === '/admin' || pathname.startsWith('/admin/')
+}
+
+/**
+ * 셸 경계.
+ *
+ * 운영 콘솔을 `ConsumerAuthProvider` **바깥**에서 렌더링한다. 안에 두면 콘솔을
+ * 열 때마다 일반 사용자 세션 복구(`POST /api/v1/consumers/auth/token-refreshes`)가
+ * 함께 나간다. 운영자 shell과 소비자 인증 상태를 공유하지 않는다는 계약에
+ * 어긋나고, 운영자 브라우저에서 불필요한 소비자 인증 시도가 기록된다.
+ *
+ * route 표가 아니라 경로 판정으로 가르는 이유는, 두 셸이 각자 `Routes`를
+ * 소유하기 때문이다. 한 `Routes` 안에 두면 provider가 공통 조상이 되거나
+ * layout마다 provider가 따로 mount돼 세션이 화면 이동에서 끊긴다.
+ */
+function ShellRouter() {
+  const location = useLocation()
+
+  if (PlatformOperatorConsole !== null && isConsolePath(location.pathname)) {
+    return (
+      <Suspense fallback={<Loading label="운영 콘솔을 여는 중입니다." />}>
+        <PlatformOperatorConsole />
+      </Suspense>
+    )
+  }
+
+  return <ConsumerShell />
+}
+
+/** 일반 사용자·공개 화면. 운영 콘솔은 여기 들어오지 않는다. */
+function ConsumerShell() {
+  return (
+    <ConsumerAuthProvider>
+      <Routes>
               <Route
                 element={
                   <AppLayout
@@ -162,10 +185,7 @@ export default function App() {
                   />
                 </Route>
               </Route>
-            </Routes>
-          </ConsumerAuthProvider>
-        </BrowserRouter>
-      </QueryClientProvider>
-    </AppErrorBoundary>
+      </Routes>
+    </ConsumerAuthProvider>
   )
 }

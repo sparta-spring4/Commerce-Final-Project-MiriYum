@@ -30,6 +30,15 @@ export interface ApiClientDependencies {
    * 기본 동작은 재시도 없이 ApiError를 던지는 것이다.
    */
   onUnauthorized?: (error: ApiError) => Promise<boolean>
+  /**
+   * 403 응답을 shell에 알린다. 재시도하지 않으며 오류는 그대로 던진다.
+   *
+   * 403 중에는 요청 하나의 실패가 아니라 세션 상태를 뜻하는 것이 있다.
+   * 플랫폼 운영자의 `AUTH_012`가 그렇다. 임시 비밀번호 세션으로 업무 API를
+   * 부르면 매번 403이 오는데, shell이 이를 모르면 화면은 일반 오류만 반복해서
+   * 보여 주고 사용자는 비밀번호 변경 화면으로 갈 방법을 찾지 못한다.
+   */
+  onForbidden?: (error: ApiError) => void
 }
 
 /** OpenAPI가 타이핑하지 않는 부수 입력. */
@@ -119,7 +128,7 @@ function buildUrl(
 export function createApiClient(
   dependencies: ApiClientDependencies = {},
 ): ApiClient {
-  const { getAccessToken, onUnauthorized } = dependencies
+  const { getAccessToken, onUnauthorized, onForbidden } = dependencies
 
   async function send(
     url: string,
@@ -278,10 +287,14 @@ export function createApiClient(
     const payload = await readBody(response)
 
     if (!response.ok) {
-      throw toApiError(
+      const error = toApiError(
         response.status,
         payload === UNPARSEABLE ? undefined : payload,
       )
+      if (response.status === 403) {
+        onForbidden?.(error)
+      }
+      throw error
     }
 
     // 계약에 204를 선언한 operation이 없다. 본문 없는 2xx는 계약 위반이다.

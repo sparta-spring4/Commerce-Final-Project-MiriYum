@@ -216,6 +216,21 @@ export function PlatformOperatorAuthProvider({
           }
           return refreshOnce()
         },
+        /**
+         * 제한 세션이 업무 API를 불렀다는 신호다.
+         *
+         * 로그인·회전 응답의 `passwordChangeRequired`만 보면 이 상태를 놓친다.
+         * 다른 탭에서 열어 둔 화면이나, 비밀번호 변경 전에 북마크로 바로 들어온
+         * 경우가 그렇다. 서버가 `AUTH_012`로 알려 주므로 그때 shell 상태를
+         * `restricted`로 돌려 가드가 변경 화면으로 보내게 한다.
+         *
+         * 세션을 비우지 않는다. 자격은 유효하고 비밀번호만 바꾸면 되기 때문이다.
+         */
+        onForbidden: (error) => {
+          if (isInitialPasswordChangeRequired(error.code)) {
+            setStatus('restricted')
+          }
+        },
       }),
     [clearSession, refreshOnce],
   )

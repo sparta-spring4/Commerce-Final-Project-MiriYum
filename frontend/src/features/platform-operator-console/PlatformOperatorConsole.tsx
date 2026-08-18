@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router'
+import { Route, Routes } from 'react-router'
 import { ROUTES } from '../../app/routes'
 import { NotFoundPage } from '../../app/NotFoundPage'
 import {
@@ -9,6 +9,7 @@ import {
 } from '../platform-operator-auth'
 import { AuditDetailPage } from './ui/AuditDetailPage'
 import { AuditSearchPage } from './ui/AuditSearchPage'
+import { ConsoleHomePage } from './ui/ConsoleHomePage'
 import { ConsoleLayout } from './ui/ConsoleLayout'
 import { MemberDetailPage } from './ui/MemberDetailPage'
 import { MemberListPage } from './ui/MemberListPage'
@@ -68,13 +69,12 @@ export default function PlatformOperatorConsole() {
               path={relative(ROUTES.platformOperatorAuditDetail)}
               element={<AuditDetailPage />}
             />
-            {/* 콘솔 진입점은 회원 관리다. 대시보드 계약이 없다. */}
-            <Route
-              index
-              element={
-                <Navigate to={ROUTES.platformOperatorMembers} replace />
-              }
-            />
+            {/*
+              진입점에서 업무 화면으로 자동 이동하지 않는다. 이동하면 콘솔에
+              들어오는 것만으로 그 화면의 조회가 나가고, 권한 없는 운영자에게는
+              403과 감사 기록이 남는다. 중립 화면에서 운영자가 직접 고른다.
+            */}
+            <Route index element={<ConsoleHomePage />} />
           </Route>
         </Route>
 

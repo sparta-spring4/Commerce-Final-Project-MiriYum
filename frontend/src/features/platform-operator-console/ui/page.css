@@ -249,3 +249,34 @@
   font-size: 0.8125rem;
   line-height: 1.125rem;
 }
+
+.po-home__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.po-home__card {
+  display: flex;
+  align-items: center;
+  min-height: 5rem;
+  padding-inline: 1.25rem;
+  padding-block: 1rem;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card, #fff);
+  color: var(--po-navy, #1a237e);
+  text-decoration: none;
+}
+
+.po-home__card:hover {
+  background-color: var(--po-tint, #e8eaf6);
+}
+
+.po-home__card-label {
+  font-size: 1rem;
+  font-weight: 600;
+}

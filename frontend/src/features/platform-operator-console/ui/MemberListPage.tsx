@@ -6,7 +6,10 @@ import { Badge, type BadgeTone } from '../../../shared/ui/Badge'
 import { SelectField } from '../../../shared/ui/Field'
 import { EmptyState, ErrorState, Loading } from '../../../shared/ui/Feedback'
 import { Pagination } from '../../../shared/ui/Pagination'
-import { usePlatformOperatorAuth } from '../../platform-operator-auth'
+import {
+  decideCapability,
+  usePlatformOperatorAuth,
+} from '../../platform-operator-auth'
 import {
   fetchMembers,
   memberQueryKeys,
@@ -54,7 +57,7 @@ const STATUS_TONE: Record<MemberStatus, BadgeTone> = {
  * 누락이 아니라 계약의 설계다.
  */
 export function MemberListPage() {
-  const { apiClient } = usePlatformOperatorAuth()
+  const { apiClient, capabilities } = usePlatformOperatorAuth()
   const [accountType, setAccountType] = useState<AccountType | ''>('')
   const [status, setStatus] = useState<MemberStatus | ''>('')
   const [page, setPage] = useState(0)
@@ -69,6 +72,14 @@ export function MemberListPage() {
   const membersQuery = useQuery({
     queryKey: memberQueryKeys.list(query),
     queryFn: ({ signal }) => fetchMembers(apiClient, query, signal),
+    /*
+     * 서버가 권한 없음을 확인해 준 경우에는 조회를 보내지 않는다.
+     * 거부될 걸 알면서 보낸 요청도 감사 원장에 기록된다.
+     *
+     * #403 전에는 판정이 `undetermined`라 조회가 나간다. 그때는 운영자가
+     * 이 화면을 직접 선택한 경우뿐이며, 진입만으로 조회되지는 않는다.
+     */
+    enabled: decideCapability(capabilities, 'MEMBER_READ_MINIMAL') !== 'denied',
     // 페이지만 넘길 때는 이전 결과를 유지해 목록이 깜빡이지 않게 한다.
     // 조건이 바뀌면 유지하지 않는다. 필터는 새 조건인데 목록은 옛 조건인
     // 구간이 생기면, 그 사이 누른 항목이 옛 조건의 대상으로 이동한다.
