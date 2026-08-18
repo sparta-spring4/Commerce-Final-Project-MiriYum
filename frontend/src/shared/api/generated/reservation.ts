@@ -65,7 +65,7 @@ export interface paths {
   "/api/v1/store-operators/stores/{storeId}/reservation-check-ins": {
     /**
      * 회전형 QR 스캔 예약 방문 완료
-     * @description 현재 매장 권한과 잠금 뒤 current QR grant·Auth epoch·scan window를 검증해 기존 FULFILLED 의미로 종결한다.
+     * @description 현재 매장 권한과 잠금 뒤 current QR grant·Auth epoch·scan window를 검증해 기존 FULFILLED 의미로 종결하고, V2 예약금이면 전액 환불 처분 PENDING projection을 함께 반환한다.
      */
     post: operations["checkInReservationByQr"];
   };
@@ -78,13 +78,16 @@ export interface paths {
     post: operations["cancelReservationByStoreOperator"];
   };
   "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/fulfillments": {
-    /** 예약 방문 완료 */
+    /**
+     * 예약 방문 완료
+     * @description 기존 직접 방문 완료를 확정하고, V2 예약금이면 전액 환불 처분 PENDING projection을 함께 반환한다.
+     */
     post: operations["fulfillReservation"];
   };
   "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/no-shows": {
     /**
      * 운영자 예약 노쇼 확정
-     * @description 정확히 예약 startAt + 5분부터 필수 후보 사유로 NO_SHOW와 MenuHold FORFEITED를 원자 확정한다.
+     * @description 정확히 예약 startAt + 5분부터 필수 후보 사유로 NO_SHOW와 MenuHold FORFEITED를 원자 확정한다. V2 예약금은 승인된 reason 매핑의 처분 PENDING projection을 반환하며 UNCLEAR는 null이다.
      */
     post: operations["markReservationNoShow"];
   };
@@ -320,7 +323,7 @@ export interface components {
       /** @enum {string|null} */
       cancelledBy: "CONSUMER" | "STORE_OPERATOR" | null;
       cancellationReason: string | null;
-      /** @description V1/null/unknown 정책은 null. V2 취소 POST는 저장된 최초 PENDING을 replay하고, 예약 상세 GET은 Reservation obligation의 최신 projection을 반환한다. */
+      /** @description V1/null/unknown 정책은 null. V2 취소·직접 방문 완료·QR 체크인·확정 노쇼 POST는 저장된 최초 PENDING을 replay하고, 예약 상세 GET은 Reservation obligation의 최신 projection을 반환한다. UNCLEAR 노쇼는 null이다. */
       depositDisposition: components["schemas"]["ReservationDepositDisposition"] | null;
       createdAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
     };
@@ -1143,7 +1146,7 @@ export interface operations {
   };
   /**
    * 회전형 QR 스캔 예약 방문 완료
-   * @description 현재 매장 권한과 잠금 뒤 current QR grant·Auth epoch·scan window를 검증해 기존 FULFILLED 의미로 종결한다.
+   * @description 현재 매장 권한과 잠금 뒤 current QR grant·Auth epoch·scan window를 검증해 기존 FULFILLED 의미로 종결하고, V2 예약금이면 전액 환불 처분 PENDING projection을 함께 반환한다.
    */
   checkInReservationByQr: {
     parameters: {
@@ -1225,7 +1228,10 @@ export interface operations {
       409: components["responses"]["ReservationStateConflict"];
     };
   };
-  /** 예약 방문 완료 */
+  /**
+   * 예약 방문 완료
+   * @description 기존 직접 방문 완료를 확정하고, V2 예약금이면 전액 환불 처분 PENDING projection을 함께 반환한다.
+   */
   fulfillReservation: {
     parameters: {
       header: {
@@ -1257,7 +1263,7 @@ export interface operations {
   };
   /**
    * 운영자 예약 노쇼 확정
-   * @description 정확히 예약 startAt + 5분부터 필수 후보 사유로 NO_SHOW와 MenuHold FORFEITED를 원자 확정한다.
+   * @description 정확히 예약 startAt + 5분부터 필수 후보 사유로 NO_SHOW와 MenuHold FORFEITED를 원자 확정한다. V2 예약금은 승인된 reason 매핑의 처분 PENDING projection을 반환하며 UNCLEAR는 null이다.
    */
   markReservationNoShow: {
     parameters: {
