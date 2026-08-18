@@ -11,6 +11,8 @@ apis:
     root: docs/specs/platform-operator-authorization/openapi.yaml
     rules:
       no-unused-components: off
+  platform-operator-capabilities:
+    root: docs/specs/platform-operator-capabilities/openapi.yaml
   member-support:
     root: docs/specs/member-support/openapi.yaml
   analytics:
