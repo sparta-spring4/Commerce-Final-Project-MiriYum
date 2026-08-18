@@ -227,8 +227,6 @@ Endpoint 자체가 영구 정지 추가 승인 대기 projection이므로 `level
 - `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/PlatformOperatorMemberSupportHttpIT.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/config/PlatformOperatorFeatureFlagIT.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/PlatformOperatorOpenApiContractTest.java`
-- `docs/superpowers/specs/2026-08-19-pending-sanction-approvals-design.md`
-- `docs/superpowers/plans/2026-08-19-pending-sanction-approvals.md`
 
 ## 구현 계획
 
