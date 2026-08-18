@@ -128,6 +128,8 @@ foreach ($test in $tests) {
 네 시나리오 smoke:
 
 ```powershell
+$commitSha = git rev-parse HEAD
+$harnessCommitSha = $commitSha
 docker run --rm `
   -v "${PWD}/performance/k6:/scripts:ro" `
   grafana/k6:2.1.0 inspect `
@@ -137,13 +139,16 @@ docker run --rm `
   -e PROFILE=smoke `
   -e FIXTURE_PATH=/scripts/fixtures/test-data.example.json `
   -e RUN_ID=local-inspect `
-  -e COMMIT_SHA=0123456789abcdef0123456789abcdef01234567 `
+  -e COMMIT_SHA=$commitSha `
+  -e HARNESS_COMMIT_SHA=$harnessCommitSha `
   /scripts/main.js
 ```
 
 `storeSearch` local-baseline options:
 
 ```powershell
+$commitSha = git rev-parse HEAD
+$harnessCommitSha = $commitSha
 docker run --rm `
   -v "${PWD}/performance/k6:/scripts:ro" `
   -v "${PWD}/performance/k6/results:/results:ro" `
@@ -160,7 +165,8 @@ docker run --rm `
   -e ARRIVAL_RATE=1 `
   -e FIXTURE_PATH=/scripts/fixtures/test-data.example.json `
   -e RUN_ID=local-baseline-inspect `
-  -e COMMIT_SHA=0123456789abcdef0123456789abcdef01234567 `
+  -e COMMIT_SHA=$commitSha `
+  -e HARNESS_COMMIT_SHA=$harnessCommitSha `
   /scripts/main.js
 ```
 
@@ -192,6 +198,7 @@ docker compose --env-file deploy/local/.env.example `
 실제 실행은 아래 Compose 명령에 표의 비식별 입력을 대입했다. `$credentialFile`의 저장소 밖 실제 경로, 계정 원문과 카카오 키는 기록하지 않는다.
 
 ```powershell
+$harnessCommitSha = $commitSha
 docker compose --env-file deploy/local/.env `
   -f deploy/local/docker-compose.dev.yml `
   -f deploy/local/docker-compose.loadtest.yml `
@@ -209,6 +216,7 @@ docker compose --env-file deploy/local/.env `
   -e FIXTURE_PATH=/scripts/fixtures/test-data.local.json `
   -e RUN_ID=$runId `
   -e COMMIT_SHA=$commitSha `
+  -e HARNESS_COMMIT_SHA=$harnessCommitSha `
   /scripts/main.js
 ```
 
