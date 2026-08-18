@@ -131,6 +131,138 @@ If an image push succeeds but a later SSM deployment step fails, rerun the faile
 
 `MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED` is a startup-time switch for the reservation deposit process and refund workers. The staging Compose and production ECS templates set it to `true` for normal operation. Changing the value does not stop workers in containers or tasks that are already running.
 
+The production CD workflow does not read `deploy/ecs/production-task-definition.json`. It copies the task definition currently attached to the ECS Service and changes only the backend image, so merging a repository template change does not add this setting to an existing production Service.
+
+For the first production activation or an emergency claim stop, use an approved operator session to clone the live task definition and change only this environment value. Set the approved production identifiers without printing the current task definition or the rest of its environment. Use `WORKER_ENABLED=false` for the disabled revision and `WORKER_ENABLED=true` when re-enabling:
+
+```bash
+set -euo pipefail
+
+export AWS_REGION=ap-northeast-2
+export ECS_CLUSTER=replace-with-production-cluster
+export ECS_SERVICE=replace-with-production-service
+export ECS_CONTAINER_NAME=backend
+export WORKER_ENABLED=false
+
+case "$WORKER_ENABLED" in
+  true|false) ;;
+  *) echo "WORKER_ENABLED must be true or false" >&2; exit 1 ;;
+esac
+
+current_task_definition=$(aws ecs describe-services \
+  --cluster "$ECS_CLUSTER" \
+  --services "$ECS_SERVICE" \
+  --query 'services[0].taskDefinition' \
+  --output text)
+
+work_dir=$(mktemp -d)
+aws ecs describe-task-definition \
+  --task-definition "$current_task_definition" \
+  --query taskDefinition \
+  --output json > "$work_dir/current-task-definition.json"
+
+backend_count=$(jq --arg container "$ECS_CONTAINER_NAME" \
+  '[.containerDefinitions[] | select(.name == $container)] | length' \
+  "$work_dir/current-task-definition.json")
+if [ "$backend_count" != "1" ]; then
+  echo "Expected exactly one backend container" >&2
+  exit 1
+fi
+
+jq --arg container "$ECS_CONTAINER_NAME" --arg enabled "$WORKER_ENABLED" '
+  .containerDefinitions |= map(
+    if .name == $container then
+      .environment = (
+        (.environment // []
+          | map(select(.name != "MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED")))
+        + [{"name": "MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED", "value": $enabled}]
+      )
+    else . end
+  )
+  | del(
+      .taskDefinitionArn,
+      .revision,
+      .status,
+      .requiresAttributes,
+      .compatibilities,
+      .registeredAt,
+      .registeredBy,
+      .deregisteredAt
+    )
+' "$work_dir/current-task-definition.json" > "$work_dir/next-task-definition.json"
+
+worker_value_count=$(jq --arg container "$ECS_CONTAINER_NAME" --arg enabled "$WORKER_ENABLED" \
+  '[.containerDefinitions[] | select(.name == $container)
+    | .environment[] | select(.name == "MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED"
+      and .value == $enabled)] | length' \
+  "$work_dir/next-task-definition.json")
+if [ "$worker_value_count" != "1" ]; then
+  echo "Worker value was not rendered exactly once" >&2
+  exit 1
+fi
+
+task_definition_arn=$(aws ecs register-task-definition \
+  --cli-input-json "file://$work_dir/next-task-definition.json" \
+  --query 'taskDefinition.taskDefinitionArn' \
+  --output text)
+
+aws ecs update-service \
+  --cluster "$ECS_CLUSTER" \
+  --service "$ECS_SERVICE" \
+  --task-definition "$task_definition_arn" \
+  --output json >/dev/null
+aws ecs wait services-stable \
+  --cluster "$ECS_CLUSTER" \
+  --services "$ECS_SERVICE"
+
+primary_task_definition=$(aws ecs describe-services \
+  --cluster "$ECS_CLUSTER" \
+  --services "$ECS_SERVICE" \
+  --query 'services[0].deployments[?status==`PRIMARY`].taskDefinition | [0]' \
+  --output text)
+if [ "$primary_task_definition" != "$task_definition_arn" ]; then
+  echo "The new task definition is not PRIMARY" >&2
+  exit 1
+fi
+
+runtime_value=$(aws ecs describe-task-definition \
+  --task-definition "$task_definition_arn" \
+  --output json \
+  | jq -r --arg container "$ECS_CONTAINER_NAME" \
+      '.taskDefinition.containerDefinitions[] | select(.name == $container)
+       | .environment[] | select(.name == "MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED")
+       | .value')
+if [ "$runtime_value" != "$WORKER_ENABLED" ]; then
+  echo "The registered worker value does not match the requested value" >&2
+  exit 1
+fi
+
+running_task_output=$(aws ecs list-tasks \
+  --cluster "$ECS_CLUSTER" \
+  --service-name "$ECS_SERVICE" \
+  --desired-status RUNNING \
+  --query 'taskArns[]' \
+  --output text)
+if [ -z "$running_task_output" ]; then
+  echo "No running service task was available for drain verification" >&2
+  exit 1
+fi
+read -r -a running_task_arns <<< "$running_task_output"
+
+old_task_count=$(aws ecs describe-tasks \
+  --cluster "$ECS_CLUSTER" \
+  --tasks "${running_task_arns[@]}" \
+  --output json \
+  | jq --arg task_definition "$task_definition_arn" \
+      '[.tasks[] | select(.taskDefinitionArn != $task_definition)] | length')
+if [ "$old_task_count" != "0" ]; then
+  echo "A task from the previous enabled revision is still running" >&2
+  exit 1
+fi
+```
+
+The temporary JSON files contain production configuration and resource identifiers even though they contain no secret values. Keep the directory private and remove it after recording only the new task definition ARN, requested worker value, Service stability result, and old-task count.
+
 Use this order when an image rollback must not start new reservation deposit claims:
 
 1. Set `MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED=false` in the staging server-local `.env`, or register a production ECS task definition revision whose backend container has the value `false`.
