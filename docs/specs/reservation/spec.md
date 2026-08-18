@@ -345,6 +345,15 @@
 - `CANCELLED`, `FULFILLED`, `NO_SHOW`는 종결 상태다. 재활성화하거나 다른 종결 상태로 바꾸지 않으며 후속 감사·grant 소비·MenuHold 전이 중 하나라도 실패하면 멱등 기록을 포함해 전부 rollback한다.
 - `FULFILLED`와 `NO_SHOW`는 수용량·allocation·메뉴 재고·수량 원장을 조회하거나 복구하지 않으며 V2에서만 승인된 disposition obligation을 생성한다.
 
+### 방문 완료·노쇼 알림 handoff
+
+- 직접 방문 완료와 QR 체크인은 모두 `FULFILLED` 종결 전이의 `RESERVATION_VISIT_COMPLETED`에 수렴한다. 운영자가 직접 확정한 `NO_SHOW`만 `RESERVATION_NO_SHOW`를 만들며 시간 경과·노쇼 후보·QR 실패는 알림 원 사건이 아니다.
+- 종결 전이를 이긴 transaction은 Reservation 상태·MenuHold 종결·감사·멱등 결과와 함께 `NotificationTaskRecorder.record`를 호출한다. 논리 작업 기록 실패는 transaction 전체를 rollback하고, 기록 이후 worker의 전달 실패는 Reservation이나 MenuHold 상태를 되돌리지 않는다.
+- 두 사건은 `sourceDomain=RESERVATION`, `resourceType=RESERVATION`, 양의 `reservationId`, 불변 소유 일반 사용자 `recipientAccountId`, `recipientRelationVersion=1`, terminal `resourceVersion=2`를 사용한다. `sourceState`는 목적에 따라 `FULFILLED` 또는 `NO_SHOW`이고, 즉시 목적이므로 `scheduledAt=occurredAt`, `expiresAt=null`, `timingPolicyVersion=null`이다.
+- `ReservationNotificationSource`는 요청 목적·terminal revision·현재 `FULFILLED` 또는 `NO_SHOW`·불변 수신자 관계가 모두 맞을 때만 `FOUND`를 반환한다. 다른 종결 상태가 먼저 확정됐거나 목적과 상태가 다르면 `SUPERSEDED`, 수신자가 다르면 `NOT_ELIGIBLE`로 반환한다.
+- 보호된 예약 상세 route가 실제 활성화되기 전에는 두 목적의 action tuple을 모두 null로 반환한다. 사건·안전한 제목·로그에는 raw QR, digest, opaque Auth epoch, 노쇼 사유 원문, 연락처, 결제 정보와 환불·몰취·귀책 결과를 넣지 않는다.
+- `FULFILLED` 또는 `NO_SHOW`가 확정되면 같은 예약의 아직 미발송된 확정·변경·방문 안내 작업을 대체한다. 이미 전달된 알림 이력은 다른 의미로 수정하지 않고 종결 목적을 새 논리 알림으로 남긴다.
+
 ## 오류 코드
 
 | 외부 코드 | HTTP | 의미 |

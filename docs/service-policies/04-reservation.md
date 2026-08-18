@@ -452,8 +452,9 @@
 - 기존 직접 방문 완료 성공 감사는 actor, requestedAt, occurredAt, `CONFIRMED` → `FULFILLED`, 잠긴 Reservation의 reservation_time_policy_version·capacity_policy_version과 commandId를 기록한다. 자유입력 reason은 두지 않고 `RESERVATION_FULFILL` 명령 자체를 고정 전이 사유로 사용한다.
 - QR 방문 완료는 기존 fulfillment audit와 QR 전용 audit를 같은 트랜잭션에 기록하되 raw QR·digest·opaque Auth epoch를 감사에 복제하지 않는다. 운영자 직접 노쇼는 필수 후보 사유, actor, requestedAt, occurredAt, `CONFIRMED` → `NO_SHOW`, 정책 버전과 commandId를 별도 추가 전용 audit에 기록한다.
 - `FULFILLED`와 `NO_SHOW`는 예약 수용량·allocation·메뉴 수량을 복구하지 않는다. 연결 MenuHold는 각각 `FULFILLED`와 `FORFEITED`로 종결하며, Issue #240은 금전 명령을 실행하지 않는다.
+- 직접 방문 완료와 QR 체크인은 같은 `RESERVATION_VISIT_COMPLETED` 원 사건으로 수렴하고, 매장 운영자가 직접 확정한 노쇼는 `RESERVATION_NO_SHOW` 원 사건을 만든다. 두 알림은 환불·몰취·귀책·결제 결과를 주장하지 않으며 시간 경과·노쇼 후보·QR 실패만으로 생성하지 않는다.
 - 허용 전이표, 조건부 갱신, 수정 번호와 명령 멱등 키로 중복·순서 역전 이벤트를 무해하게 한다. 여러 인스턴스의 경합에서 하나의 다음 상태만 확정된다.
-- DB 전이와 영속 후속 작업 레코드를 같은 트랜잭션 또는 동등한 일관성 처리 경계에 기록한다. 메시지·알림 지연은 중앙 상태를 되돌리지 않고 소비자는 예약·전이 식별자로 재처리한다.
+- DB 전이와 영속 후속 작업 레코드를 같은 트랜잭션 또는 동등한 일관성 처리 경계에 기록한다. 후속 작업 기록 실패는 종결 전이를 함께 롤백하고, 기록이 확정된 뒤의 메시지·알림 지연이나 전달 실패는 중앙 상태를 되돌리지 않으며 소비자는 예약·전이 식별자로 재처리한다.
 - 사용자에게 현재 상태와 필요한 행동을 표시하고 확정·변경·거절·취소·만료를 알린다. 전이 전후, 행위자, 이유, 정책·수용량 버전과 상관관계 ID를 감사하며 불필요한 개인정보를 이벤트에 넣지 않는다.
 
 ### 관측 가능한 인수 조건
