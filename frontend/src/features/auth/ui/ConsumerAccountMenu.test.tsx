@@ -82,6 +82,7 @@ describe('ConsumerAccountMenu', () => {
     const trigger = await accountButton()
 
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(trigger).not.toHaveAttribute('aria-haspopup')
     expect(screen.queryByRole('link', { name: '마이페이지' })).toBeNull()
 
     fireEvent.click(trigger)

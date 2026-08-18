@@ -185,7 +185,6 @@ export function ConsumerAccountMenu() {
         ref={triggerRef}
         className="app-header__avatar"
         aria-label="내 계정"
-        aria-haspopup="true"
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((current) => !current)}
