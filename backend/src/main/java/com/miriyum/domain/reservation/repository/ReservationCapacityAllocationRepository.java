@@ -28,7 +28,15 @@ public interface ReservationCapacityAllocationRepository
             SELECT
                 COALESCE(SUM(a.occupied_people), 0) AS reservedPeopleUnits,
                 COALESCE(SUM(a.occupied_teams), 0) AS reservedTeamUnits,
-                COALESCE(MAX(a.reservation_capacity_allocation_id), 0) AS maxAllocationId
+                COALESCE((
+                    SELECT MAX(watermark.reservation_capacity_allocation_id)
+                    FROM reservation_capacity_allocations watermark
+                    JOIN reservations watermark_reservation
+                      ON watermark_reservation.reservation_id = watermark.reservation_id
+                    WHERE watermark_reservation.store_id = :storeId
+                      AND watermark_reservation.service_date = :businessDate
+                      AND watermark_reservation.created_at <= :asOf
+                ), 0) AS allocationHighWatermark
             FROM reservation_capacity_allocations a
             JOIN reservations r ON r.reservation_id = a.reservation_id
             WHERE r.store_id = :storeId
@@ -45,6 +53,6 @@ public interface ReservationCapacityAllocationRepository
     interface ReservationCapacityUsageAnalytics {
         Long getReservedPeopleUnits();
         Long getReservedTeamUnits();
-        Long getMaxAllocationId();
+        Long getAllocationHighWatermark();
     }
 }

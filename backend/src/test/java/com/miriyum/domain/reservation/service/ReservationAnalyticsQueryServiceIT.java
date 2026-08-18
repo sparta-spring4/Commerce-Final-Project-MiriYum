@@ -163,6 +163,33 @@ class ReservationAnalyticsQueryServiceIT {
                 .isEqualTo(epochMicros(Instant.parse("2026-08-16T09:30:00Z")));
     }
 
+    @Test
+    void cancellationKeepsAllocationHighWatermarkAndAdvancesSourceVersion() {
+        insertReservation(6L, "CONFIRMED", "2026-08-16 08:25:00", null, null);
+        jdbc.update("""
+                INSERT INTO reservation_capacity_allocations (
+                    reservation_capacity_allocation_id, reservation_id,
+                    reservation_capacity_bucket_id, occupied_people, occupied_teams,
+                    capacity_policy_version
+                ) VALUES (100, 6, 101, 2, 1, 1)
+                """);
+        ReservationAnalyticsSnapshot before = service.getDashboardSnapshot(
+                STORE_ID, BUSINESS_DATE, AS_OF);
+
+        jdbc.update("""
+                UPDATE reservations
+                SET status = 'CANCELLED', cancelled_at = '2026-08-16 09:10:00'
+                WHERE reservation_id = 6
+                """);
+        insertCancellationAudit(6L, "2026-08-16 09:10:00", "cancel-6");
+        ReservationAnalyticsSnapshot after = service.getDashboardSnapshot(
+                STORE_ID, BUSINESS_DATE, Instant.parse("2026-08-16T09:15:00Z"));
+
+        assertThat(after.reservedTeamUnits()).isLessThan(before.reservedTeamUnits());
+        assertThat(after.inputCheckpoint()).isNotEqualTo(before.inputCheckpoint());
+        assertThat(after.sourceVersion()).isGreaterThan(before.sourceVersion());
+    }
+
     private void insertParents() {
         jdbc.update("""
                 INSERT INTO consumer_accounts (

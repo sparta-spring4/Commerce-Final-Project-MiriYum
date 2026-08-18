@@ -77,7 +77,7 @@ public class ReservationAnalyticsQueryService {
         long reservationVersion = value(lifecycle.getMaxReservationId());
         long lifecyclePolicyVersion = value(lifecycle.getMaxCapacityPolicyVersion());
         long capacityPolicyVersion = value(offers.getPolicyVersion());
-        long allocationVersion = value(usage.getMaxAllocationId());
+        long allocationVersion = value(usage.getAllocationHighWatermark());
         long bucketVersion = value(offers.getMaxBucketId());
         long cancellationVersion = value(cancellations.getMaxAuditId());
         long fulfillmentVersion = value(fulfillments.getMaxAuditId());

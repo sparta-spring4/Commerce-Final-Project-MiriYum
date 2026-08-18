@@ -78,7 +78,7 @@ class ReservationAnalyticsQueryServiceTest {
 
         given(usage.getReservedPeopleUnits()).willReturn(48L);
         given(usage.getReservedTeamUnits()).willReturn(12L);
-        given(usage.getMaxAllocationId()).willReturn(201L);
+        given(usage.getAllocationHighWatermark()).willReturn(201L);
         given(offers.getOfferedPeopleUnits()).willReturn(80L);
         given(offers.getOfferedTeamUnits()).willReturn(20L);
         given(offers.getPolicyVersion()).willReturn(7L);
