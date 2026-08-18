@@ -83,3 +83,30 @@ export function startIdempotentAttempt(
     },
   }
 }
+
+/**
+ * 요청 내용으로 멱등 키를 정하는 캐시다.
+ *
+ * "재시도에는 같은 키, 바뀐 입력에는 새 키"를 화면마다 손으로 관리하면 반드시
+ * 한쪽을 틀린다. 대신 요청 내용의 서명을 주면 같은 서명에는 같은 키를, 서명이
+ * 바뀌면 새 키를 돌려준다. 같은 내용을 다시 보내는 것은 서버 쪽에서도 재시도로
+ * 취급되어야 하는 요청이므로 이 규칙이 계약과 어긋나지 않는다.
+ *
+ * 화면 하나에 여러 명령이 있으면 명령마다 캐시를 따로 둔다. 초안 저장 재시도가
+ * 게시 요청의 키를 바꿔 버리는 상황을 막는다.
+ */
+export interface IdempotencyKeyCache {
+  keyFor(signature: string): string
+}
+
+export function createIdempotencyKeyCache(): IdempotencyKeyCache {
+  let entry: { signature: string; key: string } | null = null
+  return {
+    keyFor(signature: string): string {
+      if (entry === null || entry.signature !== signature) {
+        entry = { signature, key: createIdempotencyKey() }
+      }
+      return entry.key
+    },
+  }
+}

@@ -1,10 +1,19 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import { http } from 'msw'
 import { beforeEach, describe, expect, test } from 'vitest'
-import { unauthenticatedConsumer } from '../features/auth/test/handlers'
+import {
+  authenticatedConsumer,
+  CONSUMER_REFRESH_PATH,
+  unauthenticatedConsumer,
+} from '../features/auth/test/handlers'
+import {
+  OPERATOR_REFRESH_PATH,
+  unauthenticatedOperator,
+} from '../features/store-operator/test/handlers'
 import { storePage } from '../features/store-search/test/fixtures'
 import { catalogHandlers } from '../features/store-search/test/handlers'
-import { successResponse } from '../test/msw/envelope'
+import { AuthErrorCode } from '../features/auth/model/authErrors'
+import { errorResponse, successResponse } from '../test/msw/envelope'
 import { server } from '../test/msw/server'
 import App from './App'
 
@@ -19,6 +28,7 @@ beforeEach(() => {
   server.use(
     ...catalogHandlers,
     unauthenticatedConsumer,
+    unauthenticatedOperator,
     http.get('/api/v1/stores', () => successResponse(storePage([]))),
   )
 })
@@ -75,6 +85,54 @@ describe('앱 셸', () => {
     ).toBeInTheDocument()
   })
 
+  /*
+   * shell을 route 그룹으로 고정했을 때 생긴 구멍이다.
+   *
+   * 로그인 직후 도착하는 `/`가 공개 그룹이라, 로그인한 사용자가 공용 화면에
+   * 머무는 동안 주 메뉴·하단 탭·푸터가 전부 비로그인 화면처럼 보였다.
+   * 마이페이지로 갈 수 있는 링크가 어디에도 없어 URL을 직접 쳐야 했다.
+   */
+  test('로그인하면 공용 화면에서도 주 메뉴에 마이페이지가 있다', async () => {
+    server.use(authenticatedConsumer())
+    renderAt('/')
+
+    const nav = screen.getByRole('navigation', { name: '주 메뉴' })
+
+    await waitFor(() =>
+      expect(
+        within(nav).getByRole('link', { name: '마이페이지' }),
+      ).toBeInTheDocument(),
+    )
+    expect(within(nav).getByRole('link', { name: '내 예약' })).toBeInTheDocument()
+  })
+
+  test('로그인하면 푸터가 로그인·회원가입 대신 마이페이지를 보여 준다', async () => {
+    server.use(authenticatedConsumer())
+    renderAt('/')
+
+    const footer = within(screen.getByRole('contentinfo'))
+
+    await waitFor(() =>
+      expect(footer.getByRole('link', { name: '마이페이지' })).toBeInTheDocument(),
+    )
+    expect(footer.queryByRole('link', { name: '로그인' })).not.toBeInTheDocument()
+    expect(footer.queryByRole('link', { name: '회원가입' })).not.toBeInTheDocument()
+  })
+
+  test('비로그인 푸터는 로그인·회원가입을 유지한다', async () => {
+    renderAt('/')
+
+    const footer = within(screen.getByRole('contentinfo'))
+
+    await waitFor(() =>
+      expect(footer.getByRole('link', { name: '로그인' })).toBeInTheDocument(),
+    )
+    expect(footer.getByRole('link', { name: '회원가입' })).toBeInTheDocument()
+    expect(
+      footer.queryByRole('link', { name: '마이페이지' }),
+    ).not.toBeInTheDocument()
+  })
+
   test('없는 경로는 404 화면을 보여 준다', () => {
     renderAt('/이런-경로는-없다')
 
@@ -90,5 +148,52 @@ describe('앱 셸', () => {
       screen.getByRole('heading', { level: 1, name: '접근할 수 없습니다' }),
     ).toBeInTheDocument()
     expect(screen.queryByText('페이지를 찾을 수 없습니다')).not.toBeInTheDocument()
+  })
+})
+
+describe('인증 shell 격리', () => {
+  /** 두 shell이 mount 시 부르는 재발급 경로를 각각 센다. */
+  function countRefreshes() {
+    const calls = { consumer: 0, operator: 0 }
+    server.use(
+      http.post(CONSUMER_REFRESH_PATH, () => {
+        calls.consumer += 1
+        return errorResponse(
+          401,
+          AuthErrorCode.REFRESH_TOKEN_REQUIRED,
+          'Refresh Token 쿠키가 필요합니다.',
+        )
+      }),
+      http.post(OPERATOR_REFRESH_PATH, () => {
+        calls.operator += 1
+        return errorResponse(
+          401,
+          AuthErrorCode.REFRESH_TOKEN_REQUIRED,
+          'Refresh Token 쿠키가 필요합니다.',
+        )
+      }),
+    )
+    return calls
+  }
+
+  test('운영자 화면은 소비자 세션 복구를 부르지 않는다', async () => {
+    const calls = countRefreshes()
+
+    renderAt('/store-operator/sign-in')
+
+    // 운영자 provider가 자기 재발급을 시도할 때까지 기다린 뒤 비교한다.
+    await waitFor(() => expect(calls.operator).toBeGreaterThan(0))
+    // 두 shell은 형제다. 운영자 경로에서 소비자 provider가 mount되면 남의 shell
+    // 세션 복구와 캐시 정리가 함께 돌아간다.
+    expect(calls.consumer).toBe(0)
+  })
+
+  test('소비자 화면은 운영자 세션 복구를 부르지 않는다', async () => {
+    const calls = countRefreshes()
+
+    renderAt('/')
+
+    await waitFor(() => expect(calls.consumer).toBeGreaterThan(0))
+    expect(calls.operator).toBe(0)
   })
 })

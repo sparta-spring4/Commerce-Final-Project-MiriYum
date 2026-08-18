@@ -121,6 +121,7 @@ class ReservationVisitIT {
     @AfterEach
     void dropFailureTrigger() {
         jdbcTemplate.execute("DROP TRIGGER IF EXISTS trg_qr_check_in_audit_failure");
+        jdbcTemplate.execute("DROP TRIGGER IF EXISTS trg_visit_notification_failure");
     }
 
     @Test
@@ -181,6 +182,11 @@ class ReservationVisitIT {
                 Boolean.class,
                 scenario.reservationId()
         )).isTrue();
+        assertTerminalTask(
+                scenario.reservationId(),
+                "RESERVATION_VISIT_COMPLETED",
+                "visit-completed"
+        );
     }
 
     @Test
@@ -236,8 +242,13 @@ class ReservationVisitIT {
                 scenario.operatorId(), scenario.storeId(), scenario.reservationId(), key(2),
                 new ReservationNoShowRequest(ReservationNoShowReason.UNCLEAR)
         );
+        ReservationVisitCommandResult replay = visitFacade.markNoShow(
+                scenario.operatorId(), scenario.storeId(), scenario.reservationId(), key(2),
+                new ReservationNoShowRequest(ReservationNoShowReason.UNCLEAR)
+        );
 
         assertThat(result.data().status()).isEqualTo("NO_SHOW");
+        assertThat(replay).isEqualTo(result);
         assertThat(jdbcTemplate.queryForMap(
                 "SELECT status, no_show_at FROM reservations WHERE reservation_id = ?",
                 scenario.reservationId()
@@ -247,6 +258,16 @@ class ReservationVisitIT {
                 String.class,
                 scenario.reservationId()
         )).isEqualTo("UNCLEAR");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_no_show_audits WHERE reservation_id = ?",
+                Integer.class,
+                scenario.reservationId()
+        )).isOne();
+        assertTerminalTask(
+                scenario.reservationId(),
+                "RESERVATION_NO_SHOW",
+                "no-show"
+        );
     }
 
     @Test
@@ -329,6 +350,158 @@ class ReservationVisitIT {
                 Integer.class,
                 key(3).value()
         )).isZero();
+        assertThat(notificationTaskCount(scenario.reservationId(), "visit-completed"))
+                .isZero();
+    }
+
+    @Test
+    void lateNotificationFailureRollsBackQrReservationGrantAuditsAndIdempotency() {
+        Scenario scenario = confirmedScenario();
+        clock.set(START_AT.plusSeconds(60));
+        ReservationCheckInQrGrantResult issued = grantFacade.issue(
+                scenario.consumerId(), scenario.reservationId()
+        );
+        jdbcTemplate.execute("""
+                CREATE TRIGGER trg_visit_notification_failure
+                BEFORE INSERT ON notification_tasks FOR EACH ROW
+                SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'visit notification failure'
+                """);
+
+        assertThatThrownBy(() -> visitFacade.checkIn(
+                scenario.operatorId(), scenario.storeId(), key(6),
+                new ReservationCheckInRequest(issued.data().qrToken())
+        )).isInstanceOf(RuntimeException.class);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM reservations WHERE reservation_id = ?",
+                String.class,
+                scenario.reservationId()
+        )).isEqualTo("CONFIRMED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT consumed_at IS NULL FROM reservation_check_in_qr_grants "
+                        + "WHERE reservation_id = ?",
+                Boolean.class,
+                scenario.reservationId()
+        )).isTrue();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_fulfillment_audits WHERE reservation_id = ?",
+                Integer.class,
+                scenario.reservationId()
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_check_in_audits "
+                        + "WHERE reservation_id = ? AND event_type = 'QR_CHECK_IN_FULFILLED'",
+                Integer.class,
+                scenario.reservationId()
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM idempotency_commands WHERE idempotency_key = ?",
+                Integer.class,
+                key(6).value()
+        )).isZero();
+        assertThat(notificationTaskCount(scenario.reservationId(), "visit-completed"))
+                .isZero();
+    }
+
+    @Test
+    void lateNotificationFailureRollsBackNoShowAuditIdempotencyAndTask() {
+        Scenario scenario = confirmedScenario();
+        insertConfirmedMenuHold(scenario);
+        clock.set(START_AT.plusSeconds(300));
+        jdbcTemplate.execute("""
+                CREATE TRIGGER trg_visit_notification_failure
+                BEFORE INSERT ON notification_tasks FOR EACH ROW
+                SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'visit notification failure'
+                """);
+
+        assertThatThrownBy(() -> visitFacade.markNoShow(
+                scenario.operatorId(), scenario.storeId(), scenario.reservationId(), key(9),
+                new ReservationNoShowRequest(ReservationNoShowReason.UNCLEAR)
+        )).isInstanceOf(RuntimeException.class);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM reservations WHERE reservation_id = ?",
+                String.class,
+                scenario.reservationId()
+        )).isEqualTo("CONFIRMED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_no_show_audits WHERE reservation_id = ?",
+                Integer.class,
+                scenario.reservationId()
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM idempotency_commands WHERE idempotency_key = ?",
+                Integer.class,
+                key(9).value()
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM menu_holds WHERE reservation_id = ?",
+                String.class,
+                scenario.reservationId()
+        )).isEqualTo("CONFIRMED");
+        assertThat(notificationTaskCount(scenario.reservationId(), "no-show")).isZero();
+
+        jdbcTemplate.execute("DROP TRIGGER IF EXISTS trg_visit_notification_failure");
+        ReservationVisitCommandResult retry = visitFacade.markNoShow(
+                scenario.operatorId(), scenario.storeId(), scenario.reservationId(), key(9),
+                new ReservationNoShowRequest(ReservationNoShowReason.UNCLEAR)
+        );
+
+        assertThat(retry.data().status()).isEqualTo("NO_SHOW");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM menu_holds WHERE reservation_id = ?",
+                String.class,
+                scenario.reservationId()
+        )).isEqualTo("FORFEITED");
+        assertTerminalTask(
+                scenario.reservationId(), "RESERVATION_NO_SHOW", "no-show");
+    }
+
+    @Test
+    void noShowAndDirectFulfillmentRaceLeavesOneMatchingTerminalTask() throws Exception {
+        Scenario scenario = confirmedScenario();
+        clock.set(START_AT.plusSeconds(300));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Boolean> noShow = executor.submit(() -> attempt(ready, start, () ->
+                    visitFacade.markNoShow(
+                            scenario.operatorId(), scenario.storeId(), scenario.reservationId(),
+                            key(7), new ReservationNoShowRequest(
+                                    ReservationNoShowReason.UNCLEAR)
+                    )));
+            Future<Boolean> direct = executor.submit(() -> attempt(ready, start, () ->
+                    fulfillmentFacade.fulfill(
+                            scenario.operatorId(), scenario.storeId(), scenario.reservationId(),
+                            key(8), new ReservationFulfillmentRequest()
+                    )));
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            assertThat(List.of(
+                    noShow.get(15, TimeUnit.SECONDS), direct.get(15, TimeUnit.SECONDS)
+            )).containsExactlyInAnyOrder(true, false);
+        } finally {
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+
+        String terminalStatus = jdbcTemplate.queryForObject(
+                "SELECT status FROM reservations WHERE reservation_id = ?",
+                String.class,
+                scenario.reservationId()
+        );
+        String winningEvent = "NO_SHOW".equals(terminalStatus) ? "no-show" : "visit-completed";
+        String winningPurpose = "NO_SHOW".equals(terminalStatus)
+                ? "RESERVATION_NO_SHOW"
+                : "RESERVATION_VISIT_COMPLETED";
+        assertTerminalTask(scenario.reservationId(), winningPurpose, winningEvent);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM notification_tasks WHERE resource_id = ?",
+                Integer.class,
+                scenario.reservationId()
+        )).isOne();
     }
 
     @Test
@@ -389,6 +562,31 @@ class ReservationVisitIT {
                 Integer.class,
                 scenario.reservationId()
         )).isOne();
+        assertTerminalTask(
+                scenario.reservationId(),
+                "RESERVATION_VISIT_COMPLETED",
+                "visit-completed"
+        );
+    }
+
+    private void assertTerminalTask(long reservationId, String purpose, String eventName) {
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT purpose, resource_version, source_state FROM notification_tasks "
+                        + "WHERE source_event_id = ?",
+                "reservation:" + reservationId + ":" + eventName
+        )).containsEntry("purpose", purpose)
+                .containsEntry("resource_version", 2L)
+                .containsEntry("source_state", purpose.equals("RESERVATION_NO_SHOW")
+                        ? "NO_SHOW" : "FULFILLED");
+        assertThat(notificationTaskCount(reservationId, eventName)).isOne();
+    }
+
+    private int notificationTaskCount(long reservationId, String eventName) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM notification_tasks WHERE source_event_id = ?",
+                Integer.class,
+                "reservation:" + reservationId + ":" + eventName
+        );
     }
 
     private Scenario confirmedScenario() {
@@ -513,6 +711,24 @@ class ReservationVisitIT {
                 paymentId,
                 paymentId,
                 scenario.reservationId());
+    }
+
+    private void insertConfirmedMenuHold(Scenario scenario) {
+        jdbcTemplate.update("""
+                INSERT INTO menu_holds (
+                    reservation_id, store_id, consumer_account_id,
+                    service_date, start_time, end_date, end_time,
+                    acquire_operation_id, status, created_at, updated_at
+                ) VALUES (
+                    ?, ?, ?, '2026-08-16', '10:00:00', '2026-08-16', '11:00:00',
+                    ?, 'CONFIRMED', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+                )
+                """,
+                scenario.reservationId(),
+                scenario.storeId(),
+                scenario.consumerId(),
+                 "reservation-visit-it-hold:" + scenario.reservationId()
+         );
     }
 
     private static boolean attempt(
