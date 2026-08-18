@@ -26,15 +26,15 @@ class DashboardAnalyticsMigrationTest {
             new MySQLContainer(DockerImageName.parse("mysql:8.0.40"));
 
     @Test
-    void v56CreatesAuthorityVersionAndAtomicMetricKeys() throws Exception {
+    void v57CreatesAuthorityVersionAndAtomicMetricKeys() throws Exception {
         Flyway flyway = Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .load();
         flyway.migrate();
 
         assertThat(flyway.info().applied()).anyMatch(migration ->
-                "56".equals(String.valueOf(migration.getVersion()))
-                        && "V56__create_dashboard_analytics_snapshots.sql"
+                "57".equals(String.valueOf(migration.getVersion()))
+                        && "V57__create_dashboard_analytics_snapshots.sql"
                                 .equals(migration.getScript()));
 
         try (Connection connection = DriverManager.getConnection(

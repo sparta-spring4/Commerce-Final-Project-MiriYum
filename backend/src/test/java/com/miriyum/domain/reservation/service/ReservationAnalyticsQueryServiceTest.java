@@ -110,7 +110,7 @@ class ReservationAnalyticsQueryServiceTest {
         assertThat(result.asOf()).isEqualTo(AS_OF);
         assertThat(result.dataThrough()).isEqualTo(AS_OF.minusSeconds(5));
         assertThat(result.inputCheckpoint()).hasSize(64);
-        assertThat(result.sourceVersion()).isEqualTo(1102L);
+        assertThat(result.sourceVersion()).isEqualTo(2120L);
         assertThat(result.corrected()).isFalse();
     }
 
@@ -122,6 +122,32 @@ class ReservationAnalyticsQueryServiceTest {
                 "a".repeat(64), AS_OF, 1, false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("lifecycle counts");
+    }
+
+    @Test
+    void sourceVersionIncreasesWhenCancellationCheckpointAdvancesBelowMaximumId() {
+        given(reservationRepository.aggregateDashboardLifecycle(
+                STORE_ID, BUSINESS_DATE, AS_OF)).willReturn(lifecycle);
+        given(bucketRepository.aggregateDashboardOffers(
+                STORE_ID, BUSINESS_DATE, AS_OF)).willReturn(offers);
+        given(allocationRepository.aggregateDashboardUsage(
+                STORE_ID, BUSINESS_DATE, AS_OF)).willReturn(usage);
+        given(cancellationAuditRepository.aggregateDashboardCancellations(
+                STORE_ID, BUSINESS_DATE, AS_OF)).willReturn(cancellations);
+        given(fulfillmentAuditRepository.aggregateDashboardFulfillments(
+                STORE_ID, BUSINESS_DATE, AS_OF)).willReturn(fulfillments);
+        given(noShowAuditRepository.aggregateDashboardNoShows(
+                STORE_ID, BUSINESS_DATE, AS_OF)).willReturn(noShows);
+        given(lifecycle.getMaxReservationId()).willReturn(1000L);
+        given(cancellations.getMaxAuditId()).willReturn(1L, 2L);
+
+        ReservationAnalyticsSnapshot first = service.getDashboardSnapshot(
+                STORE_ID, BUSINESS_DATE, AS_OF);
+        ReservationAnalyticsSnapshot corrected = service.getDashboardSnapshot(
+                STORE_ID, BUSINESS_DATE, AS_OF);
+
+        assertThat(corrected.inputCheckpoint()).isNotEqualTo(first.inputCheckpoint());
+        assertThat(corrected.sourceVersion()).isGreaterThan(first.sourceVersion());
     }
 
     private static long epochMicros(Instant instant) {

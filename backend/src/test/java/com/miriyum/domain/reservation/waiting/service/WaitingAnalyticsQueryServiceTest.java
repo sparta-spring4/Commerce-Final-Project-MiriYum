@@ -61,7 +61,25 @@ class WaitingAnalyticsQueryServiceTest {
         assertThat(result.confirmedNoShowTeams()).isEqualTo(2);
         assertThat(result.inputCheckpoint()).hasSize(64);
         assertThat(result.dataThrough()).isEqualTo(AS_OF.minusSeconds(5));
-        assertThat(result.sourceVersion()).isEqualTo(91L);
+        assertThat(result.sourceVersion()).isEqualTo(170L);
+    }
+
+    @Test
+    void sourceVersionIncreasesWhenEventCheckpointAdvancesBelowMaximumTeamId() {
+        given(eventRepository.aggregateDashboardState(STORE_ID, BUSINESS_DATE, AS_OF))
+                .willReturn(aggregate);
+        given(teamRepository.dashboardCheckpoint(STORE_ID, BUSINESS_DATE, AS_OF))
+                .willReturn(checkpoint);
+        given(checkpoint.getMaxTeamId()).willReturn(1000L);
+        given(aggregate.getMaxEventId()).willReturn(20L, 21L);
+
+        WaitingAnalyticsSnapshot first = service.getDashboardSnapshot(
+                STORE_ID, BUSINESS_DATE, AS_OF);
+        WaitingAnalyticsSnapshot corrected = service.getDashboardSnapshot(
+                STORE_ID, BUSINESS_DATE, AS_OF);
+
+        assertThat(corrected.inputCheckpoint()).isNotEqualTo(first.inputCheckpoint());
+        assertThat(corrected.sourceVersion()).isGreaterThan(first.sourceVersion());
     }
 
     private static long epochMicros(Instant instant) {

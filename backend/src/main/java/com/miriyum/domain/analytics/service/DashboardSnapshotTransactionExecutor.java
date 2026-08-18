@@ -19,11 +19,13 @@ import com.miriyum.domain.analytics.repository.DashboardSnapshotRepository;
 import java.sql.PreparedStatement;
 import java.sql.Types;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -53,6 +55,19 @@ public class DashboardSnapshotTransactionExecutor {
         this.metricRepository = metricRepository;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public Optional<DashboardSnapshotResponse> findStoredSnapshot(
+            long storeId,
+            LocalDate businessDate,
+            Instant asOf,
+            long storeAuthorityVersion
+    ) {
+        return snapshotRepository
+                .findByStoreIdAndBusinessDateAndAsOfAndStoreAuthorityVersion(
+                        storeId, businessDate, asOf, storeAuthorityVersion)
+                .map(this::storedResponse);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)

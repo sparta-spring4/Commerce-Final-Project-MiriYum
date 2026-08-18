@@ -7,9 +7,13 @@ import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.Metri
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verify;
 
 import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.DashboardMetricDraft;
 import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.DashboardSnapshotDraft;
+import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.DashboardSnapshotResponse;
 import com.miriyum.domain.reservation.dto.contract.ReservationAnalyticsSnapshot;
 import com.miriyum.domain.reservation.service.ReservationAnalyticsQueryService;
 import com.miriyum.domain.reservation.waiting.dto.WaitingAnalyticsSnapshot;
@@ -21,6 +25,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -95,6 +100,22 @@ class StoreDashboardAnalyticsServiceTest {
         assertThat(published.get().metrics())
                 .extracting(metric -> metric.metadata().asOf())
                 .containsOnly(AS_OF);
+    }
+
+    @Test
+    void storedCanonicalSnapshotReturnsBeforeCallingSources() {
+        reset(waitingSource, executor);
+        DashboardSnapshotResponse stored = org.mockito.Mockito.mock(
+                DashboardSnapshotResponse.class);
+        given(executor.findStoredSnapshot(STORE_ID, DATE, AS_OF, 1L))
+                .willReturn(Optional.of(stored));
+
+        DashboardSnapshotResponse result = service.getDashboard(41L, STORE_ID);
+
+        assertThat(result).isSameAs(stored);
+        verify(reservationSource, never()).getDashboardSnapshot(STORE_ID, DATE, AS_OF);
+        verify(waitingSource, never()).getDashboardSnapshot(STORE_ID, DATE, AS_OF);
+        verify(executor, never()).publish(any());
     }
 
     @Test

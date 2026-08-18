@@ -75,27 +75,26 @@ public class ReservationAnalyticsQueryService {
                         storeId, businessDate, asOf));
 
         long reservationVersion = value(lifecycle.getMaxReservationId());
+        long lifecyclePolicyVersion = value(lifecycle.getMaxCapacityPolicyVersion());
         long capacityPolicyVersion = value(offers.getPolicyVersion());
         long allocationVersion = value(usage.getMaxAllocationId());
         long bucketVersion = value(offers.getMaxBucketId());
         long cancellationVersion = value(cancellations.getMaxAuditId());
         long fulfillmentVersion = value(fulfillments.getMaxAuditId());
         long noShowVersion = value(noShows.getMaxAuditId());
-        long baseSourceVersion = Math.max(1L, Stream.of(
-                        reservationVersion,
-                        value(lifecycle.getMaxCapacityPolicyVersion()),
-                        capacityPolicyVersion,
-                        allocationVersion,
-                        bucketVersion,
-                        cancellationVersion,
-                        fulfillmentVersion)
-                .mapToLong(Long::longValue)
-                .max()
-                .orElse(0L));
-        long sourceVersion = Math.addExact(baseSourceVersion, noShowVersion);
+        long sourceVersion = aggregateVersion(
+                reservationVersion,
+                lifecyclePolicyVersion,
+                capacityPolicyVersion,
+                allocationVersion,
+                bucketVersion,
+                cancellationVersion,
+                fulfillmentVersion,
+                noShowVersion);
 
         String checkpoint = checkpoint(
                 reservationVersion,
+                lifecyclePolicyVersion,
                 capacityPolicyVersion,
                 allocationVersion,
                 bucketVersion,
@@ -155,5 +154,13 @@ public class ReservationAnalyticsQueryService {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is required", exception);
         }
+    }
+
+    private static long aggregateVersion(long... versions) {
+        long version = 0L;
+        for (long component : versions) {
+            version = Math.addExact(version, component);
+        }
+        return Math.max(1L, version);
     }
 }

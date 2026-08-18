@@ -48,9 +48,7 @@ public class WaitingAnalyticsQueryService {
         long maxTeamId = value(teamCheckpoint.getMaxTeamId());
         long maxEventId = value(aggregate.getMaxEventId());
         long maxEventSequence = value(aggregate.getMaxEventSequence());
-        long sourceVersion = Math.max(1L, Math.max(
-                maxTeamId,
-                Math.max(maxEventId, maxEventSequence)));
+        long sourceVersion = aggregateVersion(maxTeamId, maxEventId, maxEventSequence);
 
         return new WaitingAnalyticsSnapshot(
                 storeId,
@@ -90,5 +88,13 @@ public class WaitingAnalyticsQueryService {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is required", exception);
         }
+    }
+
+    private static long aggregateVersion(long... versions) {
+        long version = 0L;
+        for (long component : versions) {
+            version = Math.addExact(version, component);
+        }
+        return Math.max(1L, version);
     }
 }

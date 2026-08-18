@@ -82,6 +82,12 @@ public class StoreDashboardAnalyticsService {
         Instant generatedAt = clock.instant();
         Instant asOf = generatedAt.truncatedTo(ChronoUnit.MINUTES);
         LocalDate businessDate = asOf.atZone(ZoneId.of(authority.timeZoneId())).toLocalDate();
+        DashboardSnapshotResponse stored = executor.findStoredSnapshot(
+                        storeId, businessDate, asOf, authority.dashboardAuthorityVersion())
+                .orElse(null);
+        if (stored != null) {
+            return stored;
+        }
 
         ReservationAnalyticsSnapshot reservation = null;
         MetricReasonCode reservationFailure = null;
