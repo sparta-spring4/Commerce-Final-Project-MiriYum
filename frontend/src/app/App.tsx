@@ -62,6 +62,22 @@ import { ROUTES } from './routes'
 const queryClient = createQueryClient()
 
 /**
+ * 일반 사용자 셸의 provider 경계.
+ *
+ * layout route로 두는 이유는 provider가 실제로 mount되는 범위를 route 경계와
+ * 같게 만들기 위해서다. `<Routes>` 바깥에서 감싸면 어떤 경로를 열든 provider가
+ * 함께 mount되고, 이 provider는 mount 즉시 소비자 재발급을 호출한다. 그러면
+ * 운영자 화면을 여는 것만으로 소비자 세션 복구와 캐시 정리가 돌아간다.
+ */
+function ConsumerShell() {
+  return (
+    <ConsumerAuthProvider>
+      <Outlet />
+    </ConsumerAuthProvider>
+  )
+}
+
+/**
  * 매장 운영자 셸의 provider 경계.
  *
  * 인증 상태와 현재 매장 선택을 이 안에서만 들고 있다. 소비자 화면은 이 provider를
@@ -81,16 +97,17 @@ function StoreOperatorShell() {
  * 앱 셸. 화면 Issue는 routes.ts에 자기 route를 등록하고 여기에 element를 붙인다.
  * 1차 MVP에 없는 기능의 route는 만들지 않는다.
  *
- * 일반 사용자 인증 shell만 감싼다. 매장 운영자 shell은 자기 provider와 가드로
- * 별도 route 그룹을 만든다. 두 shell의 상태를 한 provider로 합치지 않는다.
+ * 두 인증 shell은 형제 route 그룹이다. 한쪽 provider가 다른 쪽 route를 감싸지
+ * 않으므로 토큰·쿠키·client뿐 아니라 mount 시점의 부수효과도 섞이지 않는다.
  */
 export default function App() {
   return (
     <AppErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <ConsumerAuthProvider>
-            <Routes>
+          <Routes>
+            {/* 일반 사용자 provider가 닿는 범위. 운영자 route는 이 밖에 있다. */}
+            <Route element={<ConsumerShell />}>
               <Route
                 element={
                   <AppLayout
@@ -163,15 +180,15 @@ export default function App() {
                   />
                 </Route>
               </Route>
+            </Route>
 
-              {/*
-                매장 운영자 셸.
+            {/*
+              매장 운영자 셸.
 
-                일반 사용자 provider 밖에 두지 않는 이유는 라우터가 하나이기
-                때문이며, 인증 상태·토큰·쿠키는 이 안의 별도 provider가 소유한다.
-                두 셸은 서로의 상태를 읽지 않는다.
-              */}
-              <Route element={<StoreOperatorShell />}>
+              일반 사용자 provider와 형제다. 운영자 경로를 열면 소비자 provider는
+              아예 mount되지 않으므로 소비자 재발급 요청도 나가지 않는다.
+            */}
+            <Route element={<StoreOperatorShell />}>
                 <Route
                   path={ROUTES.storeOperatorSignIn}
                   element={<StoreOperatorSignInPage />}
@@ -254,8 +271,7 @@ export default function App() {
                   </Route>
                 </Route>
               </Route>
-            </Routes>
-          </ConsumerAuthProvider>
+          </Routes>
         </BrowserRouter>
       </QueryClientProvider>
     </AppErrorBoundary>

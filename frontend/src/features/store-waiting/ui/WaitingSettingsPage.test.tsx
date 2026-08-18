@@ -11,9 +11,11 @@ import {
   WAITING_SETTINGS_PATH,
   closureJob,
   disableImpact,
+  waitingClosureJobPath,
   waitingSetting,
   waitingSettingsHandler,
 } from '../test/handlers'
+import { CLOSURE_JOB_POLL_MS } from '../api/queries'
 import { WaitingSettingsPage } from './WaitingSettingsPage'
 
 function renderPage() {
@@ -179,21 +181,8 @@ describe('웨이팅 설정 화면', () => {
     })
   })
 
-  it('202 종결 작업 응답은 진행 상태로 안내한다', async () => {
-    server.use(
-      authenticatedOperator(),
-      waitingSettingsHandler(),
-      http.get(WAITING_IMPACT_PATH, () =>
-        successResponse(disableImpact({ activeTeamCount: 2 })),
-      ),
-      http.put(WAITING_SETTINGS_PATH, () =>
-        successResponse(
-          closureJob({ status: 'PROCESSING', totalTeamCount: 2, completedTeamCount: 1 }),
-        ),
-      ),
-    )
-
-    renderPage()
+  /** 끄기를 확정해 202 종결 작업을 시작시킨다. */
+  async function startClosure() {
     fireEvent.click(
       await screen.findByLabelText('이 매장에서 웨이팅을 사용합니다'),
     )
@@ -201,13 +190,129 @@ describe('웨이팅 설정 화면', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: '대기 2팀 일괄 종결하고 끄기' }),
     )
+  }
+
+  /** 끄기 확인까지 필요한 공통 핸들러. 202 본문만 테스트마다 바꾼다. */
+  function disableFlow(job = closureJob()) {
+    return [
+      authenticatedOperator(),
+      waitingSettingsHandler(),
+      http.get(WAITING_IMPACT_PATH, () =>
+        successResponse(disableImpact({ activeTeamCount: 2 })),
+      ),
+      http.put(WAITING_SETTINGS_PATH, () => successResponse(job)),
+    ]
+  }
+
+  it('202 종결 작업 응답은 진행 상태로 안내한다', async () => {
+    const started = closureJob({
+      status: 'PROCESSING',
+      totalTeamCount: 2,
+      completedTeamCount: 1,
+    })
+    server.use(
+      ...disableFlow(started),
+      // 조회가 아직 같은 상태를 준다. 202 본문만으로 끝내지 않는다는 전제다.
+      http.get(waitingClosureJobPath(started.jobId), () =>
+        successResponse(started),
+      ),
+    )
+
+    renderPage()
+    await startClosure()
 
     expect(
       await screen.findByText('대기 팀 일괄 종결을 시작했습니다.'),
     ).toBeInTheDocument()
     expect(
-      screen.getByText(/상태 처리 중 · 대상 2팀 · 완료 1팀 · 실패 0팀/),
+      screen.getByText(
+        /상태 처리 중 · 대상 2팀 · 완료 1팀 · 실패 0팀 · 대사 필요 0팀/,
+      ),
     ).toBeInTheDocument()
+  })
+
+  it('202 이후 서버가 완료로 바꾸면 화면도 완료로 바뀐다', async () => {
+    const started = closureJob({
+      status: 'PENDING',
+      totalTeamCount: 2,
+      completedTeamCount: 0,
+    })
+    server.use(
+      ...disableFlow(started),
+      http.get(waitingClosureJobPath(started.jobId), () =>
+        successResponse(
+          closureJob({
+            status: 'COMPLETED',
+            totalTeamCount: 2,
+            completedTeamCount: 2,
+          }),
+        ),
+      ),
+    )
+
+    renderPage()
+    await startClosure()
+
+    // 202 본문에 멈추지 않고 jobId로 다시 읽어 종결까지 따라간다.
+    expect(
+      await screen.findByText('대기 팀 일괄 종결을 마쳤습니다.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/상태 완료 · 대상 2팀 · 완료 2팀/),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText('대기 팀 일괄 종결을 시작했습니다.'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('종결하지 못한 팀이 남으면 확인이 필요하다고 알린다', async () => {
+    const started = closureJob({ status: 'PROCESSING', totalTeamCount: 3 })
+    server.use(
+      ...disableFlow(started),
+      http.get(waitingClosureJobPath(started.jobId), () =>
+        successResponse(
+          closureJob({
+            status: 'RECONCILIATION_REQUIRED',
+            totalTeamCount: 3,
+            completedTeamCount: 1,
+            failedTeamCount: 1,
+            reconciliationRequiredTeamCount: 1,
+          }),
+        ),
+      ),
+    )
+
+    renderPage()
+    await startClosure()
+
+    expect(
+      await screen.findByText('일괄 종결이 끝났지만 확인이 필요합니다.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/완료 1팀 · 실패 1팀 · 대사 필요 1팀/),
+    ).toBeInTheDocument()
+  })
+
+  it('종결 작업이 끝나면 더 읽지 않는다', async () => {
+    let reads = 0
+    const started = closureJob({ status: 'PROCESSING' })
+    server.use(
+      ...disableFlow(started),
+      http.get(waitingClosureJobPath(started.jobId), () => {
+        reads += 1
+        return successResponse(closureJob({ status: 'COMPLETED' }))
+      }),
+    )
+
+    renderPage()
+    await startClosure()
+    await screen.findByText('대기 팀 일괄 종결을 마쳤습니다.')
+
+    const settled = reads
+    // 종결 상태에서는 백엔드가 값을 더 바꾸지 않는다. 폴링이 계속되면 화면을
+    // 열어 둔 동안 같은 응답만 반복해서 받는다.
+    await new Promise((resolve) => setTimeout(resolve, CLOSURE_JOB_POLL_MS + 300))
+    expect(reads).toBe(settled)
   })
 
   it('활성 팀이 없으면 일괄 종결을 제시하지 않는다', async () => {

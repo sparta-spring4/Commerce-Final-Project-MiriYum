@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { storeOperatorKeys, useStoreOperatorAuth } from '../../store-operator'
 import type { WaitingCommand } from '../model/transitions'
+import { isClosureJobSettled } from '../model/types'
 import type {
   WaitingClosureJob,
   WaitingDisableImpact,
@@ -87,15 +88,31 @@ export function useWaitingDisableImpact(storeId: string, enabled: boolean) {
   })
 }
 
+/** 종결 작업을 다시 읽는 간격. */
+export const CLOSURE_JOB_POLL_MS = 2_000
+
+/**
+ * 비동기 일괄 종결 작업의 현재 상태.
+ *
+ * 202는 "접수했다"까지만 말한다. 그 응답을 그대로 들고 있으면 화면이 영원히
+ * 최초 PENDING·PROCESSING에 멈춘다. 그래서 202가 준 값을 첫 표시로만 쓰고,
+ * 서버가 종결로 넘길 때까지 jobId로 다시 읽는다.
+ *
+ * 종결 상태에서는 폴링을 멈춘다. 백엔드가 그 뒤로 상태를 바꾸지 않으므로 계속
+ * 읽어도 같은 값이고, 운영자가 화면을 열어 둔 동안 요청만 쌓인다.
+ */
 export function useWaitingClosureJob(
   storeId: string,
   jobId: string | null,
+  initialJob?: WaitingClosureJob,
 ) {
   const { apiClient } = useStoreOperatorAuth()
 
   return useQuery({
     queryKey: storeOperatorKeys.waitingClosureJob(storeId, jobId ?? ''),
     enabled: jobId !== null && storeId.length > 0,
+    // 202 응답을 첫 화면으로 쓴다. 첫 조회가 돌아오기 전 빈 자리를 만들지 않는다.
+    initialData: initialJob,
     queryFn: async ({ signal }): Promise<WaitingClosureJob> => {
       const response = await apiClient(JOB_PATH, {
         method: 'get',
@@ -103,6 +120,12 @@ export function useWaitingClosureJob(
         signal,
       })
       return response.data
+    },
+    refetchInterval: (query) => {
+      const job = query.state.data
+      return job !== undefined && isClosureJobSettled(job)
+        ? false
+        : CLOSURE_JOB_POLL_MS
     },
   })
 }

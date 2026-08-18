@@ -11,7 +11,11 @@ import {
   SummaryList,
   useAdoptStoreFromRoute,
 } from '../../store-operator'
-import { useUpdateWaitingSettings, useWaitingSettings } from '../api/queries'
+import {
+  useUpdateWaitingSettings,
+  useWaitingClosureJob,
+  useWaitingSettings,
+} from '../api/queries'
 import { isStaleVersionConflict, waitingErrorMessage } from '../model/errors'
 import {
   ADVANCE_OPEN_MINUTES_MAX,
@@ -32,6 +36,8 @@ import {
   RECEPTION_MODE_HINT,
   RECEPTION_MODE_LABEL,
   isClosureJob,
+  isClosureJobSettled,
+  needsClosureFollowUp,
   type WaitingClosureJob,
   type WaitingDisableAction,
   type WaitingReceptionMode,
@@ -97,7 +103,19 @@ function WaitingSettingsForm({
   const [formError, setFormError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [closureJob, setClosureJob] = useState<WaitingClosureJob | null>(null)
+  /*
+   * 202가 준 첫 스냅샷.
+   *
+   * 표시는 여기서 시작하되 여기서 끝내지 않는다. 아래 query가 같은 jobId로
+   * 서버를 다시 읽어 종결까지 따라간다.
+   */
+  const [startedJob, setStartedJob] = useState<WaitingClosureJob | null>(null)
+  const jobQuery = useWaitingClosureJob(
+    storeId,
+    startedJob?.jobId ?? null,
+    startedJob ?? undefined,
+  )
+  const closureJob = jobQuery.data ?? startedJob
 
   function edit(next: WaitingSettingsDraft) {
     setDraft(next)
@@ -125,9 +143,9 @@ function WaitingSettingsForm({
       setConfirming(false)
       if (isClosureJob(data)) {
         // 202다. 설정은 꺼졌고 활성 팀 종결은 비동기로 진행된다.
-        setClosureJob(data)
+        setStartedJob(data)
       } else {
-        setClosureJob(null)
+        setStartedJob(null)
       }
       setSaved(true)
     } catch (error) {
@@ -174,24 +192,11 @@ function WaitingSettingsForm({
           <div className="op-stack">
             {formError !== null && <Alert tone="error" title={formError} />}
 
-            {saved && closureJob === null && (
+            {saved && closureJob == null && (
               <Alert tone="info" title="웨이팅 설정을 저장했습니다." />
             )}
 
-            {closureJob !== null && (
-              <Alert
-                tone="warning"
-                title="대기 팀 일괄 종결을 시작했습니다."
-              >
-                <p>
-                  {`상태 ${CLOSURE_JOB_STATUS_LABEL[closureJob.status]} · 대상 ${closureJob.totalTeamCount}팀 · 완료 ${closureJob.completedTeamCount}팀 · 실패 ${closureJob.failedTeamCount}팀`}
-                </p>
-                <p className="op-section__hint">
-                  종결은 서버에서 이어집니다. 결과는 웨이팅 목록에서 확인해
-                  주세요.
-                </p>
-              </Alert>
-            )}
+            {closureJob != null && <ClosureJobAlert job={closureJob} />}
 
             {confirming && (
               <WaitingDisableDialog
@@ -314,5 +319,40 @@ function WaitingSettingsForm({
         </div>
       </form>
     </>
+  )
+}
+
+/**
+ * 일괄 종결 작업 진행 상황.
+ *
+ * 계약이 주는 것은 집계뿐이다. 팀 단위 결과 목록은 없으므로 완료·실패·대사
+ * 대상 수를 그대로 보여 주고, 사람이 손대야 하는 건이 남았는지만 말한다.
+ */
+function ClosureJobAlert({ job }: { job: WaitingClosureJob }) {
+  const settled = isClosureJobSettled(job)
+  const followUp = needsClosureFollowUp(job)
+
+  return (
+    <Alert
+      tone={settled && !followUp ? 'info' : 'warning'}
+      title={
+        settled
+          ? followUp
+            ? '일괄 종결이 끝났지만 확인이 필요합니다.'
+            : '대기 팀 일괄 종결을 마쳤습니다.'
+          : '대기 팀 일괄 종결을 시작했습니다.'
+      }
+    >
+      <p>
+        {`상태 ${CLOSURE_JOB_STATUS_LABEL[job.status]} · 대상 ${job.totalTeamCount}팀 · 완료 ${job.completedTeamCount}팀 · 실패 ${job.failedTeamCount}팀 · 대사 필요 ${job.reconciliationRequiredTeamCount}팀`}
+      </p>
+      <p className="op-section__hint">
+        {settled
+          ? followUp
+            ? '종결하지 못한 팀이 있습니다. 웨이팅 목록에서 해당 팀을 직접 처리해 주세요.'
+            : '대상 팀을 모두 종결했습니다.'
+          : '종결은 서버에서 이어집니다. 이 화면이 진행 상황을 따라갑니다.'}
+      </p>
+    </Alert>
   )
 }

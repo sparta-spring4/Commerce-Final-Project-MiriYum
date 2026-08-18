@@ -22,6 +22,8 @@ const BASE = `/api/v1/store-operators/stores/${STORE_ID}`
 export const WAITING_SETTINGS_PATH = `${BASE}/waiting-settings`
 export const WAITING_IMPACT_PATH = `${BASE}/waiting-settings/deactivation-impact`
 export const WAITING_TEAMS_PATH = `${BASE}/waiting-teams`
+export const waitingClosureJobPath = (jobId: string) =>
+  `${BASE}/waiting-closure-jobs/${jobId}`
 export const waitingTeamPath = (id: string) => `${BASE}/waiting-teams/${id}`
 export const waitingCommandPath = (id: string, command: string) =>
   `${BASE}/waiting-teams/${id}/${command}`

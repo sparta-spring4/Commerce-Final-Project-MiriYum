@@ -78,6 +78,25 @@ export const CLOSURE_JOB_STATUS_LABEL: Record<WaitingClosureJobStatus, string> =
   }
 
 /**
+ * 종결 작업이 더 진행되지 않는 상태인지 판정한다.
+ *
+ * 백엔드는 대상 팀을 다 처리한 순간에만 `COMPLETED` 또는
+ * `RECONCILIATION_REQUIRED`로 넘기고 그 뒤로는 상태를 바꾸지 않는다.
+ * `PENDING`과 `PROCESSING`은 서로 오가므로 둘 다 진행 중으로 본다.
+ *
+ * 재조회를 언제 멈출지가 이 판정 하나에 달려 있다. 진행 중을 종결로 잘못 보면
+ * 화면이 최초 상태에 멈추고, 반대로 보면 끝난 작업을 계속 폴링한다.
+ */
+export function isClosureJobSettled(job: WaitingClosureJob): boolean {
+  return job.status === 'COMPLETED' || job.status === 'RECONCILIATION_REQUIRED'
+}
+
+/** 종결 작업에 사람이 개입해야 하는지. 실패·대사 대상이 하나라도 있으면 참이다. */
+export function needsClosureFollowUp(job: WaitingClosureJob): boolean {
+  return job.failedTeamCount > 0 || job.reconciliationRequiredTeamCount > 0
+}
+
+/**
  * 비활성화 응답이 설정인지 종결 작업인지 가른다.
  *
  * client가 HTTP status를 노출하지 않으므로 응답 모양으로 판정한다. 두 스키마는
