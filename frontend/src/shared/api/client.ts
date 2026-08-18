@@ -31,6 +31,7 @@ export interface ApiClientDependencies {
 /** OpenAPI가 타이핑하지 않는 부수 입력. */
 interface CommonRequestOptions {
   query?: Record<string, string | number | boolean | undefined>
+  multipart?: FormData
   signal?: AbortSignal
 }
 
@@ -106,6 +107,7 @@ export function createApiClient(
     options: {
       method: string
       body?: unknown
+      multipart?: FormData
       idempotencyKey?: string
       csrfToken?: string
       signal?: AbortSignal
@@ -132,7 +134,8 @@ export function createApiClient(
         method: options.method.toUpperCase(),
         headers,
         body:
-          options.body === undefined ? undefined : JSON.stringify(options.body),
+          options.multipart ??
+          (options.body === undefined ? undefined : JSON.stringify(options.body)),
         signal: options.signal,
         // Refresh·CSRF 쿠키는 same-origin 프록시를 통해서만 오간다.
         credentials: 'same-origin',
@@ -179,6 +182,7 @@ export function createApiClient(
       method,
       pathParams,
       body,
+      multipart,
       idempotencyKey,
       csrfToken,
       query,
@@ -188,10 +192,18 @@ export function createApiClient(
       body?: unknown
       idempotencyKey?: string
       csrfToken?: string
+      multipart?: FormData
     }
 
     const url = buildUrl(path, pathParams, query)
-    const sendOptions = { method, body, idempotencyKey, csrfToken, signal }
+    const sendOptions = {
+      method,
+      body,
+      multipart,
+      idempotencyKey,
+      csrfToken,
+      signal,
+    }
 
     let response = await send(url, sendOptions)
 
@@ -213,7 +225,10 @@ export function createApiClient(
       )
     }
 
-    // 계약에 204를 선언한 operation이 없다. 본문 없는 2xx는 계약 위반이다.
+    if (response.status === 204) {
+      return undefined as unknown as ApiResult<P, M>
+    }
+
     if (payload === UNPARSEABLE) {
       throw new ApiContractError(response.status, 'notAnObject')
     }

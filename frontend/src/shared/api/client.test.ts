@@ -111,13 +111,12 @@ describe('성공 봉투 검증 — 2xx라도 통과시키지 않는다', () => {
     expect((error as { violation: string }).violation).toBe('notAnObject')
   })
 
-  // 계약에 204를 선언한 operation이 없다. 본문 없는 2xx는 계약 위반이다.
-  test('본문 없는 204를 성공으로 통과시키지 않는다', async () => {
+  test('본문 없는 204를 성공으로 처리한다', async () => {
     server.use(http.get(CATEGORIES, () => new HttpResponse(null, { status: 204 })))
 
-    const error = await getCategories().catch((thrown: unknown) => thrown)
+    const result = await getCategories()
 
-    expect(isApiContractError(error)).toBe(true)
+    expect(result).toBeUndefined()
   })
 
   test('계약 위반을 서버 오류 코드로 위장하지 않는다', async () => {

@@ -1581,3 +1581,36 @@
   transform: translateX(2px);
   color: var(--color-primary);
 }
+
+.op-menu-image {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.op-menu-image__preview,
+.op-menu-image__empty {
+  width: 100%;
+  min-height: 12rem;
+  border-radius: var(--radius-md);
+}
+
+.op-menu-image__preview {
+  display: block;
+  object-fit: cover;
+  background: var(--color-surface-container);
+}
+
+.op-menu-image__empty {
+  display: grid;
+  place-items: center;
+  padding: var(--space-3);
+  background: var(--color-surface-container-low);
+  color: var(--color-on-surface-variant);
+}
+
+.op-menu-image__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
