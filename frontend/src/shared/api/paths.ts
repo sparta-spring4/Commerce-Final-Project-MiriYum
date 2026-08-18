@@ -3,6 +3,7 @@ import type { paths as MenuHoldPickupPaths } from './generated/menu-hold-pickup'
 import type { paths as NotificationPaths } from './generated/notification'
 import type { paths as ReservationPaths } from './generated/reservation'
 import type { paths as StoreSearchPaths } from './generated/store-search'
+import type { paths as WaitingPaths } from './generated/waiting'
 
 /**
  * 기능별 OpenAPI 문서에서 생성한 paths를 하나의 API 표면으로 합친다.
@@ -24,18 +25,24 @@ export type NoPathOverlap =
   | AssertNoOverlap<Overlap<AuthAccountPaths, ReservationPaths>>
   | AssertNoOverlap<Overlap<AuthAccountPaths, MenuHoldPickupPaths>>
   | AssertNoOverlap<Overlap<AuthAccountPaths, NotificationPaths>>
+  | AssertNoOverlap<Overlap<AuthAccountPaths, WaitingPaths>>
   | AssertNoOverlap<Overlap<StoreSearchPaths, ReservationPaths>>
   | AssertNoOverlap<Overlap<StoreSearchPaths, MenuHoldPickupPaths>>
   | AssertNoOverlap<Overlap<StoreSearchPaths, NotificationPaths>>
+  | AssertNoOverlap<Overlap<StoreSearchPaths, WaitingPaths>>
   | AssertNoOverlap<Overlap<ReservationPaths, MenuHoldPickupPaths>>
   | AssertNoOverlap<Overlap<ReservationPaths, NotificationPaths>>
+  | AssertNoOverlap<Overlap<ReservationPaths, WaitingPaths>>
   | AssertNoOverlap<Overlap<MenuHoldPickupPaths, NotificationPaths>>
+  | AssertNoOverlap<Overlap<MenuHoldPickupPaths, WaitingPaths>>
+  | AssertNoOverlap<Overlap<NotificationPaths, WaitingPaths>>
 
 export type ApiPaths = AuthAccountPaths &
   StoreSearchPaths &
   ReservationPaths &
   MenuHoldPickupPaths &
-  NotificationPaths
+  NotificationPaths &
+  WaitingPaths
 
 /** OpenAPI에 존재하는 경로만 허용한다. */
 export type ApiPath = keyof ApiPaths & string
@@ -73,8 +80,13 @@ export type RequestBodyOf<Op> = [JsonRequestBody<Op>] extends [never]
   : { body: JsonRequestBody<Op> }
 
 /**
- * 계약이 선언한 성공 status다. 네 문서를 훑어 200과 201만 존재하며
- * 전부 application/json 본문을 가진다. 204를 선언한 operation은 없다.
+ * client가 기본으로 좁혀 주는 성공 status다. 전부 application/json 본문을 가지며
+ * 204를 선언한 operation은 없다.
+ *
+ * 202를 선언한 operation이 몇 개 있다(예약 요청 계열과 웨이팅 설정 교체). 여기에
+ * 202를 더하면 그 operation들의 성공 본문이 합집합이 되어 기존 호출부가 한꺼번에
+ * 깨진다. 지금 202 본문을 실제로 다뤄야 하는 곳은 웨이팅 설정 교체 하나뿐이므로,
+ * 공유 타입을 넓히는 대신 그 호출 지점에서 합집합으로 넓히고 응답 모양으로 가른다.
  */
 type SuccessStatus = 200 | 201
 

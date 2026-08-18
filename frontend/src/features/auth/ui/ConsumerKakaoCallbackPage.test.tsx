@@ -49,6 +49,10 @@ function renderCallback(route: string) {
 
 function seedProtectedCache(queryClient: QueryClient) {
   queryClient.setQueryData(consumerAccountKeys.me(), { nickname: '이전 사용자' })
+  queryClient.setQueryData(
+    ['consumer', 'notification-history', 0],
+    { items: [{ title: '이전 사용자' }] },
+  )
   queryClient.setQueryData(reservationKeys.detail('r-1'), { storeName: '이전 사용자' })
   queryClient.setQueryData(pickupKeys.detail('p-1'), { storeName: '이전 사용자' })
 }
@@ -56,6 +60,7 @@ function seedProtectedCache(queryClient: QueryClient) {
 function protectedCache(queryClient: QueryClient) {
   return [
     queryClient.getQueryData(consumerAccountKeys.me()),
+    queryClient.getQueryData(['consumer', 'notification-history', 0]),
     queryClient.getQueryData(reservationKeys.detail('r-1')),
     queryClient.getQueryData(pickupKeys.detail('p-1')),
   ]
@@ -140,7 +145,7 @@ describe('일반 사용자 카카오 콜백', () => {
 
     resolveSession?.()
 
-    await waitFor(() => expect(queryClient.cancelQueries).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(queryClient.cancelQueries).toHaveBeenCalledTimes(4))
     expect(screen.getByTestId('auth-status')).toHaveTextContent('unauthenticated')
     expect(screen.getByText('로그인 정보를 확인하고 있습니다.')).toBeInTheDocument()
     expect(protectedCache(queryClient)).not.toContain(undefined)
@@ -148,7 +153,12 @@ describe('일반 사용자 카카오 콜백', () => {
     cacheClear.resolve()
     await waitFor(() => expect(screen.getByTestId('auth-status')).toHaveTextContent('authenticated'))
     await waitFor(() => expect(screen.getByText('홈')).toBeInTheDocument())
-    expect(protectedCache(queryClient)).toEqual([undefined, undefined, undefined])
+    expect(protectedCache(queryClient)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ])
   })
 
   it('code 또는 state가 없으면 세션 API를 호출하지 않고 다시 시작하도록 안내한다', async () => {

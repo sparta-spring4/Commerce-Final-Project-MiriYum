@@ -49,7 +49,10 @@ function createTestQueryClient() {
   })
 }
 
-async function renderPage(queryClient = createTestQueryClient()) {
+async function renderPage(
+  queryClient = createTestQueryClient(),
+  sessionKey = 0,
+) {
   const { NotificationHistoryPage } = await import('./NotificationHistoryPage')
 
   function Wrapper({ children }: { children: ReactNode }) {
@@ -60,9 +63,13 @@ async function renderPage(queryClient = createTestQueryClient()) {
     )
   }
 
-  return render(<NotificationHistoryPage apiClient={createApiClient()} />, {
-    wrapper: Wrapper,
-  })
+  return render(
+    <NotificationHistoryPage
+      apiClient={createApiClient()}
+      sessionKey={sessionKey}
+    />,
+    { wrapper: Wrapper },
+  )
 }
 
 describe('NotificationHistoryPage', () => {
@@ -334,13 +341,13 @@ describe('NotificationHistoryPage', () => {
     const firstPage = await renderPage(queryClient)
     expect(await screen.findByText(title)).toBeVisible()
     expect(
-      queryClient.getQueryData(['consumer', 'notification-history']),
+      queryClient.getQueryData(['consumer', 'notification-history', 0]),
     ).toBeDefined()
 
     firstPage.unmount()
 
     expect(
-      queryClient.getQueryData(['consumer', 'notification-history']),
+      queryClient.getQueryData(['consumer', 'notification-history', 0]),
     ).toBeUndefined()
 
     title = '두 번째 소비자의 예약 알림'
@@ -350,5 +357,30 @@ describe('NotificationHistoryPage', () => {
       screen.queryByText('첫 번째 소비자의 예약 알림'),
     ).not.toBeInTheDocument()
     expect(await screen.findByText(title)).toBeVisible()
+  })
+
+  test('does not share history cache between consumer sessions', async () => {
+    let title = '첫 번째 소비자의 예약 알림'
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(successResponse([historyItem({ title })])),
+      ),
+    )
+    const queryClient = createTestQueryClient()
+
+    const firstPage = await renderPage(queryClient, 1)
+    expect(await screen.findByText(title)).toBeVisible()
+    firstPage.unmount()
+
+    title = '두 번째 소비자의 예약 알림'
+    await renderPage(queryClient, 2)
+
+    expect(
+      queryClient.getQueryData(['consumer', 'notification-history', 1]),
+    ).toBeUndefined()
+    expect(await screen.findByText('두 번째 소비자의 예약 알림')).toBeVisible()
+    expect(
+      queryClient.getQueryData(['consumer', 'notification-history', 2]),
+    ).toBeDefined()
   })
 })
