@@ -17,10 +17,6 @@ import java.time.Instant;
             @UniqueConstraint(
                     name = "uk_waiting_active_memberships_consumer_account",
                     columnNames = "consumer_account_id"
-            ),
-            @UniqueConstraint(
-                    name = "uk_waiting_active_memberships_team",
-                    columnNames = "waiting_team_id"
             )
         })
 public class WaitingActiveMembership {

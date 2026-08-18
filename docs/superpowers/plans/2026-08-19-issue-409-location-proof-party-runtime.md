@@ -87,7 +87,7 @@ Also insert two different accounts into one team, attempt one account in two tea
 Run:
 
 ```powershell
-.\gradlew.bat test --tests com.miriyum.domain.reservation.waiting.repository.WaitingMigrationTest --console=plain
+.\gradlew.bat integrationTest --tests com.miriyum.domain.reservation.waiting.repository.WaitingMigrationTest --console=plain
 ```
 
 Expected: FAIL because V60 tables/indexes do not exist and V44 still leaves team membership unique.
