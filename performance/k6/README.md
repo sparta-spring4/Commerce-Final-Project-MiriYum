@@ -5,7 +5,7 @@ Issue #285의 인증·공개 검색·예약 생성·알림 이력 기준선을 �
 ## 안전 경계
 
 - `TARGET_ENV`는 `local` 또는 `staging`만 허용한다. production hostname과 allowlist 밖 host는 HTTP 요청 전에 거부하며, local은 전용 HTTPS proxy 또는 loopback host만 허용한다.
-- staging은 `STAGING_APPROVED=true`가 필요하다. local·staging baseline은 성공한 smoke의 run ID와 JSON artifact를 함께 요구하고, artifact의 profile·target·commit·fixture·threshold를 현재 실행과 대조한다.
+- staging은 `STAGING_APPROVED=true`가 필요하다. `COMMIT_SHA`는 실제 배포 backend full SHA, `HARNESS_COMMIT_SHA`는 실행 중인 k6 script full SHA다. local은 둘이 반드시 같아야 하며 staging에서만 `STAGING_SPLIT_SHA_APPROVED=true`로 리뷰된 split SHA를 허용한다. staging은 아래 clean-checkout 검증을 통과한 뒤에만 `STAGING_HARNESS_SOURCE_VERIFIED=true`를 허용한다. local·staging baseline은 성공한 smoke의 run ID와 JSON artifact를 함께 요구하고, artifact의 profile·target·두 SHA·fixture·threshold를 현재 실행과 대조한다.
 - staging host는 저장소의 신뢰 allowlist가 비어 있는 동안 fail-closed다. 실제 host는 별도 리뷰 변경으로 먼저 고정해야 한다.
 - `MAX_VUS`와 `ARRIVAL_RATE`는 선택한 시나리오 전체에 배분되는 상한이다. 일반 `MAX_VUS` 상한은 100이지만 `authRefresh`를 선택하면 CSRF 준비 예산을 보존하도록 50 이하로 제한하며, duration은 setup bearer의 유효성을 보존하기 위해 최대 600초다.
 - 실제 계정 비밀번호는 저장소 밖 환경 파일에서만 읽는다. Access/Refresh Token, cookie, cursor, 알림 제목, 응답 body와 자원 ID는 summary에 쓰지 않는다.
@@ -44,7 +44,7 @@ K6_CONSUMER_05_PASSWORD=replace-outside-the-repository
 저장소 루트에서 고정 이미지로 실행한다.
 
 ```powershell
-$tests = @('config-contract.js', 'contracts-contract.js', 'runtime-options-contract.js', 'scenario-contract.js', 'smoke-proof-contract.js', 'summary-contract.js')
+$tests = @('config-contract.js', 'contracts-contract.js', 'recovery-rate-limit-contract.js', 'runtime-options-contract.js', 'scenario-contract.js', 'smoke-proof-contract.js', 'summary-contract.js')
 foreach ($test in $tests) {
   docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 run "/scripts/tests/$test"
 }
@@ -54,6 +54,7 @@ foreach ($test in $tests) {
 
 ```powershell
 $commitSha = git rev-parse HEAD
+$harnessCommitSha = $commitSha
 docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 inspect `
   -e TARGET_ENV=local `
   -e BASE_URL=https://loadtest-proxy:8443 `
@@ -62,6 +63,7 @@ docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 inspect 
   -e FIXTURE_PATH=/scripts/fixtures/test-data.example.json `
   -e RUN_ID=local-inspect `
   -e COMMIT_SHA=$commitSha `
+  -e HARNESS_COMMIT_SHA=$harnessCommitSha `
   /scripts/main.js
 ```
 
@@ -76,6 +78,7 @@ Copy-Item deploy/local/.env.example deploy/local/.env
 New-Item -ItemType Directory -Force performance/k6/results
 $credentialFile = 'C:\secure\miriyum-k6.env'
 $commitSha = git rev-parse HEAD
+$harnessCommitSha = $commitSha
 $runId = 'local-smoke-20260814-01'
 
 docker compose --env-file deploy/local/.env `
@@ -94,6 +97,7 @@ docker compose --env-file deploy/local/.env `
   -e FIXTURE_PATH=/scripts/fixtures/test-data.local.json `
   -e RUN_ID=$runId `
   -e COMMIT_SHA=$commitSha `
+  -e HARNESS_COMMIT_SHA=$harnessCommitSha `
   /scripts/main.js
 ```
 
@@ -123,6 +127,7 @@ docker compose --env-file deploy/local/.env `
   -e FIXTURE_PATH=/scripts/fixtures/test-data.local.json `
   -e RUN_ID=$runId `
   -e COMMIT_SHA=$commitSha `
+  -e HARNESS_COMMIT_SHA=$harnessCommitSha `
   /scripts/main.js
 ```
 
@@ -132,18 +137,60 @@ backend 기본 IP rate limit은 login 성공 표본을 단일 source IP 기준 5
 
 공개 매장 검색의 기본 한도도 source IP 기준 60회/60초지만 local loadtest override는 `60,000회/60초`를 주입한다. override를 사용하지 않는 실행에서는 위 `storeSearch` 예시의 `2 iterations/s × 30초`가 한 창의 60회를 모두 소비하므로 다음 실행은 이전 실행 종료 후 최소 60초를 기다린다. 어느 환경이든 예상 429가 발생한 결과는 검색 처리량 또는 p50/p95/p99 기준선으로 사용하지 않으며 #286에 전달하지 않는다.
 
-`SMOKE_PROOF_PATH`는 바로 앞 smoke가 생성한 `/results/{SMOKE_RUN_ID}.json`을 가리켜야 한다. baseline init context는 artifact의 `schemaVersion`, `profile=smoke`, run ID, target environment와 fingerprint, full commit SHA, fixture SHA-256, 실행 시나리오 포함 관계, 고정 smoke 상한, 전체 threshold 성공을 검증한다. 문자열 run ID만 전달하거나 다른 target·commit·fixture의 artifact를 재사용하면 HTTP 요청 전에 실패한다.
+`SMOKE_PROOF_PATH`는 바로 앞 smoke가 생성한 `/results/{SMOKE_RUN_ID}.json`을 가리켜야 한다. baseline init context는 artifact의 `schemaVersion`, `profile=smoke`, run ID, target environment와 fingerprint, backend·harness full SHA, fixture SHA-256, 실행 시나리오 포함 관계, 고정 smoke 상한, 전체 threshold 성공을 검증한다. 문자열 run ID만 전달하거나 다른 target·SHA·fixture의 artifact를 재사용하면 HTTP 요청 전에 실패한다.
 
 ## staging gate
 
 다음 값이 PR 또는 팀 기록에서 모두 확인되지 않으면 staging 요청을 보내지 않는다.
 
-1. 실제 배포된 full commit SHA
+1. 실제 배포된 backend full SHA(`COMMIT_SHA`)와 실행할 k6 harness full SHA(`HARNESS_COMMIT_SHA`)
 2. 승인된 staging host allowlist와 합성 fixture 경로
-3. 팀 공지·실행 시간·최대 VU·duration·arrival rate 승인
-4. 같은 SHA의 staging smoke 성공 `RUN_ID`
+3. 두 SHA가 다르면 별도 리뷰된 split-SHA 승인과 `STAGING_SPLIT_SHA_APPROVED=true`
+4. harness checkout의 `HEAD`가 `HARNESS_COMMIT_SHA`이고 `performance/k6`의 tracked·staged·untracked 변경이 모두 없다는 검증
+5. 팀 공지·실행 시간·최대 VU·duration·arrival rate, operator와 독립 observer/stop 담당 승인
+6. `reservationCreate`는 #358이 `dev`에 병합된 뒤에만 `STAGING_RESERVATION_FIXTURE_APPROVED=true`; 그전에는 `SCENARIOS`에서 명시적으로 제외
+7. 두 SHA와 동일 fixture의 staging smoke 성공 `RUN_ID`
 
-staging smoke에는 `TARGET_ENV=staging`, HTTPS `BASE_URL`, `STAGING_APPROVED=true`를 전달한다. baseline에는 추가로 `PROFILE=staging-baseline`, `STAGING_SMOKE_RUN_ID`, `SMOKE_PROOF_PATH=/results/{STAGING_SMOKE_RUN_ID}.json`을 전달한다. 현재 신뢰 staging host allowlist는 의도적으로 비어 있으므로 승인된 hostname을 저장소 변경으로 먼저 고정하기 전에는 실행되지 않는다. production hostname, 실사용자 계정 또는 운영 데이터는 어떤 값으로도 실행하지 않는다.
+staging smoke 전에 승인된 harness checkout에서 다음을 실행한다. 출력이 하나라도 있거나 HEAD가 다르면 중단하며 `STAGING_HARNESS_SOURCE_VERIFIED`를 설정하지 않는다.
+
+```powershell
+$actualHarnessSha = (git rev-parse HEAD).Trim()
+$harnessChanges = @(git status --porcelain=v1 --untracked-files=all -- performance/k6)
+if ($actualHarnessSha -ne $harnessCommitSha -or $harnessChanges.Count -ne 0) {
+  throw 'staging k6 requires a clean checkout at HARNESS_COMMIT_SHA'
+}
+$stagingHarnessSourceVerified = 'true'
+```
+
+staging smoke에는 `TARGET_ENV=staging`, HTTPS `BASE_URL`, `STAGING_APPROVED=true`, `STAGING_HARNESS_SOURCE_VERIFIED=true`, 두 full SHA를 전달한다. baseline에는 추가로 `PROFILE=staging-baseline`, `STAGING_SMOKE_RUN_ID`, `SMOKE_PROOF_PATH=/results/{STAGING_SMOKE_RUN_ID}.json`을 전달한다. #358 전에는 `SCENARIOS=authRefresh,storeSearch,notificationHistory`처럼 예약을 명시적으로 제외해야 하며, 생략해 네 시나리오 기본값을 선택하면 요청 전에 실패한다. 현재 신뢰 staging host allowlist는 의도적으로 비어 있으므로 승인된 hostname을 저장소 변경으로 먼저 고정하기 전에는 실행되지 않는다. production hostname, 실사용자 계정 또는 운영 데이터는 어떤 값으로도 실행하지 않는다.
+
+### 예외 제거와 기본 429 복구
+
+성공·실패·중단과 무관하게 [`docs/deployment/docker-ecr-ssm-cd.md`](../../docs/deployment/docker-ecr-ssm-cd.md)의 절차로 `MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP` 값을 비우고 같은 `COMMIT_SHA`를 다시 배포한다. backend container에서 값이 비었음을 환경 원문을 출력하지 않는 존재 여부 검사로 확인하고, 직전 로그인 창이 남아 있지 않은 새 600초 창에서만 아래 verifier를 실행한다. 자격증명 파일에는 `K6_RECOVERY_EMAIL`과 `K6_RECOVERY_PASSWORD`만 두며 저장소 밖에서 읽는다.
+
+```powershell
+$recoveryRunId = 'staging-rate-limit-recovery-YYYYMMDD-NN'
+docker run --rm `
+  --env-file $credentialFile `
+  -v "${PWD}/performance/k6:/scripts:ro" `
+  -v "${PWD}/performance/k6/results:/results" `
+  grafana/k6:2.1.0 run `
+  -e TARGET_ENV=staging `
+  -e BASE_URL=$approvedStagingBaseUrl `
+  -e ALLOWED_HOSTS=$approvedStagingHost `
+  -e STAGING_APPROVED=true `
+  -e STAGING_HARNESS_SOURCE_VERIFIED=true `
+  -e RECOVERY_VERIFICATION_APPROVED=true `
+  -e RATE_LIMIT_EXCEPTION_REMOVED=true `
+  -e RATE_LIMIT_WINDOW_CONFIRMED=true `
+  -e COMMIT_SHA=$deployedCommitSha `
+  -e HARNESS_COMMIT_SHA=$harnessCommitSha `
+  -e STAGING_SPLIT_SHA_APPROVED=$splitShaApproved `
+  -e RUN_ID=$recoveryRunId `
+  /scripts/recovery-rate-limit.js
+```
+
+verifier는 단일 VU·단일 iteration으로 순차 실행한다. 로그인 5회가 모두 성공하고 각 session이 logout된 뒤 6번째 로그인만 정확히 `429`여야 성공한다. summary에는 두 SHA, 성공 횟수 `5`, 최종 상태 `429`, threshold 결과만 남으며 실제 IP·email·password·Token·cookie·Authorization header·요청/응답 원문은 남기지 않는다. `--http-debug`를 사용하지 않는다.
 
 ## 종료와 결과 취급
 
