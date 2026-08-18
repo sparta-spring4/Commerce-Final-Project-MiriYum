@@ -189,6 +189,8 @@ export interface components {
     /** @enum {string} */
     AlternativeReasonCode: "SAME_PRIMARY_CATEGORY" | "PRICE_WITHIN_20_PERCENT" | "SECONDARY_CATEGORY_MATCH" | "ALLERGEN_FILTER_PASSED" | "IN_STOCK";
     /** @enum {string} */
+    MenuAlternativeRankingReason: "LLM_CONCEPT" | "SECONDARY_CATEGORY" | "PRICE_SIMILARITY";
+    /** @enum {string} */
     AllergenIngredientCode: "EGG" | "MILK" | "BUCKWHEAT" | "PEANUT" | "SOYBEAN" | "WHEAT" | "MACKEREL" | "CRAB" | "SHRIMP" | "PORK" | "PEACH" | "TOMATO" | "SULFITES" | "WALNUT" | "CHICKEN" | "BEEF" | "SQUID" | "SHELLFISH" | "PINE_NUT";
     MenuAlternativeSearchRequest: {
       quantity: number;
@@ -218,6 +220,14 @@ export interface components {
       distanceMeters: number | null;
       coordinates: components["schemas"]["MenuAlternativeCoordinates"] | null;
       reasonCodes: components["schemas"]["AlternativeReasonCode"][];
+      alternativeScore: number;
+      rankingReason: components["schemas"]["MenuAlternativeRankingReason"];
+      scoreBreakdown: components["schemas"]["MenuAlternativeScoreBreakdown"];
+    };
+    MenuAlternativeScoreBreakdown: {
+      llmConcept: number;
+      secondaryCategory: number;
+      priceSimilarity: number;
     };
     MenuAlternativeSearchData: {
       sourceStoreId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
