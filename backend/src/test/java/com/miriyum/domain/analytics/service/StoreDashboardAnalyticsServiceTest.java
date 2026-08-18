@@ -3,6 +3,7 @@ package com.miriyum.domain.analytics.service;
 import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricCompleteness.COMPLETE;
 import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricCompleteness.PARTIAL;
 import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricCompleteness.UNAVAILABLE;
+import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricReasonCode.SOURCE_FAILED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
@@ -116,6 +117,24 @@ class StoreDashboardAnalyticsServiceTest {
     }
 
     @Test
+    void reservationBoundaryMismatchDoesNotOverwriteWaitingSuccess() {
+        given(reservationSource.getDashboardSnapshot(STORE_ID, DATE, AS_OF))
+                .willReturn(reservationSnapshot(AS_OF.plusSeconds(60)));
+
+        service.getDashboard(41L, STORE_ID);
+
+        DashboardMetricDraft reservation = metric("TODAY_RESERVATION_TEAMS");
+        assertThat(reservation.metadata().completeness()).isEqualTo(UNAVAILABLE);
+        assertThat(reservation.metadata().reasonCode()).isEqualTo(SOURCE_FAILED);
+        assertThat(metric("WAITING_STATUS").metadata().completeness()).isEqualTo(COMPLETE);
+        DashboardMetricDraft noShow = metric("NO_SHOW_STATUS");
+        assertThat(noShow.value().path("reservationConfirmed").path("value").isNull())
+                .isTrue();
+        assertThat(noShow.value().path("waitingConfirmed").path("value").longValue())
+                .isEqualTo(2L);
+    }
+
+    @Test
     void composesConfirmedSourcesWithoutPretendingCandidateExists() {
         given(reservationSource.getDashboardSnapshot(STORE_ID, DATE, AS_OF))
                 .willReturn(reservationSnapshot());
@@ -156,6 +175,28 @@ class StoreDashboardAnalyticsServiceTest {
         assertThat(noShow.value().path("waitingConfirmed").path("value").isNull()).isTrue();
         assertThat(noShow.value().path("waitingConfirmed").path("completeness").textValue())
                 .isEqualTo("UNAVAILABLE");
+    }
+
+    @Test
+    void waitingBoundaryMismatchDoesNotHideReservationSuccess() {
+        given(reservationSource.getDashboardSnapshot(STORE_ID, DATE, AS_OF))
+                .willReturn(reservationSnapshot());
+        given(waitingSource.getDashboardSnapshot(STORE_ID, DATE, AS_OF))
+                .willReturn(new WaitingAnalyticsSnapshot(
+                        STORE_ID + 1, DATE, AS_OF, 1, 0, 3, 0, 1800L, 2,
+                        "b".repeat(64), AS_OF.minusSeconds(1), 9, false));
+
+        service.getDashboard(41L, STORE_ID);
+
+        assertThat(metric("TODAY_RESERVATION_TEAMS").metadata().completeness())
+                .isEqualTo(COMPLETE);
+        DashboardMetricDraft waiting = metric("WAITING_STATUS");
+        assertThat(waiting.metadata().completeness()).isEqualTo(UNAVAILABLE);
+        assertThat(waiting.metadata().reasonCode()).isEqualTo(SOURCE_FAILED);
+        DashboardMetricDraft noShow = metric("NO_SHOW_STATUS");
+        assertThat(noShow.value().path("reservationConfirmed").path("value").longValue())
+                .isEqualTo(1L);
+        assertThat(noShow.value().path("waitingConfirmed").path("value").isNull()).isTrue();
     }
 
     private DashboardMetricDraft metric(String key) {

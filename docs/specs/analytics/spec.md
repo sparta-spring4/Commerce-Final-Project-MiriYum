@@ -147,7 +147,6 @@ Issue #270은 혼합 방식을 채택한다. 범용 Kafka/Outbox나 새 사용�
 - `docs/05-functional-requirements.md`
 - `docs/specs/analytics/spec.md`
 - `docs/specs/analytics/openapi.yaml`
-- `docs/specs/analytics/implementation-plan.md`
 - `docs/specs/store-operator-openapi.yaml`
 - `redocly.yaml`
 - `backend/src/test/java/com/miriyum/architecture/AudienceOpenApiContractTest.java`

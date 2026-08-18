@@ -24,6 +24,8 @@ class AnalyticsMetricFailureClassifierTest {
                 .isEqualTo(SOURCE_QUARANTINED);
         assertThat(classifier.classify(new DataAccessResourceFailureException("down")))
                 .isEqualTo(SOURCE_FAILED);
+        assertThat(classifier.classify(new SourceSnapshotBoundaryMismatchException()))
+                .isEqualTo(SOURCE_FAILED);
         assertThatThrownBy(() -> classifier.classify(new IllegalArgumentException("bad dto")))
                 .isInstanceOf(IllegalArgumentException.class);
     }

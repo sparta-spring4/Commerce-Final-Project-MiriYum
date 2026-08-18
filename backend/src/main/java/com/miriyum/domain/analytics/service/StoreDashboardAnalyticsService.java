@@ -90,6 +90,7 @@ public class StoreDashboardAnalyticsService {
             requireBoundary(reservation.storeId(), reservation.businessDate(), reservation.asOf(),
                     storeId, businessDate, asOf);
         } catch (RuntimeException failure) {
+            reservation = null;
             reservationFailure = failureClassifier.classify(failure);
         }
 
@@ -100,6 +101,7 @@ public class StoreDashboardAnalyticsService {
             requireBoundary(waiting.storeId(), waiting.businessDate(), waiting.asOf(),
                     storeId, businessDate, asOf);
         } catch (RuntimeException failure) {
+            waiting = null;
             waitingFailure = failureClassifier.classify(failure);
         }
 
@@ -357,7 +359,7 @@ public class StoreDashboardAnalyticsService {
         if (actualStoreId != expectedStoreId
                 || !expectedDate.equals(actualDate)
                 || !expectedAsOf.equals(actualAsOf)) {
-            throw new IllegalArgumentException("source snapshot boundary mismatch");
+            throw new SourceSnapshotBoundaryMismatchException();
         }
     }
 }

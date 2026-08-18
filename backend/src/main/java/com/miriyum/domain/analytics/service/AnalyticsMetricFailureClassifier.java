@@ -20,6 +20,9 @@ public class AnalyticsMetricFailureClassifier {
         if (failure instanceof DataAccessResourceFailureException) {
             return MetricReasonCode.SOURCE_FAILED;
         }
+        if (failure instanceof SourceSnapshotBoundaryMismatchException) {
+            return MetricReasonCode.SOURCE_FAILED;
+        }
         throw failure;
     }
 }
