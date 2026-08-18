@@ -24,21 +24,23 @@ export function ConsoleLayout() {
   const { capabilities, sessionDeadlines, signOut } = usePlatformOperatorAuth()
   const navigate = useNavigate()
   const [signingOut, setSigningOut] = useState(false)
-  const [signOutError, setSignOutError] = useState<string | null>(null)
 
+  /**
+   * 로그아웃.
+   *
+   * 서버 폐기를 확인하지 못한 경우의 경고를 여기서 렌더링하지 않는다.
+   * `signOut()`은 결과와 무관하게 `clearSession()`을 부르고, status가
+   * `unauthenticated`가 되는 즉시 가드가 로그인으로 redirect해 이 레이아웃을
+   * unmount한다. 여기에 상태를 두면 경고가 한 번도 그려지지 않는다.
+   *
+   * 그래서 provider가 `signOutNotice`를 들고 있고, 가드 바깥의 로그인 화면이
+   * 그것을 표시한다. 공용 PC에서 세션이 남았을 수 있다는 안내는 사용자가
+   * 실제로 볼 수 있는 자리에 있어야 한다.
+   */
   async function handleSignOut() {
     setSigningOut(true)
-    setSignOutError(null)
     try {
-      const outcome = await signOut()
-      if (outcome === 'unconfirmed') {
-        // 로컬 자격은 비웠지만 서버 세션이 살아 있을 수 있다. 공용 PC에서는
-        // 사용자가 조치를 더 해야 하므로 조용히 로그인 화면으로 보내지 않는다.
-        setSignOutError(
-          '로그아웃은 됐지만 서버 세션 종료를 확인하지 못했습니다. 공용 PC라면 슈퍼관리자에게 알려 주세요.',
-        )
-        return
-      }
+      await signOut()
       void navigate(ROUTES.platformOperatorSignIn, { replace: true })
     } finally {
       setSigningOut(false)
@@ -108,9 +110,6 @@ export function ConsoleLayout() {
         </header>
 
         <div className="po-console__content">
-          {signOutError !== null && (
-            <Alert tone="warning" title={signOutError} />
-          )}
           {capabilitiesUnknown && (
             <Alert
               tone="info"

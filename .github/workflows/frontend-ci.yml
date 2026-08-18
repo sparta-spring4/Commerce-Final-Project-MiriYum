@@ -86,7 +86,9 @@ jobs:
             fail=1
           fi
 
-          leaked=$(grep -rho 'platform-operators' dist/assets | wc -l)
+          # grep은 매치가 0건이면 exit 1이다. pipefail 아래에서 그대로 두면
+          # "누출 없음"이라는 정상 결과가 스크립트를 죽인다. 실패를 삼켜야 한다.
+          leaked=$({ grep -rho 'platform-operators' dist/assets || true; } | wc -l)
           if [ "$leaked" -ne 0 ]; then
             echo "::error::flag가 꺼진 빌드에 platform-operators 문자열이 ${leaked}건 남아 있습니다."
             fail=1

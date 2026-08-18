@@ -10,10 +10,12 @@ import {
   usePlatformOperatorAuth,
 } from './PlatformOperatorAuthProvider'
 import {
+  PO_CSRF_PATH,
   PO_INITIAL_PASSWORD_PATH,
   PO_MEMBERS_PATH,
   PO_REFRESH_PATH,
   PO_SESSIONS_PATH,
+  PO_SESSION_CURRENT_PATH,
   authenticatedPlatformOperator,
   platformOperatorTokenData,
   restrictedPlatformOperator,
@@ -21,12 +23,23 @@ import {
 } from './test/handlers'
 
 function Probe() {
-  const { status, apiClient, signIn, changeInitialPassword, sessionDeadlines } =
-    usePlatformOperatorAuth()
+  const {
+    status,
+    apiClient,
+    signIn,
+    changeInitialPassword,
+    sessionDeadlines,
+    signOut,
+    signOutNotice,
+  } = usePlatformOperatorAuth()
 
   return (
     <div>
       <p data-testid="status">{status}</p>
+      <p data-testid="sign-out-notice">{signOutNotice ?? 'none'}</p>
+      <button type="button" onClick={() => void signOut()}>
+        로그아웃
+      </button>
       <p data-testid="absolute-expiry">
         {sessionDeadlines?.absoluteExpiresAt ?? 'none'}
       </p>
@@ -229,5 +242,64 @@ describe('플랫폼 운영자 인증 shell', () => {
     await waitFor(() => expect(memberCalls).toBe(2))
     expect(refreshCalls).toBe(callsAfterRestore + 1)
     expect(screen.getByTestId('status')).toHaveTextContent('authenticated')
+  })
+
+  /**
+   * 서버 폐기를 확인하지 못한 로그아웃의 경고는 provider가 들고 있어야 한다.
+   *
+   * 콘솔 레이아웃에 두면 렌더링되지 않는다. `signOut()`이 결과와 무관하게
+   * 세션을 비우고, status가 `unauthenticated`가 되는 즉시 가드가 로그인으로
+   * redirect하며 레이아웃을 unmount하기 때문이다. 실제로 그렇게 구현했다가
+   * 리뷰에서 지적받았다(PR #414).
+   */
+  it('서버 폐기를 확인하지 못하면 세션을 비우고도 경고를 남긴다', async () => {
+    server.use(
+      authenticatedPlatformOperator(),
+      http.get(PO_CSRF_PATH, () =>
+        successResponse({ token: 'csrf-1', headerName: 'X-CSRF-TOKEN' }),
+      ),
+      // 서버가 요청을 처리하지 못했다. 중앙 세션이 남아 있을 수 있다.
+      http.delete(PO_SESSION_CURRENT_PATH, () =>
+        errorResponse(403, AuthErrorCode.CSRF_TOKEN_INVALID, 'CSRF 검증 실패'),
+      ),
+    )
+    renderProvider()
+
+    await waitFor(() =>
+      expect(screen.getByTestId('status')).toHaveTextContent('authenticated'),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
+
+    // 로컬 자격은 무조건 비운다.
+    await waitFor(() =>
+      expect(screen.getByTestId('status')).toHaveTextContent('unauthenticated'),
+    )
+    // 그리고 경고가 남아 있어야 로그인 화면이 표시할 수 있다.
+    expect(screen.getByTestId('sign-out-notice')).toHaveTextContent(
+      'unconfirmed',
+    )
+  })
+
+  it('서버 폐기가 확인되면 경고를 남기지 않는다', async () => {
+    server.use(
+      authenticatedPlatformOperator(),
+      http.get(PO_CSRF_PATH, () =>
+        successResponse({ token: 'csrf-1', headerName: 'X-CSRF-TOKEN' }),
+      ),
+      http.delete(PO_SESSION_CURRENT_PATH, () => successResponse(null)),
+    )
+    renderProvider()
+
+    await waitFor(() =>
+      expect(screen.getByTestId('status')).toHaveTextContent('authenticated'),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('status')).toHaveTextContent('unauthenticated'),
+    )
+    expect(screen.getByTestId('sign-out-notice')).toHaveTextContent('none')
   })
 })

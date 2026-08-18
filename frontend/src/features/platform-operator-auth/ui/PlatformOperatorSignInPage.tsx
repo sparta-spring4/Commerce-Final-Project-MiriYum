@@ -22,7 +22,8 @@ import './platform-operator-auth.css'
  * 실제 값은 로그인 응답의 `idleExpiresAt`·`absoluteExpiresAt`으로 온다.
  */
 export function PlatformOperatorSignInPage() {
-  const { status, signIn } = usePlatformOperatorAuth()
+  const { status, signIn, signOutNotice, dismissSignOutNotice } =
+    usePlatformOperatorAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -80,6 +81,37 @@ export function PlatformOperatorSignInPage() {
           운영자 로그인
         </h1>
         <p className="po-auth__subtitle">인가된 담당자만 접근할 수 있습니다.</p>
+
+        {/*
+          서버 세션 폐기를 확인하지 못한 로그아웃의 경고다.
+
+          콘솔 안에서 띄울 수 없다. `signOut()`이 결과와 무관하게 세션을 비우고,
+          그 즉시 가드가 이 화면으로 redirect하며 콘솔이 unmount되기 때문이다.
+          경고를 보여 줄 수 있는 첫 화면이 여기다.
+
+          네트워크나 CSRF 실패로 HttpOnly refresh 쿠키와 중앙 세션이 남으면
+          같은 브라우저의 새로고침으로 이전 운영자 세션이 복구될 수 있다.
+          공용 PC에서는 사용자가 추가 조치를 해야 한다.
+        */}
+        {signOutNotice === 'unconfirmed' && (
+          <Alert
+            tone="warning"
+            title="서버 세션 종료를 확인하지 못했습니다."
+            actions={
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={dismissSignOutNotice}
+              >
+                확인했습니다
+              </Button>
+            }
+          >
+            이 브라우저의 자격은 지웠지만 서버 세션이 남아 있을 수 있습니다.
+            공용 PC라면 슈퍼관리자에게 알려 세션을 폐기해 주세요.
+          </Alert>
+        )}
 
         <form
           className="po-auth__form"
