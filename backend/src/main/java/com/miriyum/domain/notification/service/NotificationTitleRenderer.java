@@ -24,6 +24,8 @@ public class NotificationTitleRenderer {
             case RESERVATION_EXPIRED -> store + " 예약 요청이 만료되었습니다.";
             case RESERVATION_VISIT_REMINDER -> store + " 방문 예정 시간을 확인해 주세요.";
             case RESERVATION_COORDINATION_REQUIRED -> store + " 예약 확인이 필요합니다.";
+            case RESERVATION_VISIT_COMPLETED -> store + " 방문이 완료되었습니다.";
+            case RESERVATION_NO_SHOW -> store + " 예약이 노쇼 처리되었습니다.";
             case PICKUP_RESERVATION_CONFIRMED -> store + " 픽업 예약이 확정되었습니다.";
             case PICKUP_RESERVATION_CANCELLED -> store + " 픽업 예약이 취소되었습니다.";
             case MENU_HOLD_FULFILLMENT_AT_RISK -> store + " 메뉴 준비 상태를 확인해 주세요.";

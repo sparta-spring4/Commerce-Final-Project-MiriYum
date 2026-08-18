@@ -4007,7 +4007,13 @@ class ReservationServiceTest {
 
         assertThat(result.httpStatus()).isEqualTo(200);
         assertThat(result.data().status()).isEqualTo("FULFILLED");
-        assertThat(notificationEvents).isEmpty();
+        assertThat(notificationEvents).singleElement().satisfies(event -> {
+            assertThat(event.purpose())
+                    .isEqualTo(NotificationPurpose.RESERVATION_VISIT_COMPLETED);
+            assertThat(event.sourceEventId())
+                    .isEqualTo("reservation:" + RESERVATION_ID + ":visit-completed");
+            assertThat(event.resourceVersion()).isEqualTo(2L);
+        });
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(capacityAllocationRepository).shouldHaveNoInteractions();
     }

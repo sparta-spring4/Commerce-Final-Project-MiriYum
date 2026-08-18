@@ -14,6 +14,7 @@ import com.miriyum.domain.reservation.entity.ReservationNoShowAudit;
 import com.miriyum.domain.reservation.entity.ReservationNoShowReason;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.notification.ReservationNotificationPublisher;
 import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldItemSnapshot;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
@@ -62,6 +63,7 @@ public class ReservationVisitService {
     private final ReservationDepositProcessRepository depositProcessRepository;
     private final ReservationDepositDispositionObligationRepository
             dispositionObligationRepository;
+    private final ReservationNotificationPublisher notificationPublisher;
     private final Clock clock;
     private final ObjectMapper objectMapper;
 
@@ -77,6 +79,7 @@ public class ReservationVisitService {
             ReservationNoShowAuditRepository noShowAuditRepository,
             ReservationDepositProcessRepository depositProcessRepository,
             ReservationDepositDispositionObligationRepository dispositionObligationRepository,
+            ReservationNotificationPublisher notificationPublisher,
             Clock clock,
             ObjectMapper objectMapper
     ) {
@@ -91,6 +94,7 @@ public class ReservationVisitService {
         this.noShowAuditRepository = noShowAuditRepository;
         this.depositProcessRepository = depositProcessRepository;
         this.dispositionObligationRepository = dispositionObligationRepository;
+        this.notificationPublisher = notificationPublisher;
         this.clock = clock;
         this.objectMapper = objectMapper;
     }
@@ -230,6 +234,8 @@ public class ReservationVisitService {
         grant.consume(occurredAt);
         ReservationDepositDispositionResponse depositDisposition =
                 persistDispositionObligation(dispositionPlan, occurredAt);
+        notificationPublisher.recordVisitCompleted(
+                reservation, occurredAt, correlationId);
         return success(reservation, presence, depositDisposition);
     }
 
@@ -277,6 +283,7 @@ public class ReservationVisitService {
         ));
         ReservationDepositDispositionResponse depositDisposition =
                 persistDispositionObligation(dispositionPlan, occurredAt);
+        notificationPublisher.recordNoShow(reservation, occurredAt, correlationId);
         return success(reservation, presence, depositDisposition);
     }
 
