@@ -122,3 +122,10 @@ export type CsrfOf<Op> = Op extends {
 }
   ? { csrfToken: string }
   : { csrfToken?: never }
+
+/** 본문 없는 204 성공은 해당 operation이 OpenAPI에 선언한 경우에만 허용한다. */
+export type NoContentOf<Op> = Op extends { responses: infer Responses }
+  ? 204 extends keyof Responses
+    ? { allowNoContent?: true }
+    : { allowNoContent?: never }
+  : { allowNoContent?: never }

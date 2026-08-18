@@ -9,6 +9,7 @@ import type {
   OperationOf,
   PathParamsOf,
   RequestBodyOf,
+  NoContentOf,
   SuccessBodyOf,
 } from './paths'
 
@@ -31,8 +32,6 @@ export interface ApiClientDependencies {
 /** OpenAPI가 타이핑하지 않는 부수 입력. */
 interface CommonRequestOptions {
   query?: Record<string, string | number | boolean | undefined>
-  /** 본문 없는 성공을 허용할 operation에서만 지정한다. */
-  allowNoContent?: boolean
   multipart?: FormData
   signal?: AbortSignal
 }
@@ -47,6 +46,7 @@ export type RequestOptions<P extends ApiPath, M extends MethodOf<P>> = {
   RequestBodyOf<OperationOf<P, M>> &
   IdempotencyOf<OperationOf<P, M>> &
   CsrfOf<OperationOf<P, M>> &
+  NoContentOf<OperationOf<P, M>> &
   CommonRequestOptions
 
 /** 성공 응답은 봉투 그대로 노출한다. 화면이 code·message·data를 구분해 쓴다. */

@@ -127,4 +127,78 @@ describe('메뉴 대표 이미지 패널', () => {
     expect(await screen.findByText('이미지 파일은 10MB 이하만 등록할 수 있습니다.')).toBeInTheDocument()
     expect(called).toBe(false)
   })
+
+  it('업로드 실패 후 다시 업로드하면 같은 멱등 키로 재시도한다', async () => {
+    const idempotencyKeys: string[] = []
+    let attempts = 0
+    server.use(
+      authenticatedOperator(),
+      http.put(IMAGE_PATH, ({ request }) => {
+        idempotencyKeys.push(request.headers.get('idempotency-key') ?? '')
+        attempts += 1
+        if (attempts === 1) {
+          return HttpResponse.json(
+            { code: 'COMMON_012', message: '잠시 후 다시 시도해 주세요.' },
+            { status: 503 },
+          )
+        }
+        return HttpResponse.json({
+          code: 'SUCCESS',
+          message: '업로드했습니다.',
+          data: { url: 'https://cdn.example/menu-11.webp' },
+        })
+      }),
+    )
+
+    renderPanel()
+    const file = new File(['image'], 'menu.webp', { type: 'image/webp' })
+    fireEvent.change(screen.getByLabelText('이미지 등록'), {
+      target: { files: [file] },
+    })
+
+    expect(await screen.findByRole('button', { name: '다시 업로드' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '다시 업로드' }))
+
+    expect(await screen.findByAltText('메뉴 대표 이미지')).toHaveAttribute(
+      'src',
+      'https://cdn.example/menu-11.webp',
+    )
+    expect(idempotencyKeys).toHaveLength(2)
+    expect(idempotencyKeys[0]).toBe(idempotencyKeys[1])
+  })
+
+  it('업로드 중에는 파일 입력과 삭제를 잠근다', async () => {
+    let releaseUpload!: () => void
+    server.use(
+      authenticatedOperator(),
+      http.put(
+        IMAGE_PATH,
+        () =>
+          new Promise((resolve) => {
+            releaseUpload = () =>
+              resolve(
+                HttpResponse.json({
+                  code: 'SUCCESS',
+                  message: '업로드했습니다.',
+                  data: { url: 'https://cdn.example/menu-11.webp' },
+                }),
+              )
+          }),
+      ),
+    )
+
+    renderPanel()
+    fireEvent.change(screen.getByLabelText('이미지 등록'), {
+      target: {
+        files: [new File(['image'], 'menu.webp', { type: 'image/webp' })],
+      },
+    })
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('메뉴 대표 이미지 파일')).toBeDisabled()
+      expect(screen.getByRole('button', { name: '이미지 삭제' })).toBeDisabled()
+    })
+    releaseUpload()
+    await screen.findByAltText('메뉴 대표 이미지')
+  })
 })

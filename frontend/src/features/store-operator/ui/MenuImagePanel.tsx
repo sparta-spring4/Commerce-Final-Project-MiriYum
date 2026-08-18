@@ -22,10 +22,14 @@ export function MenuImagePanel({
   const deleteKey = useRef<string | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [retryFile, setRetryFile] = useState<File | null>(null)
+
+  const busy = upload.isPending || remove.isPending
 
   async function handleFileChange(file: File | undefined) {
     if (file === undefined) return
     setMessage(null)
+    setRetryFile(null)
 
     if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
       setMessage('JPG, PNG, WEBP 이미지 파일만 등록할 수 있습니다.')
@@ -36,22 +40,31 @@ export function MenuImagePanel({
       return
     }
 
+    await uploadFile(file)
+  }
+
+  async function uploadFile(file: File) {
     try {
       const url = await upload.mutateAsync({
         file,
-        idempotencyKey: uploadKeys.current.get(file) ?? createUploadKey(file, uploadKeys.current),
+        idempotencyKey:
+          uploadKeys.current.get(file) ??
+          createUploadKey(file, uploadKeys.current),
       })
       setImageUrl(url)
       deleteKey.current = null
+      setRetryFile(null)
     } catch (error) {
       setMessage(storeErrorMessage(error))
+      setRetryFile(file)
     }
   }
 
   async function handleDelete() {
     setMessage(null)
     try {
-      const key = deleteKey.current ?? (deleteKey.current = createIdempotencyKey())
+      const key =
+        deleteKey.current ?? (deleteKey.current = createIdempotencyKey())
       await remove.mutateAsync(key)
       setImageUrl(null)
       deleteKey.current = null
@@ -65,7 +78,24 @@ export function MenuImagePanel({
       title="대표 이미지"
       hint="메뉴 목록과 상세 화면에 표시할 이미지를 관리합니다."
     >
-      {message !== null && <Alert tone="error" title={message} />}
+      {message !== null && (
+        <Alert
+          tone="error"
+          title={message}
+          actions={
+            retryFile !== null ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                loading={upload.isPending}
+                onClick={() => void uploadFile(retryFile)}
+              >
+                다시 업로드
+              </Button>
+            ) : undefined
+          }
+        />
+      )}
       {upload.isPending && (
         <Alert tone="info" title="이미지를 업로드하는 중입니다." />
       )}
@@ -77,9 +107,9 @@ export function MenuImagePanel({
         )}
         <div className="op-menu-image__actions">
           <label
-            className={`mi-button mi-button--secondary${upload.isPending ? ' mi-button--disabled' : ''}`}
+            className={`mi-button mi-button--secondary${busy ? ' mi-button--disabled' : ''}`}
             htmlFor="menu-image-file"
-            aria-disabled={upload.isPending}
+            aria-disabled={busy}
           >
             {upload.isPending
               ? '업로드 중...'
@@ -89,16 +119,21 @@ export function MenuImagePanel({
           </label>
           <input
             id="menu-image-file"
+            aria-label="메뉴 대표 이미지 파일"
             className="visually-hidden"
             type="file"
-            disabled={upload.isPending}
+            disabled={busy}
             accept="image/jpeg,image/png,image/webp"
-            onChange={(event) => void handleFileChange(event.target.files?.[0])}
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              event.target.value = ''
+              void handleFileChange(file)
+            }}
           />
           <Button
             variant="danger"
             loading={remove.isPending}
-            disabled={upload.isPending}
+            disabled={busy}
             onClick={() => void handleDelete()}
           >
             이미지 삭제

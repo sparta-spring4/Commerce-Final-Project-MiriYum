@@ -118,11 +118,9 @@ describe('성공 봉투 검증 — 2xx라도 통과시키지 않는다', () => {
 
     expect(isApiContractError(error)).toBe(true)
 
-    const allowed = await client()(CATEGORIES, {
-      method: 'get',
-      allowNoContent: true,
-    })
-    expect(allowed).toBeUndefined()
+    // `allowNoContent`는 204를 선언한 operation에서만 타입상 허용한다.
+    // @ts-expect-error 카테고리 GET은 OpenAPI에 204를 선언하지 않았다.
+    await client()(CATEGORIES, { method: 'get', allowNoContent: true })
   })
 
   test('계약 위반을 서버 오류 코드로 위장하지 않는다', async () => {
