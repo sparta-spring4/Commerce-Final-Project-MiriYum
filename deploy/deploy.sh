@@ -5,6 +5,7 @@ set -Eeuo pipefail
 APP_DIR="${APP_DIR:-/opt/miriyum}"
 COMPOSE_FILE="${COMPOSE_FILE:-${APP_DIR}/docker-compose.prod.yml}"
 ENV_FILE="${ENV_FILE:-${APP_DIR}/.env}"
+RUNTIME_CONFIG_PARAMETER_NAME="${RUNTIME_CONFIG_PARAMETER_NAME:-/miriyum/staging/backend-runtime-config}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/actuator/health}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-90}"
 MYSQL_HEALTH_TIMEOUT_SECONDS="${MYSQL_HEALTH_TIMEOUT_SECONDS:-210}"
@@ -36,6 +37,40 @@ validate_runtime_environment() {
     echo "Runtime environment validation failed. Check required keys in ${ENV_FILE}; values are not printed." >&2
     return 1
   fi
+}
+
+sync_runtime_config_environment() {
+  local runtime_config runtime_config_enabled
+
+  runtime_config_enabled=$(awk -F= '$1 == "MIRIYUM_RUNTIME_CONFIG_ENABLED" { print substr($0, index($0, "=") + 1); exit }' "${ENV_FILE}")
+  runtime_config_enabled="${runtime_config_enabled:-false}"
+  case "${runtime_config_enabled}" in
+    false)
+      unset MIRIYUM_SPRING_APPLICATION_JSON
+      echo "Runtime config disabled; skipping SSM parameter synchronization."
+      return 0
+      ;;
+    true) ;;
+    *)
+      echo "Invalid MIRIYUM_RUNTIME_CONFIG_ENABLED value: ${runtime_config_enabled}" >&2
+      return 1
+      ;;
+  esac
+
+  runtime_config=$(aws ssm get-parameter \
+    --region "${AWS_REGION}" \
+    --name "${RUNTIME_CONFIG_PARAMETER_NAME}" \
+    --with-decryption \
+    --query 'Parameter.Value' \
+    --output text)
+
+  if [[ -z "${runtime_config}" || "${runtime_config}" == "None" ]]; then
+    echo "Runtime config parameter is empty: ${RUNTIME_CONFIG_PARAMETER_NAME}" >&2
+    return 1
+  fi
+
+  export MIRIYUM_SPRING_APPLICATION_JSON="${runtime_config}"
+  unset runtime_config
 }
 
 sync_llm_runtime_environment() {
@@ -378,6 +413,7 @@ main() {
   fi
 
   sync_llm_runtime_environment
+  sync_runtime_config_environment
   validate_runtime_environment
 
   for command in aws curl docker; do
