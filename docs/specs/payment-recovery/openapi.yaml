@@ -1,0 +1,424 @@
+openapi: 3.1.0
+info:
+  title: MiriYum Platform Operator Payment Recovery API
+  version: 1.0.0
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+  description: 자동 대사를 소진한 Payment handoff만 처리하는 플랫폼 운영자 수동 복구 계약이다.
+servers:
+  - url: /
+security:
+  - platformOperatorBearerAuth: []
+paths:
+  /api/v1/platform-operators/payment-recovery-cases:
+    get:
+      tags: [Platform Operator Payment Recovery]
+      operationId: listPaymentRecoveryCases
+      parameters:
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200': {$ref: '#/components/responses/CasePageResult'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}:
+    get:
+      tags: [Platform Operator Payment Recovery]
+      operationId: getPaymentRecoveryCase
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      responses:
+        '200': {$ref: '#/components/responses/CaseDetailResult'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/assignments:
+    post:
+      tags: [Platform Operator Payment Recovery]
+      operationId: assignPaymentRecoveryCase
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminReauthentication'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AssignmentRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/CaseChanged'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/requeries:
+    post:
+      tags: [Platform Operator Payment Recovery]
+      operationId: requestPaymentRecoveryRequery
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminReauthentication'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RequeryRequest'}
+      responses:
+        '202': {$ref: '#/components/responses/ExecutionQueued'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals:
+    post:
+      tags: [Platform Operator Payment Recovery]
+      operationId: createPaymentRecoveryProposal
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminReauthentication'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProposalRequest'}
+      responses:
+        '201': {$ref: '#/components/responses/ProposalChanged'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals/{proposalVersion}/approvals:
+    post:
+      tags: [Platform Operator Payment Recovery]
+      operationId: approvePaymentRecoveryProposal
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/ProposalVersion'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminReauthentication'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ApprovalRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/ExecutionQueued'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/failed-unresolved-closures:
+    post:
+      tags: [Platform Operator Payment Recovery]
+      operationId: closePaymentRecoveryCaseUnresolved
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminReauthentication'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ClosureRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/CaseChanged'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+components:
+  securitySchemes:
+    platformOperatorBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    CaseId:
+      name: caseId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    ProposalVersion:
+      name: proposalVersion
+      in: path
+      required: true
+      schema: {type: integer, format: int64, minimum: 1}
+    Status:
+      name: status
+      in: query
+      required: false
+      schema: {$ref: '#/components/schemas/CaseStatus'}
+    Page:
+      name: page
+      in: query
+      required: false
+      schema: {type: integer, minimum: 0, default: 0}
+    Size:
+      name: size
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+        pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    AdminReauthentication:
+      name: X-Admin-Reauthentication
+      in: header
+      required: true
+      description: PAYMENT_RECOVERY 목적과 현재 사건/제안 version에 결속된 일회 승인값
+      schema: {type: string, minLength: 43, maxLength: 512}
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 100}
+  schemas:
+    CaseStatus:
+      type: string
+      enum: [RECONCILIATION_PENDING, INVESTIGATING, PROPOSED, ADDITIONAL_APPROVAL_PENDING, EXECUTING, VERIFYING, COMPLETED, HOLD, FAILED, FAILED_UNRESOLVED]
+    RecoveryKind:
+      type: string
+      enum: [DISPOSITION_RESULT_UNKNOWN, DISPOSITION_FAILED, REFUND_RESULT_UNKNOWN, REFUND_FAILED]
+    RecoveryAction:
+      type: string
+      enum: [REQUERY_PROVIDER_RESULT, RETRY_REFUND]
+    ResultStatus:
+      type: string
+      enum: [UNKNOWN, FAILED, SUCCEEDED]
+    ApprovalTier:
+      type: string
+      enum: [SINGLE_OPERATOR, ADDITIONAL_SUPER_ADMIN]
+    ExecutionStatus:
+      type: string
+      enum: [PENDING, PROCESSING, VERIFYING, SUCCEEDED, FAILED, HOLD]
+    AssignmentRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedCaseVersion]
+      properties:
+        expectedCaseVersion: {type: integer, format: int64, minimum: 1}
+    RequeryRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedCaseVersion, expectedHandoffVersion, expectedPaymentVersion, expectedRecoveryVersion]
+      properties:
+        expectedCaseVersion: {type: integer, format: int64, minimum: 1}
+        expectedHandoffVersion: {type: integer, format: int64, minimum: 0}
+        expectedPaymentVersion: {type: integer, format: int64, minimum: 0}
+        expectedRecoveryVersion: {type: integer, format: int64, minimum: 0}
+    ProposalRequest:
+      type: object
+      additionalProperties: false
+      required: [action, expectedCaseVersion, expectedHandoffVersion, expectedPaymentVersion, expectedRecoveryVersion]
+      properties:
+        action: {$ref: '#/components/schemas/RecoveryAction'}
+        expectedCaseVersion: {type: integer, format: int64, minimum: 1}
+        expectedHandoffVersion: {type: integer, format: int64, minimum: 0}
+        expectedPaymentVersion: {type: integer, format: int64, minimum: 0}
+        expectedRecoveryVersion: {type: integer, format: int64, minimum: 0}
+    ApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedCaseVersion, expectedProposalVersion]
+      properties:
+        expectedCaseVersion: {type: integer, format: int64, minimum: 1}
+        expectedProposalVersion: {type: integer, format: int64, minimum: 1}
+    ClosureRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedCaseVersion]
+      properties:
+        expectedCaseVersion: {type: integer, format: int64, minimum: 1}
+    CaseSummary:
+      type: object
+      additionalProperties: false
+      required: [caseId, status, caseVersion, kind, resultStatus, originalAmountMinor, cumulativeRefundedAmountMinor, remainingRefundableAmountMinor, currency, allowedActions, createdAt, updatedAt]
+      properties:
+        caseId: {type: string, format: uuid}
+        status: {$ref: '#/components/schemas/CaseStatus'}
+        caseVersion: {type: integer, format: int64, minimum: 1}
+        kind: {$ref: '#/components/schemas/RecoveryKind'}
+        resultStatus: {$ref: '#/components/schemas/ResultStatus'}
+        originalAmountMinor: {type: integer, format: int64, minimum: 1}
+        cumulativeRefundedAmountMinor: {type: integer, format: int64, minimum: 0}
+        remainingRefundableAmountMinor: {type: integer, format: int64, minimum: 0}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        maskedProviderReference:
+          type: [string, 'null']
+          pattern: '^port\*{8}[A-Za-z0-9_-]{1,4}$'
+        allowedActions:
+          type: array
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/RecoveryAction'}
+        assignedOperatorId: {type: [integer, 'null'], format: int64, minimum: 1}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    Proposal:
+      type: object
+      additionalProperties: false
+      required: [proposalVersion, action, requestedAmountMinor, cumulativeLineageAmountMinor, originalAmountMinor, currency, approvalTier, requesterOperatorId, createdAt]
+      properties:
+        proposalVersion: {type: integer, format: int64, minimum: 1}
+        action: {$ref: '#/components/schemas/RecoveryAction'}
+        requestedAmountMinor: {type: integer, format: int64, minimum: 1}
+        cumulativeLineageAmountMinor: {type: integer, format: int64, minimum: 1}
+        originalAmountMinor: {type: integer, format: int64, minimum: 1}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        approvalTier: {$ref: '#/components/schemas/ApprovalTier'}
+        requesterOperatorId: {type: integer, format: int64, minimum: 1}
+        approverOperatorId: {type: [integer, 'null'], format: int64, minimum: 1}
+        createdAt: {type: string, format: date-time}
+    Execution:
+      type: object
+      additionalProperties: false
+      required: [executionId, operation, status, createdAt, updatedAt]
+      properties:
+        executionId: {type: string, format: uuid}
+        operation: {$ref: '#/components/schemas/RecoveryAction'}
+        status: {$ref: '#/components/schemas/ExecutionStatus'}
+        maskedOutcome: {type: [string, 'null'], maxLength: 50}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    CaseDetail:
+      allOf:
+        - $ref: '#/components/schemas/CaseSummary'
+        - type: object
+          required: [proposals, executions]
+          properties:
+            proposals:
+              type: array
+              items: {$ref: '#/components/schemas/Proposal'}
+            executions:
+              type: array
+              items: {$ref: '#/components/schemas/Execution'}
+    CasePage:
+      type: object
+      additionalProperties: false
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items: {$ref: '#/components/schemas/CaseSummary'}
+        page: {type: integer, minimum: 0}
+        size: {type: integer, minimum: 1}
+        totalElements: {type: integer, format: int64, minimum: 0}
+        totalPages: {type: integer, minimum: 0}
+    CaseEnvelope:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessCode'}
+        message: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage'}
+        data: {$ref: '#/components/schemas/CaseSummary'}
+    CaseDetailEnvelope:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessCode'}
+        message: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage'}
+        data: {$ref: '#/components/schemas/CaseDetail'}
+    CasePageEnvelope:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessCode'}
+        message: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage'}
+        data: {$ref: '#/components/schemas/CasePage'}
+    ProposalEnvelope:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessCode'}
+        message: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage'}
+        data: {$ref: '#/components/schemas/Proposal'}
+    ExecutionEnvelope:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessCode'}
+        message: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage'}
+        data: {$ref: '#/components/schemas/Execution'}
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code: {type: string}
+        message: {type: string}
+  responses:
+    CasePageResult:
+      description: 마스킹된 결제 복구 사건 목록
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/CasePageEnvelope'}
+    CaseDetailResult:
+      description: 배정된 결제 복구 사건 상세
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/CaseDetailEnvelope'}
+    CaseChanged:
+      description: 변경된 결제 복구 사건
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/CaseEnvelope'}
+    ProposalChanged:
+      description: 저장된 불변 복구 제안
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ProposalEnvelope'}
+    ExecutionQueued:
+      description: 승인되어 queue에 기록된 복구 실행
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ExecutionEnvelope'}
+    BadRequest:
+      description: 허용되지 않은 명령 또는 요청
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unauthorized:
+      description: 인증 또는 재인증 실패
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Forbidden:
+      description: 권한 또는 사건 배정 부족
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    NotFound:
+      description: 사건 또는 제안을 찾을 수 없음
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Conflict:
+      description: 멱등 key payload 또는 상태/version 충돌
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unavailable:
+      description: Payment 공개 복구 계약 또는 저장소 일시 장애
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}

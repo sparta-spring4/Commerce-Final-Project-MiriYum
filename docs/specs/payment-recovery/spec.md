@@ -3,9 +3,13 @@
 - Status: approved in brainstorming on 2026-08-19
 - Prerequisite issue: #457
 - Consumer issue: #281
-- Base: `origin/dev` at `a663d6189afa0a96686bedab4d8fbec3769bc275`
+- Stacked base: PR #468 Head `fc15ce6568321dd8acc33b7275b2e6c5a3c41995`
 - Prerequisite branch: `feature/457-payment-recovery-contract`
-- Consumer branch after #457 merges: `feature/281-payment-recovery`
+- Consumer branch: `feature/281-payment-recovery`
+- Selected consumer migration: `V64__create_payment_recovery_workflow.sql`
+- Active HTTP contract: `docs/specs/payment-recovery/openapi.yaml`
+
+Issue #281 temporarily starts as a stacked branch because approved prerequisite PR #468 cannot merge while deployment load testing changes the Docker image. Before #281 merges, #468 must be merged and this branch must be rebased or merged onto the resulting latest `origin/dev`; migration and shared Platform Operator OpenAPI collision checks are repeated at that point.
 
 ## 1. Purpose
 
