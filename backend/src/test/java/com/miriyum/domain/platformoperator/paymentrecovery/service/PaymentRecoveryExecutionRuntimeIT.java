@@ -14,6 +14,8 @@ import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryApproval;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryCase;
+import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.CaseStatus;
+import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.ExecutionStatus;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.RecoveryAction;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.RecoveryKind;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.ResultStatus;
@@ -26,6 +28,7 @@ import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRec
 import com.miriyum.domain.platformoperator.repository.AdminCaseAssignmentRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorRoleGrantRepository;
+import com.miriyum.domain.platformoperator.service.OperatorAuthorityService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -34,6 +37,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -78,8 +82,32 @@ class PaymentRecoveryExecutionRuntimeIT {
     @Autowired PlatformOperatorAccountRepository accounts;
     @Autowired PlatformOperatorRoleGrantRepository roles;
     @Autowired AdminCaseAssignmentRepository assignments;
+    @Autowired OperatorAuthorityService authority;
     @Autowired PasswordEncoder encoder;
     @Autowired JdbcTemplate jdbc;
+
+    @BeforeEach
+    void isolateExecutionFixtures() {
+        jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<Void>) connection -> {
+            try (var statement = connection.createStatement()) {
+                statement.execute("SET FOREIGN_KEY_CHECKS = 0");
+                try {
+                    statement.execute("TRUNCATE TABLE payment_recovery_executions");
+                    statement.execute("TRUNCATE TABLE payment_recovery_approvals");
+                    statement.execute("TRUNCATE TABLE payment_recovery_proposals");
+                    statement.execute("TRUNCATE TABLE payment_recovery_cases");
+                    statement.execute("TRUNCATE TABLE admin_case_assignments");
+                    statement.execute("TRUNCATE TABLE platform_operator_audit_events");
+                    statement.execute("TRUNCATE TABLE platform_operator_permission_grants");
+                    statement.execute("TRUNCATE TABLE platform_operator_role_grants");
+                    statement.execute("TRUNCATE TABLE platform_operator_accounts");
+                } finally {
+                    statement.execute("SET FOREIGN_KEY_CHECKS = 1");
+                }
+            }
+            return null;
+        });
+    }
 
     @Test
     void twoWorkersCanClaimOneExecutionOnlyOnce() throws Exception {
@@ -235,6 +263,85 @@ class PaymentRecoveryExecutionRuntimeIT {
         assertThat(claim.executionId()).isEqualTo(fixture.execution().getId());
     }
 
+    @Test
+    void fifthExceptionalProviderLookupMovesExecutionAndCaseToHoldWithoutSixthClaim() {
+        Instant now = Instant.now();
+        Instant past = now.minusSeconds(1_000);
+        PlatformOperatorAccount requester = operator("lookup-exhausted@example.com", now);
+        PaymentRecoveryCase recoveryCase = PaymentRecoveryCase.open(
+                "28105", RecoveryKind.REFUND_RESULT_UNKNOWN, ResultStatus.UNKNOWN,
+                300_000L, 0L, 300_000L, "KRW", Set.of(RecoveryAction.REQUERY_PROVIDER_RESULT),
+                "port********005", 3L, 4L, 5L, past);
+        recoveryCase.beginInvestigation(1L, past);
+        cases.saveAndFlush(recoveryCase);
+        PaymentRecoveryExecution execution = PaymentRecoveryExecution.authorizeRequery(
+                recoveryCase, requester.getId(), 1L, past);
+        recoveryCase.queueRequery(2L, past);
+        cases.saveAndFlush(recoveryCase);
+        for (int attempt = 0; attempt < 4; attempt++) {
+            Instant attemptAt = past.plusSeconds(attempt * 100L);
+            long token = execution.claim("previous-worker-" + attempt, attemptAt,
+                    attemptAt.plusSeconds(30));
+            execution.markUnknown("previous-worker-" + attempt, token,
+                    attemptAt, attemptAt.plusSeconds(1));
+        }
+        executions.saveAndFlush(execution);
+        assignments.saveAndFlush(AdminCaseAssignment.assign(AdminCaseType.PAYMENT_RECOVERY,
+                recoveryCase.getPublicId(), recoveryCase.getCaseVersion(), requester.getId(),
+                now.plusSeconds(600), now));
+
+        var fifthClaim = transactions.claim("fifth-lookup-worker").orElseThrow();
+        transactions.recordFailure(fifthClaim);
+
+        assertThat(executions.findById(execution.getId()).orElseThrow().getStatus())
+                .isEqualTo(ExecutionStatus.HOLD);
+        assertThat(cases.findByPublicId(recoveryCase.getPublicId()).orElseThrow().getStatus())
+                .isEqualTo(CaseStatus.HOLD);
+        assertThat(transactions.claim("sixth-lookup-worker")).isEmpty();
+        assertThat(jdbc.queryForObject("""
+                select count(*) from platform_operator_audit_events
+                where action = 'PAYMENT_RECOVERY_HELD' and target_id = ?
+                """, Long.class, execution.getExecutionKey())).isEqualTo(1L);
+    }
+
+    @Test
+    void revokedRequesterAuthorityPersistsHoldAndAuditAcrossSpringProxyBoundary() {
+        Instant now = Instant.now();
+        PlatformOperatorAccount requester = operator("revoked-requester@example.com", now);
+        ExecutionFixture fixture = refundExecution("28106", requester, now);
+        assignments.saveAndFlush(AdminCaseAssignment.assign(AdminCaseType.PAYMENT_RECOVERY,
+                fixture.recoveryCase().getPublicId(), fixture.recoveryCase().getCaseVersion(),
+                requester.getId(), now.plusSeconds(600), now));
+        authority.revokeRole(requester.getId(), PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR);
+
+        assertThat(transactions.claim("revoked-requester-worker")).isEmpty();
+
+        assertHeldWithDeniedAudit(fixture);
+    }
+
+    @Test
+    void revokedApproverAuthorityPersistsHoldAndAuditAcrossSpringProxyBoundary() {
+        Instant now = Instant.now();
+        PlatformOperatorAccount requester = operator("valid-high-requester@example.com", now);
+        PlatformOperatorAccount approver = accounts.saveAndFlush(PlatformOperatorAccount.createTemporary(
+                "revoked-high-approver@example.com", encoder.encode("Password1!"),
+                "revoked-high-approver", now.plusSeconds(600)));
+        roles.saveAndFlush(PlatformOperatorRoleGrant.create(
+                approver.getId(), PlatformOperatorRole.SUPER_ADMIN, now));
+        authority.grantPermission(
+                approver.getId(), PlatformOperatorPermission.PAYMENT_RECOVERY_HIGH_VALUE_APPROVE);
+        ExecutionFixture fixture = highValueRefundExecution("28107", requester, approver, now);
+        assignments.saveAndFlush(AdminCaseAssignment.assign(AdminCaseType.PAYMENT_RECOVERY,
+                fixture.recoveryCase().getPublicId(), fixture.recoveryCase().getCaseVersion(),
+                requester.getId(), now.plusSeconds(600), now));
+        authority.revokePermission(
+                approver.getId(), PlatformOperatorPermission.PAYMENT_RECOVERY_HIGH_VALUE_APPROVE);
+
+        assertThat(transactions.claim("revoked-approver-worker")).isEmpty();
+
+        assertHeldWithDeniedAudit(fixture);
+    }
+
     private PlatformOperatorAccount operator(String email, Instant now) {
         PlatformOperatorAccount operator = accounts.saveAndFlush(PlatformOperatorAccount.createTemporary(
                 email, encoder.encode("Password1!"), email.substring(0, email.indexOf('@')),
@@ -271,6 +378,48 @@ class PaymentRecoveryExecutionRuntimeIT {
         PaymentRecoveryExecution execution = executions.saveAndFlush(
                 PaymentRecoveryExecution.authorize(proposal, approval, now));
         return new ExecutionFixture(recoveryCase, execution);
+    }
+
+    private ExecutionFixture highValueRefundExecution(
+            String handoffId, PlatformOperatorAccount requester,
+            PlatformOperatorAccount approver, Instant now) {
+        PaymentRecoveryCase recoveryCase = PaymentRecoveryCase.open(
+                handoffId, RecoveryKind.REFUND_FAILED, ResultStatus.FAILED,
+                300_000L, 0L, 300_000L, "KRW", Set.of(RecoveryAction.RETRY_REFUND),
+                "port********" + handoffId.substring(handoffId.length() - 3),
+                3L, 4L, 5L, now);
+        recoveryCase.beginInvestigation(1L, now);
+        cases.saveAndFlush(recoveryCase);
+        PaymentRecoveryProposal proposal = proposals.saveAndFlush(PaymentRecoveryProposal.propose(
+                recoveryCase.getPublicId(), 1L, 2L, RecoveryAction.RETRY_REFUND,
+                250_000L, 250_000L, 300_000L, "KRW", 3L, 4L, 5L,
+                "b".repeat(64), requester.getId(), 1L,
+                Set.of(PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR),
+                Set.of(PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE),
+                UUID.randomUUID().toString(), now));
+        recoveryCase.recordProposal(2L, 1L, proposal.getApprovalTier(), now);
+        PaymentRecoveryApproval approval = approvals.saveAndFlush(PaymentRecoveryApproval.approve(
+                proposal, approver.getId(), 2L,
+                Set.of(PlatformOperatorRole.SUPER_ADMIN),
+                Set.of(PlatformOperatorPermission.PAYMENT_RECOVERY_HIGH_VALUE_APPROVE),
+                UUID.randomUUID().toString(), now));
+        recoveryCase.recordAdditionalApproval(3L, now);
+        recoveryCase.queueExecution(4L, now);
+        cases.saveAndFlush(recoveryCase);
+        PaymentRecoveryExecution execution = executions.saveAndFlush(
+                PaymentRecoveryExecution.authorize(proposal, approval, now));
+        return new ExecutionFixture(recoveryCase, execution);
+    }
+
+    private void assertHeldWithDeniedAudit(ExecutionFixture fixture) {
+        assertThat(executions.findById(fixture.execution().getId()).orElseThrow().getStatus())
+                .isEqualTo(ExecutionStatus.HOLD);
+        assertThat(cases.findByPublicId(fixture.recoveryCase().getPublicId()).orElseThrow().getStatus())
+                .isEqualTo(CaseStatus.HOLD);
+        assertThat(jdbc.queryForObject("""
+                select count(*) from platform_operator_audit_events
+                where action = 'PAYMENT_RECOVERY_HELD' and outcome = 'DENIED' and target_id = ?
+                """, Long.class, fixture.execution().getExecutionKey())).isEqualTo(1L);
     }
 
     private record ExecutionFixture(

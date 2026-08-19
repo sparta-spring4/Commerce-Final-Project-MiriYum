@@ -89,7 +89,7 @@ HOLD -> INVESTIGATING | FAILED_UNRESOLVED
 FAILED -> INVESTIGATING                (new proposal version required)
 ```
 
-`FAILED_UNRESOLVED` is terminal for that case. New evidence cannot reopen or rewrite it; the system creates a new linked case in the same lineage with a new case sequence and version.
+`FAILED_UNRESOLVED` is terminal for that case and cannot be reopened or rewritten. Issue #281 does not let an operator create a successor case and does not infer lineage from masked Payment data. A linked successor is deferred until Payment publishes a scalar correlation from a newly eligible automatic handoff to the prior recovery lineage; without that public contract, new Payment evidence remains in automatic reconciliation and cannot create an Admin case.
 
 Every transition checks the expected case version. Assignment is keyed by `PAYMENT_RECOVERY`, public case ID, and case version. A version change invalidates stale assignment and command attempts until the assignment is renewed for the new version.
 
@@ -141,7 +141,7 @@ Issue #457 owns a Payment-side handoff table with:
 
 Issue #281 owns:
 
-- `payment_recovery_cases`: public case ID, handoff ID, lineage and sequence, status, case version, current proposal version, active-lineage marker, timestamps;
+- `payment_recovery_cases`: public case ID, handoff ID, lineage and sequence, status, case version, current proposal version, active-lineage marker, timestamps. The current intake opens each independently eligible Payment handoff as sequence 1; lineage and sequence columns reserve the future linked-successor contract without granting Admin access to Payment internals;
 - `payment_recovery_proposals`: immutable proposal version, action, exact amount, Payment snapshot/version, fingerprint, approval tier, requester authority snapshot;
 - `payment_recovery_approvals`: immutable approver, authority snapshot, approval tier and timestamp, with duplicate and separation constraints;
 - `payment_recovery_executions`: stable execution key, status, lease owner/token/expiry, attempt metadata, masked outcome, timestamps, and row version.

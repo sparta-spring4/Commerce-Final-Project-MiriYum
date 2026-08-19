@@ -186,6 +186,19 @@ public class PaymentRecoveryExecutionTransaction {
         PaymentRecoveryCase recoveryCase = lockedCase(execution.getCasePublicId());
         long previousCaseVersion = recoveryCase.getCaseVersion();
         var before = PaymentRecoveryAuditSnapshots.executionStateSnapshot(recoveryCase, execution);
+        if (execution.getLookupAttemptCount() >= MAX_LOOKUPS) {
+            execution.markHold(claim.owner(), claim.leaseToken(), "LOOKUP_EXHAUSTED", now);
+            if (recoveryCase.getStatus() == CaseStatus.EXECUTING) {
+                recoveryCase.startVerification(recoveryCase.getCaseVersion(), now);
+            }
+            recoveryCase.hold(recoveryCase.getCaseVersion(), now);
+            inheritAssignmentIfAdvanced(recoveryCase, previousCaseVersion,
+                    execution.getRequesterPlatformOperatorAccountId(), now);
+            append(claim, execution, recoveryCase,
+                    PlatformOperatorAuditAction.PAYMENT_RECOVERY_HELD,
+                    PlatformOperatorAuditOutcome.SUCCESS, before);
+            return;
+        }
         execution.markUnknown(claim.owner(), claim.leaseToken(), now,
                 now.plusSeconds(Math.min(300L, 10L << execution.getLookupAttemptCount())));
         if (recoveryCase.getStatus() == CaseStatus.EXECUTING) {
