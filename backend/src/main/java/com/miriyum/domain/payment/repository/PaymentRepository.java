@@ -14,6 +14,48 @@ import org.springframework.data.repository.query.Param;
 public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
     @Query("""
+            select p.paymentId as paymentId,
+                   p.sourceType as sourceType,
+                   p.sourceReferenceId as sourceReferenceId,
+                   p.status as status,
+                   p.version as version,
+                   p.createdAt as createdAt,
+                   p.updatedAt as updatedAt,
+                   p.amountMinor as amountMinor,
+                   p.refundedAmountMinor as refundedAmountMinor,
+                   p.currency as currency
+              from Payment p
+             where p.updatedAt between :changedFrom and :changedTo
+             order by p.updatedAt desc, p.paymentId desc
+            """)
+    List<MonitoringSnapshot> findMonitoringChanges(
+            @Param("changedFrom") Instant changedFrom,
+            @Param("changedTo") Instant changedTo,
+            Pageable pageable);
+
+    @Query("""
+            select p.paymentId as paymentId,
+                   p.sourceType as sourceType,
+                   p.sourceReferenceId as sourceReferenceId,
+                   p.status as status,
+                   p.version as version,
+                   p.createdAt as createdAt,
+                   p.updatedAt as updatedAt,
+                   p.amountMinor as amountMinor,
+                   p.refundedAmountMinor as refundedAmountMinor,
+                   p.currency as currency
+              from Payment p
+             where (p.sourceType = 'RESERVATION_DEPOSIT'
+                    and p.sourceReferenceId in :reservationReferences)
+                or (p.sourceType = 'WAITING_RESERVATION_DEPOSIT'
+                    and p.sourceReferenceId in :waitingReferences)
+             order by p.updatedAt desc, p.paymentId desc
+            """)
+    List<MonitoringSnapshot> findMonitoringSnapshots(
+            @Param("reservationReferences") List<String> reservationReferences,
+            @Param("waitingReferences") List<String> waitingReferences);
+
+    @Query("""
             select count(payment)
             from Payment payment
             where payment.sourceType = :sourceType
@@ -77,4 +119,17 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
             @Param("cursorPaymentId") String cursorPaymentId,
             Pageable pageable
     );
+
+    interface MonitoringSnapshot {
+        String getPaymentId();
+        String getSourceType();
+        String getSourceReferenceId();
+        Payment.Status getStatus();
+        long getVersion();
+        Instant getCreatedAt();
+        Instant getUpdatedAt();
+        long getAmountMinor();
+        long getRefundedAmountMinor();
+        String getCurrency();
+    }
 }

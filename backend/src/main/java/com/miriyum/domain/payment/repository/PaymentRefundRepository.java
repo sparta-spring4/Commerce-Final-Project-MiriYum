@@ -13,6 +13,21 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Long> {
+
+    @Query("""
+            select refund.payment.paymentId as paymentId,
+                   refund.status as status,
+                   refund.version as version,
+                   refund.amountMinor as amountMinor,
+                   refund.requestedAt as requestedAt,
+                   refund.completedAt as completedAt,
+                   refund.updatedAt as updatedAt
+              from PaymentRefund refund
+             where refund.payment.paymentId in :paymentIds
+             order by refund.payment.paymentId, refund.requestedAt, refund.id
+            """)
+    List<MonitoringRefund> findMonitoringRefunds(
+            @Param("paymentIds") List<String> paymentIds);
     Optional<PaymentRefund> findByPayment_IdAndIdempotencyKey(Long paymentId, String idempotencyKey);
     Optional<PaymentRefund> findByPayment_IdAndSourceEventId(Long paymentId, String sourceEventId);
     List<PaymentRefund> findByPayment_IdOrderByRequestedAtAsc(Long paymentId);
@@ -67,4 +82,14 @@ public interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Lo
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select r from PaymentRefund r join fetch r.payment where r.refundId = :refundId")
     Optional<PaymentRefund> findByRefundIdForUpdate(@Param("refundId") String refundId);
+
+    interface MonitoringRefund {
+        String getPaymentId();
+        com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus getStatus();
+        long getVersion();
+        long getAmountMinor();
+        Instant getRequestedAt();
+        Instant getCompletedAt();
+        Instant getUpdatedAt();
+    }
 }
