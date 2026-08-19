@@ -62,6 +62,20 @@ def validate(contract_path, task_definition_path, application_config_path=None):
             if name not in secrets:
                 errors.append(f"Missing secret reference: {name}")
 
+    conditional_parameter_secrets = set()
+    for feature_flag, required_secrets in contract.get("conditionalParameterSecrets", {}).items():
+        if environment.get(feature_flag, "false").lower() != "true":
+            for name in required_secrets:
+                if name in secrets:
+                    errors.append(
+                        f"Conditional parameter secret must be absent when disabled: {name}"
+                    )
+            continue
+        conditional_parameter_secrets.update(required_secrets)
+        for name in required_secrets:
+            if name not in secrets:
+                errors.append(f"Missing parameter secret reference: {name}")
+
     for feature_flag, required_environment in contract.get("conditionalEnvironment", {}).items():
         if environment.get(feature_flag, "false").lower() != "true":
             continue
@@ -69,7 +83,10 @@ def validate(contract_path, task_definition_path, application_config_path=None):
             if not environment.get(name, ""):
                 errors.append(f"Missing environment value: {name}")
 
-    parameter_secrets = set(contract.get("parameterSecrets", []))
+    parameter_secrets = (
+        set(contract.get("parameterSecrets", []))
+        | set(contract.get("parameterReferencePaths", {}))
+    )
     parameter_reference_paths = contract.get("parameterReferencePaths", {})
     secret_prefixes = set()
     for name, value_from in secrets.items():
@@ -78,7 +95,8 @@ def validate(contract_path, task_definition_path, application_config_path=None):
             if not expected_path:
                 errors.append(f"Missing parameter reference contract entry: {name}")
                 continue
-            if value_from == "REPLACE_WITH_OPENAI_API_KEY_PARAMETER_ARN":
+            expected_placeholder = f"REPLACE_WITH_{name}_PARAMETER_ARN"
+            if value_from == expected_placeholder:
                 continue
             parameter_match = re.fullmatch(
                 r"arn:aws:ssm:[a-z0-9-]+:\d{12}:parameter/(.+)",

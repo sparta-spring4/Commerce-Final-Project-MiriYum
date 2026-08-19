@@ -311,7 +311,7 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
                     {
                         "requiredSecrets": [],
                         "parameterSecrets": [],
-                        "conditionalSecrets": {
+                        "conditionalParameterSecrets": {
                             "MIRIYUM_STORE_SEARCH_LLM_ENABLED": ["OPENAI_API_KEY"]
                         },
                         "parameterReferencePaths": {
@@ -339,6 +339,138 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
             )
 
             self.assertEqual([], validate(contract, task_definition))
+
+    def test_requires_openai_parameter_secret_when_llm_is_enabled(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                directory,
+                "contract.json",
+                {
+                    "conditionalParameterSecrets": {
+                        "MIRIYUM_STORE_SEARCH_LLM_ENABLED": ["OPENAI_API_KEY"]
+                    },
+                    "parameterReferencePaths": {
+                        "OPENAI_API_KEY": "miriyum/shared/openai-api-key"
+                    },
+                },
+            )
+            task_definition = self.write_json(
+                directory,
+                "task-definition.json",
+                {
+                    "requiresCompatibilities": ["FARGATE"],
+                    "networkMode": "awsvpc",
+                    "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                    "containerDefinitions": [
+                        {
+                            "name": "backend",
+                            "environment": [
+                                {"name": "MIRIYUM_STORE_SEARCH_LLM_ENABLED", "value": "true"}
+                            ],
+                            "secrets": [
+                                {
+                                    "name": "OPENAI_API_KEY",
+                                    "valueFrom": (
+                                        "arn:aws:ssm:ap-northeast-2:123456789012:"
+                                        "parameter/miriyum/shared/openai-api-key"
+                                    ),
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            self.assertEqual([], validate(contract, task_definition))
+
+    def test_rejects_invalid_openai_parameter_placeholder(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                directory,
+                "contract.json",
+                {
+                    "parameterReferencePaths": {
+                        "OPENAI_API_KEY": "miriyum/shared/openai-api-key"
+                    }
+                },
+            )
+            task_definition = self.write_json(
+                directory,
+                "task-definition.json",
+                {
+                    "requiresCompatibilities": ["FARGATE"],
+                    "networkMode": "awsvpc",
+                    "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                    "containerDefinitions": [
+                        {
+                            "name": "backend",
+                            "secrets": [
+                                {
+                                    "name": "OPENAI_API_KEY",
+                                    "valueFrom": "REPLACE_WITH_WRONG_PARAMETER_ARN",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            self.assertEqual(
+                ["Parameter reference does not match contract path: OPENAI_API_KEY"],
+                validate(contract, task_definition),
+            )
+
+    def test_rejects_openai_parameter_secret_when_llm_is_disabled(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                directory,
+                "contract.json",
+                {
+                    "conditionalParameterSecrets": {
+                        "MIRIYUM_STORE_SEARCH_LLM_ENABLED": ["OPENAI_API_KEY"]
+                    },
+                    "parameterReferencePaths": {
+                        "OPENAI_API_KEY": "miriyum/shared/openai-api-key"
+                    },
+                },
+            )
+            task_definition = self.write_json(
+                directory,
+                "task-definition.json",
+                {
+                    "requiresCompatibilities": ["FARGATE"],
+                    "networkMode": "awsvpc",
+                    "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                    "containerDefinitions": [
+                        {
+                            "name": "backend",
+                            "environment": [
+                                {"name": "MIRIYUM_STORE_SEARCH_LLM_ENABLED", "value": "false"}
+                            ],
+                            "secrets": [
+                                {
+                                    "name": "OPENAI_API_KEY",
+                                    "valueFrom": "REPLACE_WITH_OPENAI_API_KEY_PARAMETER_ARN",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            self.assertEqual(
+                [
+                    "Conditional parameter secret must be absent when disabled: "
+                    "OPENAI_API_KEY"
+                ],
+                validate(contract, task_definition),
+            )
 
     def test_rejects_parameter_reference_that_uses_a_different_path(self):
         validate = load_validator()

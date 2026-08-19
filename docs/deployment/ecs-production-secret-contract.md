@@ -82,6 +82,8 @@ The execution role needs `secretsmanager:GetSecretValue` only for the applicatio
 
 `OPENAI_API_KEY` is a separate SSM SecureString parameter, not a key in `miriyum/production/application`. Store it at `/miriyum/shared/openai-api-key`; the ECS execution role needs `ssm:GetParameter` for only that parameter ARN. Production CD derives that ARN from the deployment account and injects it through the ECS `secrets` field, so neither the API key nor its value is registered as a normal task environment variable.
 
+The contract records this as a `conditionalParameterSecrets` entry. The mapping is required only when `MIRIYUM_STORE_SEARCH_LLM_ENABLED=true`; when the flag is `false`, the task definition must not contain the `OPENAI_API_KEY` mapping. The verifier accepts the value-free template placeholder `REPLACE_WITH_OPENAI_API_KEY_PARAMETER_ARN`, but a deployed ARN must be an AWS SSM parameter ARN whose path is exactly `miriyum/shared/openai-api-key`.
+
 The production task enables `MIRIYUM_STORE_SEARCH_LLM_ENABLED=true` with model `gpt-4o-mini`. Set the flag to `false` and deploy a new task revision to disable provider calls while retaining exact search and non-LLM recommendations.
 
 ### CloudWatch LLM metrics
