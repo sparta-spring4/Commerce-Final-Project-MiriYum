@@ -2,6 +2,7 @@ package com.miriyum.domain.search.repository;
 
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -17,6 +18,8 @@ import java.time.LocalDateTime;
  * @param menuHoldEnabled 메뉴 홀드 기능 활성 여부
  * @param pickupEnabled 픽업 기능 활성 여부
  * @param createdAt 매장 생성 시각
+ * @param latitude 현재 주소 버전에 대해 검증된 위도, 없으면 null
+ * @param longitude 현재 주소 버전에 대해 검증된 경도, 없으면 null
  */
 public record StoreSearchCandidate(
         long storeId,
@@ -28,6 +31,25 @@ public record StoreSearchCandidate(
         boolean reservationEnabled,
         boolean menuHoldEnabled,
         boolean pickupEnabled,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        BigDecimal latitude,
+        BigDecimal longitude
 ) {
+
+    public StoreSearchCandidate(
+            long storeId,
+            String name,
+            Region region,
+            String address,
+            String storeCategoryCode,
+            OperationStatus operationStatus,
+            boolean reservationEnabled,
+            boolean menuHoldEnabled,
+            boolean pickupEnabled,
+            LocalDateTime createdAt
+    ) {
+        this(storeId, name, region, address, storeCategoryCode, operationStatus,
+                reservationEnabled, menuHoldEnabled, pickupEnabled, createdAt,
+                null, null);
+    }
 }

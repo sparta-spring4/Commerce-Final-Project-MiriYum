@@ -3,7 +3,7 @@ import { storeSummary } from '../test/fixtures'
 import { toMapStores, type MapStoreSource } from './mapStores'
 
 describe('toMapStores', () => {
-  it('좌표가 없는 page 모드 항목은 좌표 없음으로 넘긴다', () => {
+  it('좌표가 null인 page 모드 항목은 좌표 없음으로 넘긴다', () => {
     const items = [storeSummary({ name: '파스타 마스터즈' })]
 
     const mapStores = toMapStores(items)
@@ -17,11 +17,7 @@ describe('toMapStores', () => {
     ])
   })
 
-  /*
-   * 통합 검색이 붙는 날의 계약 모양. 이 함수를 고치지 않고도 좌표가 흐르는지
-   * 지금 못박아 둔다.
-   */
-  it('좌표를 담은 항목은 좌표를 그대로 흘린다', () => {
+  it('page 응답 좌표를 지도 props로 그대로 흘린다', () => {
     const items: MapStoreSource[] = [
       {
         storeId: '01JBQ8Z4T7K2N9V6M3P5R8W1XA',

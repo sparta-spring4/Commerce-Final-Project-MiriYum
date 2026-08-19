@@ -4,6 +4,7 @@ import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.search.config.StoreSearchCandidateLimit;
 import com.miriyum.domain.search.model.StoreSearchQuery;
+import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashSet;
@@ -35,6 +36,18 @@ public class StoreSearchRepository {
                    s.reservation_enabled,
                    s.menu_hold_enabled,
                    s.pickup_enabled,
+                   CASE
+                       WHEN s.geocoding_status = 'VERIFIED'
+                        AND s.geocoding_address_version = s.address_version
+                       THEN s.latitude
+                       ELSE NULL
+                   END AS latitude,
+                   CASE
+                       WHEN s.geocoding_status = 'VERIFIED'
+                        AND s.geocoding_address_version = s.address_version
+                       THEN s.longitude
+                       ELSE NULL
+                   END AS longitude,
                    s.created_at
             """;
 
@@ -161,7 +174,19 @@ public class StoreSearchRepository {
         List<Long> storeIds = candidates.stream().map(StoreSearchCandidate::storeId).toList();
         List<CurrentPublicState> current = jdbcTemplate.query("""
                 SELECT store_id, operation_status, reservation_enabled,
-                       menu_hold_enabled, pickup_enabled
+                       menu_hold_enabled, pickup_enabled,
+                       CASE
+                           WHEN geocoding_status = 'VERIFIED'
+                            AND geocoding_address_version = address_version
+                           THEN latitude
+                           ELSE NULL
+                       END AS latitude,
+                       CASE
+                           WHEN geocoding_status = 'VERIFIED'
+                            AND geocoding_address_version = address_version
+                           THEN longitude
+                           ELSE NULL
+                       END AS longitude
                 FROM stores
                 WHERE store_id IN (:storeIds)
                   AND verification_status = 'APPROVED'
@@ -172,7 +197,9 @@ public class StoreSearchRepository {
                         OperationStatus.valueOf(resultSet.getString("operation_status")),
                         resultSet.getBoolean("reservation_enabled"),
                         resultSet.getBoolean("menu_hold_enabled"),
-                        resultSet.getBoolean("pickup_enabled")));
+                        resultSet.getBoolean("pickup_enabled"),
+                        resultSet.getBigDecimal("latitude"),
+                        resultSet.getBigDecimal("longitude")));
         Map<Long, CurrentPublicState> byId = new LinkedHashMap<>();
         current.forEach(state -> byId.put(state.storeId(), state));
         return candidates.stream()
@@ -198,7 +225,9 @@ public class StoreSearchRepository {
                 current.reservationEnabled(),
                 current.menuHoldEnabled(),
                 current.pickupEnabled(),
-                candidate.createdAt());
+                candidate.createdAt(),
+                current.latitude(),
+                current.longitude());
     }
 
     private static MapSqlParameterSource parameters(StoreSearchQuery query) {
@@ -222,7 +251,9 @@ public class StoreSearchRepository {
                 resultSet.getBoolean("reservation_enabled"),
                 resultSet.getBoolean("menu_hold_enabled"),
                 resultSet.getBoolean("pickup_enabled"),
-                resultSet.getTimestamp("created_at").toLocalDateTime());
+                resultSet.getTimestamp("created_at").toLocalDateTime(),
+                resultSet.getBigDecimal("latitude"),
+                resultSet.getBigDecimal("longitude"));
     }
 
     private record CurrentPublicState(
@@ -230,7 +261,9 @@ public class StoreSearchRepository {
             OperationStatus operationStatus,
             boolean reservationEnabled,
             boolean menuHoldEnabled,
-            boolean pickupEnabled
+            boolean pickupEnabled,
+            BigDecimal latitude,
+            BigDecimal longitude
     ) {
     }
 }

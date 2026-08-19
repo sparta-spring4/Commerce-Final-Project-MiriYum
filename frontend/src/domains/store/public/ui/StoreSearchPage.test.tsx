@@ -424,10 +424,8 @@ describe('매장 찾기 결과 화면', () => {
  * `map/KakaoMap.test.tsx`가 소유한다. 여기서는 화면이 지도를 어디에 놓고,
  * 무엇을 넘기고, 선택을 어떻게 주고받는지만 본다.
  *
- * page 모드 응답 항목(`StoreSummary`)에는 좌표 필드가 없다. 그래서 이 화면의
- * 지도는 언제나 좌표 없음 폴백이며, 그 폴백 문구가 선택 상태에 따라 달라지는
- * 것을 이용해 목록 → 지도 연결을 관찰한다. 좌표를 가진 가짜 응답을 만들어
- * 계약에 없는 필드를 지어내지 않는다.
+ * page 모드 응답 항목(`StoreSummary`)의 nullable 좌표를 목록과 지도가 함께
+ * 소비한다. 좌표가 null인 항목은 목록에 남고 지도 마커에서만 제외된다.
  */
 describe('매장 찾기 목록과 지도', () => {
   const 좌표없음 = '표시할 수 있는 매장 좌표가 없습니다.'
@@ -489,6 +487,66 @@ describe('매장 찾기 목록과 지도', () => {
 
     expect(지도가열렸나()).toBe(false)
     expect(screen.getByRole('link', { name: '첫째 매장' })).toBeVisible()
+  })
+
+  it('page 응답의 검증 좌표를 지도에 넘기고 좌표 null 매장은 목록에 남긴다', async () => {
+    respondWithStores(
+      storeSummary({
+        storeId: '01JBQ8Z4T7K2N9V6M3P5R8W211',
+        name: '좌표 확인 매장',
+        coordinates: { latitude: 37.5665, longitude: 126.978 },
+      }),
+      storeSummary({
+        storeId: '01JBQ8Z4T7K2N9V6M3P5R8W212',
+        name: '좌표 미확인 매장',
+        coordinates: null,
+      }),
+    )
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+    await screen.findByRole('link', { name: '좌표 확인 매장' })
+    fireEvent.click(지도열기버튼())
+
+    // 유효 좌표가 KakaoMap까지 도달했으므로 좌표 없음이 아니라 키 설정을 안내한다.
+    expect(within(지도영역()).getByText('지도 설정이 필요합니다.')).toBeVisible()
+    expect(within(지도영역()).queryByText(좌표없음)).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '좌표 미확인 매장' })).toBeVisible()
+  })
+
+  it('검색 조건 변경 시 같은 응답으로 목록과 지도를 함께 갱신한다', async () => {
+    let call = 0
+    server.use(
+      ...catalogHandlers,
+      http.get('/api/v1/stores', () => {
+        call += 1
+        return successResponse(
+          storePage([
+            call === 1
+              ? storeSummary({
+                  name: '좌표 있는 이전 매장',
+                  coordinates: { latitude: 37.5665, longitude: 126.978 },
+                })
+              : storeSummary({ name: '좌표 없는 새 매장', coordinates: null }),
+          ]),
+        )
+      }),
+    )
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+    await screen.findByRole('link', { name: '좌표 있는 이전 매장' })
+    fireEvent.click(지도열기버튼())
+    expect(within(지도영역()).getByText('지도 설정이 필요합니다.')).toBeVisible()
+
+    typeInto('검색어', '새 매장')
+    fireEvent.click(screen.getByRole('button', { name: '이 조건으로 검색' }))
+
+    expect(
+      await screen.findByRole('link', { name: '좌표 없는 새 매장' }),
+    ).toBeVisible()
+    expect(within(지도영역()).getByText(좌표없음)).toBeVisible()
+    expect(
+      within(지도영역()).queryByText('지도 설정이 필요합니다.'),
+    ).not.toBeInTheDocument()
   })
 
   it('지도 옆의 닫기 버튼으로도 닫을 수 있다', async () => {

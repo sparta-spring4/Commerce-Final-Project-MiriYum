@@ -2,6 +2,7 @@ package com.miriyum.domain.search.service;
 
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.search.config.StoreSearchCandidateLimit;
+import com.miriyum.domain.search.dto.publicapi.PublicStoreCoordinates;
 import com.miriyum.domain.search.dto.publicapi.PublicStoreModes;
 import com.miriyum.domain.search.dto.publicapi.PublicStoreSummary;
 import com.miriyum.domain.search.dto.publicapi.ReservationAvailability;
@@ -211,6 +212,10 @@ public class StoreSearchCoreService {
                         candidate.reservationEnabled(),
                         candidate.menuHoldEnabled(),
                         candidate.pickupEnabled()),
-                availability);
+                availability,
+                candidate.latitude() == null
+                        ? null
+                        : new PublicStoreCoordinates(
+                                candidate.latitude(), candidate.longitude()));
     }
 }
