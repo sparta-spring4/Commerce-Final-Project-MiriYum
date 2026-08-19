@@ -3,6 +3,7 @@ package com.miriyum.domain.platformoperator.paymentrecovery.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryCase;
+import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryProposal;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAuditEvent;
 import com.miriyum.domain.platformoperator.enums.AdminCaseType;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuditAction;
@@ -59,5 +60,33 @@ class PaymentRecoveryAuditPrivacyTest {
         assertThat(event.getAfterSnapshot()).isEqualTo(after);
         assertThat(event.getBeforeRoles()).isEmpty();
         assertThat(event.getAfterPermissions()).isEmpty();
+    }
+
+    @Test
+    void proposalSnapshotIncludesMoneyTierAndActorWithoutSensitiveProviderData() {
+        Instant now = Instant.parse("2026-08-19T10:00:00Z");
+        PaymentRecoveryCase recoveryCase = PaymentRecoveryCase.open(
+                "281", RecoveryKind.REFUND_FAILED, ResultStatus.FAILED,
+                300_000L, 100_000L, 200_000L, "KRW", Set.of(RecoveryAction.RETRY_REFUND),
+                "port********abc", 3L, 4L, 5L, now);
+        recoveryCase.beginInvestigation(1L, now);
+        PaymentRecoveryProposal proposal = PaymentRecoveryProposal.propose(
+                recoveryCase.getPublicId(), 1L, 2L, RecoveryAction.RETRY_REFUND,
+                100_001L, 200_001L, 300_000L, "KRW", 3L, 4L, 5L,
+                "a".repeat(64), 11L, 7L,
+                Set.of(PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR),
+                Set.of(PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE),
+                java.util.UUID.randomUUID().toString(), now);
+
+        var snapshot = PaymentRecoveryAuditSnapshots.proposalSnapshot(recoveryCase, proposal, 12L);
+
+        assertThat(snapshot).containsEntry("requestedAmountMinor", 100_001L)
+                .containsEntry("cumulativeLineageAmountMinor", 200_001L)
+                .containsEntry("approvalTier", "ADDITIONAL_SUPER_ADMIN")
+                .containsEntry("requesterOperatorId", 11L)
+                .containsEntry("approverOperatorId", 12L);
+        String json = new ObjectMapper().writeValueAsString(snapshot).toLowerCase();
+        assertThat(json).doesNotContain("card", "account", "providerpayload", "authorization",
+                "password", "approvaltoken", "secret", "portonepaymentid");
     }
 }

@@ -3,6 +3,9 @@ package com.miriyum.domain.platformoperator.paymentrecovery.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryInspection;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryKind;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryResultStatus;
 import com.miriyum.domain.platformoperator.entity.AdminCaseAssignment;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorRoleGrant;
@@ -36,6 +39,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -75,6 +79,7 @@ class PaymentRecoveryExecutionRuntimeIT {
     @Autowired PlatformOperatorRoleGrantRepository roles;
     @Autowired AdminCaseAssignmentRepository assignments;
     @Autowired PasswordEncoder encoder;
+    @Autowired JdbcTemplate jdbc;
 
     @Test
     void twoWorkersCanClaimOneExecutionOnlyOnce() throws Exception {
@@ -122,6 +127,47 @@ class PaymentRecoveryExecutionRuntimeIT {
             outcomes = List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS));
         }
         assertThat(outcomes.stream().filter(Optional::isPresent)).hasSize(1);
+    }
+
+    @Test
+    void expiredRequeryLeaseIsReclaimedAsRequeryRatherThanRefundRequest() {
+        Instant now = Instant.now();
+        Instant originalAttempt = now.minusSeconds(120);
+        PlatformOperatorAccount operator = accounts.saveAndFlush(PlatformOperatorAccount.createTemporary(
+                "requery-reclaim@example.com", encoder.encode("Password1!"), "requery-reclaim",
+                now.plusSeconds(600)));
+        roles.saveAndFlush(PlatformOperatorRoleGrant.create(
+                operator.getId(), PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR, now));
+        PaymentRecoveryCase recoveryCase = PaymentRecoveryCase.open(
+                "28102", RecoveryKind.REFUND_RESULT_UNKNOWN, ResultStatus.UNKNOWN,
+                300_000L, 0L, 300_000L, "KRW", Set.of(RecoveryAction.REQUERY_PROVIDER_RESULT),
+                "port********002", 3L, 4L, 5L, originalAttempt);
+        recoveryCase.beginInvestigation(1L, originalAttempt);
+        cases.saveAndFlush(recoveryCase);
+        PaymentRecoveryExecution execution = PaymentRecoveryExecution.authorizeRequery(
+                recoveryCase, operator.getId(), 1L, originalAttempt);
+        recoveryCase.queueRequery(2L, originalAttempt);
+        cases.saveAndFlush(recoveryCase);
+        assignments.saveAndFlush(AdminCaseAssignment.assign(AdminCaseType.PAYMENT_RECOVERY,
+                recoveryCase.getPublicId(), 2L, operator.getId(), now.plusSeconds(600), now));
+        execution.claim("crashed-query-worker", originalAttempt,
+                originalAttempt.plusSeconds(30));
+        executions.saveAndFlush(execution);
+
+        var reclaimed = transactions.claim("replacement-worker").orElseThrow();
+
+        assertThat(reclaimed.operation()).isEqualTo(RecoveryAction.REQUERY_PROVIDER_RESULT);
+        assertThat(reclaimed.operationId()).isEqualTo(execution.getOperationId());
+
+        transactions.recordInspection(reclaimed, new ManualRecoveryInspection(
+                recoveryCase.getHandoffId(), 3L, 4L, 5L,
+                ManualRecoveryKind.REFUND_RESULT_UNKNOWN, 300_000L, 300_000L, 0L,
+                "KRW", ManualRecoveryResultStatus.SUCCEEDED, Set.of(), "port********002"));
+
+        assertThat(jdbc.queryForObject("""
+                select count(*) from platform_operator_audit_events
+                where action = 'PAYMENT_RECOVERY_VERIFIED' and target_id = ?
+                """, Long.class, execution.getExecutionKey())).isEqualTo(1L);
     }
 
     private Optional<PaymentRecoveryExecutionTransaction.Claim> claim(

@@ -1,8 +1,10 @@
 package com.miriyum.domain.platformoperator.paymentrecovery.service;
 
+import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileManualRecoveryCommand;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.InspectManualRecoveryQuery;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryInspection;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryResultStatus;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RequestManualRecoveryRefundCommand;
 import com.miriyum.domain.payment.service.PaymentService;
@@ -35,32 +37,41 @@ public class PaymentRecoveryExecutionJob {
     }
 
     private void execute(PaymentRecoveryExecutionTransaction.Claim claim) {
-        try {
-            if (claim.operation() == RecoveryAction.RETRY_REFUND) {
-                var result = payments.requestManualRecoveryRefund(new RequestManualRecoveryRefundCommand(
+        if (claim.operation() == RecoveryAction.RETRY_REFUND) {
+            RefundResult result;
+            try {
+                result = payments.requestManualRecoveryRefund(new RequestManualRecoveryRefundCommand(
                         claim.handoffId(), claim.expectedHandoffVersion(), claim.expectedPaymentVersion(),
                         claim.expectedRecoveryVersion(), claim.operationId()));
-                if (result.status() == RefundStatus.FAILED) {
-                    transactions.recordProviderFailure(claim);
-                } else {
-                    transactions.scheduleLookup(claim,
-                            result.status() == RefundStatus.RECONCILIATION_REQUIRED
-                                    ? "RESULT_UNKNOWN" : "VERIFY_REQUIRED");
-                }
+            } catch (RuntimeException failure) {
+                transactions.recordFailure(claim);
+                return;
+            }
+            if (result.status() == RefundStatus.FAILED) {
+                transactions.recordProviderFailure(claim);
             } else {
-                var current = payments.inspectManualRecovery(
+                transactions.scheduleLookup(claim,
+                        result.status() == RefundStatus.RECONCILIATION_REQUIRED
+                                ? "RESULT_UNKNOWN" : "VERIFY_REQUIRED");
+            }
+            return;
+        }
+
+        ManualRecoveryInspection inspection;
+        try {
+            var current = payments.inspectManualRecovery(
                         new InspectManualRecoveryQuery(claim.handoffId()));
-                if (current.resultStatus() != ManualRecoveryResultStatus.UNKNOWN) {
-                    transactions.recordInspection(claim, current);
-                    return;
-                }
-                var inspection = payments.reconcileManualRecovery(new ReconcileManualRecoveryCommand(
+            if (current.resultStatus() != ManualRecoveryResultStatus.UNKNOWN) {
+                inspection = current;
+            } else {
+                inspection = payments.reconcileManualRecovery(new ReconcileManualRecoveryCommand(
                         claim.handoffId(), current.handoffVersion(), current.paymentVersion(),
                         current.recoveryVersion()));
-                transactions.recordInspection(claim, inspection);
             }
         } catch (RuntimeException failure) {
             transactions.recordFailure(claim);
+            return;
         }
+        transactions.recordInspection(claim, inspection);
     }
 }

@@ -37,7 +37,6 @@ import com.miriyum.domain.platformoperator.service.HighRiskCommandGuard;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorAuditWriter;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorAuditWriter.RecoveryEvent;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
-import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -45,10 +44,8 @@ import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Map;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -92,6 +89,7 @@ public class PaymentRecoveryCommandService {
                     principal, PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE, recoveryCase,
                     caseId, approval, correlationId));
             recoveryCase.beginInvestigation(request.expectedCaseVersion(), clock.instant());
+            cases.saveAndFlush(recoveryCase);
             assignments.assign(new AdminCaseAssignmentCommand(AdminCaseType.PAYMENT_RECOVERY,
                     caseId, recoveryCase.getCaseVersion(), principal.accountId(),
                     clock.instant().plus(Duration.ofMinutes(30))));
@@ -118,6 +116,7 @@ public class PaymentRecoveryCommandService {
             PaymentRecoveryExecution execution = PaymentRecoveryExecution.authorizeRequery(
                     recoveryCase, context.operatorId(), context.authorityVersion(), clock.instant());
             recoveryCase.queueRequery(request.expectedCaseVersion(), clock.instant());
+            cases.saveAndFlush(recoveryCase);
             executions.saveAndFlush(execution);
             append(context, PlatformOperatorAuditAction.PAYMENT_RECOVERY_REQUERY_REQUESTED,
                     execution.getExecutionKey(), command.idempotencyKey(), before,
@@ -171,6 +170,7 @@ public class PaymentRecoveryCommandService {
             recoveryCase.recordProposal(request.expectedCaseVersion(), proposalVersion,
                     proposal.getApprovalTier(), clock.instant());
             Long approverId = null;
+            PaymentRecoveryExecution execution = null;
             if (proposal.getApprovalTier() == ApprovalTier.SINGLE_OPERATOR) {
                 PaymentRecoveryApproval selfApproval = approvals.saveAndFlush(
                         PaymentRecoveryApproval.approve(proposal, context.operatorId(),
@@ -178,12 +178,22 @@ public class PaymentRecoveryCommandService {
                                 command.idempotencyKey(), clock.instant()));
                 approverId = selfApproval.getApproverPlatformOperatorAccountId();
                 recoveryCase.queueExecution(recoveryCase.getCaseVersion(), clock.instant());
-                executions.saveAndFlush(PaymentRecoveryExecution.authorize(
+                execution = executions.saveAndFlush(PaymentRecoveryExecution.authorize(
                         proposal, selfApproval, clock.instant()));
             }
+            cases.saveAndFlush(recoveryCase);
             append(context, PlatformOperatorAuditAction.PAYMENT_RECOVERY_PROPOSED,
                     caseId + ":" + proposalVersion, command.idempotencyKey(), before,
-                    PaymentRecoveryAuditSnapshots.caseSnapshot(recoveryCase));
+                    PaymentRecoveryAuditSnapshots.proposalSnapshot(
+                            recoveryCase, proposal, approverId));
+            if (execution != null) {
+                append(context, PlatformOperatorAuditAction.PAYMENT_RECOVERY_EXECUTION_QUEUED,
+                        execution.getExecutionKey(), command.idempotencyKey(),
+                        PaymentRecoveryAuditSnapshots.proposalSnapshot(
+                                recoveryCase, proposal, approverId),
+                        PaymentRecoveryAuditSnapshots.executionSnapshot(
+                                recoveryCase, proposal, execution));
+            }
             return success(HttpStatus.CREATED, "PAYMENT_RECOVERY_PROPOSAL",
                     caseId + ":" + proposalVersion, ProposalData.from(proposal, approverId));
         });
@@ -211,11 +221,19 @@ public class PaymentRecoveryCommandService {
                     context.permissions(), command.idempotencyKey(), clock.instant()));
             recoveryCase.recordAdditionalApproval(request.expectedCaseVersion(), clock.instant());
             recoveryCase.queueExecution(recoveryCase.getCaseVersion(), clock.instant());
+            cases.saveAndFlush(recoveryCase);
             PaymentRecoveryExecution execution = executions.saveAndFlush(
                     PaymentRecoveryExecution.authorize(proposal, approved, clock.instant()));
             append(context, PlatformOperatorAuditAction.PAYMENT_RECOVERY_APPROVED,
                     execution.getExecutionKey(), command.idempotencyKey(), before,
-                    PaymentRecoveryAuditSnapshots.caseSnapshot(recoveryCase));
+                    PaymentRecoveryAuditSnapshots.proposalSnapshot(
+                            recoveryCase, proposal, approved.getApproverPlatformOperatorAccountId()));
+            append(context, PlatformOperatorAuditAction.PAYMENT_RECOVERY_EXECUTION_QUEUED,
+                    execution.getExecutionKey(), command.idempotencyKey(),
+                    PaymentRecoveryAuditSnapshots.proposalSnapshot(
+                            recoveryCase, proposal, approved.getApproverPlatformOperatorAccountId()),
+                    PaymentRecoveryAuditSnapshots.executionSnapshot(
+                            recoveryCase, proposal, execution));
             return success(HttpStatus.OK, "PAYMENT_RECOVERY_EXECUTION",
                     execution.getExecutionKey(), ExecutionData.from(execution));
         });
@@ -238,6 +256,7 @@ public class PaymentRecoveryCommandService {
                             PaymentRecoveryErrorCode.RECOVERY_APPROVER_MUST_DIFFER); });
             var before = PaymentRecoveryAuditSnapshots.caseSnapshot(recoveryCase);
             recoveryCase.closeUnresolved(request.expectedCaseVersion(), clock.instant());
+            cases.saveAndFlush(recoveryCase);
             append(context, PlatformOperatorAuditAction.PAYMENT_RECOVERY_CLOSED,
                     caseId, command.idempotencyKey(), before,
                     PaymentRecoveryAuditSnapshots.caseSnapshot(recoveryCase));

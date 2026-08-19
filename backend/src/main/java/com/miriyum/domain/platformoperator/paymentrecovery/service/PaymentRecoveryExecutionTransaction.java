@@ -2,9 +2,17 @@ package com.miriyum.domain.platformoperator.paymentrecovery.service;
 
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryInspection;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryResultStatus;
+import com.miriyum.domain.platformoperator.dto.authorization.AdminAuditContext;
 import com.miriyum.domain.platformoperator.dto.authorization.AdminCaseAssignmentRequest;
+import com.miriyum.domain.platformoperator.dto.authorization.OperatorAuthority;
 import com.miriyum.domain.platformoperator.enums.AdminCaseType;
+import com.miriyum.domain.platformoperator.enums.AdminCommandPurpose;
+import com.miriyum.domain.platformoperator.enums.AdminTargetType;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuditAction;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuditOutcome;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuditReason;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryCase;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.CaseStatus;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.ExecutionStatus;
@@ -15,6 +23,8 @@ import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRec
 import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRecoveryExecutionRepository;
 import com.miriyum.domain.platformoperator.service.AdminCaseAssignmentVerifier;
 import com.miriyum.domain.platformoperator.service.OperatorAuthorityReader;
+import com.miriyum.domain.platformoperator.service.PlatformOperatorAuditWriter;
+import com.miriyum.domain.platformoperator.service.PlatformOperatorAuditWriter.RecoveryEvent;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.Duration;
@@ -35,15 +45,18 @@ public class PaymentRecoveryExecutionTransaction {
     private final PaymentRecoveryCaseRepository cases;
     private final OperatorAuthorityReader authorities;
     private final AdminCaseAssignmentVerifier assignments;
+    private final PlatformOperatorAuditWriter audit;
     private final Clock clock;
 
     public PaymentRecoveryExecutionTransaction(
             PaymentRecoveryExecutionRepository executions, PaymentRecoveryCaseRepository cases,
-            OperatorAuthorityReader authorities, AdminCaseAssignmentVerifier assignments, Clock clock) {
+            OperatorAuthorityReader authorities, AdminCaseAssignmentVerifier assignments,
+            PlatformOperatorAuditWriter audit, Clock clock) {
         this.executions = executions;
         this.cases = cases;
         this.authorities = authorities;
         this.assignments = assignments;
+        this.audit = audit;
         this.clock = clock;
     }
 
@@ -58,21 +71,27 @@ public class PaymentRecoveryExecutionTransaction {
         PaymentRecoveryCase recoveryCase = lockedCase(execution.getCasePublicId());
         requireAuthorizedCaseState(execution, recoveryCase);
         long token = execution.claim(owner, now, now.plus(Duration.ofSeconds(30)));
+        OperatorAuthority requester;
         try {
-            requireActorsAndAssignment(execution, recoveryCase);
+            requester = requireActorsAndAssignment(execution, recoveryCase);
         } catch (RuntimeException denied) {
+            var before = PaymentRecoveryAuditSnapshots.executionStateSnapshot(recoveryCase, execution);
             execution.markHold(owner, token, "AUTHORIZATION_REJECTED", now);
             if (recoveryCase.getStatus() == CaseStatus.EXECUTING) {
                 recoveryCase.holdFromInvestigation(recoveryCase.getCaseVersion(), now);
             } else {
                 recoveryCase.hold(recoveryCase.getCaseVersion(), now);
             }
+            append(execution, recoveryCase, Set.of(), Set.of(),
+                    PlatformOperatorAuditAction.PAYMENT_RECOVERY_HELD,
+                    PlatformOperatorAuditOutcome.DENIED, before);
             return Optional.empty();
         }
         return Optional.of(new Claim(execution.getId(), recoveryCase.getPublicId(),
                 recoveryCase.getHandoffId(), execution.getOperation(), execution.getOperationId(),
                 execution.getExpectedHandoffVersion(), execution.getExpectedPaymentVersion(),
-                execution.getExpectedRecoveryVersion(), owner, token));
+                execution.getExpectedRecoveryVersion(), owner, token,
+                requester.roles(), requester.permissions()));
     }
 
     @Transactional
@@ -80,10 +99,14 @@ public class PaymentRecoveryExecutionTransaction {
         Instant now = clock.instant();
         PaymentRecoveryExecution execution = lockedExecution(claim);
         PaymentRecoveryCase recoveryCase = lockedCase(execution.getCasePublicId());
+        var before = PaymentRecoveryAuditSnapshots.executionStateSnapshot(recoveryCase, execution);
         execution.markUnknown(claim.owner(), claim.leaseToken(), now, now.plusSeconds(10));
         if (recoveryCase.getStatus() == CaseStatus.EXECUTING) {
             recoveryCase.startVerification(recoveryCase.getCaseVersion(), now);
         }
+        append(claim, execution, recoveryCase,
+                PlatformOperatorAuditAction.PAYMENT_RECOVERY_EXECUTED,
+                PlatformOperatorAuditOutcome.SUCCESS, before);
     }
 
     @Transactional
@@ -91,6 +114,7 @@ public class PaymentRecoveryExecutionTransaction {
         Instant now = clock.instant();
         PaymentRecoveryExecution execution = lockedExecution(claim);
         PaymentRecoveryCase recoveryCase = lockedCase(execution.getCasePublicId());
+        var before = PaymentRecoveryAuditSnapshots.executionStateSnapshot(recoveryCase, execution);
         if (!recoveryCase.getHandoffId().equals(inspection.handoffId())) conflict();
         if (inspection.resultStatus() == ManualRecoveryResultStatus.SUCCEEDED) {
             execution.markSucceeded(claim.owner(), claim.leaseToken(), "SUCCEEDED", now);
@@ -98,21 +122,33 @@ public class PaymentRecoveryExecutionTransaction {
                 recoveryCase.startVerification(recoveryCase.getCaseVersion(), now);
             }
             recoveryCase.complete(recoveryCase.getCaseVersion(), now);
+            append(claim, execution, recoveryCase,
+                    PlatformOperatorAuditAction.PAYMENT_RECOVERY_VERIFIED,
+                    PlatformOperatorAuditOutcome.SUCCESS, before);
         } else if (inspection.resultStatus() == ManualRecoveryResultStatus.FAILED) {
             execution.markFailed(claim.owner(), claim.leaseToken(), "PROVIDER_FAILED", now);
             recoveryCase.fail(recoveryCase.getCaseVersion(), now);
+            append(claim, execution, recoveryCase,
+                    PlatformOperatorAuditAction.PAYMENT_RECOVERY_VERIFIED,
+                    PlatformOperatorAuditOutcome.FAILED, before);
         } else if (execution.getLookupAttemptCount() >= MAX_LOOKUPS) {
             execution.markHold(claim.owner(), claim.leaseToken(), "LOOKUP_EXHAUSTED", now);
             if (recoveryCase.getStatus() == CaseStatus.EXECUTING) {
                 recoveryCase.startVerification(recoveryCase.getCaseVersion(), now);
             }
             recoveryCase.hold(recoveryCase.getCaseVersion(), now);
+            append(claim, execution, recoveryCase,
+                    PlatformOperatorAuditAction.PAYMENT_RECOVERY_HELD,
+                    PlatformOperatorAuditOutcome.SUCCESS, before);
         } else {
             execution.markUnknown(claim.owner(), claim.leaseToken(), now,
                     now.plusSeconds(Math.min(300L, 10L << execution.getLookupAttemptCount())));
             if (recoveryCase.getStatus() == CaseStatus.EXECUTING) {
                 recoveryCase.startVerification(recoveryCase.getCaseVersion(), now);
             }
+            append(claim, execution, recoveryCase,
+                    PlatformOperatorAuditAction.PAYMENT_RECOVERY_EXECUTED,
+                    PlatformOperatorAuditOutcome.SUCCESS, before);
         }
     }
 
@@ -130,8 +166,12 @@ public class PaymentRecoveryExecutionTransaction {
         Instant now = clock.instant();
         PaymentRecoveryExecution execution = lockedExecution(claim);
         PaymentRecoveryCase recoveryCase = lockedCase(execution.getCasePublicId());
+        var before = PaymentRecoveryAuditSnapshots.executionStateSnapshot(recoveryCase, execution);
         execution.markFailed(claim.owner(), claim.leaseToken(), "PROVIDER_FAILED", now);
         recoveryCase.fail(recoveryCase.getCaseVersion(), now);
+        append(claim, execution, recoveryCase,
+                PlatformOperatorAuditAction.PAYMENT_RECOVERY_EXECUTED,
+                PlatformOperatorAuditOutcome.FAILED, before);
     }
 
     private static void requireAuthorizedCaseState(
@@ -147,7 +187,7 @@ public class PaymentRecoveryExecutionTransaction {
         if (!expectedCaseState) conflict();
     }
 
-    private void requireActorsAndAssignment(
+    private OperatorAuthority requireActorsAndAssignment(
             PaymentRecoveryExecution execution, PaymentRecoveryCase recoveryCase) {
         var requester = authorities.requireCurrentAuthority(
                 execution.getRequesterPlatformOperatorAccountId(), execution.getRequesterAuthorityVersion());
@@ -162,6 +202,32 @@ public class PaymentRecoveryExecutionTransaction {
             if (!approver.permissions().contains(
                     PlatformOperatorPermission.PAYMENT_RECOVERY_HIGH_VALUE_APPROVE)) conflict();
         }
+        return requester;
+    }
+
+    private void append(Claim claim, PaymentRecoveryExecution execution,
+                        PaymentRecoveryCase recoveryCase, PlatformOperatorAuditAction action,
+                        PlatformOperatorAuditOutcome outcome, java.util.Map<String, Object> before) {
+        append(execution, recoveryCase, claim.requesterRoles(), claim.requesterPermissions(),
+                action, outcome, before);
+    }
+
+    private void append(PaymentRecoveryExecution execution, PaymentRecoveryCase recoveryCase,
+                        Set<PlatformOperatorRole> roles,
+                        Set<PlatformOperatorPermission> permissions,
+                        PlatformOperatorAuditAction action, PlatformOperatorAuditOutcome outcome,
+                        java.util.Map<String, Object> before) {
+        AdminAuditContext context = new AdminAuditContext(
+                execution.getRequesterPlatformOperatorAccountId(), roles, permissions,
+                execution.getRequesterAuthorityVersion(), AdminCaseType.PAYMENT_RECOVERY,
+                recoveryCase.getPublicId(), recoveryCase.getCaseVersion(),
+                AdminCommandPurpose.PAYMENT_RECOVERY, AdminTargetType.PAYMENT_RECOVERY_CASE,
+                execution.getExecutionKey(), null,
+                "payment-recovery-worker:" + execution.getExecutionKey());
+        audit.appendRecovery(new RecoveryEvent(context, action, outcome,
+                PlatformOperatorAuditReason.PAYMENT_RECOVERY, "PAYMENT_RECOVERY_EXECUTION",
+                execution.getExecutionKey(), null, before,
+                PaymentRecoveryAuditSnapshots.executionStateSnapshot(recoveryCase, execution)));
     }
 
     private PaymentRecoveryExecution lockedExecution(Claim claim) {
@@ -192,6 +258,12 @@ public class PaymentRecoveryExecutionTransaction {
     public record Claim(long executionId, String caseId, String handoffId,
                         RecoveryAction operation, String operationId,
                         long expectedHandoffVersion, long expectedPaymentVersion,
-                        long expectedRecoveryVersion, String owner, long leaseToken) {
+                        long expectedRecoveryVersion, String owner, long leaseToken,
+                        Set<PlatformOperatorRole> requesterRoles,
+                        Set<PlatformOperatorPermission> requesterPermissions) {
+        public Claim {
+            requesterRoles = Set.copyOf(requesterRoles);
+            requesterPermissions = Set.copyOf(requesterPermissions);
+        }
     }
 }

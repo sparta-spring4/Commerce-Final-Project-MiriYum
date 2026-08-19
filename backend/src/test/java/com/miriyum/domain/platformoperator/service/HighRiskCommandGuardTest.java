@@ -3,6 +3,7 @@ package com.miriyum.domain.platformoperator.service;
 import static com.miriyum.domain.platformoperator.enums.AdminCommandPurpose.PAYMENT_RECOVERY;
 import static com.miriyum.domain.platformoperator.enums.AdminTargetType.PAYMENT_RECOVERY_CASE;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE;
+import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.PAYMENT_RECOVERY_HIGH_VALUE_APPROVE;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -101,6 +102,41 @@ class HighRiskCommandGuardTest {
             assertThat(context.operatorId()).isEqualTo(7L);
             verifyNoInteractions(assignments);
         }
+    }
+
+    @Test
+    void secondaryPaymentRecoveryApprovalUsesExactCaseBoundTargetWithoutAssignmentCheck() {
+        when(authorities.requireCurrentAuthority(7L, 3L)).thenReturn(new OperatorAuthority(
+                7L, 3L, Set.of(), Set.of(PAYMENT_RECOVERY_HIGH_VALUE_APPROVE)));
+        when(approvals.consumeBoundApproval(any(), any(Long.class), any(), any(), any(), any(), any(Long.class), any()))
+                .thenReturn(1);
+        HighRiskCommandRequest secondary = new HighRiskCommandRequest(
+                request.principal(), PAYMENT_RECOVERY_HIGH_VALUE_APPROVE, request.caseType(),
+                request.caseId(), request.caseVersion(), request.purpose(), request.targetType(),
+                request.caseId() + ":proposal:1", "approval-raw", request.correlationId());
+
+        try (MockedStatic<TransactionSynchronizationManager> tx = mockStatic(TransactionSynchronizationManager.class)) {
+            tx.when(TransactionSynchronizationManager::isActualTransactionActive).thenReturn(true);
+            assertThat(guard.authorizeSecondaryPaymentRecoveryCommand(secondary).operatorId()).isEqualTo(7L);
+            verifyNoInteractions(assignments);
+        }
+    }
+
+    @Test
+    void secondaryPaymentRecoveryApprovalRejectsCasePrefixCollision() {
+        HighRiskCommandRequest collision = new HighRiskCommandRequest(
+                request.principal(), PAYMENT_RECOVERY_HIGH_VALUE_APPROVE, request.caseType(),
+                request.caseId(), request.caseVersion(), request.purpose(), request.targetType(),
+                request.caseId() + "-other:proposal:1", "approval-raw", request.correlationId());
+
+        try (MockedStatic<TransactionSynchronizationManager> tx = mockStatic(TransactionSynchronizationManager.class)) {
+            tx.when(TransactionSynchronizationManager::isActualTransactionActive).thenReturn(true);
+            assertThatThrownBy(() -> guard.authorizeSecondaryPaymentRecoveryCommand(collision))
+                    .isInstanceOf(ServiceException.class)
+                    .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                            .isEqualTo(AdminAuthorizationErrorCode.AUTHORIZATION_DENIED));
+        }
+        verifyNoInteractions(accounts, authorities, assignments, approvals);
     }
 
     @Test

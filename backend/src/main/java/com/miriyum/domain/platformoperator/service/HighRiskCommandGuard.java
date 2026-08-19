@@ -93,7 +93,7 @@ public class HighRiskCommandGuard {
                 || request.targetType() != AdminTargetType.PAYMENT_RECOVERY_CASE
                 || request.requiredPermission()
                 != PlatformOperatorPermission.PAYMENT_RECOVERY_HIGH_VALUE_APPROVE
-                || !request.targetId().startsWith(request.caseId())) {
+                || !isSecondaryPaymentRecoveryTarget(request.caseId(), request.targetId())) {
             deny();
         }
         try {
@@ -101,6 +101,14 @@ public class HighRiskCommandGuard {
         } catch (DataAccessException exception) {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
+    }
+
+    private static boolean isSecondaryPaymentRecoveryTarget(String caseId, String targetId) {
+        if (targetId.equals(caseId + ":closure")) return true;
+        String proposalPrefix = caseId + ":proposal:";
+        if (!targetId.startsWith(proposalPrefix)) return false;
+        String proposalVersion = targetId.substring(proposalPrefix.length());
+        return proposalVersion.matches("[1-9][0-9]*");
     }
 
     private AdminAuditContext authorizeAgainstStores(

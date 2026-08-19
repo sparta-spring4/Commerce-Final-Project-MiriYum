@@ -1,5 +1,7 @@
 package com.miriyum.domain.platformoperator.paymentrecovery.service;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -10,6 +12,8 @@ import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryIns
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryResultStatus;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RequestManualRecoveryRefundCommand;
 import com.miriyum.domain.payment.service.PaymentService;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.RecoveryAction;
 import java.time.Instant;
 import java.util.Optional;
@@ -99,10 +103,30 @@ class PaymentRecoveryExecutionJobTest {
                 org.mockito.ArgumentMatchers.any());
     }
 
+    @Test
+    void localCommitFailureIsNotMisclassifiedAsUnknownProviderResult() {
+        var claim = claim(RecoveryAction.REQUERY_PROVIDER_RESULT);
+        when(transactions.claim("worker-281")).thenReturn(Optional.of(claim));
+        ManualRecoveryInspection succeeded = new ManualRecoveryInspection(
+                "281", 8L, 9L, 10L,
+                com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryKind.REFUND_RESULT_UNKNOWN,
+                300_000L, 300_000L, 0L, "KRW", ManualRecoveryResultStatus.SUCCEEDED,
+                Set.of(), "port********abc");
+        when(payments.inspectManualRecovery(org.mockito.ArgumentMatchers.any())).thenReturn(succeeded);
+        doThrow(new IllegalStateException("local commit failed"))
+                .when(transactions).recordInspection(claim, succeeded);
+
+        assertThatThrownBy(job::runOnce).isInstanceOf(IllegalStateException.class);
+
+        verify(transactions, never()).recordFailure(claim);
+    }
+
     private static PaymentRecoveryExecutionTransaction.Claim claim(RecoveryAction operation) {
         return new PaymentRecoveryExecutionTransaction.Claim(
                 1L, "550e8400-e29b-41d4-a716-446655440281", "281", operation,
                 "550e8400-e29b-41d4-a716-446655440282", 3L, 4L, 5L,
-                "worker-281", 7L);
+                "worker-281", 7L,
+                Set.of(PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR),
+                Set.of(PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE));
     }
 }

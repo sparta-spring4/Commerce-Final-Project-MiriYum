@@ -58,7 +58,7 @@ public class PaymentRecoveryQueryService {
                 result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages());
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public CaseDetail detail(PlatformOperatorPrincipal principal, String caseId) {
         requirePermission(principal);
         var recoveryCase = cases.findByPublicId(caseId)
