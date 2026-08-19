@@ -133,6 +133,35 @@ class PaymentMigrationTest {
         }
     }
 
+    @Test
+    @DisplayName("V59 데이터를 보존하며 V60 수동 복구 handoff와 전달 outbox를 추가한다")
+    void upgradesV59ToPaymentRecoveryV60() throws Exception {
+        try (MySQLContainer mysql = new MySQLContainer(MYSQL_IMAGE)
+                .withCommand("--log-bin-trust-function-creators=1")) {
+            mysql.start();
+            Flyway.configure()
+                    .dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())
+                    .target(MigrationVersion.fromVersion("59"))
+                    .load()
+                    .migrate();
+
+            Flyway upgraded = Flyway.configure()
+                    .dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())
+                    .load();
+            upgraded.migrate();
+
+            assertThat(upgraded.info().applied())
+                    .extracting(MigrationInfo::getScript)
+                    .contains("V60__create_payment_recovery_handoffs.sql");
+            try (Connection connection = mysql.createConnection("")) {
+                assertThat(tableCount(connection, "payment_recovery_handoffs"))
+                        .isEqualTo(1L);
+                assertThat(tableCount(connection, "reservation_payment_recovery_outbox"))
+                        .isEqualTo(1L);
+            }
+        }
+    }
+
     private static void insertExistingConsumer(MySQLContainer mysql) throws Exception {
         try (Connection connection = mysql.createConnection("");
              PreparedStatement statement = connection.prepareStatement("""
@@ -160,6 +189,21 @@ class PaymentMigrationTest {
              ResultSet resultSet = statement.executeQuery(sql)) {
             resultSet.next();
             return resultSet.getLong(1);
+        }
+    }
+
+    private static long tableCount(Connection connection, String tableName) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT COUNT(*)
+                  FROM information_schema.tables
+                 WHERE table_schema = DATABASE()
+                   AND table_name = ?
+                """)) {
+            statement.setString(1, tableName);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                return resultSet.getLong(1);
+            }
         }
     }
 
