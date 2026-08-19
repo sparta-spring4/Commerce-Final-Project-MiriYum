@@ -2,35 +2,60 @@
 param()
 
 $ErrorActionPreference = "Stop"
-$terraformDir = Split-Path -Parent $PSScriptRoot
+$ExpectedAccountId = "579750808837"
+$Region = "ap-northeast-2"
+$Cluster = "miriyum-prod-cluster"
+$Service = "miriyum-prod-backend-service"
+$TaskFamily = "miriyum-production-backend"
+$Database = "miriyum-prod-mysql"
+$TimeoutSeconds = 900
 
-Write-Host "This deletes the production ECS service, ALB, NAT Gateway, EIP, and api.miriyum.click record. RDS data is retained and stopped afterward." -ForegroundColor Yellow
+function Assert-AwsContext {
+  $accountId = aws sts get-caller-identity --query Account --output text --region $Region
+  if ($LASTEXITCODE -ne 0 -or $accountId -ne $ExpectedAccountId) {
+    throw "Unexpected AWS account. Expected $ExpectedAccountId."
+  }
+}
+
+function Assert-BackendServiceFamily {
+  $taskDefinition = aws ecs describe-services --cluster $Cluster --services $Service --region $Region --query "services[0].taskDefinition" --output text
+  $family = aws ecs describe-task-definition --task-definition $taskDefinition --region $Region --query "taskDefinition.family" --output text
+  if ($LASTEXITCODE -ne 0 -or $family -ne $TaskFamily) {
+    throw "Unexpected ECS task family. Expected $TaskFamily."
+  }
+}
+
+function Wait-ForRdsStatus([string]$ExpectedStatus) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  do {
+    $status = aws rds describe-db-instances --db-instance-identifier $Database --region $Region --query "DBInstances[0].DBInstanceStatus" --output text
+    if ($LASTEXITCODE -ne 0) { throw "RDS status check failed." }
+    if ($status -eq $ExpectedStatus) { return }
+    Start-Sleep -Seconds 15
+  } while ((Get-Date) -lt $deadline)
+  throw "RDS did not reach $ExpectedStatus within $TimeoutSeconds seconds."
+}
+
+Write-Host "This operation scales only the ECS service to zero and stops RDS. It never deletes infrastructure resources." -ForegroundColor Yellow
 if ((Read-Host "Type DOWN to continue") -cne "DOWN") {
   Write-Host "Cancelled."
   exit 0
 }
 
-Push-Location $terraformDir
-try {
-  terraform apply -var production_infrastructure_enabled=false -var production_backend_desired_count=0
-  if ($LASTEXITCODE -ne 0) { throw "Terraform apply failed." }
+Assert-AwsContext
+Assert-BackendServiceFamily
+aws ecs update-service --cluster $Cluster --service $Service --desired-count 0 --region $Region | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "ECS desired count update failed." }
+aws ecs wait services-stable --cluster $Cluster --services $Service --region $Region
+if ($LASTEXITCODE -ne 0) { throw "ECS service did not stabilize." }
+
+$rdsStatus = aws rds describe-db-instances --db-instance-identifier $Database --region $Region --query "DBInstances[0].DBInstanceStatus" --output text
+if ($rdsStatus -eq "available") {
+  aws rds stop-db-instance --db-instance-identifier $Database --region $Region | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "RDS stop request failed." }
 }
-finally {
-  Pop-Location
+elseif ($rdsStatus -notin @("stopped", "stopping")) {
+  throw "RDS cannot be stopped from state: $rdsStatus"
 }
-
-aws rds stop-db-instance --db-instance-identifier miriyum-prod-mysql | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "RDS stop request failed." }
-
-do {
-  Start-Sleep -Seconds 15
-  $rdsStatus = aws rds describe-db-instances `
-    --db-instance-identifier miriyum-prod-mysql `
-    --query "DBInstances[0].DBInstanceStatus" `
-    --output text
-  if ($LASTEXITCODE -ne 0) { throw "RDS status check failed." }
-  Write-Host "RDS status: $rdsStatus"
-} while ($rdsStatus -eq "stopping")
-
-if ($rdsStatus -ne "stopped") { throw "RDS did not reach stopped state: $rdsStatus" }
-Write-Host "Production is down. RDS is stopped; stored data and backups remain." -ForegroundColor Green
+Wait-ForRdsStatus "stopped"
+Write-Host "Production compute is down. Persistent infrastructure and RDS data remain intact." -ForegroundColor Green

@@ -1,30 +1,37 @@
 #!/usr/bin/env python3
-"""Guards Terraform references required to recreate production after an OFF apply."""
+"""Guards the approved production compute OFF/ON boundary."""
 
 from pathlib import Path
 import unittest
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-ALB_ECS = REPOSITORY_ROOT / "infra/terraform/production/generated-alb-ecs.tf"
-NETWORK = REPOSITORY_ROOT / "infra/terraform/production/generated-network.tf"
+DOWN_SCRIPT = REPOSITORY_ROOT / "infra/terraform/production/scripts/production-down.ps1"
+UP_SCRIPT = REPOSITORY_ROOT / "infra/terraform/production/scripts/production-up.ps1"
 
 
 class ProductionTerraformLifecycleContractTest(unittest.TestCase):
-    def test_recreated_listeners_reference_recreated_resources(self) -> None:
-        source = ALB_ECS.read_text(encoding="utf-8")
+    def test_scripts_limit_changes_to_compute_and_rds_state(self) -> None:
+        source = DOWN_SCRIPT.read_text(encoding="utf-8") + UP_SCRIPT.read_text(encoding="utf-8")
 
-        self.assertEqual(2, source.count("load_balancer_arn                    = aws_lb.production[0].arn"))
-        self.assertIn("arn    = aws_lb_target_group.backend_green[0].arn", source)
-        self.assertIn("arn    = aws_lb_target_group.backend_blue[0].arn", source)
-        self.assertNotIn("loadbalancer/app/miriyum-prod-alb/", source)
-        self.assertNotIn("targetgroup/miriyum-prod-backend", source)
+        self.assertIn('$ExpectedAccountId = "579750808837"', source)
+        self.assertIn('$Region = "ap-northeast-2"', source)
+        self.assertIn('$Cluster = "miriyum-prod-cluster"', source)
+        self.assertIn('$Service = "miriyum-prod-backend-service"', source)
+        self.assertIn('$TaskFamily = "miriyum-production-backend"', source)
+        self.assertIn("--desired-count 0", source)
+        self.assertIn("--desired-count 2", source)
+        self.assertIn("stop-db-instance", source)
+        self.assertIn("start-db-instance", source)
+        self.assertIn("Wait-ForRdsStatus", source)
+        self.assertIn("$TimeoutSeconds = 900", source)
 
-    def test_recreated_nat_does_not_reuse_deleted_network_interface(self) -> None:
-        source = NETWORK.read_text(encoding="utf-8")
+    def test_scripts_do_not_take_terraform_or_persistent_resource_ownership(self) -> None:
+        source = DOWN_SCRIPT.read_text(encoding="utf-8") + UP_SCRIPT.read_text(encoding="utf-8")
 
-        self.assertIn("allocation_id            = aws_eip.production_nat[0].id", source)
-        self.assertNotIn("network_interface", source)
+        self.assertNotIn("terraform ", source.lower())
+        self.assertNotIn("delete-", source.lower())
+        self.assertNotIn("blue/green", source.lower())
 
 
 if __name__ == "__main__":
