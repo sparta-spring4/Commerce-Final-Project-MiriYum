@@ -275,9 +275,10 @@ jobs:
                     {name: "MIRIYUM_CLOUDWATCH_METRICS_ENABLED", value: "true"},
                     {name: "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE", value: "MiriYum/Production"}
                   ])
-                | .secrets = ((.secrets // [] | map(select(.name != "OPENAI_API_KEY"))) + [
-                    {name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}
-                  ])
+                | .secrets = ((.secrets // [] | map(select(.name != "OPENAI_API_KEY"))) +
+                  (if $llm_enabled == "true" then
+                    [{name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}]
+                  else [] end))
               else . end
             )
             | del(
