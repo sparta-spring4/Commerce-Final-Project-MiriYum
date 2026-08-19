@@ -31,6 +31,9 @@ import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRec
 import com.miriyum.domain.platformoperator.repository.AdminCaseAssignmentRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorRoleGrantRepository;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +41,7 @@ import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.yaml.snakeyaml.Yaml;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -71,6 +75,8 @@ import org.testcontainers.mysql.MySQLContainer;
 })
 @AutoConfigureMockMvc
 class PaymentRecoveryHttpIT {
+    private static final Path CONTRACT = Path.of(
+            "..", "docs", "specs", "payment-recovery", "openapi.yaml");
     @Container static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.0.40")
             .withCommand("--log-bin-trust-function-creators=1");
     @Container static final GenericContainer<?> VALKEY = new GenericContainer<>("valkey/valkey:8.1-alpine")
@@ -168,12 +174,14 @@ class PaymentRecoveryHttpIT {
                 update platform_operator_audit_events set target_id = 'tampered'
                 where platform_operator_audit_event_id = ?
                 """, auditId)).isInstanceOf(DataAccessException.class);
-        mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases/{caseId}",
+        String detailResponse = mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases/{caseId}",
                         recoveryCase.getPublicId()).header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.caseId").value(recoveryCase.getPublicId()))
                 .andExpect(content().string(not(containsString("Changed2@"))))
-                .andExpect(content().string(not(containsString(approval))));
+                .andExpect(content().string(not(containsString(approval))))
+                .andReturn().getResponse().getContentAsString();
+        assertMatchesLocalSchema(JsonPath.read(detailResponse, "$"), "CaseDetailEnvelope");
 
         mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases")
                         .header("Authorization", "Bearer "
@@ -361,5 +369,54 @@ class PaymentRecoveryHttpIT {
 
     private static long jsonNumber(String body, String path) {
         return ((Number) JsonPath.read(body, path)).longValue();
+    }
+
+    private static void assertMatchesLocalSchema(Object value, String schemaName) throws Exception {
+        try (InputStream input = Files.newInputStream(CONTRACT)) {
+            Map<String, Object> document = map(new Yaml().load(input));
+            Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+            assertMatchesSchema(value, map(schemas.get(schemaName)), schemas);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void assertMatchesSchema(
+            Object value, Map<String, Object> schema, Map<String, Object> schemas) {
+        Object reference = schema.get("$ref");
+        if (reference instanceof String ref) {
+            if (ref.startsWith("#/components/schemas/")) {
+                assertMatchesSchema(value,
+                        map(schemas.get(ref.substring("#/components/schemas/".length()))), schemas);
+            }
+            return;
+        }
+        Object allOf = schema.get("allOf");
+        if (allOf instanceof List<?> branches) {
+            branches.forEach(branch -> assertMatchesSchema(value, map(branch), schemas));
+        }
+        if (value instanceof Map<?, ?> object) {
+            Map<String, Object> properties = schema.containsKey("properties")
+                    ? map(schema.get("properties")) : Map.of();
+            List<String> required = schema.containsKey("required")
+                    ? (List<String>) schema.get("required") : List.of();
+            Set<String> actualKeys = object.keySet().stream()
+                    .map(String::valueOf).collect(java.util.stream.Collectors.toSet());
+            assertThat(actualKeys).containsAll(required);
+            if (Boolean.FALSE.equals(schema.get("additionalProperties"))) {
+                assertThat(actualKeys).isSubsetOf(properties.keySet());
+            }
+            properties.forEach((name, propertySchema) -> {
+                if (object.containsKey(name) && object.get(name) != null) {
+                    assertMatchesSchema(object.get(name), map(propertySchema), schemas);
+                }
+            });
+        } else if (value instanceof List<?> values && schema.containsKey("items")) {
+            values.forEach(item -> assertMatchesSchema(item, map(schema.get("items")), schemas));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> map(Object value) {
+        return (Map<String, Object>) value;
     }
 }
