@@ -53,10 +53,37 @@ describe('회원지원 사건 결정', () => {
     server.use(
       authenticatedPlatformOperator(),
       currentPlatformOperator({
-        permissions: ['MEMBER_RECOVERY', 'ACCOUNT_APPEAL_REVIEW'],
+        permissions: [
+          'MEMBER_READ_MINIMAL',
+          'MEMBER_RECOVERY',
+          'ACCOUNT_APPEAL_REVIEW',
+        ],
       }),
     )
   })
+
+  test.each([
+    ['ACCOUNT_RECOVERY', 'MEMBER_RECOVERY'],
+    ['ACCOUNT_APPEAL', 'ACCOUNT_APPEAL_REVIEW'],
+  ] as const)(
+    '%s 사건의 명령 권한이 없으면 배정과 결정 UI를 노출하지 않는다',
+    async (caseType, requiredPermission) => {
+      server.use(
+        currentPlatformOperator({ permissions: ['MEMBER_READ_MINIMAL'] }),
+        http.get(DETAIL_PATH, () => successResponse(supportCase(caseType))),
+      )
+      renderPage()
+
+      expect(await screen.findByText('case-1001')).toBeInTheDocument()
+      expect(
+        screen.queryByRole('button', { name: '나에게 배정' }),
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('form', { name: '사건 결정' }),
+      ).not.toBeInTheDocument()
+      expect(screen.getByText(requiredPermission)).toBeInTheDocument()
+    },
+  )
 
   test('계정 복구 사건에는 서버가 허용하는 승인과 반려만 노출한다', async () => {
     server.use(http.get(DETAIL_PATH, () => successResponse(supportCase('ACCOUNT_RECOVERY'))))

@@ -17,6 +17,7 @@ import {
 } from '../api/auditApi'
 import { auditEventDetailPath } from '../model/paths'
 import { AuditReviewContextForm } from './AuditReviewContextForm'
+import { OperatorCapabilityGate } from './OperatorAccessDenied'
 import { OUTCOME_LABEL, OUTCOME_TONE, REASON_LABEL, SOURCE_LABEL } from './auditLabels'
 import './page.css'
 
@@ -36,6 +37,14 @@ const PAGE_SIZE = 20
  * 값을 화면이 지어내면 감사 기록에 거짓 사유가 남으므로 운영자가 직접 넣는다.
  */
 export function AuditSearchPage() {
+  return (
+    <OperatorCapabilityGate permission="AUDIT_READ">
+      <AuditSearchContent />
+    </OperatorCapabilityGate>
+  )
+}
+
+function AuditSearchContent() {
   const { apiClient } = usePlatformOperatorAuth()
   const [context, setContext] = useState<AuditReviewContext | null>(null)
 

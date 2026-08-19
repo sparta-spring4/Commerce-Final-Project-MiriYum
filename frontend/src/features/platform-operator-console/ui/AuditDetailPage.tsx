@@ -9,7 +9,10 @@ import { Badge } from '../../../shared/ui/Badge'
 import { Button } from '../../../shared/ui/Button'
 import { SelectField, TextField } from '../../../shared/ui/Field'
 import { Alert, EmptyState, ErrorState, Loading } from '../../../shared/ui/Feedback'
-import { usePlatformOperatorAuth } from '../../platform-operator-auth'
+import {
+  decideCapability,
+  usePlatformOperatorAuth,
+} from '../../platform-operator-auth'
 import {
   auditQueryKeys,
   createAuditCorrection,
@@ -20,6 +23,7 @@ import {
   type AuditReviewContext,
 } from '../api/auditApi'
 import { AuditReviewContextForm } from './AuditReviewContextForm'
+import { OperatorCapabilityGate } from './OperatorAccessDenied'
 import { OUTCOME_LABEL, OUTCOME_TONE, REASON_LABEL, SOURCE_LABEL } from './auditLabels'
 import { useLogicalCommandAttempt } from './OperatorCommandFields'
 import { ReauthenticationDialog } from './ReauthenticationDialog'
@@ -37,6 +41,14 @@ import './page.css'
  * 그래서 화면 문구도 "수정"이 아니라 "보정 사건 추가"다.
  */
 export function AuditDetailPage() {
+  return (
+    <OperatorCapabilityGate permission="AUDIT_READ">
+      <AuditDetailContent />
+    </OperatorCapabilityGate>
+  )
+}
+
+function AuditDetailContent() {
   const params = useParams<{ eventKey: string }>()
   const eventKey = params.eventKey
   const [context, setContext] = useState<AuditReviewContext | null>(null)
@@ -78,7 +90,7 @@ function AuditDetailBody({
   context: AuditReviewContext
   onChangeContext: () => void
 }) {
-  const { apiClient } = usePlatformOperatorAuth()
+  const { apiClient, capabilities } = usePlatformOperatorAuth()
 
   const eventQuery = useQuery({
     queryKey: auditQueryKeys.detail(context, eventKey),
@@ -164,11 +176,16 @@ function AuditDetailBody({
             )}
           </section>
 
-          <CorrectionForm
-            event={eventQuery.data.original}
-            context={context}
-            onCorrected={() => void eventQuery.refetch()}
-          />
+          {decideCapability(
+            capabilities,
+            'OPERATOR_AUTHORITY_MANAGE',
+          ) === 'allowed' && (
+            <CorrectionForm
+              event={eventQuery.data.original}
+              context={context}
+              onCorrected={() => void eventQuery.refetch()}
+            />
+          )}
         </>
       )}
     </section>

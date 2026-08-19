@@ -3,7 +3,10 @@ import { useQuery } from '@tanstack/react-query'
 import { ROUTES } from '../../../app/routes'
 import { Badge, type BadgeTone } from '../../../shared/ui/Badge'
 import { EmptyState, ErrorState, Loading } from '../../../shared/ui/Feedback'
-import { usePlatformOperatorAuth } from '../../platform-operator-auth'
+import {
+  decideCapability,
+  usePlatformOperatorAuth,
+} from '../../platform-operator-auth'
 import { SanctionForm } from './SanctionForm'
 import {
   fetchMember,
@@ -12,6 +15,7 @@ import {
   type MemberStatus,
   type SanctionLevel,
 } from '../api/memberSupportApi'
+import { OperatorCapabilityGate } from './OperatorAccessDenied'
 import './page.css'
 
 const ACCOUNT_TYPE_LABEL: Record<AccountType, string> = {
@@ -61,7 +65,15 @@ const RESTRICTED_FEATURE_LABEL: Record<string, string> = {
  * 바뀐 것을 알아차릴 수 있어야 한다.
  */
 export function MemberDetailPage() {
-  const { apiClient } = usePlatformOperatorAuth()
+  return (
+    <OperatorCapabilityGate permission="MEMBER_READ_MINIMAL">
+      <MemberDetailContent />
+    </OperatorCapabilityGate>
+  )
+}
+
+function MemberDetailContent() {
+  const { apiClient, capabilities } = usePlatformOperatorAuth()
   const params = useParams<{ accountType: string; accountId: string }>()
 
   const accountType = params.accountType
@@ -204,12 +216,14 @@ export function MemberDetailPage() {
             성공 뒤에는 낙관 확정하지 않고 서버에서 상세를 다시 읽는다.
             `supportVersion`이 바뀌므로 재조회 없이는 다음 명령이 409로 거절된다.
           */}
-          <SanctionForm
-            accountType={memberQuery.data.accountType}
-            accountId={memberQuery.data.accountId}
-            supportVersion={memberQuery.data.supportVersion}
-            onApplied={() => void memberQuery.refetch()}
-          />
+          {decideCapability(capabilities, 'ACCOUNT_SANCTION') === 'allowed' && (
+            <SanctionForm
+              accountType={memberQuery.data.accountType}
+              accountId={memberQuery.data.accountId}
+              supportVersion={memberQuery.data.supportVersion}
+              onApplied={() => void memberQuery.refetch()}
+            />
+          )}
         </>
       )}
     </section>

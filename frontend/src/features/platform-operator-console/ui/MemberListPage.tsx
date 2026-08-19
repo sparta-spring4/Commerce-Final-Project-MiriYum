@@ -19,6 +19,7 @@ import {
   type MemberStatus,
 } from '../api/memberSupportApi'
 import { memberDetailPath } from '../model/paths'
+import { OperatorCapabilityGate } from './OperatorAccessDenied'
 import './page.css'
 
 const PAGE_SIZE = 20
@@ -57,6 +58,14 @@ const STATUS_TONE: Record<MemberStatus, BadgeTone> = {
  * 누락이 아니라 계약의 설계다.
  */
 export function MemberListPage() {
+  return (
+    <OperatorCapabilityGate permission="MEMBER_READ_MINIMAL">
+      <MemberListContent />
+    </OperatorCapabilityGate>
+  )
+}
+
+function MemberListContent() {
   const { apiClient, capabilities } = usePlatformOperatorAuth()
   const [accountType, setAccountType] = useState<AccountType | ''>('')
   const [status, setStatus] = useState<MemberStatus | ''>('')

@@ -15,6 +15,7 @@ import {
   type SupportCaseListQuery,
 } from '../api/memberSupportApi'
 import { supportCaseDetailPath } from '../model/paths'
+import { OperatorCapabilityGate } from './OperatorAccessDenied'
 import './page.css'
 
 const PAGE_SIZE = 20
@@ -51,6 +52,14 @@ export const CASE_STATUS_TONE: Record<CaseStatus, BadgeTone> = {
  * 담당자 필터는 계약에 없어 만들지 않았다.
  */
 export function SupportCaseListPage() {
+  return (
+    <OperatorCapabilityGate permission="MEMBER_READ_MINIMAL">
+      <SupportCaseListContent />
+    </OperatorCapabilityGate>
+  )
+}
+
+function SupportCaseListContent() {
   const { apiClient } = usePlatformOperatorAuth()
   const [caseType, setCaseType] = useState<CaseType | ''>('')
   const [status, setStatus] = useState<CaseStatus | ''>('')

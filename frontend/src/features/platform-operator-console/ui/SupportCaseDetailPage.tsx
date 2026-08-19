@@ -10,7 +10,11 @@ import { Button } from '../../../shared/ui/Button'
 import { SelectField, TextField } from '../../../shared/ui/Field'
 import { Alert, EmptyState, ErrorState, Loading } from '../../../shared/ui/Feedback'
 import { AuthErrorCode } from '../../auth/model/authErrors'
-import { usePlatformOperatorAuth } from '../../platform-operator-auth'
+import {
+  decideCapability,
+  usePlatformOperatorAuth,
+  type PlatformOperatorPermission,
+} from '../../platform-operator-auth'
 import {
   assignSupportCase,
   decideSupportCase,
@@ -23,6 +27,7 @@ import {
 } from '../api/memberSupportApi'
 import { accountTargetType } from '../api/reauthenticationApi'
 import { memberDetailPath } from '../model/paths'
+import { OperatorCapabilityGate } from './OperatorAccessDenied'
 import { useLogicalCommandAttempt } from './OperatorCommandFields'
 import {
   CASE_STATUS_LABEL,
@@ -47,6 +52,14 @@ const DECISIONS_BY_CASE_TYPE: Record<
 > = {
   ACCOUNT_RECOVERY: ['APPROVE', 'REJECT'],
   ACCOUNT_APPEAL: ['UPHOLD', 'REDUCE', 'CANCEL'],
+}
+
+const COMMAND_PERMISSION_BY_CASE_TYPE: Record<
+  SupportCase['caseType'],
+  PlatformOperatorPermission
+> = {
+  ACCOUNT_RECOVERY: 'MEMBER_RECOVERY',
+  ACCOUNT_APPEAL: 'ACCOUNT_APPEAL_REVIEW',
 }
 
 const DECISION_LABEL: Record<Decision, string> = {
@@ -89,6 +102,14 @@ const REASON_CODE_PATTERN = /^[A-Z0-9_]+$/
  * version이 바뀌므로 재조회 없이는 다음 명령이 409로 거절된다.
  */
 export function SupportCaseDetailPage() {
+  return (
+    <OperatorCapabilityGate permission="MEMBER_READ_MINIMAL">
+      <SupportCaseDetailContent />
+    </OperatorCapabilityGate>
+  )
+}
+
+function SupportCaseDetailContent() {
   const { apiClient } = usePlatformOperatorAuth()
   const params = useParams<{ caseId: string }>()
   const caseId = params.caseId
@@ -152,11 +173,15 @@ function SupportCaseBody({
   supportCase: SupportCase
   onChanged: () => void
 }) {
-  const { apiClient } = usePlatformOperatorAuth()
+  const { apiClient, capabilities } = usePlatformOperatorAuth()
   const [assigning, setAssigning] = useState(false)
   const [assignError, setAssignError] = useState<string | null>(null)
 
   const isOpen = OPEN_STATUSES.has(supportCase.status)
+  const commandPermission =
+    COMMAND_PERMISSION_BY_CASE_TYPE[supportCase.caseType]
+  const canHandle =
+    decideCapability(capabilities, commandPermission) === 'allowed'
 
   async function handleAssign() {
     setAssigning(true)
@@ -232,6 +257,10 @@ function SupportCaseBody({
       {!isOpen ? (
         <Alert tone="info" title="이미 종결된 사건입니다.">
           종결된 사건에는 배정과 결정을 보낼 수 없습니다.
+        </Alert>
+      ) : !canHandle ? (
+        <Alert tone="warning" title="이 사건을 처리할 권한이 없습니다.">
+          배정과 결정에는 <code>{commandPermission}</code> 권한이 필요합니다.
         </Alert>
       ) : (
         <>
