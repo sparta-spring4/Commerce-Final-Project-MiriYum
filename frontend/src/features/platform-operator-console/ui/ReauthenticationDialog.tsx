@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { isApiError, isNetworkError } from '../../../shared/api/apiError'
 import { CommonErrorCode } from '../../../shared/api/envelope'
 import { Button } from '../../../shared/ui/Button'
@@ -45,6 +45,15 @@ export function ReauthenticationDialog({
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const activeRequestRef = useRef<AbortController | null>(null)
+
+  useEffect(
+    () => () => {
+      activeRequestRef.current?.abort()
+      activeRequestRef.current = null
+    },
+    [],
+  )
 
   /*
    * 처리 중에는 ESC로 닫지 않는다. 승인 발급이 떠 있는 동안 닫으면 발급된
@@ -67,20 +76,34 @@ export function ReauthenticationDialog({
 
     setSubmitting(true)
     setError(null)
+    const request = new AbortController()
+    activeRequestRef.current = request
     try {
       const approval = await createReauthenticationApproval(apiClient, {
         currentPassword: password,
         purpose,
         targetType,
         targetId,
+        signal: request.signal,
       })
+      if (request.signal.aborted || activeRequestRef.current !== request) {
+        return
+      }
       // 평문 비밀번호를 먼저 비운다. 부모 콜백이 던져도 남지 않는다.
       setPassword('')
       onApproved(approval.approval)
     } catch (caught) {
+      if (request.signal.aborted || activeRequestRef.current !== request) {
+        return
+      }
       setError(reauthenticationErrorMessage(caught))
     } finally {
-      setSubmitting(false)
+      if (activeRequestRef.current === request) {
+        activeRequestRef.current = null
+        if (!request.signal.aborted) {
+          setSubmitting(false)
+        }
+      }
     }
   }
 

@@ -24,6 +24,7 @@ export async function createReauthenticationApproval(
     purpose: AdminCommandPurpose
     targetType: AdminTargetType
     targetId: string
+    signal?: AbortSignal
   },
 ): Promise<ReauthenticationApprovalData> {
   const response = await apiClient(
@@ -36,6 +37,7 @@ export async function createReauthenticationApproval(
         targetType: input.targetType,
         targetId: input.targetId,
       },
+      signal: input.signal,
     },
   )
   return response.data

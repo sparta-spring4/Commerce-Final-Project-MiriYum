@@ -339,6 +339,60 @@ describe('영구 정지 추가 승인', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('권한 회수 후 늦게 완료된 재인증으로 승인 명령을 보내지 않는다', async () => {
+    let pendingRequests = 0
+    let approvalRequests = 0
+    let releaseReauthentication: (() => void) | undefined
+    const reauthenticationPending = new Promise<void>((resolve) => {
+      releaseReauthentication = resolve
+    })
+    let queryClient: QueryClient | undefined
+    server.use(
+      http.get(PENDING_APPROVALS_PATH, () => {
+        pendingRequests += 1
+        return pendingRequests === 1
+          ? pendingPage()
+          : errorResponse(403, 'AUTH_011', '권한이 회수됐습니다.')
+      }),
+      http.post(REAUTH_PATH, async () => {
+        await reauthenticationPending
+        return successResponse({
+          approval: 'late-approval',
+          expiresAt: '2026-08-17T10:05:00Z',
+        })
+      }),
+      http.post(APPROVAL_PATH, () => {
+        approvalRequests += 1
+        return approvedSanction('APPLIED')
+      }),
+    )
+    renderPage((client) => {
+      queryClient = client
+    })
+    await selectAndSubmit()
+    fireEvent.change(await screen.findByLabelText('현재 비밀번호'), {
+      target: { value: 'Miriyum1!' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '확인' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '확인' })).toBeDisabled(),
+    )
+
+    await act(async () => {
+      await queryClient!.refetchQueries({ type: 'active' })
+    })
+    expect(
+      await screen.findByText('이 업무를 수행할 권한이 없습니다.'),
+    ).toBeInTheDocument()
+
+    releaseReauthentication!()
+    await act(async () => {
+      await delay(100)
+    })
+
+    expect(approvalRequests).toBe(0)
+  })
+
   it('승인 권한이 없으면 목록 query와 폼을 열지 않는다', async () => {
     let pendingRequests = 0
     server.use(

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { isApiError, isNetworkError } from '../../../shared/api/apiError'
 import { CommonErrorCode } from '../../../shared/api/envelope'
@@ -51,6 +51,7 @@ export function MemberSanctionApprovalPage() {
   const [submitting, setSubmitting] = useState(false)
   const [awaitingReauthentication, setAwaitingReauthentication] =
     useState(false)
+  const commandAccessDeniedRef = useRef(true)
 
   const decision = decideCapability(
     capabilities,
@@ -69,6 +70,8 @@ export function MemberSanctionApprovalPage() {
     pendingQuery.isError &&
     isApiError(pendingQuery.error) &&
     pendingQuery.error.status === 403
+  commandAccessDeniedRef.current =
+    decision !== 'allowed' || !isSuperAdmin || deniedByServer
 
   const { attempt, beginAttempt, clearAttempt, isAttemptCurrent } =
     useLogicalCommandAttempt(
@@ -141,6 +144,11 @@ export function MemberSanctionApprovalPage() {
   }
 
   async function handleApproved(approval: string) {
+    if (commandAccessDeniedRef.current) {
+      setAwaitingReauthentication(false)
+      clearAttempt()
+      return
+    }
     if (selected === null || attempt === null || !isAttemptCurrent()) {
       setAwaitingReauthentication(false)
       clearAttempt()

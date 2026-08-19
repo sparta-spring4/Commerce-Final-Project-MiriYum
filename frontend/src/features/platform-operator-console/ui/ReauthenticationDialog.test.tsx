@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { http } from 'msw'
+import { delay, http } from 'msw'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { successResponse } from '../../../test/msw/envelope'
 import { server } from '../../../test/msw/server'
@@ -171,5 +171,41 @@ describe('재인증 다이얼로그 접근성', () => {
 
     release!()
     await waitFor(() => expect(onApproved).toHaveBeenCalledWith('approval-1'))
+  })
+
+  it('승인 발급 중 unmount되면 늦은 응답을 부모에게 전달하지 않는다', async () => {
+    let release: (() => void) | null = null
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let requestSignal: AbortSignal | undefined
+    server.use(
+      http.post(REAUTH_PATH, async ({ request }) => {
+        requestSignal = request.signal
+        await pending
+        return successResponse({
+          approval: 'late-approval',
+          expiresAt: '2026-08-17T10:05:00Z',
+        })
+      }),
+    )
+    const onApproved = vi.fn()
+    const rendered = render(<Harness onApproved={onApproved} />)
+    openDialog()
+    fireEvent.change(await screen.findByLabelText('현재 비밀번호'), {
+      target: { value: 'Miriyum1!' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '확인' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '확인' })).toBeDisabled(),
+    )
+    await waitFor(() => expect(requestSignal).toBeDefined())
+
+    rendered.unmount()
+    expect(requestSignal!.aborted).toBe(true)
+    release!()
+    await delay(100)
+
+    expect(onApproved).not.toHaveBeenCalled()
   })
 })
