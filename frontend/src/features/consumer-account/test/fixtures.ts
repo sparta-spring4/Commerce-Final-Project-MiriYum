@@ -1,9 +1,17 @@
-import type { ConsumerAccount } from '../api/queries'
+import type {
+  ConsumerAccount,
+  ConsumerPayment,
+  ConsumerPaymentHistory,
+  ConsumerWaitingSnapshot,
+} from '../api/queries'
 import type { ReservationHistoryItem } from '../model/reservationDisplay'
 
 export const CONSUMER_ME_PATH = '/api/v1/consumers/me'
 export const CONSUMER_ME_CONTACT_PATH = '/api/v1/consumers/me/contact'
 export const CONSUMER_ME_RESERVATIONS_PATH = '/api/v1/consumers/me/reservations'
+export const CONSUMER_PAYMENTS_PATH = '/api/v1/consumers/me/payments'
+export const CONSUMER_CURRENT_WAITING_PATH =
+  '/api/v1/consumers/me/waiting-teams/current'
 
 export function consumerAccount(
   overrides: Partial<ConsumerAccount> = {},
@@ -50,5 +58,60 @@ export function reservationHistoryPage(
       totalPages: Math.max(1, Math.ceil(totalElements / 20)),
       hasNext: totalElements > 20,
     },
+  }
+}
+
+export function consumerPayment(
+  overrides: Partial<ConsumerPayment> = {},
+): ConsumerPayment {
+  return {
+    paymentId: '01JBQ8Z4T7K2N9V6M3P5R8W1P1',
+    reservationReferenceId: '01JBQ8Z4T7K2N9V6M3P5R8W1R1',
+    amountMinor: 25_000,
+    refundedAmountMinor: 0,
+    refundableAmountMinor: 25_000,
+    currency: 'KRW',
+    status: 'PAID',
+    lastAttemptStatus: 'PAID',
+    createdAt: '2026-08-19T12:00:00+09:00',
+    paidAt: '2026-08-19T12:00:03+09:00',
+    updatedAt: '2026-08-19T12:00:03+09:00',
+    refunds: [],
+    ...overrides,
+  }
+}
+
+export function consumerPaymentHistory(
+  items: ConsumerPayment[] = [],
+): ConsumerPaymentHistory {
+  return { items, nextCursor: null, hasNext: false }
+}
+
+export function consumerWaitingSnapshot(
+  overrides: Partial<ConsumerWaitingSnapshot> = {},
+): ConsumerWaitingSnapshot {
+  return {
+    waitingTeamId: '01JBQ8Z4T7K2N9V6M3P5R8W1W1',
+    storeId: '01JBQ8Z4T7K2N9V6M3P5R8W1XA',
+    businessDate: '2026-08-19',
+    status: 'WAITING',
+    queueSequence: 7,
+    teamsAhead: 3,
+    partySize: 2,
+    createdAt: '2026-08-19T12:00:00+09:00',
+    calledAt: null,
+    arrivalDeadline: null,
+    arrivedAt: null,
+    cancelledAt: null,
+    version: 1,
+    memberships: [
+      {
+        membershipId: '01JBQ8Z4T7K2N9V6M3P5R8W1M1',
+        role: 'REPRESENTATIVE',
+        joinedAt: '2026-08-19T12:00:00+09:00',
+        self: true,
+      },
+    ],
+    ...overrides,
   }
 }
