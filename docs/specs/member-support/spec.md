@@ -31,7 +31,7 @@
 | --- | --- | --- |
 | 회원 최소 목록·상세 | `MEMBER_READ_MINIMAL` | 권한을 계정 조회보다 먼저 검사 |
 | 복구 사건 배정·결정 | `MEMBER_RECOVERY` | 현재 배정, 사건 version, `MEMBER_RECOVERY` 재인증 |
-| 경고·기능 제한·기간 정지 제안·적용 | `ACCOUNT_SANCTION` | 현재 배정, 사건 version, `ACCOUNT_SANCTION` 재인증 |
+| 경고·기능 제한·기간 정지 제안·적용 | `ACCOUNT_SANCTION` | `ENFORCEMENT_OPERATOR`는 대상의 최소 상세 조회를 위해 `MEMBER_READ_MINIMAL`도 함께 보유. 현재 배정, 사건 version, `ACCOUNT_SANCTION` 재인증 |
 | 영구 정지 추가 승인 | `ACCOUNT_PERMANENT_SANCTION_APPROVE` | 제안자와 다른 `SUPER_ADMIN`, 별도 재인증 |
 | 이의 배정·결정 | `ACCOUNT_APPEAL_REVIEW` | 현재 배정, 사건 version, `ACCOUNT_APPEAL_DECISION` 재인증 |
 

@@ -1,18 +1,29 @@
 package com.miriyum.domain.platformoperator.enums;
 
-import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.AUDIT_READ;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.ACCOUNT_PERMANENT_SANCTION_APPROVE;
+import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.ACCOUNT_SANCTION;
+import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.AUDIT_READ;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.MEMBER_READ_MINIMAL;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.ONBOARDING_EVIDENCE_READ;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.OPERATOR_AUTHORITY_MANAGE;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.OPERATOR_CREATE;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.OPERATOR_SUSPEND;
+import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.STORE_READ_MINIMAL;
+import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.STORE_SANCTION;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 class PlatformOperatorRoleTest {
+
+    @Test
+    @DisplayName("제재 운영자는 회원 최소 조회를 거쳐 계정 제재에 도달할 수 있다")
+    void enforcementOperatorCanReachMemberSanctionFlow() {
+        assertThat(PlatformOperatorRole.ENFORCEMENT_OPERATOR.permissions())
+                .containsExactlyInAnyOrder(
+                        MEMBER_READ_MINIMAL, ACCOUNT_SANCTION, STORE_READ_MINIMAL, STORE_SANCTION);
+    }
 
     @Test
     @DisplayName("슈퍼관리자는 운영자 생명주기 권한만 가지며 포괄 조회 권한을 얻지 않는다")

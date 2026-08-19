@@ -1,0 +1,442 @@
+/*
+ * 콘솔 화면 공통 요소. 셸 토큰(`.po-console`)을 상속해 쓴다.
+ * 컨테이너에 단축 padding을 쓰지 않는다.
+ */
+
+.po-page__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.po-page__title {
+  margin-block: 0 0.25rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 2rem;
+  letter-spacing: -0.02em;
+}
+
+.po-page__subtitle {
+  margin-block: 0;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.po-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding-inline: 1rem;
+  padding-block: 1rem;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card, #fff);
+}
+
+.po-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  max-width: 30rem;
+  padding-inline: 1.5rem;
+  padding-block: 1.5rem;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card, #fff);
+}
+
+/*
+ * 표는 자기 컨테이너 안에서만 가로로 스크롤한다.
+ * 페이지 본문이 가로로 밀리면 좌측 내비까지 함께 흔들린다.
+ */
+.po-table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card, #fff);
+}
+
+.po-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.po-table__caption {
+  padding-inline: 1rem;
+  padding-block: 0.75rem;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.75rem;
+  text-align: start;
+}
+
+.po-table th,
+.po-table td {
+  padding-inline: 1rem;
+  padding-block: 0.875rem;
+  text-align: start;
+  white-space: nowrap;
+}
+
+.po-table thead th {
+  border-block-end: 1px solid var(--po-border, #e9ecef);
+  color: var(--po-text-muted, #454652);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.po-table tbody tr + tr th,
+.po-table tbody tr + tr td {
+  border-block-start: 1px solid var(--po-border, #e9ecef);
+}
+
+.po-table tbody tr:hover {
+  background-color: var(--po-tint, #e8eaf6);
+}
+
+.po-table__link {
+  color: var(--po-navy, #1a237e);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.po-table__link:hover {
+  text-decoration: underline;
+}
+
+.po-section__title {
+  margin-block: 0 1rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.75rem;
+}
+
+.po-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card, #fff);
+}
+
+.po-detail__row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 14rem) 1fr;
+  gap: 1rem;
+  padding-inline: 1rem;
+  padding-block: 0.875rem;
+}
+
+.po-detail__row + .po-detail__row {
+  border-block-start: 1px solid var(--po-border, #e9ecef);
+}
+
+.po-detail dt {
+  margin: 0;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.po-detail dd {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+@media (width <= 40rem) {
+  .po-detail__row {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+}
+
+/*
+ * 재인증 다이얼로그.
+ *
+ * 화면 흐름을 끊는 것이 목적이라 본문 위에 겹친다. 배경은 시안의 scrim 규칙대로
+ * Deep Charcoal 40%를 쓴다.
+ */
+.po-dialog {
+  position: fixed;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  z-index: 20;
+  width: min(26rem, calc(100vw - 2rem));
+  padding-inline: 1.5rem;
+  padding-block: 1.5rem;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card, #fff);
+  box-shadow: 0 4px 12px rgb(26 35 126 / 20%);
+}
+
+.po-dialog__title {
+  margin-block: 0 0.5rem;
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.75rem;
+}
+
+.po-dialog__description {
+  margin-block: 0 1.25rem;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.po-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.po-dialog__notice {
+  margin: 0;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.po-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.po-fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0;
+  padding-inline: 1rem;
+  padding-block: 0.875rem;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 0.5rem;
+}
+
+.po-fieldset__legend {
+  padding-inline: 0.25rem;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.po-fieldset__error {
+  flex-basis: 100%;
+  margin: 0;
+  color: #d32f2f;
+  font-size: 0.8125rem;
+}
+
+.po-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.875rem;
+}
+
+.po-form__notice {
+  margin: 0;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.8125rem;
+  line-height: 1.125rem;
+}
+
+.po-home__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.po-home__card {
+  display: flex;
+  align-items: center;
+  min-height: 5rem;
+  padding-inline: 1.25rem;
+  padding-block: 1rem;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card, #fff);
+  color: var(--po-navy, #1a237e);
+  text-decoration: none;
+}
+
+.po-home__card:hover {
+  background-color: var(--po-tint, #e8eaf6);
+}
+
+.po-home__card-label {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* 운영자 계정 화면 */
+
+.po-fieldset--stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.po-filters__search {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+/*
+ * 목록 헤더의 등록 링크. 시각적으로는 primary 버튼이지만 실제로는 이동이므로
+ * 앵커로 둔다. 버튼으로 만들면 새 탭 열기·주소 복사가 안 된다.
+ */
+.po-button-link {
+  display: inline-flex;
+  align-items: center;
+  padding-inline: 1rem;
+  padding-block: 0.625rem;
+  border-radius: 0.5rem;
+  background-color: var(--po-navy, #1a237e);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.po-button-link:hover {
+  background-color: var(--po-navy-deep, #000666);
+}
+
+.po-button-link:focus-visible {
+  outline: 2px solid var(--po-navy, #1a237e);
+  outline-offset: 2px;
+}
+
+/* 상태 뱃지 옆의 보조 설명. 색만으로 뜻을 전하지 않도록 문구로 둔다. */
+.po-table__note {
+  display: inline-block;
+  margin-inline-start: 0.5rem;
+  color: var(--po-text-muted, #454652);
+  font-size: 0.75rem;
+}
+
+.po-subsection__title {
+  margin-block: 1.5rem 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.po-list {
+  margin-block: 0.5rem 0;
+  padding-inline-start: 1.25rem;
+  font-size: 0.875rem;
+}
+
+/* 매장 제재 사건 카드 */
+
+.po-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.po-card {
+  padding-inline: 1.25rem;
+  padding-block: 1.25rem;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card, #fff);
+}
+
+.po-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block-end: 1rem;
+}
+
+.po-card__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-block-start: 1rem;
+  padding-block-start: 1rem;
+  border-block-start: 1px solid var(--po-border, #e9ecef);
+}
+
+.po-inline-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.po-textarea {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.po-textarea__label {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.po-textarea__hint {
+  color: var(--po-text-muted, #454652);
+  font-size: 0.75rem;
+}
+
+.po-textarea__control {
+  padding-inline: 0.75rem;
+  padding-block: 0.5rem;
+  border: 1px solid var(--po-border, #e9ecef);
+  border-radius: 0.5rem;
+  font: inherit;
+  resize: vertical;
+}
+
+.po-textarea__control:focus-visible {
+  outline: 2px solid var(--po-navy, #1a237e);
+  outline-offset: 1px;
+}
+
+.po-textarea__error {
+  color: #d32f2f;
+  font-size: 0.8125rem;
+}
+
+/*
+ * 모바일에서는 상세·폼을 한 열로 재배치한다. 표는 이미 `.po-table-scroll`이
+ * 자기 컨테이너 안에서만 가로 스크롤하므로 페이지 본문은 밀리지 않는다.
+ */
+@media (width <= 40rem) {
+  .po-filters,
+  .po-filters__search {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .po-card__header {
+    flex-direction: row;
+  }
+
+  .po-page__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
