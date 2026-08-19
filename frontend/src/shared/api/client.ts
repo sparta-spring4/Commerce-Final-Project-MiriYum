@@ -6,9 +6,11 @@ import type {
   CsrfOf,
   IdempotencyOf,
   MethodOf,
+  MultipartOf,
   OperationOf,
   PathParamsOf,
   RequestBodyOf,
+  NoContentOf,
   SuccessBodyOf,
 } from './paths'
 
@@ -42,8 +44,10 @@ export type RequestOptions<P extends ApiPath, M extends MethodOf<P>> = {
   method: M
 } & PathParamsOf<P> &
   RequestBodyOf<OperationOf<P, M>> &
+  MultipartOf<OperationOf<P, M>> &
   IdempotencyOf<OperationOf<P, M>> &
   CsrfOf<OperationOf<P, M>> &
+  NoContentOf<OperationOf<P, M>> &
   CommonRequestOptions
 
 /** 성공 응답은 봉투 그대로 노출한다. 화면이 code·message·data를 구분해 쓴다. */
@@ -106,6 +110,8 @@ export function createApiClient(
     options: {
       method: string
       body?: unknown
+      allowNoContent?: boolean
+      multipart?: FormData
       idempotencyKey?: string
       csrfToken?: string
       signal?: AbortSignal
@@ -132,7 +138,8 @@ export function createApiClient(
         method: options.method.toUpperCase(),
         headers,
         body:
-          options.body === undefined ? undefined : JSON.stringify(options.body),
+          options.multipart ??
+          (options.body === undefined ? undefined : JSON.stringify(options.body)),
         signal: options.signal,
         // Refresh·CSRF 쿠키는 same-origin 프록시를 통해서만 오간다.
         credentials: 'same-origin',
@@ -179,6 +186,8 @@ export function createApiClient(
       method,
       pathParams,
       body,
+      allowNoContent,
+      multipart,
       idempotencyKey,
       csrfToken,
       query,
@@ -186,12 +195,22 @@ export function createApiClient(
     } = options as RequestOptions<P, M> & {
       pathParams?: Record<string, string | number>
       body?: unknown
+      allowNoContent?: boolean
       idempotencyKey?: string
       csrfToken?: string
+      multipart?: FormData
     }
 
     const url = buildUrl(path, pathParams, query)
-    const sendOptions = { method, body, idempotencyKey, csrfToken, signal }
+    const sendOptions = {
+      method,
+      body,
+      allowNoContent,
+      multipart,
+      idempotencyKey,
+      csrfToken,
+      signal,
+    }
 
     let response = await send(url, sendOptions)
 
@@ -213,7 +232,10 @@ export function createApiClient(
       )
     }
 
-    // 계약에 204를 선언한 operation이 없다. 본문 없는 2xx는 계약 위반이다.
+    if (response.status === 204 && options.allowNoContent) {
+      return undefined as unknown as ApiResult<P, M>
+    }
+
     if (payload === UNPARSEABLE) {
       throw new ApiContractError(response.status, 'notAnObject')
     }
