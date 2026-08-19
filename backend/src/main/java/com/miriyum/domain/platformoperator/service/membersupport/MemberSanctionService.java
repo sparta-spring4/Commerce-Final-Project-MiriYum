@@ -92,9 +92,9 @@ public class MemberSanctionService {
     }
 
     @Transactional
-    public void approvePermanent(PlatformOperatorPrincipal principal, String sanctionId, long expectedCaseVersion,
-                                 long expectedSupportVersion, String approval, String correlationId,
-                                 String reasonCode) {
+    public MemberSanction approvePermanent(PlatformOperatorPrincipal principal, String sanctionId,
+                                           long expectedCaseVersion, long expectedSupportVersion,
+                                           String approval, String correlationId, String reasonCode) {
         MemberSanction sanction = sanctions.findByPublicIdForUpdate(sanctionId)
                 .filter(candidate -> candidate.getStatus() == MemberSanctionStatus.PENDING_ADDITIONAL_APPROVAL)
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.MEMBER_SUPPORT_NOT_FOUND));
@@ -121,14 +121,16 @@ public class MemberSanctionService {
                 AdminCaseType.MEMBER_SUPPORT, supportCase.getPublicId(), expectedCaseVersion, principal.accountId()));
         supportCase.decide(MemberSupportCaseStatus.APPROVED, "PERMANENT_SUSPENSION", now);
         audit.enforcement(context, "PERMANENT_SUSPENSION_APPROVED", sanction.getPolicyVersion());
+        return sanction;
     }
 
     @Transactional
-    public void approvePermanent(PlatformOperatorPrincipal principal, String sanctionId, long expectedCaseVersion,
-                                 String approval, String correlationId, String reasonCode) {
+    public MemberSanction approvePermanent(PlatformOperatorPrincipal principal, String sanctionId,
+                                           long expectedCaseVersion, String approval,
+                                           String correlationId, String reasonCode) {
         MemberSanction sanction = sanctions.findByPublicIdForUpdate(sanctionId)
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.MEMBER_SUPPORT_NOT_FOUND));
-        approvePermanent(principal, sanctionId, expectedCaseVersion,
+        return approvePermanent(principal, sanctionId, expectedCaseVersion,
                 sanction.getSupportCase().getTargetSupportVersion(), approval, correlationId, reasonCode);
     }
 

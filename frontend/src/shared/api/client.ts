@@ -2,9 +2,14 @@ import { ApiContractError, ApiError, NetworkError } from './apiError'
 import { IDEMPOTENCY_KEY_HEADER } from './idempotencyKey'
 import { checkSuccessEnvelope, isApiErrorBody, type ApiSuccess } from './envelope'
 import type {
+  AdminAuditContextOf,
+  AdminCaseRefOf,
+  AdminReasonOnlyOf,
+  AdminReauthenticationOf,
   ApiPath,
   CsrfOf,
   IdempotencyOf,
+  IfMatchOf,
   MethodOf,
   MultipartOf,
   OperationOf,
@@ -28,6 +33,15 @@ export interface ApiClientDependencies {
    * 기본 동작은 재시도 없이 ApiError를 던지는 것이다.
    */
   onUnauthorized?: (error: ApiError) => Promise<boolean>
+  /**
+   * 403 응답을 shell에 알린다. 재시도하지 않으며 오류는 그대로 던진다.
+   *
+   * 403 중에는 요청 하나의 실패가 아니라 세션 상태를 뜻하는 것이 있다.
+   * 플랫폼 운영자의 `AUTH_012`가 그렇다. 임시 비밀번호 세션으로 업무 API를
+   * 부르면 매번 403이 오는데, shell이 이를 모르면 화면은 일반 오류만 반복해서
+   * 보여 주고 사용자는 비밀번호 변경 화면으로 갈 방법을 찾지 못한다.
+   */
+  onForbidden?: (error: ApiError) => void
 }
 
 /** OpenAPI가 타이핑하지 않는 부수 입력. */
@@ -47,6 +61,11 @@ export type RequestOptions<P extends ApiPath, M extends MethodOf<P>> = {
   MultipartOf<OperationOf<P, M>> &
   IdempotencyOf<OperationOf<P, M>> &
   CsrfOf<OperationOf<P, M>> &
+  IfMatchOf<OperationOf<P, M>> &
+  AdminReauthenticationOf<P, OperationOf<P, M>> &
+  AdminAuditContextOf<OperationOf<P, M>> &
+  AdminCaseRefOf<OperationOf<P, M>> &
+  AdminReasonOnlyOf<OperationOf<P, M>> &
   NoContentOf<OperationOf<P, M>> &
   CommonRequestOptions
 
@@ -69,6 +88,18 @@ const JSON_CONTENT_TYPE = 'application/json'
  * 값은 shell이 자기 namespace 쿠키에서 읽어 넘긴다. 이 모듈은 쿠키를 읽지 않는다.
  */
 const CSRF_TOKEN_HEADER = 'X-CSRF-TOKEN'
+
+/**
+ * 플랫폼 운영자 명령·조회가 요구하는 헤더 이름.
+ *
+ * `If-Match`는 대상 version, 재인증은 고위험 명령 승인, 사건·사유는 감사 조회의
+ * 인가 조건이다. 값은 화면이 넘긴다. 이 모듈은 값을 만들거나 기본값을 채우지 않는다.
+ */
+const IF_MATCH_HEADER = 'If-Match'
+const ADMIN_REAUTHENTICATION_HEADER = 'X-Admin-Reauthentication'
+const ADMIN_CASE_ID_HEADER = 'X-Admin-Case-Id'
+const ADMIN_CASE_VERSION_HEADER = 'X-Admin-Case-Version'
+const ADMIN_REASON_CODE_HEADER = 'X-Admin-Reason-Code'
 
 /**
  * 2xx 본문을 JSON으로 읽지 못했을 때 쓰는 표식이다.
@@ -103,7 +134,7 @@ function buildUrl(
 export function createApiClient(
   dependencies: ApiClientDependencies = {},
 ): ApiClient {
-  const { getAccessToken, onUnauthorized } = dependencies
+  const { getAccessToken, onUnauthorized, onForbidden } = dependencies
 
   async function send(
     url: string,
@@ -114,6 +145,15 @@ export function createApiClient(
       multipart?: FormData
       idempotencyKey?: string
       csrfToken?: string
+      ifMatch?: number
+      adminReauthentication?: string
+      adminAuditContext?: {
+        caseId: string
+        caseVersion: number
+        reasonCode: string
+      }
+      adminCaseRef?: { caseId: string; caseVersion: number }
+      adminReasonCode?: string
       signal?: AbortSignal
     },
   ): Promise<Response> {
@@ -127,6 +167,31 @@ export function createApiClient(
     }
     if (options.csrfToken) {
       headers[CSRF_TOKEN_HEADER] = options.csrfToken
+    }
+    // version 0이 유효한 값이므로 존재 여부로 판정한다.
+    if (options.ifMatch !== undefined) {
+      headers[IF_MATCH_HEADER] = String(options.ifMatch)
+    }
+    if (options.adminReauthentication) {
+      headers[ADMIN_REAUTHENTICATION_HEADER] = options.adminReauthentication
+    }
+    if (options.adminAuditContext) {
+      headers[ADMIN_CASE_ID_HEADER] = options.adminAuditContext.caseId
+      headers[ADMIN_CASE_VERSION_HEADER] = String(
+        options.adminAuditContext.caseVersion,
+      )
+      headers[ADMIN_REASON_CODE_HEADER] = options.adminAuditContext.reasonCode
+    }
+    // 사건 맥락 없이 조회 사유만 남기는 요청이다.
+    if (options.adminReasonCode) {
+      headers[ADMIN_REASON_CODE_HEADER] = options.adminReasonCode
+    }
+    // 사유 코드 없이 사건만 참조하는 명령이다. 조회와 헤더 구성이 다르다.
+    if (options.adminCaseRef) {
+      headers[ADMIN_CASE_ID_HEADER] = options.adminCaseRef.caseId
+      headers[ADMIN_CASE_VERSION_HEADER] = String(
+        options.adminCaseRef.caseVersion,
+      )
     }
     const token = getAccessToken?.()
     if (token) {
@@ -190,6 +255,11 @@ export function createApiClient(
       multipart,
       idempotencyKey,
       csrfToken,
+      ifMatch,
+      adminReauthentication,
+      adminAuditContext,
+      adminCaseRef,
+      adminReasonCode,
       query,
       signal,
     } = options as RequestOptions<P, M> & {
@@ -198,6 +268,15 @@ export function createApiClient(
       allowNoContent?: boolean
       idempotencyKey?: string
       csrfToken?: string
+      ifMatch?: number
+      adminReauthentication?: string
+      adminAuditContext?: {
+        caseId: string
+        caseVersion: number
+        reasonCode: string
+      }
+      adminCaseRef?: { caseId: string; caseVersion: number }
+      adminReasonCode?: string
       multipart?: FormData
     }
 
@@ -205,6 +284,11 @@ export function createApiClient(
     const sendOptions = {
       method,
       body,
+      ifMatch,
+      adminReauthentication,
+      adminAuditContext,
+      adminCaseRef,
+      adminReasonCode,
       allowNoContent,
       multipart,
       idempotencyKey,
@@ -226,10 +310,14 @@ export function createApiClient(
     const payload = await readBody(response)
 
     if (!response.ok) {
-      throw toApiError(
+      const error = toApiError(
         response.status,
         payload === UNPARSEABLE ? undefined : payload,
       )
+      if (response.status === 403) {
+        onForbidden?.(error)
+      }
+      throw error
     }
 
     if (response.status === 204 && options.allowNoContent) {
