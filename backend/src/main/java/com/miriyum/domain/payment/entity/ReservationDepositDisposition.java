@@ -434,6 +434,7 @@ public class ReservationDepositDisposition {
     public long getCompletedRefundAmountMinor() { return completedRefundAmountMinor; }
     public long getWithheldAmountMinor() { return withheldAmountMinor; }
     public String getCurrency() { return currency; }
+    public long getVersion() { return version; }
     public String getRefundId() { return refundId; }
     public String getIdempotencyKey() { return idempotencyKey; }
     public String getRequestFingerprint() { return requestFingerprint; }

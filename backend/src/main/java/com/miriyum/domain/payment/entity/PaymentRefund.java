@@ -177,6 +177,7 @@ public class PaymentRefund {
     public String getSourceEventId() { return sourceEventId; }
     public long getAmountMinor() { return amountMinor; }
     public String getCurrency() { return currency; }
+    public long getVersion() { return version; }
     public RefundStatus getStatus() { return status; }
     public String getReasonCode() { return reasonCode; }
     public long getPolicyVersion() { return policyVersion; }
