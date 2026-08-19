@@ -9,7 +9,7 @@
 - 기능 플래그 OFF의 Controller 부재와 실제 404를 HTTP 통합 테스트로 검증한다.
 - 로그인·최초 비밀번호 변경·refresh·logout·CSRF와 제한 세션의 업무 API 403을 실제 MySQL·Valkey 흐름으로 검증한다.
 - 최초 비밀번호 변경 경합은 실제 MySQL 두 트랜잭션으로, 세션 교체·회전·재사용 회수는 실제 Valkey Lua 연산으로 검증한다.
-- `platform-operator-openapi.yaml`의 활성 인증·권한·회원지원·운영자 관리·감사 경로는 아키텍처·OpenAPI 드리프트 테스트로 고정한다.
+- `platform-operator-openapi.yaml`의 활성 인증·권한·현재 capabilities·회원지원·운영자 관리·감사 경로는 아키텍처·OpenAPI 드리프트 테스트로 고정한다.
 
 ## 증거 원칙
 
@@ -58,7 +58,7 @@
 - 순수 JUnit·Mockito 및 `@WebMvcTest` slice 테스트는 태그 없이 빠른 `test` task에서 실행한다.
 - `@SpringBootTest`, `@Testcontainers` 또는 `MySQLContainer`를 사용하는 테스트 클래스에는 class-level `@Tag("integration")`을 선언한다.
 - `integrationTest` task는 `@Tag("integration")` 테스트를 모두 실행하며, CI 전용 `integrationTestShardA`~`integrationTestShardD` task는 각각 `integration-shard-a`~`integration-shard-d` 태그를 실행한다. `test` task는 integration 태그를 제외하고, `build`는 전체 통합 테스트를 포함한다.
-- `Backend CI`는 unit job과 네 integration shard job을 병렬 실행하고, 모두 성공한 뒤에만 required check 이름인 `backend-ci`를 성공 처리한다. 새 통합 테스트가 기본 태그 또는 정확히 하나의 shard 태그를 빠뜨리면 Gradle 검증 task가 실패한다.
+- `Backend CI`의 required check 이름인 `backend-ci`는 모든 PR에서 실행한다. 백엔드 코드·migration·Gradle·Backend CI 변경, `deploy/deploy.sh`, 미분류 경로는 unit job과 네 integration shard job이 모두 성공해야 한다. OpenAPI와 그 밖의 `deploy/` 변경은 unit test와 계약 검증이 성공해야 하며, 프론트·k6·일반 문서·런북 전용 변경은 계약 검증만 성공하면 된다. 새 통합 테스트가 기본 태그 또는 정확히 하나의 shard 태그를 빠뜨리면 Gradle 검증 task가 실패한다.
 - 새 통합 테스트의 shard는 최근 CI 실행 시간과 테스트 구성 정보를 함께 보고 균형 있게 고른다. `@SpringBootTest` 속성·`@AutoConfigureMockMvc`·`@Testcontainers` 조합은 배치 힌트일 뿐, 실제 Spring ApplicationContext 캐시 키는 `@DynamicPropertySource`, `@MockitoBean` 등 context customizer까지 포함하므로 정적 어노테이션만으로 컨텍스트 공유를 단정하지 않는다. 컨텍스트 재사용을 근거로 배치하려면 cache debug log 또는 동등한 실행 증거를 남긴다. Gradle 검증 task는 태그 개수만 확인하고 shard별 균형은 검사하지 않으므로 새 테스트 추가 뒤 한 shard의 실측 시간이 치우치면 재배치한다(#288).
 - 위 marker를 직접 사용하지 않아도 외부 DB, Docker 또는 느린 Spring runtime에 의존하는 테스트는 통합 테스트로 분류하고 그 근거를 PR에 기록한다.
 
@@ -93,7 +93,11 @@
 - 동일 MySQL 스냅샷에서 Java 점수 계산이 같은 순위·설명을 만든다.
 - 품절 대안은 같은 매장을 먼저 검증한다. 같은 매장 후보가 없을 때 원 매장의 검증된 저장 좌표·bounding box·Haversine을 사용해 3km 경계값은 포함하고 3km 초과 후보는 거부하는지 회귀 테스트한다.
 - 추천 중 외부 지도 호출과 사용자 현재 위치 요청·저장·사용이 없는지 검사한다.
-- AI/LLM·Spring AI·벡터 DB·검색 클러스터·메시지 브로커 의존성이 없는지 확인한다.
+- 날짜·시각·인원이 독립적으로 해석되고 날짜 없는 검색은 Reservation을 호출하지 않는지 검증한다.
+- OpenAI 요청이 잔여 표현 또는 공개 메뉴 문맥, 승인 모델, 엄격한 최대 8개 문자열 schema만 포함하고 사용자 ID·연락처·정밀 위치·예약 이력·알레르기 정보를 포함하지 않는지 계약 테스트한다.
+- LLM 개념 후보의 stale 게시 버전·비공개 메뉴·폐점 매장이 현재 MySQL QueryDSL 조회와 응답 직전 재검증에서 제거되는지 실제 MySQL로 검증한다.
+- OpenAI timeout·429·오류·거절·형식 불일치에 정확 MySQL 검색 또는 일반 대체 후보가 유지되고 자동 재시도로 요청 비용을 증폭하지 않는지 검증한다.
+- 외부 호출 수·성공/실패 사유·지연·입출력 토큰과 정확 검색 폴백을 목적별 저카디널리티 지표로 관측하고 원문·응답·Secret은 로그에 남기지 않는다.
 
 ## `고도화` 검증 gate
 
@@ -158,7 +162,7 @@ Kafka, 범용 Outbox, 마이크로서비스, WebSocket과 검색 클러스터가
 
 배포 자동화나 AWS·Terraform은 핵심 흐름, Flyway, 비밀 분리, 상태 확인, Docker 실행, 백업·복원과 비용 책임이 검증된 뒤 승인한다. S3를 `고도화`에서 사용한다는 결정만으로 전체 AWS 배포·Terraform을 활성화하지 않는다.
 
-[#120](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/120)의 ECR·SSM 백엔드 API 사전 배포는 `staging` EC2만 대상으로 하며 프론트엔드 사용자 shell과 최종 same-origin 배포를 대체하지 않는다. 이 경로는 ECR 이미지의 SHA 추적, 비밀의 서버 분리, SSM 배포, Docker 실행과 loopback health 확인만 증명한다. `dev`에 통합된 뒤 CI가 성공한 SHA만 staging에 배포한다. 실제 `dev` 배포 실행·ECR push·SSM command·EC2 health의 성공 증거가 없으면 각각 `NOT CONFIGURED` 또는 `NOT RUN`으로 기록하며, 프론트엔드 소유자가 `/` 정적 제공과 `/api` 프록시를 포함한 후속 범위를 승인할 때까지 핵심 사용자 흐름 배포 성공으로 선언하지 않는다. 운영 배포는 이 경로와 분리해 `main` 전용 workflow, 별도 EC2·IAM 역할·GitHub Environment 승인으로 구성한다.
+[#120](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/120)의 ECR·SSM 백엔드 API 사전 배포는 `staging` EC2만 대상으로 하며 프론트엔드 사용자 shell과 최종 same-origin 배포를 대체하지 않는다. 이 경로는 ECR 이미지의 SHA 추적, 비밀의 서버 분리, SSM 배포, Docker 실행과 loopback health 확인만 증명한다. `dev`에 통합된 뒤 CI가 성공한 SHA만 staging에 배포한다. 실제 `dev` 배포 실행·ECR push·SSM command·EC2 health의 성공 증거가 없으면 각각 `NOT CONFIGURED` 또는 `NOT RUN`으로 기록하며, 프론트엔드 소유자가 `/` 정적 제공과 `/api` 프록시를 포함한 후속 범위를 승인할 때까지 핵심 사용자 흐름 배포 성공으로 선언하지 않는다. 운영 ECS 전환의 근거·검증·롤백은 [ADR-003](adr/ADR-003-aws-after-verification.md)의 2026-08-17 개정을 따른다. 이 문서는 운영 CD 실행 전 gate만 관리한다. 즉 `production` Environment 보호 규칙, `PRODUCTION_ECS_DEPLOYMENT_ENABLED=true`, ECR `IMMUTABLE` 태그 정책이 모두 준비되기 전에는 deploy job을 실행하지 않는다.
 
 ### staging 비용 가드레일과 종료 체크리스트
 

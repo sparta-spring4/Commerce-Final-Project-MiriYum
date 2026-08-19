@@ -48,7 +48,7 @@ class MenuAlternativeSearchServiceTest {
     void setUp() {
         service = new MenuAlternativeSearchService(candidateQuery, reservationService,
                 reservationTimeResolutionService, inventoryService,
-                new MenuAlternativeEligibility());
+                new MenuAlternativeEligibility(), new MenuAlternativeScorer());
     }
 
     @Test
@@ -71,6 +71,29 @@ class MenuAlternativeSearchServiceTest {
         assertThat(result.mode()).isEqualTo(MenuAlternativeMode.SAME_STORE);
         assertThat(result.items()).extracting(item -> item.menuId()).containsExactly(11L);
         then(candidateQuery).should(never()).findNearbyCandidates(any(), any());
+    }
+
+    @Test
+    void ranksLlmRelevantAlternativeAheadOfACloserPriceMatch() {
+        var source = new MenuAlternativeSourceView(1L, "원본", 10L, "닭갈비", 14_000,
+                "MEAT", List.of(), "REGISTERED", List.of(), null, null);
+        var chicken = new MenuAlternativeCandidateView(1L, "원본", 11L, "숯불 닭구이",
+                14_500, "MEAT", List.of(), "REGISTERED", List.of(), null, null, 50);
+        var pork = new MenuAlternativeCandidateView(1L, "원본", 12L, "제육볶음",
+                14_000, "MEAT", List.of(), "REGISTERED", List.of(), null, null, 0);
+        given(candidateQuery.findSource(1L, 10L)).willReturn(source);
+        given(reservationTimeResolutionService.resolveReservationTimes(any(), any()))
+                .willReturn(List.of(ReservationTimeResolutionResult.resolved(1L, resolved(1L))));
+        given(candidateQuery.findSameStoreCandidates(source)).willReturn(List.of(pork, chicken));
+        given(reservationService.getAvailabilities(any(), any())).willReturn(List.of(
+                new ReservationAvailabilityResult(1L, ReservationAvailabilityStatus.AVAILABLE)));
+        given(inventoryService.findExistingOnlineAvailability(any())).willReturn(List.of(
+                availability(11L), availability(12L)));
+
+        var result = service.search(1L, 10L, command());
+
+        assertThat(result.items()).extracting(item -> item.menuId())
+                .containsExactly(11L, 12L);
     }
 
     @Test
@@ -231,5 +254,12 @@ class MenuAlternativeSearchServiceTest {
                 Instant.parse("2026-08-15T09:30:00Z"), Instant.parse("2026-08-15T11:00:00Z"),
                 Instant.parse("2026-08-15T11:00:00Z"), "Asia/Seoul", 32400, 32400,
                 32400, 30, 90, 0, storeId, 1L);
+    }
+
+    private static MenuInventoryAvailability availability(long menuId) {
+        return new MenuInventoryAvailability(menuId, 1L, "Asia/Seoul",
+                LocalDate.of(2026, 8, 15), LocalTime.of(18, 30),
+                LocalDate.of(2026, 8, 15), LocalTime.of(20, 0), 3,
+                MenuInventoryAvailability.AvailabilityStatus.AVAILABLE);
     }
 }

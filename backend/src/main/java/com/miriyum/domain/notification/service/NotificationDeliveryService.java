@@ -14,8 +14,11 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
+import com.miriyum.global.sse.SseWakeUpRequester;
+import com.miriyum.global.sse.SseWakeUpTarget;
 
 /**
  * 임대한 알림 작업을 최신 원 상태에 수렴시켜 IN_APP 채널에 전달한다.
@@ -40,6 +43,7 @@ public class NotificationDeliveryService {
     private final NotificationSourceRegistry sourceRegistry;
     private final NotificationTitleRenderer titleRenderer;
     private final TransactionTemplate transactions;
+    private final SseWakeUpRequester wakeUps;
 
     public NotificationDeliveryService(
             NotificationTaskRepository taskRepository,
@@ -48,7 +52,8 @@ public class NotificationDeliveryService {
             NotificationDatabaseClock databaseClock,
             NotificationSourceRegistry sourceRegistry,
             NotificationTitleRenderer titleRenderer,
-            TransactionTemplate transactions
+            TransactionTemplate transactions,
+            SseWakeUpRequester wakeUps
     ) {
         this.taskRepository = taskRepository;
         this.channelAttemptRepository = channelAttemptRepository;
@@ -57,6 +62,7 @@ public class NotificationDeliveryService {
         this.sourceRegistry = sourceRegistry;
         this.titleRenderer = titleRenderer;
         this.transactions = transactions;
+        this.wakeUps = wakeUps;
     }
 
     /**
@@ -105,8 +111,11 @@ public class NotificationDeliveryService {
     }
 
     private boolean deliver(LeasedTask task, RuntimePolicy policy) {
-        if (task.sourceDomain()
-                != com.miriyum.domain.notification.dto.source.NotificationSourceDomain.WAITING) {
+        boolean lockedSourceDelivery = task.sourceDomain()
+                == com.miriyum.domain.notification.dto.source.NotificationSourceDomain.WAITING
+                || task.sourceDomain()
+                == com.miriyum.domain.notification.dto.source.NotificationSourceDomain.RESERVATION;
+        if (!lockedSourceDelivery) {
             return readAndDeliver(task, policy, false);
         }
         try {
@@ -121,11 +130,11 @@ public class NotificationDeliveryService {
     private boolean readAndDeliver(
             LeasedTask task,
             RuntimePolicy policy,
-            boolean lockedWaitingDelivery
+            boolean lockedSourceDelivery
     ) {
         NotificationSourceContextV1 context;
         try {
-            context = lockedWaitingDelivery
+            context = lockedSourceDelivery
                     ? sourceRegistry.readContextForDelivery(
                             task.sourceDomain(),
                             task.purpose(),
@@ -141,7 +150,7 @@ public class NotificationDeliveryService {
                             task.resourceVersion(),
                             task.recipientAccountId());
         } catch (RuntimeException sourceFailure) {
-            if (lockedWaitingDelivery) {
+            if (lockedSourceDelivery) {
                 throw new SourceReadFailure(sourceFailure);
             }
             context = unavailable();
@@ -254,6 +263,10 @@ public class NotificationDeliveryService {
                             : outcome.reason(), policy),
                     task.correlationId()
             );
+            if (outcome.status() == NotificationTaskStatus.DELIVERED) {
+                wakeUps.afterCommit(List.of(
+                        SseWakeUpTarget.notificationAccount(task.recipientAccountId())));
+            }
             return true;
         });
         return Boolean.TRUE.equals(updated);

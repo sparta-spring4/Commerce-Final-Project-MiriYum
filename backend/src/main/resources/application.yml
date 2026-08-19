@@ -45,6 +45,13 @@ management:
       show-details: never
 
 miriyum:
+  cloudwatch-metrics:
+    # Spring Boot 4에는 CloudWatch registry 자동 설정이 없으므로 CloudWatchMetricsConfig가 이
+    # 설정으로 registry를 직접 만든다. LLM meter 이외에는 CloudWatch로 전송하지 않는다.
+    enabled: ${MIRIYUM_CLOUDWATCH_METRICS_ENABLED:false}
+    namespace: ${MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE:MiriYum}
+    region: ${MIRIYUM_CLOUDWATCH_METRICS_REGION:ap-northeast-2}
+    step: ${MIRIYUM_CLOUDWATCH_METRICS_STEP:1m}
   platform-operator:
     enabled: ${MIRIYUM_PLATFORM_OPERATOR_ENABLED:false}
     reauthentication-fingerprint-secret: ${MIRIYUM_PLATFORM_OPERATOR_REAUTH_FINGERPRINT_SECRET:}
@@ -117,6 +124,15 @@ miriyum:
       max-retry-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_MAX_RETRY_DELAY_MS:0}
       poll-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_POLL_DELAY_MS:60000}
       initial-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_INITIAL_DELAY_MS:60000}
+  sse:
+    enabled: ${MIRIYUM_SSE_ENABLED:false}
+    cursor-secret: ${MIRIYUM_SSE_CURSOR_SECRET:}
+    timeout: ${MIRIYUM_SSE_TIMEOUT:PT0S}
+    heartbeat-interval: ${MIRIYUM_SSE_HEARTBEAT_INTERVAL:PT0S}
+    correction-interval: ${MIRIYUM_SSE_CORRECTION_INTERVAL:PT0S}
+    correction-batch-size: ${MIRIYUM_SSE_CORRECTION_BATCH_SIZE:0}
+    max-connections-total: ${MIRIYUM_SSE_MAX_CONNECTIONS_TOTAL:0}
+    max-connections-per-account: ${MIRIYUM_SSE_MAX_CONNECTIONS_PER_ACCOUNT:0}
   waiting:
     auto-open:
       enabled: ${MIRIYUM_WAITING_AUTO_OPEN_ENABLED:false}
@@ -149,12 +165,30 @@ miriyum:
       response-timeout-ms: ${MIRIYUM_STORE_GEOCODING_RESPONSE_TIMEOUT_MS:2000}
   store-search:
     available-candidate-limit: ${MIRIYUM_STORE_SEARCH_AVAILABLE_CANDIDATE_LIMIT:5000}
+    llm:
+      enabled: ${MIRIYUM_STORE_SEARCH_LLM_ENABLED:false}
+      base-url: ${MIRIYUM_STORE_SEARCH_LLM_BASE_URL:https://api.openai.com}
+      api-key: ${OPENAI_API_KEY:}
+      model: ${MIRIYUM_STORE_SEARCH_LLM_MODEL:gpt-4o-mini}
+      connect-timeout-ms: ${MIRIYUM_STORE_SEARCH_LLM_CONNECT_TIMEOUT_MS:1000}
+      response-timeout-ms: ${MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS:2000}
+      max-output-tokens: ${MIRIYUM_STORE_SEARCH_LLM_MAX_OUTPUT_TOKENS:100}
+      max-concepts: ${MIRIYUM_STORE_SEARCH_LLM_MAX_CONCEPTS:8}
+      supplement-candidate-limit: ${MIRIYUM_STORE_SEARCH_LLM_CANDIDATE_LIMIT:200}
   storage:
     s3:
       enabled: ${MIRIYUM_STORAGE_S3_ENABLED:false}
       bucket: ${MIRIYUM_STORAGE_S3_BUCKET:}
       region: ${MIRIYUM_STORAGE_S3_REGION:ap-northeast-2}
       max-size-bytes: ${MIRIYUM_STORAGE_S3_MAX_SIZE_BYTES:10485760}
+      reconciliation:
+        enabled: ${MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED:false}
+        delay-ms: ${MIRIYUM_STORAGE_S3_RECONCILIATION_DELAY_MS:60000}
+        batch-size: ${MIRIYUM_STORAGE_S3_RECONCILIATION_BATCH_SIZE:50}
+        pending-min-age-seconds: ${MIRIYUM_STORAGE_S3_RECONCILIATION_PENDING_MIN_AGE_SECONDS:600}
+        long-stay-threshold-seconds: ${MIRIYUM_STORAGE_S3_RECONCILIATION_LONG_STAY_THRESHOLD_SECONDS:3600}
+        retry-base-delay-seconds: ${MIRIYUM_STORAGE_S3_RECONCILIATION_RETRY_BASE_DELAY_SECONDS:60}
+        claim-lease-seconds: ${MIRIYUM_STORAGE_S3_RECONCILIATION_CLAIM_LEASE_SECONDS:300}
   rate-limit:
     sign-up:
       max-requests: ${MIRIYUM_RATE_LIMIT_SIGN_UP_MAX_REQUESTS:5}

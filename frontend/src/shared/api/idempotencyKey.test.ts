@@ -3,6 +3,7 @@ import { ApiContractError, ApiError, NetworkError } from './apiError'
 import { CommonErrorCode } from './envelope'
 import {
   createIdempotencyKey,
+  createIdempotencyKeyCache,
   isOutcomeUnknown,
   startIdempotentAttempt,
 } from './idempotencyKey'
@@ -91,5 +92,36 @@ describe('결과 불명 판정', () => {
     expect(
       isOutcomeUnknown(apiError(429, CommonErrorCode.TOO_MANY_REQUESTS)),
     ).toBe(false)
+  })
+})
+
+describe('내용 기반 멱등 키 캐시', () => {
+  test('같은 내용을 다시 보내면 같은 키를 준다', () => {
+    const cache = createIdempotencyKeyCache()
+
+    expect(cache.keyFor('{"days":[]}')).toBe(cache.keyFor('{"days":[]}'))
+  })
+
+  test('내용이 바뀌면 새 키를 준다', () => {
+    const cache = createIdempotencyKeyCache()
+    const first = cache.keyFor('{"days":[]}')
+
+    expect(cache.keyFor('{"days":[1]}')).not.toBe(first)
+  })
+
+  test('앞선 내용으로 되돌아가면 그때의 키를 재사용하지 않는다', () => {
+    const cache = createIdempotencyKeyCache()
+    const first = cache.keyFor('a')
+    cache.keyFor('b')
+
+    // 되돌아온 요청은 새로운 시도다. 지난 키를 되살리면 서버가 그때의 결과를
+    // 그대로 재생해 실제 변경이 반영되지 않는다.
+    expect(cache.keyFor('a')).not.toBe(first)
+  })
+
+  test('backend가 받아들이는 UUID 형식을 만든다', () => {
+    expect(createIdempotencyKeyCache().keyFor('a')).toMatch(
+      BACKEND_UUID_PATTERN,
+    )
   })
 })

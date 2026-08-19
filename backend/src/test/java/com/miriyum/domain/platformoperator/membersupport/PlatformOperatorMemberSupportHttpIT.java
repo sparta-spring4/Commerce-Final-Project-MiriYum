@@ -17,6 +17,7 @@ import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.platformoperator.dto.authorization.AdminAuditContext;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberAppealOutcome;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
+import com.miriyum.domain.platformoperator.entity.PlatformOperatorPermissionGrant;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorRoleGrant;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import com.miriyum.domain.platformoperator.enums.AdminCaseType;
@@ -25,6 +26,7 @@ import com.miriyum.domain.platformoperator.enums.AdminTargetType;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAuthEventRepository;
+import com.miriyum.domain.platformoperator.repository.PlatformOperatorPermissionGrantRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorRoleGrantRepository;
 import com.miriyum.domain.platformoperator.repository.membersupport.MemberSanctionRepository;
 import com.miriyum.domain.platformoperator.repository.membersupport.MemberSupportCaseRepository;
@@ -33,6 +35,7 @@ import com.miriyum.domain.platformoperator.service.HighRiskCommandGuard;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberAppealService;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportAuditWriter;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
+import com.miriyum.domain.platformoperator.session.PlatformOperatorSessionStore;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSanction;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCase;
 import com.miriyum.domain.auth.membersupport.MemberAccountType;
@@ -75,6 +78,7 @@ import org.testcontainers.mysql.MySQLContainer;
         "miriyum.member-support.proof-digest-secret=test-only-member-proof-secret",
         "miriyum.member-support.pii-encryption-active-key-version=1",
         "miriyum.member-support.pii-encryption-active-key=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "miriyum.rate-limit.login.max-requests=100",
         "miriyum.store.schedule.activation-enabled=false",
         "miriyum.reservation.hold-expiration.enabled=false",
         "miriyum.menu.schedule.enabled=false"
@@ -96,6 +100,7 @@ class PlatformOperatorMemberSupportHttpIT {
     @Autowired MockMvc mvc;
     @Autowired PlatformOperatorAccountRepository operators;
     @Autowired PlatformOperatorAuthEventRepository authEvents;
+    @Autowired PlatformOperatorPermissionGrantRepository permissionGrants;
     @Autowired PlatformOperatorRoleGrantRepository roleGrants;
     @Autowired ConsumerAccountRepository consumers;
     @Autowired PasswordEncoder passwordEncoder;
@@ -103,6 +108,7 @@ class PlatformOperatorMemberSupportHttpIT {
     @Autowired MemberSupportCaseRepository supportCases;
     @Autowired JdbcTemplate jdbc;
     @Autowired MemberAppealService appeals;
+    @Autowired PlatformOperatorSessionStore sessions;
     @MockitoBean HighRiskCommandGuard highRiskCommands;
     @MockitoBean AdminCaseAssignmentService assignments;
     @MockitoBean MemberSupportAuditWriter memberSupportAudits;
@@ -119,6 +125,7 @@ class PlatformOperatorMemberSupportHttpIT {
         jdbc.update("DELETE FROM member_sanctions");
         jdbc.update("DELETE FROM member_support_cases");
         authEvents.deleteAll();
+        permissionGrants.deleteAll();
         roleGrants.deleteAll();
         operators.deleteAll();
         consumers.deleteAll();
@@ -242,6 +249,121 @@ class PlatformOperatorMemberSupportHttpIT {
     }
 
     @Test
+    void pendingAdditionalApprovalsUseTheMysqlLedgerAndStablePagination() throws Exception {
+        PlatformOperatorAccount approver = createOperator("approval-list@example.com");
+        PlatformOperatorAccount proposer = createOperator("proposal-source@example.com");
+        roleGrants.saveAndFlush(PlatformOperatorRoleGrant.create(
+                approver.getId(), PlatformOperatorRole.SUPER_ADMIN, Instant.now()));
+        String accessToken = activateAndLogin(approver.getEmail());
+        LocalDateTime tiedAt = LocalDateTime.of(2026, 8, 19, 4, 5, 6);
+        MemberSanction oldest = pendingSanction(101L, proposer.getId(), tiedAt.minusDays(1), "OLDEST");
+        MemberSanction tiedFirst = pendingSanction(102L, proposer.getId(), tiedAt, "TIED_FIRST");
+        MemberSanction tiedSecond = pendingSanction(103L, proposer.getId(), tiedAt, "TIED_SECOND");
+        pendingSanction(104L, approver.getId(), tiedAt.plusDays(1), "OWN_PROPOSAL");
+        appliedSanction(105L, proposer.getId(), tiedAt.plusDays(2));
+
+        var firstPage = mvc.perform(get(
+                        "/api/v1/platform-operators/member-sanctions/pending-additional-approvals")
+                        .param("page", "0").param("size", "2")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.page.number").value(0))
+                .andExpect(jsonPath("$.data.page.size").value(2))
+                .andExpect(jsonPath("$.data.page.totalElements").value(3))
+                .andExpect(jsonPath("$.data.page.totalPages").value(2))
+                .andExpect(jsonPath("$.data.page.hasNext").value(true))
+                .andExpect(jsonPath("$.data.content[0].sanctionId").value(tiedSecond.getPublicId()))
+                .andExpect(jsonPath("$.data.content[1].sanctionId").value(tiedFirst.getPublicId()))
+                .andExpect(jsonPath("$.data.content[0].version")
+                        .value(tiedSecond.getSupportCase().getRowVersion()))
+                .andReturn();
+
+        java.util.Map<String, Object> item = JsonPath.read(
+                firstPage.getResponse().getContentAsString(), "$.data.content[0]");
+        assertThat(item).containsOnlyKeys(
+                "sanctionId", "version", "accountType", "accountId",
+                "reasonCode", "policyVersion", "proposedAt");
+        assertThat(item).doesNotContainKeys(
+                "proposedByOperatorId", "email", "phone", "level", "status", "restrictedFeatures");
+
+        mvc.perform(get("/api/v1/platform-operators/member-sanctions/pending-additional-approvals")
+                        .param("page", "1").param("size", "2")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].sanctionId").value(oldest.getPublicId()))
+                .andExpect(jsonPath("$.data.page.hasNext").value(false));
+    }
+
+    @Test
+    void pendingAdditionalApprovalsRequireBothPermissionAndSuperAdminRole() throws Exception {
+        PlatformOperatorAccount permissionless = createOperator("permissionless-approval@example.com");
+        String permissionlessToken = activateAndLogin(permissionless.getEmail());
+
+        mvc.perform(get("/api/v1/platform-operators/member-sanctions/pending-additional-approvals")
+                        .header("Authorization", "Bearer " + permissionlessToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ADMIN_001"));
+
+        PlatformOperatorAccount directPermission = createOperator("direct-approval@example.com");
+        permissionGrants.saveAndFlush(PlatformOperatorPermissionGrant.create(
+                directPermission.getId(),
+                PlatformOperatorPermission.ACCOUNT_PERMANENT_SANCTION_APPROVE, Instant.now()));
+        String directPermissionToken = activateAndLogin(directPermission.getEmail());
+
+        mvc.perform(get("/api/v1/platform-operators/member-sanctions/pending-additional-approvals")
+                        .header("Authorization", "Bearer " + directPermissionToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ADMIN_001"));
+    }
+
+    @Test
+    void pendingAdditionalApprovalsRejectStaleAuthority() throws Exception {
+        PlatformOperatorAccount stale = createOperator("stale-approval@example.com");
+        roleGrants.saveAndFlush(PlatformOperatorRoleGrant.create(
+                stale.getId(), PlatformOperatorRole.SUPER_ADMIN, Instant.now()));
+        String staleToken = activateAndLogin(stale.getEmail());
+        stale = operators.findById(stale.getId()).orElseThrow();
+        stale.advanceAuthorityVersion();
+        operators.saveAndFlush(stale);
+
+        mvc.perform(get("/api/v1/platform-operators/member-sanctions/pending-additional-approvals")
+                        .header("Authorization", "Bearer " + staleToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_015"));
+    }
+
+    @Test
+    void pendingAdditionalApprovalsRejectRevokedCentralSession() throws Exception {
+        PlatformOperatorAccount revoked = createOperator("revoked-approval@example.com");
+        roleGrants.saveAndFlush(PlatformOperatorRoleGrant.create(
+                revoked.getId(), PlatformOperatorRole.SUPER_ADMIN, Instant.now()));
+        String revokedToken = activateAndLogin(revoked.getEmail());
+        sessions.revokeAll(revoked.getId());
+
+        mvc.perform(get("/api/v1/platform-operators/member-sanctions/pending-additional-approvals")
+                        .header("Authorization", "Bearer " + revokedToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_015"));
+    }
+
+    @Test
+    void pendingAdditionalApprovalsRejectInvalidPageBoundaries() throws Exception {
+        PlatformOperatorAccount approver = createOperator("approval-page@example.com");
+        roleGrants.saveAndFlush(PlatformOperatorRoleGrant.create(
+                approver.getId(), PlatformOperatorRole.SUPER_ADMIN, Instant.now()));
+        String accessToken = activateAndLogin(approver.getEmail());
+
+        for (String[] query : java.util.List.of(
+                new String[]{"-1", "20"}, new String[]{"0", "0"}, new String[]{"0", "101"})) {
+            mvc.perform(get("/api/v1/platform-operators/member-sanctions/pending-additional-approvals")
+                            .param("page", query[0]).param("size", query[1])
+                            .header("Authorization", "Bearer " + accessToken))
+                    .andExpect(status().isBadRequest());
+        }
+    }
+
+    @Test
     void cancellingOneSuspensionKeepsMysqlAccountSuspendedWhileAnotherRemainsActive() {
         ConsumerAccount consumer = ConsumerAccount.createWithContact(
                 "overlap@example.com", "password-hash", "overlap", "+821044444444", "overlap-ref");
@@ -290,9 +412,33 @@ class PlatformOperatorMemberSupportHttpIT {
         return supportCases.saveAndFlush(supportCase);
     }
 
+    private MemberSanction pendingSanction(
+            long accountId, long proposerId, LocalDateTime proposedAt, String reasonCode) {
+        MemberSupportCase supportCase = MemberSupportCase.enforcement(
+                MemberAccountType.CONSUMER, accountId, 0, reasonCode, proposedAt);
+        supportCase.assign();
+        supportCase.pendingAdditionalApproval();
+        supportCase = supportCases.saveAndFlush(supportCase);
+        return sanctions.saveAndFlush(MemberSanction.propose(
+                supportCase, MemberSanctionLevel.PERMANENT_SUSPENSION, Set.of(),
+                reasonCode, "policy-v3", proposerId, proposedAt));
+    }
+
+    private MemberSanction appliedSanction(long accountId, long proposerId, LocalDateTime proposedAt) {
+        MemberSupportCase supportCase = supportCases.saveAndFlush(MemberSupportCase.enforcement(
+                MemberAccountType.CONSUMER, accountId, 0, "APPLIED", proposedAt));
+        return sanctions.saveAndFlush(MemberSanction.propose(
+                supportCase, MemberSanctionLevel.TEMPORARY_SUSPENSION, Set.of(),
+                "APPLIED", "policy-v3", proposerId, proposedAt));
+    }
+
     private PlatformOperatorAccount createOperator() {
+        return createOperator("operator@example.com");
+    }
+
+    private PlatformOperatorAccount createOperator(String email) {
         return operators.saveAndFlush(PlatformOperatorAccount.createTemporary(
-                "operator@example.com", passwordEncoder.encode("Password1!"),
+                email, passwordEncoder.encode("Password1!"),
                 "operator", Instant.now().plusSeconds(600)));
     }
 

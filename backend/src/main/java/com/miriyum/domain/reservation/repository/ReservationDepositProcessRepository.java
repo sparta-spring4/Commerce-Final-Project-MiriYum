@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.repository;
 
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
+import com.miriyum.domain.reservation.entity.ReservationDepositProcessStatus;
 import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +23,18 @@ public interface ReservationDepositProcessRepository
             + "where process.reservationHoldId = :reservationHoldId")
     Optional<Long> findProcessIdByReservationHoldId(
             @Param("reservationHoldId") long reservationHoldId);
+
+    @Query("""
+            select process.id as processId,
+                   process.reservationHoldId as reservationHoldId,
+                   process.status as status,
+                   process.finalReservationId as finalReservationId,
+                   process.paymentId as paymentId
+            from ReservationDepositProcess process
+            where process.finalReservationId = :finalReservationId
+            """)
+    Optional<DepositProcessLink> findDepositProcessLinkByFinalReservationId(
+            @Param("finalReservationId") long finalReservationId);
 
     @Query("""
             select process.reservationHoldId from ReservationDepositProcess process
@@ -68,4 +81,12 @@ public interface ReservationDepositProcessRepository
     @Query("select process from ReservationDepositProcess process where process.id = :processId")
     Optional<ReservationDepositProcess> findByIdForUpdate(
             @Param("processId") long processId);
+
+    interface DepositProcessLink {
+        long getProcessId();
+        long getReservationHoldId();
+        ReservationDepositProcessStatus getStatus();
+        Long getFinalReservationId();
+        String getPaymentId();
+    }
 }

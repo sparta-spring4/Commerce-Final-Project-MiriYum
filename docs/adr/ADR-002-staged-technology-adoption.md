@@ -66,7 +66,7 @@ Redis 일반 후보 가운데 인증 상태 저장 요구는 [ADR-006](ADR-006-j
 | 단계 | 활성 기술과 역할 | 제외 기술 |
 |---|---|---|
 | 1차 MVP | Java 21, Spring Boot 4.1.0, Gradle 9.6.1, MVC, JPA, Security, Flyway, MySQL, Testcontainers MySQL, stateless Access/Refresh JWT | Valkey, QueryDSL, Kakao 지도·로그인, S3, PortOne, SSE, 메시지 브로커, 검색 엔진 |
-| 2차 MVP | 방식 A·MySQL 유지, `RuleInterpreter`, QueryDSL, 단계 진입 전 contract-first Issue/PR에서 확정할 하나의 공개 batch 가용성 조회 계약, 매장 주소 등록·변경 시 Kakao Local API와 지도 SDK | AI/LLM, Spring AI, 벡터 DB, 검색 엔진, 추천 캐시, 메시지 브로커 |
+| 2차 MVP | 방식 A·MySQL 유지, `RuleInterpreter`, QueryDSL, 제한된 OpenAI 구조화 음식 개념 해석, 공개 batch 가용성 조회 계약, 매장 주소 등록·변경 시 Kakao Local API와 지도 SDK | 벡터 DB, 검색 엔진, 추천 캐시, 메시지 브로커 |
 | 고도화 | Valkey Refresh Token 상태, Kakao 로그인, S3, 웨이팅·SSE, PortOne, 알림, 플랫폼 운영 기능, 기능별 MySQL durable task | 증거 없는 범용 분산 인프라 |
 | 향후 고도화 | 별도 승인된 AI/LLM 또는 측정된 병목을 해결하는 인프라 | 승인 전 Kafka, 범용 Outbox, MSA, WebSocket, 검색 클러스터 |
 

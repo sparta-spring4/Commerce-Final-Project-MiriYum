@@ -13,9 +13,30 @@ const EXPECTED_CONFLICT_CODES = new Set([
   'MENU_HOLD_002',
 ])
 
-const RESERVATION_STATUSES = new Set(['CONFIRMED', 'CANCELLED', 'FULFILLED'])
+const RESERVATION_STATUSES = new Set(['CONFIRMED', 'CANCELLED', 'FULFILLED', 'NO_SHOW'])
 const TIME_STATUSES = new Set(['RESOLVED', 'LEGACY_UNRESOLVED'])
 const CANCELLED_BY = new Set(['CONSUMER', 'STORE_OPERATOR', null])
+const DEPOSIT_RESPONSIBILITIES = new Set([
+  'CONSUMER',
+  'STORE_RESPONSIBLE',
+  'PLATFORM_RESPONSIBLE',
+])
+const DEPOSIT_REFUND_RATES = new Set([0, 5000, 10000])
+const DEPOSIT_STATUSES = new Set([
+  'PENDING',
+  'PROCESSING',
+  'COMPLETED',
+  'RECONCILIATION_REQUIRED',
+  'RECOVERY_REQUIRED',
+])
+const PAYMENT_DISPOSITION_STATUSES = new Set([
+  null,
+  'PROCESSING',
+  'COMPLETED',
+  'FAILED',
+  'RECONCILIATION_REQUIRED',
+])
+const FAILURE_CLASSIFICATIONS = new Set([null, 'RETRYABLE', 'PERMANENT', 'UNKNOWN'])
 
 function requireObject(value, name) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -78,6 +99,95 @@ function validateMenuItem(value) {
   }
 }
 
+function requireNullableSafeInteger(value, name, minimum) {
+  if (value !== null && (!Number.isSafeInteger(value) || value < minimum)) {
+    throw new Error(`${name} is invalid`)
+  }
+}
+
+function validateDepositDisposition(value) {
+  if (value === null) return
+  const disposition = requireExactObject(value, [
+    'policyVersion',
+    'responsibilityCode',
+    'targetRefundRateBasisPoints',
+    'originalAmountMinor',
+    'targetRefundAmountMinor',
+    'completedRefundAmountMinor',
+    'withheldAmountMinor',
+    'currency',
+    'dispositionId',
+    'refundId',
+    'status',
+    'paymentDispositionStatus',
+    'failureClassification',
+    'createdAt',
+    'updatedAt',
+    'completedAt',
+    'paymentRequestedAt',
+    'paymentUpdatedAt',
+  ], 'reservation depositDisposition')
+  if (disposition.policyVersion !== 2) {
+    throw new Error('reservation depositDisposition policyVersion is invalid')
+  }
+  if (!DEPOSIT_RESPONSIBILITIES.has(disposition.responsibilityCode)) {
+    throw new Error('reservation depositDisposition responsibilityCode is invalid')
+  }
+  if (!DEPOSIT_REFUND_RATES.has(disposition.targetRefundRateBasisPoints)) {
+    throw new Error('reservation depositDisposition targetRefundRateBasisPoints is invalid')
+  }
+  requireNullableSafeInteger(
+    disposition.originalAmountMinor,
+    'reservation depositDisposition originalAmountMinor',
+    1,
+  )
+  for (const field of [
+    'targetRefundAmountMinor',
+    'completedRefundAmountMinor',
+    'withheldAmountMinor',
+  ]) {
+    requireNullableSafeInteger(
+      disposition[field],
+      `reservation depositDisposition ${field}`,
+      0,
+    )
+  }
+  if (disposition.currency !== null
+      && (typeof disposition.currency !== 'string'
+        || !/^[A-Z]{3}$/.test(disposition.currency))) {
+    throw new Error('reservation depositDisposition currency is invalid')
+  }
+  if (disposition.dispositionId !== null
+      && (typeof disposition.dispositionId !== 'string'
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          disposition.dispositionId,
+        ))) {
+    throw new Error('reservation depositDisposition dispositionId is invalid')
+  }
+  if (disposition.refundId !== null) {
+    requirePublicId(disposition.refundId, 'reservation depositDisposition refundId')
+  }
+  if (!DEPOSIT_STATUSES.has(disposition.status)) {
+    throw new Error('reservation depositDisposition status is invalid')
+  }
+  if (!PAYMENT_DISPOSITION_STATUSES.has(disposition.paymentDispositionStatus)) {
+    throw new Error('reservation depositDisposition paymentDispositionStatus is invalid')
+  }
+  if (!FAILURE_CLASSIFICATIONS.has(disposition.failureClassification)) {
+    throw new Error('reservation depositDisposition failureClassification is invalid')
+  }
+  requireOffsetDateTime(disposition.createdAt, 'reservation depositDisposition createdAt')
+  requireOffsetDateTime(disposition.updatedAt, 'reservation depositDisposition updatedAt')
+  for (const field of ['completedAt', 'paymentRequestedAt', 'paymentUpdatedAt']) {
+    if (disposition[field] !== null) {
+      requireOffsetDateTime(
+        disposition[field],
+        `reservation depositDisposition ${field}`,
+      )
+    }
+  }
+}
+
 function buildReservationBody(template) {
   requireObject(template, 'reservation template')
   requireObject(template.party, 'reservation party')
@@ -135,6 +245,7 @@ function validateReservationSuccess(response) {
     'status',
     'menuSelections',
     'createdAt',
+    'depositDisposition',
     'cancelledBy',
     'cancellationReason',
   ], 'reservation response data')
@@ -156,6 +267,7 @@ function validateReservationSuccess(response) {
   if (!Array.isArray(data.menuSelections)) throw new Error('reservation menuSelections must be an array')
   data.menuSelections.forEach(validateMenuItem)
   requireOffsetDateTime(data.createdAt, 'reservation createdAt')
+  validateDepositDisposition(data.depositDisposition)
   if (!CANCELLED_BY.has(data.cancelledBy)) throw new Error('reservation cancelledBy is invalid')
   if (data.cancellationReason !== null) {
     requireBoundedString(data.cancellationReason, 'reservation cancellationReason', 0, 500)

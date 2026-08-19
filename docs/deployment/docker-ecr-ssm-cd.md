@@ -4,7 +4,14 @@ Issue: [#120](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/i
 
 ## Scope
 
-This is a staging API pre-deployment route, not the first MVP's final user deployment. It runs the Spring Boot API, MySQL, Nginx, and the Valkey staging container on one ARM64 staging EC2 instance. Nginx only proxies `/api/`; it deliberately returns `404` for `/` and `/actuator/`. No frontend asset, Vite server, S3, RDS, ECS, ALB, TLS certificate, or domain is configured by this change. The Valkey container is infrastructure preparation only; the backend does not consume it until the Refresh Token work in #140.
+This is the same-origin staging deployment route. It runs the version-matched React production
+build, Spring Boot API, MySQL, gateway Nginx, and Valkey on one ARM64 staging EC2 instance.
+`staging.miriyum.click` serves the frontend at `/` and proxies `/api/` to Spring Boot;
+`staging-api.miriyum.click` remains API-only and deliberately returns `404` for `/` and
+`/actuator/`. The frontend image is built from the same dev SHA as the backend image and is tagged
+`<SHA>-frontend` in the existing staging ECR repository. Neither the frontend container nor the
+backend, MySQL, or Valkey receives a host port. S3, RDS, ECS, ALB, and production infrastructure
+are not part of this staging route.
 
 The later frontend delivery must add static frontend assets to Nginx and retain the `/api/` proxy route. That work needs its own issue, review, and deploy verification before this can be called a same-origin user release.
 
@@ -47,6 +54,82 @@ These are staging Environment variables, not application secrets. Application an
 3. Run `chmod 600 /opt/miriyum/.env`.
 4. Confirm the instance role has `AmazonEC2ContainerRegistryReadOnly` and Systems Manager access.
 5. Confirm the security group allows TCP `80` only as required for the API. Do not expose MySQL `3306`, backend `8080`, or Valkey `6379`.
+
+### S3 runtime activation gate (#223)
+
+S3 runtime activation is a separate deployment step. Do not set
+`MIRIYUM_STORAGE_S3_ENABLED=true` merely because the application image is
+deployed. Keep both `MIRIYUM_STORAGE_S3_ENABLED` and
+`MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED` set to `false` until the following
+checks pass in the same staging environment.
+
+**Preflight**
+
+- The bucket name and region are present in the server-local `.env`. The
+  bucket is private, public access is blocked, and versioning is disabled.
+- Before activation, record a non-sensitive pass/fail result that bucket
+  default encryption is enabled, the bucket policy denies non-TLS requests,
+  and the approved object lifecycle and retention policy exists. Do not enable
+  either flag while any of these settings is undecided or absent.
+- The instance role has only the required access to this bucket and cannot
+  access unrelated buckets. Do not copy bucket names, ARNs, secrets, or object
+  keys into Issues, PRs, or workflow logs.
+- The deployed image contains the matching Flyway schema and the reconciliation
+  migration completed successfully.
+- The current deployment is healthy with both flags disabled. Record the exact
+  full SHA before changing the flags so the activation can be rolled back to
+  that same image.
+
+**Activation and smoke**
+
+1. Set both flags to `true` in the server-local `.env` and redeploy the same
+   approved full SHA. Do not enable the worker while the S3 runtime is disabled.
+2. Confirm loopback health is `UP`, the reconciliation scheduler is registered,
+   and startup logs contain no missing bucket, region, or permission error.
+3. As an authorized staging store operator, upload one supported image, replace
+   it, and delete it. Confirm the public image changes only after metadata is
+   `CONFIRMED`, and that an unauthorized request is rejected.
+4. Confirm reconciliation success, retryable failure, and long-stay observations
+   contain aggregate counts only. Do not capture tokens, cookies, source
+   filenames, object keys, user IDs, or raw provider errors.
+
+**Reconciliation fault smoke**
+
+1. Use a new synthetic staging store and a generated test-only image. Do not
+   use an existing user, store, menu, object, or business-registration record.
+2. After a successful upload creates the synthetic object, apply the
+   pre-approved staging-only fault that denies `DeleteObject` only for that
+   generated test object's prefix. Do not broaden the denial to production
+   prefixes, the whole bucket, or unrelated actions.
+3. Delete the synthetic image through the normal authorized API. Separately
+   confirm the external `503 COMMON_012` response and the internal `DELETED`
+   retry target with its aggregate counter; neither observation may expose an
+   object key, file ID, user ID, token, or provider error.
+4. Keep the fault in place and run the reconciliation worker at least once.
+   Confirm the aggregate `failed` count increases and the synthetic target is
+   scheduled for retry. Do not remove the fault before this failed worker path
+   is observed.
+5. Remove the fault, wait until `nextAttemptAt`, and confirm the first eligible
+   worker execution converges the synthetic metadata and object cleanup. Confirm
+   the aggregate `failed` count does not increase again. If it does not
+   converge within the approved observation window, stop the smoke and follow
+   rollback.
+6. For a separately approved long-stay fixture, keep the same narrowly scoped
+   fault only until the configured long-stay threshold is crossed. Confirm the
+   long-stay observation is an aggregate count, then remove the fault and wait
+   for convergence. Record only the run URL, full SHA, aggregate counters, and
+   success/failure result.
+7. Remove the synthetic store and verify no temporary deny rule remains. Stop
+   immediately and roll back if the fault affects any non-synthetic object or
+   the cleanup worker reports an unexpected error.
+
+**Rollback**
+
+If any smoke, permission, health, or reconciliation check fails, set both flags
+back to `false` and redeploy the same approved SHA. Confirm the service is
+healthy and that new image requests fail closed without deleting the last
+confirmed public image. Preserve only the run URL, full SHA, health result, and
+aggregate observation outcome; never use ad hoc bucket deletion as rollback.
 
 ### Store geocoding secret migration
 
@@ -126,5 +209,159 @@ After that manual decision is complete, rerun the selected immutable SHA deploym
 An ordinary push to `dev` deploys only to staging after `Backend CI` succeeds. The CD job additionally requires the triggering CI event to be a `push` from this repository, so a successful pull request CI result, including a fork PR, never receives OIDC or SSM deployment authority. Before automatic build and deployment, the workflow compares the completed CI SHA with the current remote `dev` HEAD and skips stale runs. A manual `Backend CD (Staging)` dispatch is allowed only from `dev` and accepts a full 40-character SHA tag; this is the only path that intentionally deploys a previous ECR image for staging rollback. The manual path checks out the same SHA before sending deployment files, so the Compose, Nginx, and deploy script revisions match the selected backend image.
 
 If an image push succeeds but a later SSM deployment step fails, rerun the failed workflow instead of deleting or overwriting the immutable ECR tag. The workflow checks whether the same SHA tag already exists and reuses it, then retries only the remaining deployment path.
+
+### Reservation deposit worker rollback
+
+`MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED` is a startup-time switch for the reservation deposit process and refund workers. The staging Compose and production ECS templates set it to `true` for normal operation. Changing the value does not stop workers in containers or tasks that are already running.
+
+The production CD workflow does not read `deploy/ecs/production-task-definition.json`. It copies the task definition currently attached to the ECS Service and changes only the backend image, so merging a repository template change does not add this setting to an existing production Service.
+
+For the first production activation or an emergency claim stop, use an approved operator session to clone the live task definition and change only this environment value. Set the approved production identifiers without printing the current task definition or the rest of its environment. Use `WORKER_ENABLED=false` for the disabled revision and `WORKER_ENABLED=true` when re-enabling:
+
+```bash
+set -euo pipefail
+umask 077
+
+export AWS_REGION=ap-northeast-2
+export ECS_CLUSTER=replace-with-production-cluster
+export ECS_SERVICE=replace-with-production-service
+export ECS_CONTAINER_NAME=backend
+export WORKER_ENABLED=false
+
+case "$WORKER_ENABLED" in
+  true|false) ;;
+  *) echo "WORKER_ENABLED must be true or false" >&2; exit 1 ;;
+esac
+
+current_task_definition=$(aws ecs describe-services \
+  --cluster "$ECS_CLUSTER" \
+  --services "$ECS_SERVICE" \
+  --query 'services[0].taskDefinition' \
+  --output text)
+
+work_dir=$(mktemp -d)
+cleanup() {
+  rm -f -- \
+    "$work_dir/current-task-definition.json" \
+    "$work_dir/next-task-definition.json"
+  rmdir -- "$work_dir"
+}
+trap cleanup EXIT
+
+aws ecs describe-task-definition \
+  --task-definition "$current_task_definition" \
+  --query taskDefinition \
+  --output json > "$work_dir/current-task-definition.json"
+
+backend_count=$(jq --arg container "$ECS_CONTAINER_NAME" \
+  '[.containerDefinitions[] | select(.name == $container)] | length' \
+  "$work_dir/current-task-definition.json")
+if [ "$backend_count" != "1" ]; then
+  echo "Expected exactly one backend container" >&2
+  exit 1
+fi
+
+jq --arg container "$ECS_CONTAINER_NAME" --arg enabled "$WORKER_ENABLED" '
+  .containerDefinitions |= map(
+    if .name == $container then
+      .environment = (
+        (.environment // []
+          | map(select(.name != "MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED")))
+        + [{"name": "MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED", "value": $enabled}]
+      )
+    else . end
+  )
+  | del(
+      .taskDefinitionArn,
+      .revision,
+      .status,
+      .requiresAttributes,
+      .compatibilities,
+      .registeredAt,
+      .registeredBy,
+      .deregisteredAt
+    )
+' "$work_dir/current-task-definition.json" > "$work_dir/next-task-definition.json"
+
+worker_value_count=$(jq --arg container "$ECS_CONTAINER_NAME" --arg enabled "$WORKER_ENABLED" \
+  '[.containerDefinitions[] | select(.name == $container)
+    | .environment[] | select(.name == "MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED"
+      and .value == $enabled)] | length' \
+  "$work_dir/next-task-definition.json")
+if [ "$worker_value_count" != "1" ]; then
+  echo "Worker value was not rendered exactly once" >&2
+  exit 1
+fi
+
+task_definition_arn=$(aws ecs register-task-definition \
+  --cli-input-json "file://$work_dir/next-task-definition.json" \
+  --query 'taskDefinition.taskDefinitionArn' \
+  --output text)
+
+aws ecs update-service \
+  --cluster "$ECS_CLUSTER" \
+  --service "$ECS_SERVICE" \
+  --task-definition "$task_definition_arn" \
+  --output json >/dev/null
+aws ecs wait services-stable \
+  --cluster "$ECS_CLUSTER" \
+  --services "$ECS_SERVICE"
+
+primary_task_definition=$(aws ecs describe-services \
+  --cluster "$ECS_CLUSTER" \
+  --services "$ECS_SERVICE" \
+  --query 'services[0].deployments[?status==`PRIMARY`].taskDefinition | [0]' \
+  --output text)
+if [ "$primary_task_definition" != "$task_definition_arn" ]; then
+  echo "The new task definition is not PRIMARY" >&2
+  exit 1
+fi
+
+runtime_value=$(aws ecs describe-task-definition \
+  --task-definition "$task_definition_arn" \
+  --output json \
+  | jq -r --arg container "$ECS_CONTAINER_NAME" \
+      '.taskDefinition.containerDefinitions[] | select(.name == $container)
+       | .environment[] | select(.name == "MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED")
+       | .value')
+if [ "$runtime_value" != "$WORKER_ENABLED" ]; then
+  echo "The registered worker value does not match the requested value" >&2
+  exit 1
+fi
+
+running_task_output=$(aws ecs list-tasks \
+  --cluster "$ECS_CLUSTER" \
+  --service-name "$ECS_SERVICE" \
+  --desired-status RUNNING \
+  --query 'taskArns[]' \
+  --output text)
+if [ -z "$running_task_output" ]; then
+  echo "No running service task was available for drain verification" >&2
+  exit 1
+fi
+read -r -a running_task_arns <<< "$running_task_output"
+
+old_task_count=$(aws ecs describe-tasks \
+  --cluster "$ECS_CLUSTER" \
+  --tasks "${running_task_arns[@]}" \
+  --output json \
+  | jq --arg task_definition "$task_definition_arn" \
+      '[.tasks[] | select(.taskDefinitionArn != $task_definition)] | length')
+if [ "$old_task_count" != "0" ]; then
+  echo "A task from the previous enabled revision is still running" >&2
+  exit 1
+fi
+```
+
+The temporary JSON files contain production configuration and resource identifiers even though they contain no secret values. The restrictive umask keeps them private, and the `EXIT` trap removes them after either success or failure. Record only the new task definition ARN, requested worker value, Service stability result, and old-task count.
+
+Use this order when an image rollback must not start new reservation deposit claims:
+
+1. Set `MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED=false` in the staging server-local `.env`, or register a production ECS task definition revision whose backend container has the value `false`.
+2. Deploy that disabled revision before changing the image. Verify the replacement backend containers or tasks received `false` without printing the rest of their environment.
+3. Wait until every previously enabled backend container or ECS task has stopped or drained. Do not declare new claims stopped while an enabled instance is still running.
+4. Deploy the selected previous image while keeping the worker value `false`, then perform the environment's normal health verification.
+
+Re-enabling the worker also requires a new container or task revision with the value set explicitly to `true`. Do not treat an environment-file or task-definition edit by itself as a runtime state change.
 
 The workflow uses the separate `staging-backend` marker when deciding the last successful backend image. This is intentionally separate from the shared `staging` Environment so a future frontend CD cannot make a backend deployment look newer. It also makes manual rollback explicit: the selected `inputs.image_tag` is the SHA recorded by the marker. After each deployment, record the GitHub Actions run URL, ECR image digest, SSM command ID, and EC2 loopback health result. Until those four runtime results exist, deployment evidence remains `NOT RUN`.

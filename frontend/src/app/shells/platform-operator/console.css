@@ -1,0 +1,171 @@
+/*
+ * 운영 콘솔 셸.
+ *
+ * 시안의 Deep Navy·Emerald 팔레트를 셸 루트에서 토큰으로만 다시 선언한다.
+ * 프리미티브를 복제하지 않는다. 컨테이너에 단축 padding을 쓰지 않는다.
+ */
+
+.po-console {
+  --po-navy: #1a237e;
+  --po-navy-deep: #000666;
+  --po-emerald: #00897b;
+  --po-surface: #f8f9fa;
+  --po-surface-card: #ffffff;
+  --po-border: #e9ecef;
+  --po-text: #212121;
+  --po-text-muted: #454652;
+  --po-tint: #e8eaf6;
+
+  display: grid;
+  grid-template-columns: 15rem 1fr;
+  min-height: 100vh;
+  background-color: var(--po-surface);
+  color: var(--po-text);
+}
+
+.po-console__nav {
+  display: flex;
+  flex-direction: column;
+  padding-inline: 1rem;
+  padding-block: 1.5rem;
+  border-inline-end: 1px solid var(--po-border);
+  background-color: var(--po-surface-card);
+}
+
+.po-console__brand {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.25rem;
+  margin-block-end: 2rem;
+  padding-inline: 0.5rem;
+}
+
+.po-console__brand-mark {
+  color: var(--po-navy-deep);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.po-console__brand-suffix {
+  color: var(--po-emerald);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.po-console__nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.po-console__nav-link {
+  display: block;
+  padding-inline: 0.75rem;
+  padding-block: 0.625rem;
+  border-radius: 0.5rem;
+  color: var(--po-text-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.po-console__nav-link:hover {
+  background-color: var(--po-tint);
+}
+
+/* 이중 클래스로 명시도를 올린다. 같은 명시도면 번들 순서가 이긴다. */
+.po-console__nav-link.po-console__nav-link--active {
+  background-color: var(--po-tint);
+  color: var(--po-navy);
+}
+
+.po-console__signout {
+  margin-block-start: auto;
+  padding-inline: 0.75rem;
+  padding-block: 0.625rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: none;
+  color: #d32f2f;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+}
+
+.po-console__signout:hover:not(:disabled) {
+  border-color: currentcolor;
+}
+
+.po-console__signout:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.po-console__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.po-console__header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 4rem;
+  padding-inline: 2rem;
+  padding-block: 0.75rem;
+  border-block-end: 1px solid var(--po-border);
+}
+
+.po-console__session {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--po-text-muted);
+  font-size: 0.75rem;
+}
+
+.po-console__session-label {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.po-console__content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 80rem;
+  padding-inline: 2rem;
+  padding-block: 2rem;
+}
+
+@media (width <= 60rem) {
+  .po-console {
+    grid-template-columns: 1fr;
+  }
+
+  .po-console__nav {
+    border-inline-end: none;
+    border-block-end: 1px solid var(--po-border);
+  }
+
+  .po-console__nav-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .po-console__signout {
+    margin-block-start: 1rem;
+  }
+
+  .po-console__content {
+    padding-inline: 1rem;
+  }
+}

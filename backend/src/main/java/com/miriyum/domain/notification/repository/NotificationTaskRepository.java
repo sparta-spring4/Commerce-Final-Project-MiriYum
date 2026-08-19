@@ -162,6 +162,26 @@ public class NotificationTaskRepository {
         );
     }
 
+    /** 소비자 공개 이력에 실제로 나타나는 IN_APP 전달 완료 작업의 최대 ID다. */
+    public long findDeliveredInAppHighWatermark(long recipientAccountId) {
+        Long watermark = jdbcTemplate.queryForObject("""
+                        SELECT COALESCE(MAX(task.notification_id), 0)
+                          FROM notification_tasks task
+                          JOIN notification_channel_attempts attempt
+                            ON attempt.notification_id = task.notification_id
+                           AND attempt.channel = 'IN_APP'
+                           AND attempt.status = 'DELIVERED'
+                         WHERE task.recipient_account_id = ?
+                           AND task.status = 'DELIVERED'
+                           AND task.delivered_at IS NOT NULL
+                           AND task.title IS NOT NULL
+                        """,
+                Long.class,
+                recipientAccountId
+        );
+        return watermark == null ? 0L : watermark;
+    }
+
     public LeasedTask claim(
             DueTask task,
             String workerId,

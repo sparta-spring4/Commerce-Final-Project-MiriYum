@@ -1,5 +1,6 @@
 import { check } from 'k6'
 
+import * as fixtureContracts from '../lib/contracts.js'
 import { loginConsumer, runAuthRefresh } from '../scenarios/auth-refresh.js'
 import { runNotificationHistory } from '../scenarios/notification-history.js'
 import { runReservationCreate } from '../scenarios/reservation-create.js'
@@ -101,9 +102,135 @@ function validReservationData() {
     status: 'CONFIRMED',
     menuSelections: [],
     createdAt: '2026-08-14T12:00:00+09:00',
+    depositDisposition: null,
     cancelledBy: null,
     cancellationReason: null,
   }
+}
+
+function validDepositDispositionData() {
+  return {
+    policyVersion: 2,
+    responsibilityCode: 'CONSUMER',
+    targetRefundRateBasisPoints: 5000,
+    originalAmountMinor: 20000,
+    targetRefundAmountMinor: 10000,
+    completedRefundAmountMinor: null,
+    withheldAmountMinor: 10000,
+    currency: 'KRW',
+    dispositionId: '123e4567-e89b-12d3-a456-426614174000',
+    refundId: null,
+    status: 'PROCESSING',
+    paymentDispositionStatus: 'PROCESSING',
+    failureClassification: null,
+    createdAt: '2026-08-14T12:00:00+09:00',
+    updatedAt: '2026-08-14T12:01:00+09:00',
+    completedAt: null,
+    paymentRequestedAt: '2026-08-14T12:00:30+09:00',
+    paymentUpdatedAt: null,
+  }
+}
+
+function reservationCapacityFixture(templateCount) {
+  return {
+    allowedOrigin: 'http://localhost:5173',
+    accounts: [
+      {
+        alias: 'auth-contract',
+        emailEnv: 'K6_AUTH_CONTRACT_EMAIL',
+        passwordEnv: 'K6_AUTH_CONTRACT_PASSWORD',
+      },
+      {
+        alias: 'reservation-contract',
+        emailEnv: 'K6_RESERVATION_CONTRACT_EMAIL',
+        passwordEnv: 'K6_RESERVATION_CONTRACT_PASSWORD',
+      },
+      {
+        alias: 'notification-contract-1',
+        emailEnv: 'K6_NOTIFICATION_CONTRACT_1_EMAIL',
+        passwordEnv: 'K6_NOTIFICATION_CONTRACT_1_PASSWORD',
+      },
+      {
+        alias: 'notification-contract-2',
+        emailEnv: 'K6_NOTIFICATION_CONTRACT_2_EMAIL',
+        passwordEnv: 'K6_NOTIFICATION_CONTRACT_2_PASSWORD',
+      },
+    ],
+    auth: { accountAliases: ['auth-contract'] },
+    search: { input: '서울 한식' },
+    reservationTemplates: Array.from({ length: templateCount }, (_, index) => ({
+      accountAlias: 'reservation-contract',
+      storeId: '301',
+      serviceDate: new Date(Date.UTC(2026, 8, index + 1)).toISOString().slice(0, 10),
+      startTime: '18:00:00',
+      startOffset: '+09:00',
+      party: { adultCount: 2, childCount: 0, infantCount: 0 },
+      menuSelections: [],
+    })),
+    notification: {
+      accountAliases: ['notification-contract-1', 'notification-contract-2'],
+      pageSize: 2,
+      minimumDeliveredItemsPerAccount: 3,
+    },
+  }
+}
+
+function reservationFixtureWithPartyDifferenceAtSameSlot(templateCount) {
+  const fixture = reservationCapacityFixture(templateCount)
+  const originalIndex = templateCount - 2
+  const duplicateIndex = templateCount - 1
+  fixture.reservationTemplates[duplicateIndex] = {
+    ...fixture.reservationTemplates[originalIndex],
+    party: { adultCount: 3, childCount: 0, infantCount: 0 },
+  }
+  return fixture
+}
+
+function reservationFixtureWithMenuDifferenceAtSameSlot(templateCount) {
+  const fixture = reservationCapacityFixture(templateCount)
+  const originalIndex = templateCount - 2
+  const duplicateIndex = templateCount - 1
+  fixture.reservationTemplates[duplicateIndex] = {
+    ...fixture.reservationTemplates[originalIndex],
+    menuSelections: [{ menuId: '701', quantity: 1 }],
+  }
+  return fixture
+}
+
+function reservationFixtureWithZeroOffsetDuplicate(templateCount) {
+  const fixture = reservationCapacityFixture(templateCount)
+  const originalIndex = templateCount - 2
+  const duplicateIndex = templateCount - 1
+  fixture.reservationTemplates[originalIndex].startOffset = '+00:00'
+  fixture.reservationTemplates[duplicateIndex] = {
+    ...fixture.reservationTemplates[originalIndex],
+    startOffset: '-00:00',
+  }
+  return fixture
+}
+
+function reservationFixtureWithOmittedAndExplicitOffsetAtSameLocalSlot(templateCount) {
+  const fixture = reservationCapacityFixture(templateCount)
+  const originalIndex = templateCount - 2
+  const duplicateIndex = templateCount - 1
+  delete fixture.reservationTemplates[originalIndex].startOffset
+  fixture.reservationTemplates[duplicateIndex] = {
+    ...fixture.reservationTemplates[originalIndex],
+    startOffset: '+09:00',
+  }
+  return fixture
+}
+
+function reservationFixtureWithSameAccountStoreDateDifferentStartTimes(templateCount) {
+  const fixture = reservationCapacityFixture(templateCount)
+  const originalIndex = templateCount - 2
+  const duplicateIndex = templateCount - 1
+  fixture.reservationTemplates[originalIndex].startTime = '18:00:00'
+  fixture.reservationTemplates[duplicateIndex] = {
+    ...fixture.reservationTemplates[originalIndex],
+    startTime: '18:30:00',
+  }
+  return fixture
 }
 
 function responseClient(status, data) {
@@ -149,6 +276,17 @@ function notificationContractThrows(pages) {
     minimumDeliveredItemsPerAccount: 3,
     tags: { phase: 'measured' },
   }))
+}
+
+function notificationContractAccepts(item) {
+  return !notificationContractThrows([
+    {
+      items: [item, notificationItem('10')],
+      hasNext: true,
+      nextCursor: 'opaque_cursor_1',
+    },
+    { items: [notificationItem('9')], hasNext: false, nextCursor: null },
+  ])
 }
 
 const RESERVATION_INPUT = {
@@ -249,7 +387,130 @@ class MalformedLoginClient extends RecordingClient {
   }
 }
 
+class AdditionalTokenFieldLoginClient extends RecordingClient {
+  post(url, body, params) {
+    if (url.endsWith('/api/v1/consumers/auth/sessions')) {
+      this.calls.push({ method: 'POST', url, body, ...params })
+      return {
+        status: 200,
+        body: envelope({
+          accessToken: 'access-token-value',
+          tokenType: 'Bearer',
+          expiresIn: 900,
+          unexpected: true,
+        }),
+        headers: { 'Set-Cookie': 'MIRIYUM_CONSUMER_REFRESH=refresh-cookie-value' },
+      }
+    }
+    return super.post(url, body, params)
+  }
+}
+
 export default function () {
+  const requiredReservationTemplateCount = fixtureContracts.requiredReservationTemplateCount
+  const buildExecutionScenarios = fixtureContracts.buildExecutionScenarios
+  const singleScenarioRequired = typeof requiredReservationTemplateCount === 'function'
+    ? requiredReservationTemplateCount({
+      profile: 'local-baseline',
+      totalArrivalRate: 1,
+      durationSeconds: 30,
+      scenarioIndex: 0,
+      scenarioCount: 1,
+    })
+    : null
+  const mixedScenarioFirstRequired = typeof requiredReservationTemplateCount === 'function'
+    ? requiredReservationTemplateCount({
+      profile: 'local-baseline',
+      totalArrivalRate: 4,
+      durationSeconds: 30,
+      scenarioIndex: 0,
+      scenarioCount: 3,
+    })
+    : null
+  const mixedScenarioThirdRequired = typeof requiredReservationTemplateCount === 'function'
+    ? requiredReservationTemplateCount({
+      profile: 'local-baseline',
+      totalArrivalRate: 4,
+      durationSeconds: 30,
+      scenarioIndex: 2,
+      scenarioCount: 3,
+    })
+    : null
+  const singleScenarioConfig = {
+    profile: 'local-baseline',
+    targetEnv: 'local',
+    scenarioNames: ['reservationCreate'],
+    limits: { arrivalRate: 1, durationSeconds: 30, maxVus: 1 },
+  }
+  const oneShortFixtureRejected = typeof buildExecutionScenarios === 'function'
+    && Number.isInteger(singleScenarioRequired)
+    && throws(() => buildExecutionScenarios(
+      singleScenarioConfig,
+      fixtureContracts.validateFixture(reservationCapacityFixture(singleScenarioRequired - 1)),
+    ))
+  const sufficientScenarios = typeof buildExecutionScenarios === 'function'
+    && Number.isInteger(singleScenarioRequired)
+    ? buildExecutionScenarios(
+      singleScenarioConfig,
+      fixtureContracts.validateFixture(reservationCapacityFixture(singleScenarioRequired)),
+    )
+    : null
+  const partyDifferenceAtSameSlotRejected = typeof buildExecutionScenarios === 'function'
+    && Number.isInteger(singleScenarioRequired)
+    && throws(() => buildExecutionScenarios(
+      singleScenarioConfig,
+      fixtureContracts.validateFixture(
+        reservationFixtureWithPartyDifferenceAtSameSlot(singleScenarioRequired),
+      ),
+    ))
+  const menuDifferenceAtSameSlotRejected = typeof buildExecutionScenarios === 'function'
+    && Number.isInteger(singleScenarioRequired)
+    && throws(() => buildExecutionScenarios(
+      singleScenarioConfig,
+      fixtureContracts.validateFixture(
+        reservationFixtureWithMenuDifferenceAtSameSlot(singleScenarioRequired),
+      ),
+    ))
+  const zeroOffsetDuplicateFixtureRejected = typeof buildExecutionScenarios === 'function'
+    && Number.isInteger(singleScenarioRequired)
+    && throws(() => buildExecutionScenarios(
+      singleScenarioConfig,
+      fixtureContracts.validateFixture(
+        reservationFixtureWithZeroOffsetDuplicate(singleScenarioRequired),
+      ),
+    ))
+  const omittedAndExplicitOffsetAtSameLocalSlotRejected =
+    typeof buildExecutionScenarios === 'function'
+    && Number.isInteger(singleScenarioRequired)
+    && throws(() => buildExecutionScenarios(
+      singleScenarioConfig,
+      fixtureContracts.validateFixture(
+        reservationFixtureWithOmittedAndExplicitOffsetAtSameLocalSlot(singleScenarioRequired),
+      ),
+    ))
+  const sameAccountStoreDateDifferentStartTimesRejected =
+    typeof buildExecutionScenarios === 'function'
+    && Number.isInteger(singleScenarioRequired)
+    && throws(() => buildExecutionScenarios(
+      singleScenarioConfig,
+      fixtureContracts.validateFixture(
+        reservationFixtureWithSameAccountStoreDateDifferentStartTimes(singleScenarioRequired),
+      ),
+    ))
+  const mixedScenarioFirstScenarios = typeof buildExecutionScenarios === 'function'
+    ? buildExecutionScenarios({
+      ...singleScenarioConfig,
+      scenarioNames: ['reservationCreate', 'storeSearch', 'notificationHistory'],
+      limits: { arrivalRate: 4, durationSeconds: 30, maxVus: 3 },
+    }, fixtureContracts.validateFixture(reservationCapacityFixture(61)))
+    : null
+  const mixedScenarioThirdScenarios = typeof buildExecutionScenarios === 'function'
+    ? buildExecutionScenarios({
+      ...singleScenarioConfig,
+      scenarioNames: ['storeSearch', 'notificationHistory', 'reservationCreate'],
+      limits: { arrivalRate: 4, durationSeconds: 30, maxVus: 3 },
+    }, fixtureContracts.validateFixture(reservationCapacityFixture(31)))
+    : null
   const client = new RecordingClient()
   const authResult = runAuthRefresh({
     client,
@@ -346,8 +607,162 @@ export default function () {
     account: { email: 'malformed-prepared@example.test', password: 'synthetic-password' },
     tags: { phase: 'preparation' },
   }))
+  const additionalTokenFieldClient = new AdditionalTokenFieldLoginClient()
+  const additionalTokenFieldRejected = throws(() => runAuthRefresh({
+    client: additionalTokenFieldClient,
+    baseUrl: 'http://backend:8080',
+    allowedOrigin: 'http://localhost:5173',
+    account: { email: 'additional-field@example.test', password: 'synthetic-password' },
+    tags: { phase: 'measured' },
+  }))
+  const noShowReservationAccepted = !throws(() => runReservationCreate({
+    client: responseClient(201, {
+      ...validReservationData(),
+      status: 'NO_SHOW',
+    }),
+    ...RESERVATION_INPUT,
+  }))
+  const allNotificationContractsAccepted = [
+    { purpose: 'RESERVATION_CONFIRMED', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_CHANGED', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_REJECTED', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_CANCELLED', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_EXPIRED', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_VISIT_REMINDER', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_COORDINATION_REQUIRED', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_VISIT_COMPLETED', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_NO_SHOW', resourceType: 'RESERVATION' },
+    { purpose: 'PICKUP_RESERVATION_CONFIRMED', resourceType: 'PICKUP_RESERVATION' },
+    { purpose: 'PICKUP_RESERVATION_CANCELLED', resourceType: 'PICKUP_RESERVATION' },
+    { purpose: 'MENU_HOLD_FULFILLMENT_AT_RISK', resourceType: 'MENU_HOLD' },
+    { purpose: 'MENU_SUBSTITUTION_PROPOSED', resourceType: 'MENU_SUBSTITUTION_PROPOSAL' },
+    { purpose: 'MENU_SUBSTITUTION_ACCEPTED', resourceType: 'MENU_SUBSTITUTION_PROPOSAL' },
+    { purpose: 'MENU_SUBSTITUTION_REJECTED', resourceType: 'MENU_SUBSTITUTION_PROPOSAL' },
+    { purpose: 'MENU_SUBSTITUTION_EXPIRED', resourceType: 'MENU_SUBSTITUTION_PROPOSAL' },
+    { purpose: 'WAITING_ENTRY_IMMINENT', resourceType: 'WAITING_TEAM' },
+    { purpose: 'WAITING_CALLED', resourceType: 'WAITING_TEAM' },
+    { purpose: 'WAITING_CANCELLED', resourceType: 'WAITING_TEAM' },
+    { purpose: 'WAITING_NO_SHOW', resourceType: 'WAITING_TEAM' },
+    { purpose: 'WAITING_CHECKED_IN', resourceType: 'WAITING_TEAM' },
+    { purpose: 'WAITING_CLOSED_BY_STORE', resourceType: 'WAITING_TEAM' },
+  ].every(({ purpose, resourceType }) => notificationContractAccepts({
+    ...notificationItem('11'),
+    purpose,
+    resource: { type: resourceType, id: '9001' },
+    action: null,
+  }))
+  const terminalNotificationActionsRejected = [
+    'RESERVATION_VISIT_COMPLETED',
+    'RESERVATION_NO_SHOW',
+  ].every((purpose) => notificationContractThrows([
+    {
+      items: [
+        {
+          ...notificationItem('11'),
+          purpose,
+          action: {
+            type: 'RESERVATION_DETAIL',
+            resource: { type: 'RESERVATION', id: '9001' },
+            availability: 'AVAILABLE',
+            expiresAt: null,
+          },
+        },
+        notificationItem('10'),
+      ],
+      hasNext: true,
+      nextCursor: 'opaque_cursor_1',
+    },
+    { items: [notificationItem('9')], hasNext: false, nextCursor: null },
+  ]))
+  const nullDepositDispositionAccepted = !throws(() => runReservationCreate({
+    client: responseClient(201, {
+      ...validReservationData(),
+      depositDisposition: null,
+    }),
+    ...RESERVATION_INPUT,
+  }))
+  const missingDepositDispositionRejected = throws(() => runReservationCreate({
+    client: responseClient(201, (() => {
+      const data = validReservationData()
+      delete data.depositDisposition
+      return data
+    })()),
+    ...RESERVATION_INPUT,
+  }))
+  const depositDispositionObjectAccepted = !throws(() => runReservationCreate({
+    client: responseClient(201, {
+      ...validReservationData(),
+      depositDisposition: validDepositDispositionData(),
+    }),
+    ...RESERVATION_INPUT,
+  }))
+  const depositDispositionMissingField = validDepositDispositionData()
+  delete depositDispositionMissingField.updatedAt
+  const invalidDepositDispositions = [
+    depositDispositionMissingField,
+    { ...validDepositDispositionData(), unexpected: true },
+    { ...validDepositDispositionData(), policyVersion: 1 },
+    { ...validDepositDispositionData(), responsibilityCode: 'UNKNOWN' },
+    { ...validDepositDispositionData(), targetRefundRateBasisPoints: 2500 },
+    { ...validDepositDispositionData(), originalAmountMinor: 0 },
+    { ...validDepositDispositionData(), targetRefundAmountMinor: -1 },
+    { ...validDepositDispositionData(), completedRefundAmountMinor: -1 },
+    { ...validDepositDispositionData(), withheldAmountMinor: -1 },
+    { ...validDepositDispositionData(), currency: 'krw' },
+    { ...validDepositDispositionData(), dispositionId: 'not-a-uuid' },
+    { ...validDepositDispositionData(), refundId: '0' },
+    { ...validDepositDispositionData(), status: 'UNKNOWN' },
+    { ...validDepositDispositionData(), paymentDispositionStatus: 'UNKNOWN' },
+    { ...validDepositDispositionData(), failureClassification: 'UNKNOWN_VALUE' },
+    { ...validDepositDispositionData(), createdAt: '2026-08-14T25:00:00+99:99' },
+    { ...validDepositDispositionData(), updatedAt: null },
+    { ...validDepositDispositionData(), completedAt: '2026-02-30T12:00:00+09:00' },
+    { ...validDepositDispositionData(), paymentRequestedAt: 'not-a-timestamp' },
+    { ...validDepositDispositionData(), paymentUpdatedAt: '2026-08-14' },
+  ]
+  const invalidDepositDispositionValuesRejected = invalidDepositDispositions.every(
+    (depositDisposition) => throws(() => runReservationCreate({
+      client: responseClient(201, {
+        ...validReservationData(),
+        depositDisposition,
+      }),
+      ...RESERVATION_INPUT,
+    })),
+  )
 
   check(null, {
+    'smoke requires one reservation template': () =>
+      typeof requiredReservationTemplateCount === 'function'
+      && requiredReservationTemplateCount({
+        profile: 'smoke',
+        totalArrivalRate: 100,
+        durationSeconds: 300,
+        scenarioIndex: 0,
+        scenarioCount: 1,
+      }) === 1,
+    'single reservation baseline includes the executor boundary iteration': () =>
+      singleScenarioRequired === 31,
+    'one fewer reservation template is rejected before execution': () =>
+      oneShortFixtureRejected,
+    'distinct-date boundary-inclusive reservation capacity is accepted': () =>
+      sufficientScenarios?.reservationCreate.rate === 1
+      && sufficientScenarios.reservationCreate.duration === '30s',
+    'party differences do not bypass same-slot reservation conflict validation': () =>
+      partyDifferenceAtSameSlotRejected,
+    'menu differences do not bypass same-slot reservation conflict validation': () =>
+      menuDifferenceAtSameSlotRejected,
+    'equivalent zero-offset reservation templates are rejected before execution': () =>
+      zeroOffsetDuplicateFixtureRejected,
+    'offset presence does not bypass same-local-slot reservation conflict validation': () =>
+      omittedAndExplicitOffsetAtSameLocalSlotRejected,
+    'different start times do not bypass same-date reservation conflict validation': () =>
+      sameAccountStoreDateDifferentStartTimesRejected,
+    'mixed scenario allocation includes the remainder and boundary guard': () =>
+      mixedScenarioFirstRequired === 61
+      && mixedScenarioFirstScenarios?.reservationCreate.rate === 2,
+    'mixed scenario capacity uses allocated rate instead of total rate': () =>
+      mixedScenarioThirdRequired === 31
+      && mixedScenarioThirdScenarios?.reservationCreate.rate === 1,
     'login uses the consumer session resource': () =>
       loginCall.method === 'POST'
       && loginCall.url === 'http://backend:8080/api/v1/consumers/auth/sessions',
@@ -451,6 +866,14 @@ export default function () {
         }),
         ...RESERVATION_INPUT,
       })),
+    'reservation creation accepts the required null deposit disposition': () =>
+      nullDepositDispositionAccepted,
+    'reservation creation rejects a missing deposit disposition': () =>
+      missingDepositDispositionRejected,
+    'reservation creation accepts a valid deposit disposition object': () =>
+      depositDispositionObjectAccepted,
+    'reservation creation rejects invalid deposit disposition fields and values': () =>
+      invalidDepositDispositionValuesRejected,
     'rate-limited login is classified but does not complete auth refresh': () =>
       rateLimitedAuth.classification === 'expected_4xx'
       && rateLimitedAuth.completed === false,
@@ -467,6 +890,15 @@ export default function () {
     'malformed successful prepared login is rejected after session cleanup': () =>
       malformedPreparationRejected
       && malformedPreparationClient.calls.some((call) => call.tags.request === 'consumerLogout'),
+    'token data rejects an additional field after session cleanup': () =>
+      additionalTokenFieldRejected
+      && additionalTokenFieldClient.calls.some((call) => call.tags.request === 'consumerLogout'),
+    'reservation creation accepts the current NO_SHOW status': () =>
+      noShowReservationAccepted,
+    'notification history accepts all current purpose and resource enum values': () =>
+      allNotificationContractsAccepted,
+    'reservation terminal notifications reject a non-null action': () =>
+      terminalNotificationActionsRejected,
     'notification invariant conflict is an unexpected 4xx': () =>
       notificationConflict.classification === 'unexpected_4xx',
     'notification first page omits the cursor': () =>

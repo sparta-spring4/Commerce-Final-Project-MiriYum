@@ -3,7 +3,10 @@ import execution from 'k6/execution'
 import http from 'k6/http'
 
 import { loadConfig } from './config.js'
-import { validateAuthPoolCapacity, validateFixture } from './lib/contracts.js'
+import {
+  buildExecutionScenarios,
+  validateFixture,
+} from './lib/contracts.js'
 import { COOKIE_LIFETIME_OPTIONS } from './lib/runtime-options.js'
 import {
   createFixtureFingerprint,
@@ -27,47 +30,11 @@ const prerequisiteSmokeProof = config.profile === 'smoke'
     targetEnv: config.targetEnv,
     baseUrl: config.baseUrl,
     commitSha: config.commitSha,
+    harnessCommitSha: config.harnessCommitSha,
     fixtureText,
     smokeRunId: config.prerequisiteSmokeRunId,
     scenarioNames: config.scenarioNames,
   })
-
-function allocate(total, index, count) {
-  return Math.floor(total / count) + (index < total % count ? 1 : 0)
-}
-
-function buildScenarios() {
-  const scenarios = {}
-  const count = config.scenarioNames.length
-  config.scenarioNames.forEach((name, index) => {
-    if (config.profile === 'smoke') {
-      scenarios[name] = {
-        executor: 'shared-iterations',
-        exec: name,
-        vus: 1,
-        iterations: name === 'notificationHistory'
-          ? fixture.notification.accountAliases.length
-          : 1,
-        maxDuration: '1m',
-        gracefulStop: '5s',
-        tags: { phase: 'measured', profile: config.profile, target_env: config.targetEnv },
-      }
-      return
-    }
-    scenarios[name] = {
-      executor: 'constant-arrival-rate',
-      exec: name,
-      rate: allocate(config.limits.arrivalRate, index, count),
-      timeUnit: '1s',
-      duration: `${config.limits.durationSeconds}s`,
-      preAllocatedVUs: allocate(config.limits.maxVus, index, count),
-      maxVUs: allocate(config.limits.maxVus, index, count),
-      gracefulStop: '30s',
-      tags: { phase: 'measured', profile: config.profile, target_env: config.targetEnv },
-    }
-  })
-  return scenarios
-}
 
 function buildThresholds() {
   const thresholds = {}
@@ -85,31 +52,14 @@ function buildThresholds() {
   return thresholds
 }
 
-function validateExecutionCapacity() {
-  if (config.profile !== 'smoke' && config.scenarioNames.includes('authRefresh')) {
-    validateAuthPoolCapacity(fixture, config.limits.maxVus)
-  }
-  if (!config.scenarioNames.includes('reservationCreate')) return
-  const reservationIndex = config.scenarioNames.indexOf('reservationCreate')
-  const requiredTemplates = config.profile === 'smoke'
-    ? 1
-    : allocate(config.limits.arrivalRate, reservationIndex, config.scenarioNames.length)
-      * config.limits.durationSeconds
-  if (fixture.reservationTemplates.length < requiredTemplates) {
-    throw new Error(`reservation fixture requires ${requiredTemplates} non-conflicting templates`)
-  }
-}
-
-validateExecutionCapacity()
-
 export const options = {
-  scenarios: buildScenarios(),
+  scenarios: buildExecutionScenarios(config, fixture),
   thresholds: buildThresholds(),
   insecureSkipTLSVerify: config.targetEnv === 'local',
   setupTimeout: '2m',
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)'],
   summaryTimeUnit: 'ms',
-  userAgent: `miriyum-k6-baseline/${config.commitSha.slice(0, 12)}`,
+  userAgent: `miriyum-k6-baseline/${config.harnessCommitSha.slice(0, 12)}`,
   ...COOKIE_LIFETIME_OPTIONS,
 }
 
@@ -242,6 +192,7 @@ export function handleSummary(data) {
     runId: config.runId,
     prerequisiteSmokeRunId: prerequisiteSmokeProof === null ? null : prerequisiteSmokeProof.runId,
     commitSha: config.commitSha,
+    harnessCommitSha: config.harnessCommitSha,
     scenarioNames: config.scenarioNames,
     targetFingerprint,
     fixtureSha256,

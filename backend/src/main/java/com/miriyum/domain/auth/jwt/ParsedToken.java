@@ -11,15 +11,16 @@ public record ParsedToken(
         String familyId,
         String tokenId,
         SessionTokenClaims sessionClaims,
-        Instant familyCreatedAt
+        Instant familyCreatedAt,
+        Instant expiresAt
 ) {
 
     public ParsedToken(TokenNamespace namespace, Long accountId) {
-        this(namespace, accountId, null, null, null, null);
+        this(namespace, accountId, null, null, null, null, null);
     }
 
     public ParsedToken(TokenNamespace namespace, Long accountId, String familyId, String tokenId) {
-        this(namespace, accountId, familyId, tokenId, null, null);
+        this(namespace, accountId, familyId, tokenId, null, null, null);
     }
 
     public ParsedToken(
@@ -29,6 +30,17 @@ public record ParsedToken(
             String tokenId,
             SessionTokenClaims sessionClaims
     ) {
-        this(namespace, accountId, familyId, tokenId, sessionClaims, null);
+        this(namespace, accountId, familyId, tokenId, sessionClaims, null, null);
+    }
+
+    public ParsedToken(
+            TokenNamespace namespace,
+            Long accountId,
+            String familyId,
+            String tokenId,
+            SessionTokenClaims sessionClaims,
+            Instant familyCreatedAt
+    ) {
+        this(namespace, accountId, familyId, tokenId, sessionClaims, familyCreatedAt, null);
     }
 }

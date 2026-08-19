@@ -2,7 +2,7 @@
 
 > 문서 상태: 세부 정책 확정(TODO 혼재)
 > 정책 범위: `NOTI-001`~`NOTI-010`
-> 최종 변경일: 2026-08-16
+> 최종 변경일: 2026-08-18
 > 기능 명세: [`docs/specs/notification/spec.md`](../specs/notification/spec.md)
 
 필수·선택 알림, 채널, 수신 동의, 발송 시점, 중복 방지, 재시도, 대체 채널 및 공급자 장애를 다룬다. 알림은 원 도메인의 확정 상태를 전달하는 파생 기능이며 상태 전이나 권리의 성립 조건이 아니다.
@@ -38,9 +38,17 @@
 - 이 화면은 보관 중인 기록만 표시하며 새 보관기간을 만들지 않는다. 정확한 보관 항목·기간과 파기는 `NOTI-009`, `PRIV-005`·`PRIV-006`의 기존 `TODO`가 확정된 뒤 그 버전을 따른다.
 - 표시 이력의 유실·지연은 원 거래 상태를 바꾸지 않고, 보관 정책을 확인할 수 없으면 과거 기록이 영구 보존되는 것으로 추정하지 않는다.
 
+## 알림 이력 SSE 변경 신호
+
+- 로그인한 일반 사용자는 `GET /api/v1/consumers/me/notification-events`를 consumer Bearer JWT와 Authorization header를 전달할 수 있는 fetch streaming으로 연결한다. `notifications.changed`는 상태 본문이 아니라 본인 알림 이력 HTTP API를 다시 조회하라는 최소 변경 신호다.
+- 연결 직후와 유효한 `Last-Event-ID` 재연결 뒤 현재 MySQL high-watermark에 결속된 신호를 한 번 보낸다. `id`는 consumer audience·인증 계정·계약 version에 결속된 무결성 보호 opaque cursor이며 client가 해석하거나 수정하지 않는다.
+- 최초 연결·재연결 수렴 신호 뒤의 high-watermark 신호는 새 `IN_APP DELIVERED`가 공개 이력에 보이게 된 경우만 나타낸다. wire frame은 `event: notifications.changed`, opaque `id`, 고정 `data: {}`만 포함하고 계정·알림·목적·상태를 싣지 않으며 필수 빈 줄을 두어 `\n\n`으로 종료한다. 내부 `PENDING`·`FAILED`·`CANCELLED`, provider 상태와 재시도는 공개 신호가 아니다. keepalive comment도 업무 event나 성공 근거가 아니며 cursor를 전진시키지 않는다.
+- Valkey Pub/Sub은 여러 인스턴스의 wake-up hint일 뿐 재생 원장이나 전달 성공의 근거가 아니다. 신호 중복·역순·유실과 재연결 뒤에도 MySQL 이력 조회로 수렴하며, SSE 실패가 알림 작업이나 원 거래 상태를 변경하지 않는다.
+- 형식이 잘못됐거나 다른 audience·계정에 결속된 `Last-Event-ID`는 공통 `400` JSON 오류 envelope로 거절한다. 연결 한도·heartbeat·timeout·correction interval의 운영 수치는 Runtime과 배포 부하 증거에서 별도로 확정한다.
+
 ## IN_APP Reservation·MenuHold·Pickup·Waiting 알림 목적 카탈로그
 
-Reservation·MenuHold·Pickup 목적은 `#247`, Waiting 목적은 후속 `#250`의 contract-first 범위를 소유한다. 모든 목적의 현재 허용 채널은 `IN_APP`이며 외부 SMS·알림톡·푸시·이메일은 `#252`의 별도 게이트를 통과하기 전에는 후보가 아니다. 아래 목적은 모두 거래 이행에 필요한 필수 알림이므로 사용자 설정으로 끄지 않으며 광고·추천 문구를 결합하지 않는다.
+Reservation·MenuHold·Pickup 기본 목적은 `#247`, 예약 방문 완료·노쇼 목적은 `#426`, Waiting 목적은 `#250`의 contract-first 범위를 소유한다. 모든 목적의 현재 허용 채널은 `IN_APP`이며 외부 SMS·알림톡·푸시·이메일은 `#252`의 별도 게이트를 통과하기 전에는 후보가 아니다. 아래 목적은 모두 거래 이행에 필요한 필수 알림이므로 사용자 설정으로 끄지 않으며 광고·추천 문구를 결합하지 않는다.
 
 | 목적 코드 | 분류 | 원 사건 소유 도메인 | 확정 원 사건 | 발송 방식 | 기본 행동 |
 |---|---|---|---|---|---|
@@ -51,6 +59,8 @@ Reservation·MenuHold·Pickup 목적은 `#247`, Waiting 목적은 후속 `#250`�
 | `RESERVATION_EXPIRED` | 거래 상태 | Reservation | 예약 `EXPIRED` 종결 전이 | 즉시 | 없거나 예약 결과 상세 |
 | `RESERVATION_VISIT_REMINDER` | 서비스 운영 | Reservation | `CONFIRMED` 예약과 승인된 알림 시점 정책 | 예약 | 예약 상세 |
 | `RESERVATION_COORDINATION_REQUIRED` | 거래 상태 | Reservation | `RES-013`의 예약별 활성 영향 사건 | 즉시 | 예약 상세 |
+| `RESERVATION_VISIT_COMPLETED` | 거래 상태 | Reservation | 직접 방문 완료 또는 QR 체크인으로 확정된 예약 `FULFILLED` 종결 전이 | 즉시 | 없음 |
+| `RESERVATION_NO_SHOW` | 거래 상태 | Reservation | 매장 운영자가 직접 확정한 예약 `NO_SHOW` 종결 전이 | 즉시 | 없음 |
 | `PICKUP_RESERVATION_CONFIRMED` | 거래 상태 | Pickup | 픽업 예약 `CONFIRMED` 전이 | 즉시 | 픽업 상세 |
 | `PICKUP_RESERVATION_CANCELLED` | 거래 상태 | Pickup | 픽업 예약 `CANCELLED` 종결 전이 | 즉시 | 픽업 상세 |
 | `MENU_HOLD_FULFILLMENT_AT_RISK` | 거래 상태 | MenuHold | `HOLD-009`의 `이행 확인 필요` 영향 사건 | 즉시 | 연결 예약 또는 픽업 상세 |
@@ -67,6 +77,8 @@ Reservation·MenuHold·Pickup 목적은 `#247`, Waiting 목적은 후속 `#250`�
 
 - 목적 코드가 카탈로그에 있어도 대응하는 원 상태·사건이 활성화되지 않았거나 확인되지 않으면 알림 작업을 추측 생성하지 않는다. 이 규칙 때문에 아직 없는 결제·환불 목적이 현재 활성 목적의 계약이나 구현을 막지 않는다.
 - `RESERVATION_VISIT_REMINDER`의 정확한 선행 시간은 코드 상수가 아니라 중앙 알림 시점 정책 버전이 결정한다. 유효한 정책 버전이 없으면 방문 안내 작업만 생성하지 않으며 예약 확정 알림은 유지한다.
+- `RESERVATION_VISIT_COMPLETED`는 기존 직접 방문 완료와 회전형 QR 체크인이 만든 같은 `FULFILLED` 종결 사건에 수렴한다. `RESERVATION_NO_SHOW`는 `CHECK-007`에 따라 매장 운영자가 직접 확정한 `NO_SHOW`에만 생성하며 시간 경과·노쇼 후보·QR 실패는 원 사건이 아니다.
+- 두 예약 종결 목적은 환불·몰취·취소 귀책·결제 결과를 주장하지 않는다. 보호된 예약 상세 route가 실제 활성화되기 전에는 공개 알림 이력의 `action`을 `null`로 유지하고 임시 URL을 만들지 않는다.
 - 일반 메뉴·구간의 `SOLD_OUT` 표시는 알림 목적이 아니다. `MENU_HOLD_FULFILLMENT_AT_RISK`는 기존 확정 거래의 당사자에게만 생성한다.
 - `MENU_SUBSTITUTION_PROPOSED`의 열람·침묵·전달 실패는 수락이 아니다. 수락·거절·만료 중 중앙에서 확정된 결과만 별도 목적을 만들고 이전 제안 행동을 비활성화한다.
 - Pickup은 픽업 예약의 확정·취소 사건을 직접 기록한다. 메뉴 이행 위험과 대체 제안·결과는 MenuHold 소유 사건으로 유지하고, 연결된 픽업 상세는 행동 대상으로만 참조한다.
@@ -151,7 +163,7 @@ Reservation·MenuHold·Pickup 목적은 `#247`, Waiting 목적은 후속 `#250`�
 - 웨이팅은 앞선 호환 팀이 두 팀 이하가 될 때 입장 임박 안내를 한 번 보내고, 실제 입장 호출에는 중앙 호출 시각과 10분 도착 제한 시각을 함께 안내한다. 입장 임박·호출·미응답 종료·체크인 완료는 서로 다른 알림 목적으로 구분한다.
 - 매장 마감 일괄 종료는 대상 팀별 `매장 종료` 사건으로 알리고 일부 발송 실패가 종료 상태를 되돌리지 않게 한다. 예약 승계 대기의 날짜 전환 만료는 매장 현지 00:00에 즉시 상태를 확정하되 사용자 전달은 `NOTI-003`의 야간 발송 정책을 적용한다.
 - 00:00 전에 생성된 승계 제안은 원래 남은 5분과 수락 뒤 10분 선점 시각을 표시한다. 야간 연기·알림 재시도·열람 지연은 제안 시간을 연장하지 않으며 날짜 전환 뒤 제안이 종결되면 다음 후보가 아니라 일반 당일 예약 경로를 안내한다.
-- 취소·변경·완료 같은 더 최신 상태가 도착하면 이전 상태의 아직 미발송 알림을 취소한다. 이미 전달된 정보가 중요하게 바뀌면 새 상태 버전의 변경 알림을 만들고 이전 메시지를 조용히 재사용하지 않는다.
+- 취소·변경·방문 완료·노쇼 같은 더 최신 상태가 도착하면 이전 상태의 아직 미발송 알림을 취소한다. 이미 전달된 정보가 중요하게 바뀌면 새 상태 버전의 알림을 만들고 이전 메시지를 조용히 재사용하지 않는다.
 
 ### 동시성·실패·감사·개인정보
 
@@ -311,3 +323,4 @@ Reservation·MenuHold·Pickup 목적은 `#247`, Waiting 목적은 후속 `#250`�
 | 2026-08-12 | NOTI-001·NOTI-004·NOTI-006·NOTI-008 | Pickup 확정·취소 목적과 원 사건 소유 경계를 추가하고 공개 이력을 `IN_APP` 전달 성공 항목으로 제한 | 검토 중 | Issue #247 Pickup 소유자 결정과 PR #255 리뷰 반영 |
 | 2026-08-16 | NOTI-001·NOTI-004·NOTI-006 | Waiting 입장 임박·호출·취소·미응답·입장 완료·매장 마감 종료를 IN_APP 목적에 추가하고 SSE를 후속으로 분리 | 검토 중 | Issue #250 설계 승인, #271·#272 Runtime 병합 확인 |
 | 2026-08-16 | NOTI-004·NOTI-006·NOTI-007 | 예약 전환 중 입장 임박 보류를 작업 version fencing, 상태 사건 기반 재판정과 유한한 주기 재조회로 수렴 | 검토 중 | PR #384 lost-wakeup 리뷰와 Issue #250 보완 설계 승인 |
+| 2026-08-18 | NOTI-004·NOTI-006 | `notifications.changed`를 MySQL 이력 재조회용 최소 SSE 신호로 확정하고 account-bound opaque 재연결 cursor와 Valkey 비원장 경계를 추가 | 검토 중 | Issue #250 SSE 3단계 설계 승인 |

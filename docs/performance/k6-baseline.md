@@ -70,7 +70,7 @@
 
 | 구간 | 상태 | 관찰 결과 |
 |---|---|---|
-| k6 계약 테스트 | PASS | 고정 k6 이미지에서 config 23, 공통 계약 27, runtime options 2, scenario 34, smoke proof 8, summary 6 — 총 100 checks가 성공했다. |
+| k6 계약 테스트 | PASS | 고정 k6 이미지에서 config 38, 공통 계약 27, recovery rate-limit 10, runtime options 2, scenario 45, smoke proof 9, summary 6 — 총 137 checks가 성공했다. |
 | k6 계약 CI workflow | PASS | `rhysd/actionlint:1.7.7`이 path-filtered workflow를 오류 없이 검증했으며 workflow는 `--network none`으로 외부·local API 접근을 차단한 고정 k6 이미지에서 계약 테스트만 실행한다. |
 | k6 smoke profile inspect | PASS | 인증 1 iteration, 검색 1, 예약 1, 알림은 명시한 2개 합성 계정에 대해 2 iterations로 해석됐다. |
 | k6 local-baseline profile inspect | PASS | 동일 target·commit·fixture의 smoke artifact를 전달했을 때 `storeSearch`, 1 VU·1 arrival/s·10초가 하나의 constant-arrival-rate executor로 해석됐다. commit이 다른 artifact는 init context에서 요청 전에 거부됐다. |
@@ -82,9 +82,9 @@
 | Backend 통합 테스트 | FAIL | 전체 task와 shard A가 Testcontainers JDBC readiness/context 전환 중 각각 15분·10분 안에 종료되지 않았다. |
 | Backend build | NOT RUN | `build`가 실패한 통합 gate에 의존하므로 동일 장시간 실행을 반복하지 않았다. PR의 공식 A~D CI shard 성공이 필요하다. |
 | Local smoke·baseline | PASS | ignored fixture와 저장소 밖 자격증명을 사용해 네 시나리오 smoke와 baseline 2회를 실행했고 모든 threshold가 통과했다. actual RPS·지연·오류는 환경별 결과 표에 기록했다. |
-| Staging smoke·baseline | NOT CONFIGURED | 승인된 시간·부하 상한·합성 fixture·배포 SHA·smoke run ID와 저장소에서 리뷰한 staging hostname allowlist가 없어 요청을 보내지 않았다. 후속 [#357](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357)이 소유한다. |
+| Staging smoke·baseline | NOT RUN | reviewed hostname과 #358·#359 선행 계약은 `dev`에 반영됐고 외부 HTTP→HTTPS `301`, HTTPS API `405`, 공개 Actuator `404`를 관찰했다. 하지만 private backend health `UP` 원증거, split-SHA·시간·부하 상한·합성 fixture·operator·observer·예외 주입·제거 승인이 없어 staging k6 요청은 보내지 않았다. 후속 실행은 [#357](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357)이 소유한다. |
 
-staging의 `NOT CONFIGURED`는 성공이 아니다. local 결과는 위 비식별 fixture 규모와 실행 artifact에서 관찰한 값이며 staging 지연시간·처리량으로 추정하지 않는다.
+staging의 `NOT RUN`은 성공이 아니다. local 결과는 위 비식별 fixture 규모와 실행 artifact에서 관찰한 값이며 staging 지연시간·처리량으로 추정하지 않는다.
 
 ## 실행 환경
 
@@ -105,7 +105,7 @@ staging의 `NOT CONFIGURED`는 성공이 아니다. local 결과는 위 비식�
 ### k6 계약 테스트
 
 ```powershell
-$tests = @('config-contract.js', 'contracts-contract.js', 'runtime-options-contract.js', 'scenario-contract.js', 'smoke-proof-contract.js', 'summary-contract.js')
+$tests = @('config-contract.js', 'contracts-contract.js', 'recovery-rate-limit-contract.js', 'runtime-options-contract.js', 'scenario-contract.js', 'smoke-proof-contract.js', 'summary-contract.js')
 foreach ($test in $tests) {
   docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 run --quiet "/scripts/tests/$test"
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -114,11 +114,12 @@ foreach ($test in $tests) {
 
 관찰 결과:
 
-- `config-contract.js`: 23/23 checks 성공
+- `config-contract.js`: 38/38 checks 성공
 - `contracts-contract.js`: 27/27 checks 성공
+- `recovery-rate-limit-contract.js`: 10/10 checks 성공
 - `runtime-options-contract.js`: 2/2 checks 성공
-- `scenario-contract.js`: 34/34 checks 성공
-- `smoke-proof-contract.js`: 8/8 checks 성공
+- `scenario-contract.js`: 45/45 checks 성공
+- `smoke-proof-contract.js`: 9/9 checks 성공
 - `summary-contract.js`: 6/6 checks 성공
 - 계약 테스트의 의도적 예약 conflict와 인증 rate-limit은 합계 `expected_4xx=2`, 공개 계약에 없는 `RESERVATION_004`와 notification invariant conflict는 `unexpected_4xx=2`로 분리됐다. 이는 실제 환경 오류율이 아니다.
 
@@ -127,6 +128,8 @@ foreach ($test in $tests) {
 네 시나리오 smoke:
 
 ```powershell
+$commitSha = git rev-parse HEAD
+$harnessCommitSha = $commitSha
 docker run --rm `
   -v "${PWD}/performance/k6:/scripts:ro" `
   grafana/k6:2.1.0 inspect `
@@ -136,13 +139,16 @@ docker run --rm `
   -e PROFILE=smoke `
   -e FIXTURE_PATH=/scripts/fixtures/test-data.example.json `
   -e RUN_ID=local-inspect `
-  -e COMMIT_SHA=0123456789abcdef0123456789abcdef01234567 `
+  -e COMMIT_SHA=$commitSha `
+  -e HARNESS_COMMIT_SHA=$harnessCommitSha `
   /scripts/main.js
 ```
 
 `storeSearch` local-baseline options:
 
 ```powershell
+$commitSha = git rev-parse HEAD
+$harnessCommitSha = $commitSha
 docker run --rm `
   -v "${PWD}/performance/k6:/scripts:ro" `
   -v "${PWD}/performance/k6/results:/results:ro" `
@@ -159,7 +165,8 @@ docker run --rm `
   -e ARRIVAL_RATE=1 `
   -e FIXTURE_PATH=/scripts/fixtures/test-data.example.json `
   -e RUN_ID=local-baseline-inspect `
-  -e COMMIT_SHA=0123456789abcdef0123456789abcdef01234567 `
+  -e COMMIT_SHA=$commitSha `
+  -e HARNESS_COMMIT_SHA=$harnessCommitSha `
   /scripts/main.js
 ```
 
@@ -191,6 +198,8 @@ docker compose --env-file deploy/local/.env.example `
 실제 실행은 아래 Compose 명령에 표의 비식별 입력을 대입했다. `$credentialFile`의 저장소 밖 실제 경로, 계정 원문과 카카오 키는 기록하지 않는다.
 
 ```powershell
+$commitSha = git rev-parse HEAD
+$harnessCommitSha = $commitSha
 docker compose --env-file deploy/local/.env `
   -f deploy/local/docker-compose.dev.yml `
   -f deploy/local/docker-compose.loadtest.yml `
@@ -208,6 +217,7 @@ docker compose --env-file deploy/local/.env `
   -e FIXTURE_PATH=/scripts/fixtures/test-data.local.json `
   -e RUN_ID=$runId `
   -e COMMIT_SHA=$commitSha `
+  -e HARNESS_COMMIT_SHA=$harnessCommitSha `
   /scripts/main.js
 ```
 
@@ -256,10 +266,25 @@ Pop-Location
 
 | scenario | 입력 | p50 | p95 | p99 | RPS | expected 4xx | unexpected 4xx | 5xx |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| authRefresh | NOT CONFIGURED — #357 | — | — | — | — | — | — | — |
-| storeSearch | NOT CONFIGURED — #357 | — | — | — | — | — | — | — |
-| reservationCreate | NOT CONFIGURED — #357 | — | — | — | — | — | — | — |
-| notificationHistory | NOT CONFIGURED — #357 | — | — | — | — | — | — | — |
+| authRefresh | NOT RUN — #357 실행 승인 대기 | — | — | — | — | — | — | — |
+| storeSearch | NOT RUN — #357 실행 승인 대기 | — | — | — | — | — | — | — |
+| reservationCreate | NOT RUN — #357 fixture·실행 승인 대기 | — | — | — | — | — | — | — |
+| notificationHistory | NOT RUN — #357 실행 승인 대기 | — | — | — | — | — | — | — |
+
+### #357 실행 하네스 보강
+
+staging 요청을 보내지 않은 상태에서 #429 병합 SHA `b468ccb34a367db43c8114e2acade7afad0c3aed`의 고정 `grafana/k6:2.1.0` 이미지와 `--network none`으로 7개 계약 suite, 총 137/137 checks를 검증했다. `config-contract.js` 38/38, `contracts-contract.js` 27/27, `recovery-rate-limit-contract.js` 10/10, `runtime-options-contract.js` 2/2, `scenario-contract.js` 45/45, `smoke-proof-contract.js` 9/9, `summary-contract.js` 6/6 checks가 성공했다. 이는 로컬 정적 계약 증거일 뿐 staging 배포·smoke·baseline·기본 429 복구의 runtime 증거가 아니다.
+
+2026-08-18 사전 점검에서 HTTP API 경로의 같은 HTTPS 경로 전환 `301`, HTTPS token-refresh 경로의 비인증 `HEAD`에 대한 API-level `405`와 `Allow: POST`, 공개 `/actuator/health`의 의도된 `404`를 관찰했다. 최근 성공한 `staging-backend` 배포 marker는 backend SHA `adf508f10fed3bfd061869a3abce7abe9dad075d`를 가리켰다. 다만 private `127.0.0.1:8080/actuator/health`의 `UP` 원응답은 이 점검에서 직접 읽지 않았고, backend와 harness SHA가 다르므로 실제 실행 전 split-SHA 승인이 필요하다.
+
+- `COMMIT_SHA`: 실제 배포 backend full SHA
+- `HARNESS_COMMIT_SHA`: 실행 중인 k6 script full SHA
+- local은 두 SHA가 같아야 하고, staging split SHA는 `STAGING_SPLIT_SHA_APPROVED=true`가 별도 승인된 경우에만 허용한다.
+- staging은 `HEAD=HARNESS_COMMIT_SHA`이고 `performance/k6`에 tracked·staged·untracked 변경이 없는 checkout을 확인한 뒤에만 `STAGING_HARNESS_SOURCE_VERIFIED=true`를 전달한다. caller가 SHA 문자열만 주장하는 것은 증거가 아니다.
+- smoke artifact는 두 SHA를 모두 기록하며 baseline이 둘 다 대조한다.
+- `reservationCreate`의 #358 executor 경계 계약은 `dev`에 병합됐다. 실제 staging에서는 배분된 arrival rate와 duration의 경계 guard까지 포함한 비충돌 template을 별도 검토하고 `STAGING_RESERVATION_FIXTURE_APPROVED=true`가 승인된 경우에만 포함한다.
+- 복구 verifier는 예외 제거·동일 backend SHA 재배포·새 로그인 창 확인 뒤 단일 VU로 5회 성공과 session logout을 수행하고 6번째 로그인의 정확한 `429`만 승인한다.
+- 실제 IP·email·password·Token·cookie·Authorization header·요청/응답 원문은 summary와 보관 로그에 남기지 않는다.
 
 ## 위험과 다음 실행 gate
 
@@ -267,8 +292,8 @@ Pop-Location
 - 로컬 backend integration task가 Testcontainers readiness/context 종료에서 시간 초과됐다. 현재 변경과 독립적인 환경·suite 종료 문제지만 CI A~D shard가 성공하기 전에는 회귀 검증이 완료되지 않는다.
 - staging 지오코딩 키 배선의 선행 작업은 [#362](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/362)로 `dev`에 병합됐다. 실제 staging fixture 준비 성공은 #357 실행 증거에서 별도로 확인한다.
 - 공유 staging의 동시 트래픽과 데이터 상태는 측정 noise가 될 수 있다. 승인 시간과 실행 전후 CloudWatch 구간을 함께 기록해야 한다.
-- staging host는 호출자가 함께 넘기는 allowlist만 신뢰하지 않는다. 저장소의 신뢰 allowlist에 승인 hostname이 리뷰되어 들어오기 전까지 모든 staging 실행을 차단한다.
-- 예약 baseline은 배분된 `ARRIVAL_RATE × DURATION_SECONDS`와 executor 경계 guard를 포함한 충돌하지 않는 template을 소모한다. 반복 사용으로 예상 409 비율을 왜곡하지 않으며 공식 보강은 #358이 소유한다.
+- staging host는 호출자가 함께 넘기는 allowlist만 신뢰하지 않고 저장소에 리뷰된 `staging-api.miriyum.click`만 허용한다. 외부 경계에서는 HTTP→HTTPS `301`, HTTPS API-level `401` 또는 `405`, 공개 Actuator `404` 차단을 확인하고, 실제 backend health `UP`은 배포·SSM의 private loopback 증거로 확인한다.
+- 예약 baseline은 배분된 `ARRIVAL_RATE × DURATION_SECONDS`와 executor 경계 guard를 포함한 충돌하지 않는 template을 소모한다. 반복 사용으로 예상 409 비율을 왜곡하지 않으며 #358 보강은 `dev`에 병합됐다. 별도 `STAGING_RESERVATION_FIXTURE_APPROVED=true`가 승인되기 전에는 staging `reservationCreate`를 실행하지 않는다.
 - 인증은 IP rate limit을 의도된 429로 분리한다. 알림·예약 setup은 fixture에서 실제로 쓰는 계정만 로그인한다.
 - 로컬 k6 요청은 전용 HTTPS proxy를 통해서만 보내고, 내부 CA 인증서 검증 완화는 `TARGET_ENV=local`에만 적용한다. backend의 refresh cookie 보안 속성은 낮추지 않는다.
 - 혼합 프로필의 인증 refresh 계정, 예약 계정, 알림 이력 계정은 서로 격리하며 알림 조회는 fixture가 약속한 두 번째 페이지가 실제로 없으면 계약 실패로 처리한다.
@@ -276,14 +301,14 @@ Pop-Location
 - k6의 전역 VU ID가 다중 시나리오에서 연속적이지 않을 수 있으므로 auth pool은 전체 `MAX_VUS` 이상을 요구해 modulo 계정 선택이 동시에 같은 계정을 가리키지 않게 한다.
 - 인증 login 또는 refresh가 429로 끝나면 분류 counter에는 남기되 완성된 인증 iteration으로 인정하지 않는다. constant-arrival-rate의 `dropped_iterations`도 0이 아니면 실행을 실패시키고 안전 summary에 남긴다.
 - backend 기본 IP rate limit은 login 5회/600초, refresh 30회/60초다. local loadtest override는 하네스 최대 입력을 수용하도록 각각 `600,000회/600초`, `60,000회/60초`를 backend에만 주입한다. 이 조건의 결과는 순수 인증 지연시간·처리량 기준선이며 기본 보호 동작 검증이 아니다. override 없이 실행해 429가 섞인 `authRefresh` 결과는 p50/p95/p99 또는 #286 근거로 사용하지 않는다.
-- staging은 전체 한도를 높이지 않는다. 승인된 실행 직전에 [#340](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/340)의 단일 공인 IPv4 예외를 주입하고, smoke·baseline 종료 즉시 값을 제거한 뒤 같은 SHA를 재배포해 기본 정책의 `429` 복구를 확인한다. IPv6는 허용하지 않는다. 예외는 login·refresh에만 적용하며 최초 실제 적용 시 프로세스당 한 번만 IP 없는 경고 이벤트를 남긴다. IP·token·cookie·raw HTTP output은 결과에 남기지 않는다.
+- staging은 전체 한도를 높이지 않는다. [#377](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/377)로 병합된 단일 공인 IPv4 예외를 승인된 실행 직전에만 주입하고, smoke·baseline의 성공·실패·중단과 무관하게 값을 제거한 뒤 같은 backend SHA를 재배포해 기본 정책의 `429` 복구를 확인한다. IPv6는 허용하지 않는다. 예외는 login·refresh에만 적용하며 최초 실제 적용 시 프로세스당 한 번만 IP 없는 경고 이벤트를 남긴다. IP·token·cookie·raw HTTP output은 결과에 남기지 않는다.
 - 공개 매장 검색의 기본 한도는 source IP 기준 60회/60초이고 local loadtest override는 `60,000회/60초`를 주입한다. override가 없는 환경에서 `2 iterations/s × 30초`를 반복하려면 이전 실행 종료 후 최소 60초를 기다려 새 창에서 시작한다. 어느 환경이든 예상 429가 발생한 결과는 검색 처리량·p50/p95/p99 기준선 또는 #286 근거로 사용하지 않는다.
 - CSRF 준비 제한은 local loadtest override에 복제하지 않고 backend 기본 예산 60회/60초를 상속한다. 일반 `MAX_VUS` 상한은 100이지만 `authRefresh`를 선택한 baseline은 이 예산 아래의 50으로 제한한다. 예약·알림처럼 auth refresh를 선택하지 않은 시나리오는 CSRF 예산 때문에 50으로 제한하지 않는다.
 - 성공한 인증 login은 refresh 결과와 관계없이 같은 cookie jar에서 CSRF 토큰을 준비한 뒤 현재 session을 logout한다. k6의 `noCookiesReset=true`가 같은 VU의 cookie jar를 iteration 사이에 유지하므로 VU runtime의 CSRF 토큰 캐시와 수명이 일치하며, VU별 cookie jar 격리는 유지된다. CSRF 토큰과 쿠키는 client별로 재사용해 IP당 준비 요청 제한을 iteration 수만큼 소비하지 않는다. setup의 Reservation·Notification bearer 준비 로그인도 Access Token을 반환하기 전에 Refresh Token family를 회수한다. CSRF·logout 요청은 `phase=cleanup`이라 성능 threshold와 summary에서 제외되며, cleanup 실패는 실행 실패다. 정상 종료에서는 k6가 만든 Valkey family가 남지 않는다. 강제 중단으로 cleanup이 실행되지 못하면 합성 계정 전체 로그인 종료 또는 환경 소유자가 승인한 Valkey 정리 절차로 잔존 family를 회수한 뒤 다음 실행을 허용한다.
 - setup bearer의 15분 수명보다 짧게 끝내기 위해 duration을 최대 600초로 제한했다. 더 긴 시험은 token 회전 계약을 별도 설계한 뒤 수행한다.
 - raw HTTP output, Token, cookie, cursor, 알림 제목과 자원 ID는 증거로 보관하지 않는다.
 
-다음 local 실행은 `performance/k6/README.md`의 smoke 순서를 따르며, 성공한 `LOCAL_SMOKE_RUN_ID`와 그 run이 생성한 검증 가능한 JSON artifact 없이는 baseline 구성이 거부된다. staging 실행은 [#357](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357)에서 배포 full SHA, 합성 fixture, 공지 시간, 부하 상한, 저장소에서 리뷰한 trusted hostname, `STAGING_APPROVED=true`, #340 예외의 주입·제거 담당자, 성공한 `STAGING_SMOKE_RUN_ID`와 동일 실행 artifact가 모두 있을 때만 수행한다.
+다음 local 실행은 `performance/k6/README.md`의 smoke 순서를 따르며, 성공한 `LOCAL_SMOKE_RUN_ID`와 그 run이 생성한 검증 가능한 JSON artifact 없이는 baseline 구성이 거부된다. staging 실행은 [#357](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357)에서 배포 full SHA, clean checkout으로 검증한 harness full SHA, 합성 fixture, 공지 시간, 부하 상한, operator·observer, 저장소에서 리뷰한 trusted hostname, 외부 HTTP→HTTPS·API 도달·Actuator 차단 증거와 private backend health `UP` 증거, `STAGING_APPROVED=true`, `STAGING_HARNESS_SOURCE_VERIFIED=true`, 필요한 split-SHA 승인, #377 예외의 주입·제거 담당자, 성공한 `STAGING_SMOKE_RUN_ID`와 동일 실행 artifact가 모두 있을 때만 수행한다. `reservationCreate`는 별도 fixture 승인 전까지 제외한다. 실행 종료 뒤에는 같은 backend SHA의 복구 배포와 비식별 recovery summary까지 있어야 완료로 기록한다.
 
 ## 후속 이슈 연결
 

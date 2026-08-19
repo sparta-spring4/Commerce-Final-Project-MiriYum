@@ -43,16 +43,47 @@ class AudienceOpenApiContractTest {
             "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-ins",
             "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations",
             "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}");
+    private static final Set<String> WAITING_CONSUMER_PATHS = Set.of(
+            "/api/v1/consumers/me/stores/{storeId}/waiting-availabilities",
+            "/api/v1/consumers/me/stores/{storeId}/waiting-location-proofs",
+            "/api/v1/consumers/me/stores/{storeId}/waiting-teams",
+            "/api/v1/consumers/me/waiting-invitation-acceptances",
+            "/api/v1/consumers/me/waiting-teams/current",
+            "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/invitations",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/membership-departures",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/acceptances",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/rejections",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations");
     private static final String NOTIFICATION_HISTORY_PATH =
             "/api/v1/consumers/me/notifications";
+    private static final String NOTIFICATION_EVENTS_PATH =
+            "/api/v1/consumers/me/notification-events";
+    private static final String CONSUMER_WAITING_EVENTS_PATH =
+            "/api/v1/consumers/me/waiting-events";
+    private static final String OPERATOR_WAITING_EVENTS_PATH =
+            "/api/v1/store-operators/stores/{storeId}/waiting-events";
     private static final String REPRESENTATIVE_MENUS_PATH =
             "/api/v1/store-operators/stores/{storeId}/representative-menus";
+    private static final String STORE_DASHBOARD_ANALYTICS_PATH =
+            "/api/v1/store-operators/stores/{storeId}/dashboard-statistics";
+    private static final String STORE_RESERVATION_PAYMENT_STATUS_PATH =
+            "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}"
+                    + "/payment-status";
     private static final Set<String> POST_MVP1_AUDIENCE_PATHS =
             Stream.concat(
                     Stream.of(
                             MENU_ALTERNATIVE_SEARCH_PATH,
                             NOTIFICATION_HISTORY_PATH,
+                            NOTIFICATION_EVENTS_PATH,
+                            CONSUMER_WAITING_EVENTS_PATH,
+                            OPERATOR_WAITING_EVENTS_PATH,
                             REPRESENTATIVE_MENUS_PATH,
+                            STORE_DASHBOARD_ANALYTICS_PATH,
+                            STORE_RESERVATION_PAYMENT_STATUS_PATH,
                             "/api/v1/store-operators/stores/{storeId}/images",
                             "/api/v1/store-operators/stores/{storeId}/images/{imageId}",
                             "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images",
@@ -87,7 +118,9 @@ class AudienceOpenApiContractTest {
                                     RESERVATION_DEPOSIT_PATHS.stream(),
                                     Stream.concat(
                                             WAITING_SETTINGS_PATHS.stream(),
-                                            WAITING_LEDGER_PATHS.stream()))))
+                                            Stream.concat(
+                                                    WAITING_LEDGER_PATHS.stream(),
+                                                    WAITING_CONSUMER_PATHS.stream())))))
                     .collect(Collectors.toUnmodifiableSet());
     private static final Set<String> LEGACY_PREFIXES = Set.of(
             "/api/v1/consumer-auth",
@@ -177,6 +210,27 @@ class AudienceOpenApiContractTest {
                 assertPathReferenceResolves(file, entry.getKey(), map(entry.getValue()));
             }
         }
+    }
+
+    @Test
+    void sseContractsAreExposedOnceThroughTheirOwningAudienceEntrypoints()
+            throws IOException {
+        assertThat(map(paths("consumer-openapi.yaml").get(NOTIFICATION_EVENTS_PATH)))
+                .containsExactly(Map.entry(
+                        "$ref",
+                        "./notification/openapi.yaml#/paths/"
+                                + "~1api~1v1~1consumers~1me~1notification-events"));
+        assertThat(map(paths("consumer-openapi.yaml").get(CONSUMER_WAITING_EVENTS_PATH)))
+                .containsExactly(Map.entry(
+                        "$ref",
+                        "./waiting/openapi.yaml#/paths/"
+                                + "~1api~1v1~1consumers~1me~1waiting-events"));
+        assertThat(map(paths("store-operator-openapi.yaml").get(OPERATOR_WAITING_EVENTS_PATH)))
+                .containsExactly(Map.entry(
+                        "$ref",
+                        "./waiting/openapi.yaml#/paths/"
+                                + "~1api~1v1~1store-operators~1stores~1{storeId}"
+                                + "~1waiting-events"));
     }
 
     private static void assertPathReferenceResolves(

@@ -5,14 +5,17 @@ import com.miriyum.domain.auth.membersupport.MemberSearchCriteria;
 import com.miriyum.domain.auth.membersupport.MemberStatus;
 import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.MemberPageResponse;
 import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.MemberResponse;
+import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.SanctionResponse;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportAssignmentService;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportQueryService;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportDecisionService;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSanctionCommandService;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSanctionService;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportCaseQueryService;
+import com.miriyum.domain.platformoperator.service.membersupport.PendingMemberSanctionQueryService;
 import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.CaseResponse;
 import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.CasePageResponse;
+import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.PendingSanctionApprovalPageResponse;
 import com.miriyum.domain.platformoperator.dto.membersupport.PlatformMemberSupportRequests.CaseDecisionRequest;
 import com.miriyum.domain.platformoperator.dto.membersupport.PlatformMemberSupportRequests.SanctionRequest;
 import com.miriyum.domain.platformoperator.dto.membersupport.PlatformMemberSupportRequests.AdditionalApprovalRequest;
@@ -42,19 +45,22 @@ public class PlatformOperatorMemberSupportController {
     private final MemberSanctionCommandService sanctionCommands;
     private final MemberSanctionService sanctions;
     private final MemberSupportCaseQueryService caseQueries;
+    private final PendingMemberSanctionQueryService pendingSanctions;
 
     public PlatformOperatorMemberSupportController(MemberSupportQueryService queries,
                                                    MemberSupportAssignmentService assignments,
                                                    MemberSupportDecisionService decisions,
                                                    MemberSanctionCommandService sanctionCommands,
                                                    MemberSanctionService sanctions,
-                                                   MemberSupportCaseQueryService caseQueries) {
+                                                   MemberSupportCaseQueryService caseQueries,
+                                                   PendingMemberSanctionQueryService pendingSanctions) {
         this.queries = queries;
         this.assignments = assignments;
         this.decisions = decisions;
         this.sanctionCommands = sanctionCommands;
         this.sanctions = sanctions;
         this.caseQueries = caseQueries;
+        this.pendingSanctions = pendingSanctions;
     }
 
     @GetMapping("/members")
@@ -114,7 +120,7 @@ public class PlatformOperatorMemberSupportController {
     }
 
     @PostMapping("/members/{accountType}/{accountId}/sanctions")
-    public ApiResponse<Void> sanction(
+    public ApiResponse<SanctionResponse> sanction(
             @AuthenticationPrincipal PlatformOperatorPrincipal principal,
             @PathVariable MemberAccountType accountType,
             @PathVariable long accountId,
@@ -122,23 +128,32 @@ public class PlatformOperatorMemberSupportController {
             @RequestHeader("X-Admin-Reauthentication") String approval,
             @RequestHeader("Idempotency-Key") String correlationId,
             @Valid @RequestBody SanctionRequest request) {
-        sanctionCommands.createAndApply(principal, accountType, accountId, version(ifMatch),
+        var sanction = sanctionCommands.createAndApply(principal, accountType, accountId, version(ifMatch),
                 request.level(), request.restrictedFeatures(), request.reasonCode(), request.policyVersion(),
                 approval, correlationId);
-        return ApiResponse.success("제재를 처리했습니다.", null);
+        return ApiResponse.success("제재를 처리했습니다.", SanctionResponse.from(sanction));
     }
 
     @PostMapping("/member-sanctions/{sanctionId}/additional-approvals")
-    public ApiResponse<Void> approvePermanent(
+    public ApiResponse<SanctionResponse> approvePermanent(
             @AuthenticationPrincipal PlatformOperatorPrincipal principal,
             @PathVariable String sanctionId,
             @RequestHeader("If-Match") String ifMatch,
             @RequestHeader("X-Admin-Reauthentication") String approval,
             @RequestHeader("Idempotency-Key") String correlationId,
             @Valid @RequestBody AdditionalApprovalRequest request) {
-        sanctions.approvePermanent(principal, sanctionId, version(ifMatch),
+        var sanction = sanctions.approvePermanent(principal, sanctionId, version(ifMatch),
                 approval, correlationId, request.reasonCode());
-        return ApiResponse.success("영구 정지를 승인했습니다.", null);
+        return ApiResponse.success("영구 정지를 승인했습니다.", SanctionResponse.from(sanction));
+    }
+
+    @GetMapping("/member-sanctions/pending-additional-approvals")
+    public ApiResponse<PendingSanctionApprovalPageResponse> pendingAdditionalApprovals(
+            @AuthenticationPrincipal PlatformOperatorPrincipal principal,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.success("추가 승인 대기 제재를 조회했습니다.",
+                pendingSanctions.list(principal, page, size));
     }
 
     private long version(String header) {

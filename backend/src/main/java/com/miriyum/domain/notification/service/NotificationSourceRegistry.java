@@ -76,7 +76,11 @@ public class NotificationSourceRegistry {
             case RESERVATION -> {
                 requireResource(resourceType, NotificationResourceType.RESERVATION);
                 yield reservationSource
-                        .map(source -> source.readContext(resource, resourceVersion, recipient))
+                        .map(source -> delivery
+                                ? source.readContextForDelivery(
+                                        purpose, resource, resourceVersion, recipient)
+                                : source.readContext(
+                                        purpose, resource, resourceVersion, recipient))
                         .orElseGet(NotificationSourceRegistry::temporarilyUnavailable);
             }
             case MENU_HOLD -> {

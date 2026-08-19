@@ -19,7 +19,7 @@ React·TypeScript·Vite 프런트엔드는 HTTP API로 Spring Boot와 통신한�
 
 `1차 MVP`의 최종 사용자 배포는 하나의 Vite 빌드와 하나의 Spring Boot 애플리케이션을 같은 Origin에서 제공하고 백엔드 API를 `/api` 아래에 둔다. 교차 Origin 자격 증명 요청은 허용하지 않으며, 실제 배포 단위를 분리해야 하는 근거가 생기면 CORS·쿠키·CSRF 경계를 함께 재검토한다.
 
-프론트엔드 배포 범위가 아직 승인되지 않은 동안 [#120](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/120)은 1차 MVP의 **staging 백엔드 API 사전 배포**만 구성한다. 이 경로는 `dev`에 통합되고 CI가 성공한 SHA만 staging EC2에 배포한다. Nginx가 `/api`만 Spring Boot에 프록시하고, Vite 정적 파일·사용자 shell·최종 same-origin 사용자 흐름은 제공하지 않는다. 따라서 이 경로의 성공은 최종 사용자 배포나 핵심 흐름 E2E 성공을 뜻하지 않는다. 프론트엔드 소유자가 배포 범위를 승인하는 후속 Issue에서 Nginx의 `/` 정적 제공과 `/api` 프록시를 함께 구성해 same-origin 배포를 완성한다. 운영 배포는 별도 EC2·IAM 역할·GitHub Environment 승인과 `main` 전용 workflow로 분리한다.
+프론트엔드 배포 범위가 아직 승인되지 않은 동안 [#120](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/120)은 1차 MVP의 **staging 백엔드 API 사전 배포**만 구성한다. 이 경로는 `dev`에 통합되고 CI가 성공한 SHA만 staging EC2에 배포한다. Nginx가 `/api`만 Spring Boot에 프록시하고, Vite 정적 파일·사용자 shell·최종 same-origin 사용자 흐름은 제공하지 않는다. 따라서 이 경로의 성공은 최종 사용자 배포나 핵심 흐름 E2E 성공을 뜻하지 않는다. 프론트엔드 소유자가 배포 범위를 승인하는 후속 Issue에서 Nginx의 `/` 정적 제공과 `/api` 프록시를 함께 구성해 same-origin 배포를 완성한다. 운영 배포는 staging과 분리된 ECS Fargate·ALB·RDS·Valkey와 OIDC IAM 역할, GitHub `production` Environment 승인으로 구성한다. 운영 전환 근거와 검증·롤백 경계는 [ADR-003](adr/ADR-003-aws-after-verification.md)의 2026-08-17 개정을 정본으로 따른다.
 
 ```text
 frontend/
@@ -80,7 +80,7 @@ HTTP 호출자 구분은 Controller와 HTTP DTO에서만 표현한다. `publicap
 - 동기 추천 가용성 조회: `1차 MVP` 매장 목록·검색의 `availableOnly`·`reservationAvailability`는 기존 `ReservationService` 공개 일괄 가용성 조회 계약을 사용한다. 선구현 금지는 `2차 추천 전용` 신규 `BulkAvailabilityPort` 또는 신규 batch 계약에만 적용하며, 해당 계약은 `2차 MVP` 진입 전 별도 contract-first Issue/PR에서 기존 1차 계약의 재사용·확장 여부와 함께 확정한다.
 - 카카오 좌표 포트: 입점·주소 변경 때만 Kakao Local REST를 호출한다. 지도 SDK는 결과 표시와 매장 운영자의 좌표 확인에만 사용한다.
 
-품절 대안은 `com.miriyum.domain.alternative`에서 같은 매장 후보를 먼저 검증하고, 후보가 없을 때만 원 매장의 검증된 저장 좌표 기준 **3km 이내**의 매장을 허용한다. bounding box로 후보를 줄인 뒤 Java Haversine으로 3km 포함 경계를 확정한다. 대안 요청 중 외부 지도 호출은 하지 않으며 사용자 현재 위치도 요청·저장·사용하지 않는다. AI/LLM, Spring AI, 벡터 DB, 검색엔진, 추천 전용 서비스·DB·캐시는 `2차 MVP`에 없다.
+품절·판매 중단 대안은 `com.miriyum.domain.alternative`에서 같은 매장 후보를 먼저 검증하고, 후보가 없을 때만 원 매장의 검증된 저장 좌표 기준 **3km 이내**의 매장을 허용한다. bounding box로 후보를 줄인 뒤 Java Haversine으로 3km 포함 경계를 확정한다. 대안 요청 중 외부 지도 호출은 하지 않으며 사용자 현재 위치도 요청·저장·사용하지 않는다. 2차 MVP의 OpenAI 구조화 해석은 공개 메뉴 문맥에서 최대 8개의 음식 개념만 만들고, 후보는 별도 인덱스 없이 현재 MySQL 게시 버전에서 다시 조회한다. 결과·재고·예약·알레르기 판단은 기존 결정적 코드가 소유한다.
 
 ## `고도화` 기술 확장
 
@@ -119,3 +119,5 @@ Kafka, 범용 Outbox, 마이크로서비스, WebSocket과 검색 클러스터는
 - [ADR-005 PortOne V2](adr/ADR-005-portone-v2-payment-adapter.md)
 - [ADR-006 JWT·Valkey 전환](adr/ADR-006-jwt-valkey-refresh-token.md)
 - [ADR-007 규칙 기반 통합 검색](adr/ADR-007-unified-search-mysql.md)
+- [ADR-009 MySQL 우선 LLM 개념 보완 검색](adr/ADR-009-hybrid-semantic-search-qdrant.md)
+- [ADR-010 Notification·Waiting 통합 SSE Runtime](adr/ADR-010-notification-waiting-sse-runtime.md)

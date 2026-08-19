@@ -268,6 +268,16 @@ public class Payment {
         updatedAt = now;
     }
 
+    /** 불명확했던 환불이 명시 실패로 해소되면 실제 완료 환불액 기준 상태로 복구한다. */
+    public void restoreRefundableStatusAfterReconciliation(Instant resolvedAt) {
+        Instant now = requireNotBeforeCreation(resolvedAt, "resolvedAt");
+        if (status != Status.RECONCILIATION_REQUIRED) {
+            throw new ServiceException(PaymentErrorCode.INVALID_STATE_TRANSITION);
+        }
+        status = refundedAmountMinor == 0L ? Status.PAID : Status.PARTIALLY_REFUNDED;
+        updatedAt = now;
+    }
+
     public void applyCompletedRefund(long refundAmountMinor, Instant completedAt) {
         long validatedAmount = requirePositive(refundAmountMinor, "refundAmountMinor");
         Instant now = requireNotBeforeCreation(completedAt, "completedAt");
@@ -372,6 +382,8 @@ public class Payment {
     public String getPortOnePaymentId() {
         return portOnePaymentId;
     }
+
+    public long getVersion() { return version; }
 
     public String getOrderName() { return orderName; }
 

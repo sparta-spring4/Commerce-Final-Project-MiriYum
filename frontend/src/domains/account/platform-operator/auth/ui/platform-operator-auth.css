@@ -1,0 +1,98 @@
+/*
+ * 플랫폼 운영자 인증 화면.
+ *
+ * 시안(Professional Minimalism)의 Deep Navy·Emerald 팔레트를 쓴다. 프리미티브를
+ * 복제하지 않고 셸 루트에서 `--color-*` 토큰만 다시 선언한다. custom property는
+ * 상속으로 내려가고 규칙 순서와 무관해 명시도 싸움이 없다.
+ *
+ * 컨테이너 계열에 단축 속성을 쓰지 않는다. `padding: 0 X`가 세로 padding을
+ * 0으로 만들어 여백이 사라지는 사고를 이 저장소에서 이미 여러 번 냈다.
+ * 축을 명시하는 `padding-inline`·`padding-block`만 쓴다.
+ */
+
+.po-auth {
+  --po-navy: #1a237e;
+  --po-navy-deep: #000666;
+  --po-emerald: #00897b;
+  --po-surface: #f8f9fa;
+  --po-surface-card: #ffffff;
+  --po-border: #e9ecef;
+  --po-text: #212121;
+  --po-text-muted: #454652;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding-inline: 1rem;
+  padding-block: 3rem;
+  background-color: var(--po-surface);
+}
+
+.po-auth__card {
+  width: 100%;
+  max-width: 26rem;
+  padding-inline: 2rem;
+  padding-block: 2.5rem;
+  border: 1px solid var(--po-border);
+  border-radius: 1rem;
+  background-color: var(--po-surface-card);
+  /* 시안의 Level 2: 매우 확산된 옅은 그림자. Navy 5% */
+  box-shadow: 0 4px 12px rgb(26 35 126 / 5%);
+}
+
+.po-auth__brand {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.25rem;
+  margin-block-end: 1.5rem;
+}
+
+.po-auth__brand-mark {
+  color: var(--po-navy-deep);
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.po-auth__brand-suffix {
+  color: var(--po-emerald);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.po-auth__title {
+  margin-block: 0 0.5rem;
+  color: var(--po-text);
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 2rem;
+  letter-spacing: -0.02em;
+  text-align: center;
+}
+
+.po-auth__subtitle {
+  margin-block: 0 2rem;
+  color: var(--po-text-muted);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  text-align: center;
+}
+
+.po-auth__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.po-auth__notice {
+  margin-block: 1.5rem 0;
+  padding-block-start: 1.5rem;
+  border-block-start: 1px solid var(--po-border);
+  color: var(--po-text-muted);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  text-align: center;
+}

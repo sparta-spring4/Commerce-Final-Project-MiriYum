@@ -2,6 +2,7 @@ package com.miriyum.domain.alternative.dto.publicapi;
 
 import com.miriyum.domain.alternative.model.AlternativeReasonCode;
 import com.miriyum.domain.alternative.model.MenuAlternativeMode;
+import com.miriyum.domain.alternative.model.MenuAlternativeRankingReason;
 import com.miriyum.domain.alternative.model.MenuAlternativeResult;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -20,15 +21,25 @@ public record MenuAlternativeSearchResponse(String sourceStoreId, String sourceM
                         Long.toString(value.menuId()), value.menuName(), value.unitPrice(),
                         value.availableOnlineQuantity(), value.secondaryCategoryMatchCount(),
                         value.distanceMeters(), value.latitude() == null ? null
-                        : new Coordinates(value.latitude(), value.longitude()), value.reasonCodes()))
+                        : new Coordinates(value.latitude(), value.longitude()), value.reasonCodes(),
+                        value.score().totalScore(), value.score().rankingReason(),
+                        new ScoreBreakdown(value.score().conceptScore(),
+                                value.score().secondaryCategoryScore(),
+                                value.score().priceSimilarityScore())))
                 .toList());
     }
 
     public record Item(String storeId, String storeName, String menuId, String menuName,
             int unitPrice, int availableOnlineQuantity, int secondaryCategoryMatchCount,
             BigDecimal distanceMeters, Coordinates coordinates,
-            List<AlternativeReasonCode> reasonCodes) {
+            List<AlternativeReasonCode> reasonCodes, int alternativeScore,
+            MenuAlternativeRankingReason rankingReason, ScoreBreakdown scoreBreakdown) {
         public Item { reasonCodes = List.copyOf(reasonCodes); }
     }
     public record Coordinates(BigDecimal latitude, BigDecimal longitude) {}
+    public record ScoreBreakdown(
+            int llmConcept,
+            int secondaryCategory,
+            int priceSimilarity
+    ) {}
 }

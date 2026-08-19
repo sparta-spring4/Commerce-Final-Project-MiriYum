@@ -9,14 +9,33 @@ export interface paths {
     /** 본인 알림 이력 조회 */
     get: operations["getMyNotificationHistory"];
   };
+  "/api/v1/consumers/me/notification-events": {
+    /**
+     * 본인 알림 이력 변경 신호 구독
+     * @description Authorization header를 전달하는 fetch streaming으로 연결한다. 연결 직후와 유효한 Last-Event-ID 재연결 뒤 현재 MySQL high-watermark에 결속된 notifications.changed 신호를 보내며, 클라이언트는 본인 알림 이력 API를 다시 조회한다.
+     */
+    get: operations["streamMyNotificationChanges"];
+  };
 }
 
 export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
-    /** @enum {string} */
-    NotificationPurpose: "RESERVATION_CONFIRMED" | "RESERVATION_CHANGED" | "RESERVATION_REJECTED" | "RESERVATION_CANCELLED" | "RESERVATION_EXPIRED" | "RESERVATION_VISIT_REMINDER" | "RESERVATION_COORDINATION_REQUIRED" | "PICKUP_RESERVATION_CONFIRMED" | "PICKUP_RESERVATION_CANCELLED" | "MENU_HOLD_FULFILLMENT_AT_RISK" | "MENU_SUBSTITUTION_PROPOSED" | "MENU_SUBSTITUTION_ACCEPTED" | "MENU_SUBSTITUTION_REJECTED" | "MENU_SUBSTITUTION_EXPIRED" | "WAITING_ENTRY_IMMINENT" | "WAITING_CALLED" | "WAITING_CANCELLED" | "WAITING_NO_SHOW" | "WAITING_CHECKED_IN" | "WAITING_CLOSED_BY_STORE";
+    /**
+     * @description UTF-8 SSE stream. 업무 event는 notifications.changed이고 id는 다음 Last-Event-ID로 그대로 재사용할 opaque cursor다. 최초 연결·유효한 재연결의 수렴 신호는 이력 유무나 변경 여부와 관계없이 현재 MySQL high-watermark 기준으로 한 번 전송하고, 이후 high-watermark 신호는 공개 이력의 새 IN_APP DELIVERED가 보이는 경우에만 발생한다. 각 업무 frame은 빈 줄(\n\n)로 종료한다. 신호는 상태 본문이나 전달 성공 근거가 아니며 수신 뒤 GET /api/v1/consumers/me/notifications를 다시 조회해야 한다. keepalive comment는 업무 event가 아니며 cursor를 전진시키지 않는다. PENDING·실패·취소 작업은 신호 대상이 아니다.
+     * @example id: opaque-notification-cursor
+     * event: notifications.changed
+     * data: {}
+     */
+    NotificationChangedEventStream: string;
+    /**
+     * @description RESERVATION_VISIT_COMPLETED와 RESERVATION_NO_SHOW는 예약 종결 상태를 설명하며 결제 결과를 뜻하지 않고 보호된 상세 route 활성화 전 action은 null이다.
+     * @enum {string}
+     */
+    NotificationPurpose: "RESERVATION_CONFIRMED" | "RESERVATION_CHANGED" | "RESERVATION_REJECTED" | "RESERVATION_CANCELLED" | "RESERVATION_EXPIRED" | "RESERVATION_VISIT_REMINDER" | "RESERVATION_COORDINATION_REQUIRED" | "RESERVATION_VISIT_COMPLETED" | "RESERVATION_NO_SHOW" | "PICKUP_RESERVATION_CONFIRMED" | "PICKUP_RESERVATION_CANCELLED" | "MENU_HOLD_FULFILLMENT_AT_RISK" | "MENU_SUBSTITUTION_PROPOSED" | "MENU_SUBSTITUTION_ACCEPTED" | "MENU_SUBSTITUTION_REJECTED" | "MENU_SUBSTITUTION_EXPIRED" | "WAITING_ENTRY_IMMINENT" | "WAITING_CALLED" | "WAITING_CANCELLED" | "WAITING_NO_SHOW" | "WAITING_CHECKED_IN" | "WAITING_CLOSED_BY_STORE";
+    NonTerminalNotificationPurpose: components["schemas"]["NotificationPurpose"] & ("RESERVATION_CONFIRMED" | "RESERVATION_CHANGED" | "RESERVATION_REJECTED" | "RESERVATION_CANCELLED" | "RESERVATION_EXPIRED" | "RESERVATION_VISIT_REMINDER" | "RESERVATION_COORDINATION_REQUIRED" | "PICKUP_RESERVATION_CONFIRMED" | "PICKUP_RESERVATION_CANCELLED" | "MENU_HOLD_FULFILLMENT_AT_RISK" | "MENU_SUBSTITUTION_PROPOSED" | "MENU_SUBSTITUTION_ACCEPTED" | "MENU_SUBSTITUTION_REJECTED" | "MENU_SUBSTITUTION_EXPIRED" | "WAITING_ENTRY_IMMINENT" | "WAITING_CALLED" | "WAITING_CANCELLED" | "WAITING_NO_SHOW" | "WAITING_CHECKED_IN" | "WAITING_CLOSED_BY_STORE");
+    ReservationTerminalNotificationPurpose: components["schemas"]["NotificationPurpose"] & ("RESERVATION_VISIT_COMPLETED" | "RESERVATION_NO_SHOW");
     /** @enum {string} */
     NotificationResourceType: "RESERVATION" | "MENU_HOLD" | "PICKUP_RESERVATION" | "MENU_SUBSTITUTION_PROPOSAL" | "WAITING_TEAM";
     /** @enum {string} */
@@ -62,7 +81,7 @@ export interface components {
       /** @description 행동 자체의 중앙 만료 시각. null은 별도 시간 만료가 없음을 뜻한다. */
       expiresAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"] | null;
     };
-    NotificationHistoryItem: {
+    NotificationHistoryItem: ({
       notificationId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
       purpose: components["schemas"]["NotificationPurpose"];
       /** @description 승인된 field allowlist로 렌더링한 안전한 제목 */
@@ -74,6 +93,16 @@ export interface components {
       deliveredAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
       /** @description 안전한 행동 대상이 없으면 null */
       action: components["schemas"]["NotificationAction"] | null;
+    }) & (components["schemas"]["NonTerminalNotificationHistoryItem"] | components["schemas"]["ReservationTerminalNotificationHistoryItem"]);
+    NonTerminalNotificationHistoryItem: {
+      purpose: components["schemas"]["NonTerminalNotificationPurpose"];
+      /** @description 안전한 행동 대상이 없으면 null */
+      action: components["schemas"]["NotificationAction"] | null;
+    };
+    ReservationTerminalNotificationHistoryItem: {
+      purpose: components["schemas"]["ReservationTerminalNotificationPurpose"];
+      /** @description 예약 방문 완료·노쇼 목적은 보호된 상세 route 활성화 전 항상 null */
+      action: null;
     };
     NotificationHistoryPageData: {
       items: components["schemas"]["NotificationHistoryItem"][];
@@ -88,6 +117,12 @@ export interface components {
     };
   };
   responses: {
+    /** @description Last-Event-ID 형식·무결성 또는 consumer 계정 결속이 유효하지 않음 */
+    InvalidEventCursor: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
     /** @description cursor 또는 size가 조회 계약에 맞지 않음 */
     InvalidQuery: {
       content: {
@@ -106,6 +141,8 @@ export interface components {
     Cursor?: string;
     /** @description 반환할 최대 항목 수 */
     Size?: number;
+    /** @description 서버가 발급하고 consumer audience·인증 계정·계약 version에 결속한 무결성 보호 opaque cursor. 없으면 최초 연결이며 클라이언트가 해석하거나 수정하지 않는다. */
+    NotificationLastEventId?: string;
   };
   requestBodies: never;
   headers: never;
@@ -263,6 +300,30 @@ export interface operations {
       400: components["responses"]["InvalidQuery"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["AccountRestricted"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /**
+   * 본인 알림 이력 변경 신호 구독
+   * @description Authorization header를 전달하는 fetch streaming으로 연결한다. 연결 직후와 유효한 Last-Event-ID 재연결 뒤 현재 MySQL high-watermark에 결속된 notifications.changed 신호를 보내며, 클라이언트는 본인 알림 이력 API를 다시 조회한다.
+   */
+  streamMyNotificationChanges: {
+    parameters: {
+      header?: {
+        "Last-Event-ID"?: components["parameters"]["NotificationLastEventId"];
+      };
+    };
+    responses: {
+      /** @description 본인에게 공개되는 IN_APP 전달 완료 이력의 최소 변경 신호 stream */
+      200: {
+        content: {
+          "text/event-stream": components["schemas"]["NotificationChangedEventStream"];
+        };
+      };
+      400: components["responses"]["InvalidEventCursor"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["AccountRestricted"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };

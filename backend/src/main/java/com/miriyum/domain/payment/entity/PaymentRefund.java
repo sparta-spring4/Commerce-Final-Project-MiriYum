@@ -64,11 +64,17 @@ public class PaymentRefund {
     @Column(name = "requested_at", nullable = false)
     private Instant requestedAt;
 
+    @Column(name = "processing_started_at", nullable = false)
+    private Instant processingStartedAt;
+
     @Column(name = "completed_at")
     private Instant completedAt;
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    @Column(name = "attempt_count", nullable = false)
+    private int attemptCount;
 
     @Version
     @Column(name = "version", nullable = false)
@@ -104,7 +110,9 @@ public class PaymentRefund {
         }
         this.policyVersion = policyVersion;
         this.status = RefundStatus.PROCESSING;
+        this.attemptCount = 1;
         this.requestedAt = Objects.requireNonNull(requestedAt);
+        this.processingStartedAt = requestedAt;
         this.updatedAt = requestedAt;
     }
 
@@ -150,6 +158,17 @@ public class PaymentRefund {
         this.updatedAt = Objects.requireNonNull(failedAt);
     }
 
+    /** 명시적으로 실패한 동일 provider 취소 참조를 새 환불 생성 없이 다시 선점한다. */
+    public void retry(Instant retriedAt) {
+        if (status != RefundStatus.FAILED) {
+            throw new IllegalStateException("only an explicitly failed refund can be retried");
+        }
+        this.status = RefundStatus.PROCESSING;
+        this.attemptCount++;
+        this.processingStartedAt = Objects.requireNonNull(retriedAt);
+        this.updatedAt = Objects.requireNonNull(retriedAt);
+    }
+
     public Long getId() { return id; }
     public String getRefundId() { return refundId; }
     public Payment getPayment() { return payment; }
@@ -158,9 +177,12 @@ public class PaymentRefund {
     public String getSourceEventId() { return sourceEventId; }
     public long getAmountMinor() { return amountMinor; }
     public String getCurrency() { return currency; }
+    public long getVersion() { return version; }
     public RefundStatus getStatus() { return status; }
     public String getReasonCode() { return reasonCode; }
     public long getPolicyVersion() { return policyVersion; }
     public Instant getRequestedAt() { return requestedAt; }
+    public Instant getProcessingStartedAt() { return processingStartedAt; }
     public Instant getCompletedAt() { return completedAt; }
+    public int getAttemptCount() { return attemptCount; }
 }

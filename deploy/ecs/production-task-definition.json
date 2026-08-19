@@ -26,8 +26,14 @@
         {"name": "MIRIYUM_ALLOWED_ORIGIN", "value": "REPLACE_WITH_HTTPS_ORIGIN"},
         {"name": "MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED", "value": "false"},
         {"name": "MIRIYUM_KAKAO_ENABLED", "value": "false"},
+        {"name": "MIRIYUM_RUNTIME_CONFIG_ENABLED", "value": "false"},
+        {"name": "MIRIYUM_STORE_SEARCH_LLM_ENABLED", "value": "true"},
+        {"name": "MIRIYUM_STORE_SEARCH_LLM_MODEL", "value": "gpt-4o-mini"},
+        {"name": "MIRIYUM_CLOUDWATCH_METRICS_ENABLED", "value": "true"},
+        {"name": "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE", "value": "MiriYum/Production"},
         {"name": "MIRIYUM_PAYMENT_ENABLED", "value": "false"},
         {"name": "MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED", "value": "true"},
+        {"name": "MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED", "value": "true"},
         {"name": "MIRIYUM_WAITING_CLOSURE_ENABLED", "value": "false"},
         {"name": "MIRIYUM_WAITING_AUTO_OPEN_ENABLED", "value": "false"},
         {"name": "MIRIYUM_WAITING_AUTO_OPEN_WORKER_ID", "value": ""},
@@ -52,7 +58,8 @@
         {"name": "MIRIYUM_JWT_SECRET", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_JWT_SECRET::"},
         {"name": "MIRIYUM_STORE_GEOCODING_REST_API_KEY", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_STORE_GEOCODING_REST_API_KEY::"},
         {"name": "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET::"},
-        {"name": "MIRIYUM_VALKEY_PASSWORD", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_VALKEY_PASSWORD::"}
+        {"name": "MIRIYUM_VALKEY_PASSWORD", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_VALKEY_PASSWORD::"},
+        {"name": "OPENAI_API_KEY", "valueFrom": "REPLACE_WITH_OPENAI_API_KEY_PARAMETER_ARN"}
       ],
       "logConfiguration": {
         "logDriver": "awslogs",

@@ -15,8 +15,20 @@ WORKFLOW_PATH = ROOT / ".github" / "workflows" / "backend-cd.yml"
 COMPOSE_PATH = ROOT / "deploy" / "docker-compose.prod.yml"
 ENV_EXAMPLE_PATH = ROOT / "deploy" / ".env.example"
 DEPLOY_SCRIPT_PATH = ROOT / "deploy" / "deploy.sh"
+NGINX_SELECTOR_PATH = (
+    ROOT / "deploy" / "nginx" / "entrypoint" / "40-select-server-config.sh"
+)
 OBSERVABILITY_DOCUMENT_PATH = ROOT / "docs" / "deployment" / "cloudwatch-staging-observability.md"
 DEPLOYMENT_DOCUMENT_PATH = ROOT / "docs" / "deployment" / "docker-ecr-ssm-cd.md"
+VALKEY_MEMORY_METRICS_SCRIPT_PATH = (
+    ROOT / "deploy" / "monitoring" / "publish-valkey-memory-metrics.sh"
+)
+VALKEY_MEMORY_SERVICE_PATH = (
+    ROOT / "deploy" / "monitoring" / "miriyum-valkey-memory-metrics.service"
+)
+VALKEY_MEMORY_TIMER_PATH = (
+    ROOT / "deploy" / "monitoring" / "miriyum-valkey-memory-metrics.timer"
+)
 RISK_EVENT_DELIVERY_PATH = (
     ROOT
     / "backend"
@@ -45,8 +57,14 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         cls.workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         cls.compose = COMPOSE_PATH.read_text(encoding="utf-8")
         cls.deploy_script = DEPLOY_SCRIPT_PATH.read_text(encoding="utf-8")
+        cls.nginx_selector = NGINX_SELECTOR_PATH.read_text(encoding="utf-8")
         cls.observability_document = OBSERVABILITY_DOCUMENT_PATH.read_text(encoding="utf-8")
         cls.deployment_document = DEPLOYMENT_DOCUMENT_PATH.read_text(encoding="utf-8")
+        cls.valkey_memory_metrics_script = VALKEY_MEMORY_METRICS_SCRIPT_PATH.read_text(
+            encoding="utf-8"
+        )
+        cls.valkey_memory_service = VALKEY_MEMORY_SERVICE_PATH.read_text(encoding="utf-8")
+        cls.valkey_memory_timer = VALKEY_MEMORY_TIMER_PATH.read_text(encoding="utf-8")
         cls.risk_event_delivery = RISK_EVENT_DELIVERY_PATH.read_text(encoding="utf-8")
         cls.compose_config = cls.load_compose_config(ENV_EXAMPLE_PATH)
 
@@ -144,13 +162,50 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn("file:/opt/miriyum/monitoring/cloudwatch-agent.json", self.workflow)
 
     def test_compose_sends_each_service_log_to_a_dedicated_stream(self):
-        expected_streams = ("mysql", "backend", "nginx", "valkey")
+        expected_streams = ("frontend", "mysql", "backend", "nginx", "valkey")
         for stream in expected_streams:
             self.assertIn("awslogs-stream: " + stream, self.compose)
         self.assertEqual(len(expected_streams), self.compose.count("driver: awslogs"))
         self.assertIn("awslogs-group: /miriyum/staging/docker", self.compose)
         self.assertNotIn("logs", self.config)
         self.assertNotIn("/var/lib/docker/containers/*", json.dumps(self.config))
+
+    def test_staging_frontend_is_internal_and_gateway_keeps_api_same_origin(self):
+        services = self.compose_config["services"]
+        frontend = services["frontend"]
+        nginx = services["nginx"]
+
+        self.assertNotIn("ports", frontend)
+        self.assertEqual({"app"}, set(frontend["networks"]))
+        self.assertEqual({"backend", "frontend"}, set(nginx["depends_on"]))
+        for template_name in ("http.conf.template", "https.conf.template"):
+            template = (
+                ROOT / "deploy" / "nginx" / "templates" / template_name
+            ).read_text(encoding="utf-8")
+            self.assertIn("proxy_pass http://frontend:80;", template)
+            self.assertIn("proxy_pass http://backend:8080;", template)
+
+    def test_deploy_verifies_frontend_container_gateway_and_spa_responses_before_success(self):
+        for expected_text in (
+            'exec -T frontend wget -q -O /dev/null http://127.0.0.1/',
+            'exec -T frontend wget -q -O /dev/null http://127.0.0.1/sign-in',
+            'Gateway frontend root did not return HTTP 200',
+            'Gateway frontend SPA fallback did not return HTTP 200',
+            'Gateway frontend root did not return HTTP 200 over HTTPS',
+            'Gateway frontend SPA fallback did not return HTTP 200 over HTTPS',
+        ):
+            self.assertIn(expected_text, self.deploy_script)
+
+    def test_frontend_image_receives_the_staging_kakao_map_public_key(self):
+        dockerfile = (ROOT / "frontend" / "Dockerfile").read_text(encoding="utf-8")
+        staging_runbook = (ROOT / "docs" / "deployment" / "staging-https.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("ARG VITE_KAKAO_MAP_APP_KEY", dockerfile)
+        self.assertIn("ENV VITE_KAKAO_MAP_APP_KEY=${VITE_KAKAO_MAP_APP_KEY}", dockerfile)
+        self.assertIn("VITE_KAKAO_MAP_APP_KEY=${{ vars.STAGING_KAKAO_MAP_APP_KEY }}", self.workflow)
+        self.assertIn("environment: staging", self.workflow)
+        self.assertIn("GitHub\n`staging` Environment", staging_runbook)
 
     def test_mysql_allows_trigger_migrations_when_binary_logging_is_enabled(self):
         mysql_command = self.compose_config["services"]["mysql"]["command"]
@@ -430,7 +485,75 @@ esac
         self.assertIn("Unauthenticated Valkey ping did not return NOAUTH.", self.deploy_script)
         self.assertIn('grep -qx PONG', self.deploy_script)
         self.assertIn('port valkey 6379', self.deploy_script)
-        self.assertIn('docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey', self.deploy_script)
+        self.assertIn('compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey', self.deploy_script)
+
+    def test_nginx_selector_requires_certificate_and_private_key_for_tls(self):
+        self.assertIn('private_key="/etc/letsencrypt/live/${STAGING_DOMAIN}/privkey.pem"', self.nginx_selector)
+        self.assertIn(
+            'elif [ -r "${certificate}" ] && [ -r "${private_key}" ]; then',
+            self.nginx_selector,
+        )
+
+    def test_deployment_fails_and_recovers_http_when_nginx_tls_validation_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            metric_path = temporary_path / "metric-arguments"
+            compose_path = temporary_path / "compose-arguments"
+            environment_file = temporary_path / ".env"
+            environment_file.write_text("placeholder=true\n", encoding="utf-8")
+            result = self.run_deploy_script(
+                """
+aws() {
+  if [[ "$1 $2" == "sts get-caller-identity" ]]; then
+    echo 123456789012
+  elif [[ "$1 $2" == "ecr get-login-password" ]]; then
+    echo token
+  elif [[ "$1 $2" == "cloudwatch put-metric-data" ]]; then
+    printf '%s\\n' "$@" > "$NGINX_TEST_METRIC"
+  fi
+  return 0
+}
+docker() {
+  if [[ "$1" == "login" ]]; then
+    cat >/dev/null
+    return 0
+  fi
+  if [[ "$1" == "compose" ]]; then
+    if [[ "$*" == *"ps --status running --services nginx"* ]]; then
+      echo nginx
+      return 0
+    fi
+    if [[ "$*" == *"exec -T nginx nginx -t"* ]]; then
+      printf '%s\\n' "$*" >> "$NGINX_TEST_COMPOSE"
+      return 1
+    fi
+    printf '%s\\n' "$*" >> "$NGINX_TEST_COMPOSE"
+  fi
+  return 0
+}
+curl() { return 0; }
+wait_for_mysql_health() { return 0; }
+verify_valkey() { return 0; }
+backfill_pending_risk_event_index() { return 0; }
+backfill_risk_event_occurrence_counters() { return 0; }
+main
+""",
+                {
+                    "AWS_REGION": "ap-northeast-2",
+                    "BACKEND_IMAGE": "example.invalid/backend:sha",
+                    "ENV_FILE": self.to_bash_path(environment_file),
+                    "COMPOSE_FILE": self.to_bash_path(temporary_path / "docker-compose.yml"),
+                    "NGINX_TEST_METRIC": self.to_bash_path(metric_path),
+                    "NGINX_TEST_COMPOSE": self.to_bash_path(compose_path),
+                },
+            )
+
+            commands = compose_path.read_text(encoding="utf-8")
+            self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("Value=0", metric_path.read_text(encoding="utf-8"))
+            self.assertIn("exec -T nginx nginx -t", commands)
+            self.assertIn("up -d --force-recreate nginx", commands)
+            self.assertIn("logs --tail 100 nginx", commands)
 
     def test_deployment_stops_before_registry_login_when_runtime_environment_is_invalid(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1085,6 +1208,15 @@ main
                 "logs --tail 100 mysql", compose_path.read_text(encoding="utf-8")
             )
 
+    def test_runtime_config_defaults_to_disabled_without_reading_ssm(self):
+        runtime_config_branch = self.deploy_script.split(
+            'case "${runtime_config_enabled}" in', 1
+        )[1].split("esac", 1)[0]
+        self.assertIn('runtime_config_enabled="${runtime_config_enabled:-false}"', self.deploy_script)
+        self.assertIn("false)", runtime_config_branch)
+        self.assertIn("return 0", runtime_config_branch)
+        self.assertNotIn("aws ssm get-parameter", runtime_config_branch)
+
     @staticmethod
     def run_deploy_script(script, extra_environment):
         environment = os.environ.copy()
@@ -1093,7 +1225,7 @@ main
             [
                 BASH_EXECUTABLE,
                 "-c",
-                f"source <(tr -d '\\r' < deploy/deploy.sh); {script}",
+                f"source <(tr -d '\\r' < deploy/deploy.sh); load_runtime_config() {{ :; }}; {script}",
             ],
             cwd=ROOT,
             capture_output=True,
@@ -1147,6 +1279,175 @@ main
         self.assertIn("--statistic Sum", alarm)
         self.assertIn("--threshold 0", alarm)
         self.assertIn("--comparison-operator GreaterThanThreshold", alarm)
+
+    def test_auth_valkey_memory_timer_is_host_scoped_and_runs_every_minute(self):
+        self.assertIn("EnvironmentFile=/opt/miriyum/.env", self.valkey_memory_service)
+        self.assertIn(
+            "ExecStart=/opt/miriyum/monitoring/publish-valkey-memory-metrics.sh",
+            self.valkey_memory_service,
+        )
+        self.assertIn("OnUnitActiveSec=60s", self.valkey_memory_timer)
+        self.assertIn("Unit=miriyum-valkey-memory-metrics.service", self.valkey_memory_timer)
+        self.assertIn(
+            "systemctl enable --now miriyum-valkey-memory-metrics.timer",
+            self.workflow,
+        )
+        self.assertIn(
+            "systemd-analyze verify /etc/systemd/system/miriyum-valkey-memory-metrics.service /etc/systemd/system/miriyum-valkey-memory-metrics.timer",
+            self.workflow,
+        )
+
+    def test_auth_valkey_memory_success_publishes_bytes_and_utilization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            aws_arguments = temporary_path / "aws-arguments"
+            fake_aws = temporary_path / "aws"
+            fake_curl = temporary_path / "curl"
+            fake_docker = temporary_path / "docker"
+            fake_aws.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$TEST_AWS_ARGUMENTS"\n',
+                encoding="utf-8",
+            )
+            fake_curl.write_text(
+                '#!/usr/bin/env bash\nif [[ " $* " == *" --request PUT "* ]]; then echo token; else echo i-test; fi\n',
+                encoding="utf-8",
+            )
+            fake_docker.write_text(
+                '#!/usr/bin/env bash\nprintf "used_memory:1048576\\r\\nmaxmemory:8388608\\r\\n"\n',
+                encoding="utf-8",
+            )
+            for executable in (fake_aws, fake_curl, fake_docker):
+                executable.chmod(0o755)
+
+            result = subprocess.run(
+                [BASH_EXECUTABLE, str(VALKEY_MEMORY_METRICS_SCRIPT_PATH)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={
+                    **os.environ,
+                    "AWS_BIN": str(fake_aws),
+                    "CURL_BIN": str(fake_curl),
+                    "DOCKER_BIN": str(fake_docker),
+                    "AWS_REGION": "ap-northeast-2",
+                    "MIRIYUM_VALKEY_PASSWORD": "test-only-password",
+                    "TEST_AWS_ARGUMENTS": str(aws_arguments),
+                },
+            )
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("event=auth_valkey_memory_collected", result.stdout)
+            published = aws_arguments.read_text(encoding="utf-8")
+            self.assertIn("MetricName=AuthValkeyUsedMemoryBytes,Value=1048576", published)
+            self.assertIn("MetricName=AuthValkeyMaxMemoryBytes,Value=8388608", published)
+            self.assertIn(
+                "MetricName=AuthValkeyMemoryUtilizationPercent,Value=12.50", published
+            )
+            self.assertIn("MetricName=AuthValkeyMemoryCollectionHeartbeat,Value=1", published)
+            self.assertNotIn("test-only-password", result.stdout + result.stderr + published)
+
+    def test_auth_valkey_memory_invalid_maxmemory_publishes_failure_not_zero_percent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            aws_arguments = temporary_path / "aws-arguments"
+            fake_aws = temporary_path / "aws"
+            fake_curl = temporary_path / "curl"
+            fake_docker = temporary_path / "docker"
+            fake_aws.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$TEST_AWS_ARGUMENTS"\n',
+                encoding="utf-8",
+            )
+            fake_curl.write_text(
+                '#!/usr/bin/env bash\nif [[ " $* " == *" --request PUT "* ]]; then echo token; else echo i-test; fi\n',
+                encoding="utf-8",
+            )
+            fake_docker.write_text(
+                '#!/usr/bin/env bash\nprintf "used_memory:1048576\\nmaxmemory:0\\n"\n',
+                encoding="utf-8",
+            )
+            for executable in (fake_aws, fake_curl, fake_docker):
+                executable.chmod(0o755)
+
+            result = subprocess.run(
+                [BASH_EXECUTABLE, str(VALKEY_MEMORY_METRICS_SCRIPT_PATH)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={
+                    **os.environ,
+                    "AWS_BIN": str(fake_aws),
+                    "CURL_BIN": str(fake_curl),
+                    "DOCKER_BIN": str(fake_docker),
+                    "AWS_REGION": "ap-northeast-2",
+                    "MIRIYUM_VALKEY_PASSWORD": "test-only-password",
+                    "TEST_AWS_ARGUMENTS": str(aws_arguments),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("event=auth_valkey_memory_collection_failed", result.stderr)
+            published = aws_arguments.read_text(encoding="utf-8")
+            self.assertIn("MetricName=AuthValkeyMemoryCollectionFailure,Value=1", published)
+            self.assertNotIn("AuthValkeyMemoryUtilizationPercent", published)
+            self.assertNotIn("AuthValkeyMemoryCollectionHeartbeat", published)
+
+    def test_auth_valkey_memory_imds_failure_leaves_heartbeat_absent_for_dead_man_alarm(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            aws_arguments = temporary_path / "aws-arguments"
+            fake_aws = temporary_path / "aws"
+            fake_curl = temporary_path / "curl"
+            fake_aws.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$TEST_AWS_ARGUMENTS"\n',
+                encoding="utf-8",
+            )
+            fake_curl.write_text('#!/usr/bin/env bash\nexit 1\n', encoding="utf-8")
+            for executable in (fake_aws, fake_curl):
+                executable.chmod(0o755)
+
+            result = subprocess.run(
+                [BASH_EXECUTABLE, str(VALKEY_MEMORY_METRICS_SCRIPT_PATH)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={
+                    **os.environ,
+                    "AWS_BIN": str(fake_aws),
+                    "CURL_BIN": str(fake_curl),
+                    "AWS_REGION": "ap-northeast-2",
+                    "MIRIYUM_VALKEY_PASSWORD": "test-only-password",
+                    "TEST_AWS_ARGUMENTS": str(aws_arguments),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertFalse(aws_arguments.exists())
+
+    def test_auth_valkey_memory_collection_failure_alarm_and_dashboard_are_configured(self):
+        start = self.resource_script.index(
+            'put_alarm "miriyum-staging-auth-valkey-memory-collection-failed"'
+        )
+        alarm = self.resource_script[start:]
+        self.assertIn("--metric-name AuthValkeyMemoryCollectionFailure", alarm)
+        self.assertIn("--threshold 0", alarm)
+        missing_start = self.resource_script.index(
+            'put_missing_data_alarm "miriyum-staging-auth-valkey-memory-collection-missing"'
+        )
+        missing_alarm = self.resource_script[missing_start:]
+        self.assertIn("--metric-name AuthValkeyMemoryCollectionHeartbeat", missing_alarm)
+        self.assertIn("--threshold 0.5", missing_alarm)
+        self.assertIn("--comparison-operator LessThanThreshold", missing_alarm)
+        self.assertIn("--treat-missing-data breaching", self.resource_script)
+        self.assertIn("AuthValkeyUsedMemoryBytes", self.resource_script)
+        self.assertIn("AuthValkeyMaxMemoryBytes", self.resource_script)
+        self.assertIn("AuthValkeyMemoryUtilizationPercent", self.resource_script)
+        self.assertIn("AuthValkeyMemoryCollectionHeartbeat", self.resource_script)
 
 class ReservationHoldReconciliationAlarmTest(unittest.TestCase):
     @classmethod

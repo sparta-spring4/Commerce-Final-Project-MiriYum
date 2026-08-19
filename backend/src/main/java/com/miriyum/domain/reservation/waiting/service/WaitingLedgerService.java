@@ -3,15 +3,15 @@ package com.miriyum.domain.reservation.waiting.service;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.dto.WaitingActiveTeamImpact;
 import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamSnapshot;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActorType;
-import com.miriyum.domain.reservation.waiting.entity.WaitingStatusEvent;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTransitionAudit;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingQueueSequenceRepository;
-import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
 import com.miriyum.global.exception.ServiceException;
@@ -47,7 +47,7 @@ public class WaitingLedgerService {
     private final WaitingQueueSequenceRepository sequenceRepository;
     private final WaitingActiveMembershipRepository membershipRepository;
     private final WaitingTransitionAuditRepository auditRepository;
-    private final WaitingStatusEventRepository eventRepository;
+    private final WaitingStatusEventAppender eventAppender;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
     private final Clock clock;
@@ -58,7 +58,7 @@ public class WaitingLedgerService {
             WaitingQueueSequenceRepository sequenceRepository,
             WaitingActiveMembershipRepository membershipRepository,
             WaitingTransitionAuditRepository auditRepository,
-            WaitingStatusEventRepository eventRepository,
+            WaitingStatusEventAppender eventAppender,
             IdempotencyExecutor idempotencyExecutor,
             ObjectMapper objectMapper,
             Clock clock
@@ -68,7 +68,7 @@ public class WaitingLedgerService {
         this.sequenceRepository = Objects.requireNonNull(sequenceRepository);
         this.membershipRepository = Objects.requireNonNull(membershipRepository);
         this.auditRepository = Objects.requireNonNull(auditRepository);
-        this.eventRepository = Objects.requireNonNull(eventRepository);
+        this.eventAppender = Objects.requireNonNull(eventAppender);
         this.idempotencyExecutor = Objects.requireNonNull(idempotencyExecutor);
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.clock = Objects.requireNonNull(clock);
@@ -113,7 +113,8 @@ public class WaitingLedgerService {
             WaitingTeamStatus before = team.getStatus();
             team.call(expectedVersion, occurredAt);
             appendTransition(
-                    team, operatorAccountId, before, expectedVersion,
+                    team, WaitingActorType.STORE_OPERATOR, operatorAccountId,
+                    before, expectedVersion,
                     "CALLED", command, occurredAt
             );
             return success(team);
@@ -169,6 +170,33 @@ public class WaitingLedgerService {
         );
     }
 
+    /** 소비자 본인 소유 활성 팀을 동일한 원장 잠금과 멱등 경계에서 취소한다. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public WaitingConsumerCommandResult cancelByConsumer(
+            long consumerAccountId,
+            long waitingTeamId,
+            long expectedVersion,
+            IdempotencyCommand command,
+            Instant occurredAt
+    ) {
+        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+            WaitingTeam team = teamRepository.findByIdForUpdate(waitingTeamId)
+                    .filter(candidate -> candidate.getConsumerAccountId() == consumerAccountId)
+                    .orElseThrow(WaitingLedgerService::notFound);
+            requireVersion(team, expectedVersion);
+            WaitingTeamStatus before = team.getStatus();
+            team.cancel(expectedVersion, occurredAt);
+            removeMembership(team);
+            appendTransition(
+                    team, WaitingActorType.CONSUMER, consumerAccountId,
+                    before, expectedVersion, "CANCELLED_BY_CONSUMER", command, occurredAt);
+            return consumerSuccess(team);
+        });
+        return new WaitingConsumerCommandResult(
+                outcome.httpStatus(),
+                objectMapper.treeToValue(outcome.data(), WaitingConsumerSnapshot.class));
+    }
+
     private WaitingCommandResult transition(
             long operatorAccountId,
             long storeId,
@@ -190,7 +218,8 @@ public class WaitingLedgerService {
                 removeMembership(team);
             }
             appendTransition(
-                    team, operatorAccountId, before, expectedVersion,
+                    team, WaitingActorType.STORE_OPERATOR, operatorAccountId,
+                    before, expectedVersion,
                     reason, command, occurredAt
             );
             return success(team);
@@ -237,7 +266,7 @@ public class WaitingLedgerService {
     }
 
     private void removeMembership(WaitingTeam team) {
-        if (membershipRepository.deleteByWaitingTeamId(team.getId()) != 1L) {
+        if (membershipRepository.deleteByWaitingTeamId(team.getId()) < 1L) {
             throw new ServiceException(
                     ReservationErrorCode.WAITING_ACTIVE_MEMBERSHIP_CONFLICT);
         }
@@ -245,7 +274,8 @@ public class WaitingLedgerService {
 
     private void appendTransition(
             WaitingTeam team,
-            long operatorAccountId,
+            WaitingActorType actorType,
+            long actorId,
             WaitingTeamStatus before,
             long expectedVersion,
             String reason,
@@ -255,8 +285,8 @@ public class WaitingLedgerService {
         Instant createdAt = clock.instant();
         auditRepository.save(WaitingTransitionAudit.record(
                 team.getId(),
-                WaitingActorType.STORE_OPERATOR,
-                operatorAccountId,
+                actorType,
+                actorId,
                 before,
                 team.getStatus(),
                 expectedVersion,
@@ -265,12 +295,7 @@ public class WaitingLedgerService {
                 occurredAt,
                 createdAt
         ));
-        eventRepository.save(WaitingStatusEvent.pending(
-                team.getId(),
-                team.getVersion() + 1L,
-                team.getStatus(),
-                occurredAt
-        ));
+        eventAppender.append(team, occurredAt);
     }
 
     private static String auditCommandId(IdempotencyCommand command) {
@@ -288,6 +313,17 @@ public class WaitingLedgerService {
                 Long.toString(team.getId()),
                 WaitingTeamSnapshot.from(team)
         );
+    }
+
+    private BusinessResult<WaitingConsumerSnapshot> consumerSuccess(WaitingTeam team) {
+        long teamsAhead = teamRepository.countActiveAhead(
+                team.getStoreId(), team.getBusinessDate(), team.getQueueSequence());
+        return new BusinessResult<>(
+                HttpStatus.OK.value(),
+                SUCCESS,
+                RESOURCE_TYPE,
+                Long.toString(team.getId()),
+                WaitingConsumerSnapshot.from(team, teamsAhead));
     }
 
     private WaitingCommandResult result(IdempotentOutcome outcome) {

@@ -5,6 +5,8 @@ import com.miriyum.domain.auth.social.dto.KakaoOAuthUser;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -24,6 +26,7 @@ public class KakaoRestOAuthClient implements KakaoOAuthClient {
 
     private static final String TOKEN_URL = "https://kauth.kakao.com/oauth/token";
     private static final String USER_URL = "https://kapi.kakao.com/v2/user/me";
+    private static final Logger log = LoggerFactory.getLogger(KakaoRestOAuthClient.class);
 
     private final KakaoOAuthProperties properties;
     private final ObjectMapper objectMapper;
@@ -65,14 +68,39 @@ public class KakaoRestOAuthClient implements KakaoOAuthClient {
             String kakaoAccessToken = requestAccessToken(authorizationCode, redirectUri);
             return new KakaoOAuthUser(requestProviderSubject(kakaoAccessToken));
         } catch (RestClientResponseException exception) {
+            logProviderRejection(exception);
             if (exception.getStatusCode().is4xxClientError()
                     && exception.getStatusCode().value() != 429) {
                 throw new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID);
             }
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         } catch (RestClientException | IllegalArgumentException | JacksonException exception) {
+            logTransportFailure(exception);
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
+    }
+
+    private void logProviderRejection(RestClientResponseException exception) {
+        log.warn("event=kakao_oauth_provider_rejected provider_status={} provider_error={}",
+                exception.getStatusCode().value(), providerErrorCode(exception));
+    }
+
+    private void logTransportFailure(Exception exception) {
+        // Exception messages can contain provider payloads, so retain only the safe type name.
+        log.warn("event=kakao_oauth_transport_failed exception_type={}",
+                exception.getClass().getSimpleName());
+    }
+
+    private String providerErrorCode(RestClientResponseException exception) {
+        try {
+            JsonNode error = objectMapper.readTree(exception.getResponseBodyAsString()).get("error");
+            if (error != null && error.isTextual() && error.asText().matches("[A-Za-z0-9_.-]{1,64}")) {
+                return error.asText();
+            }
+        } catch (JacksonException ignored) {
+            // Provider bodies are untrusted; only a compact error code is useful for diagnosis.
+        }
+        return "unknown";
     }
 
     private String requestAccessToken(String authorizationCode, String redirectUri) {

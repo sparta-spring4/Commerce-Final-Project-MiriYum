@@ -5,10 +5,12 @@
 > 소유 도메인: platformoperator
 > 관련 정책 ID: ADMIN-001, ADMIN-002, ADMIN-009
 > 소유 Issue: #282
+> 계정 읽기 확장 Issue: #415
 > 선행 계약: #275, #276
 > OpenAPI: `docs/specs/platform-operator-management-audit/openapi.yaml`
 > Audience: `docs/specs/platform-operator-openapi.yaml`
 > 최종 승인일: 2026-08-14
+> 읽기 확장 승인일: 2026-08-17
 
 ## 결과와 경계
 
@@ -57,6 +59,33 @@
 - 상태를 `SUSPENDED`로 변경하고 `session_version`을 증가시킨 뒤 미사용 재인증 승인과 중앙 세션을 회수한다.
 - MySQL 변경 뒤 Valkey 회수가 실패하면 `COMMON_012`로 실패 폐쇄한다. 증가한 version 때문에 이전 세션은 다시 유효해지지 않는다.
 
+## 운영자 계정·권한 읽기
+
+#415는 기존 쓰기 계약을 변경하지 않고 플랫폼 운영자 콘솔이 필요한 계정 목록·상세 API를 추가한다. 모든 조회는 #275 보호 chain이 token namespace, 활성 계정, 중앙 세션, session version을 검증한 뒤 시작하며, Service는 `OperatorAuthorityReader.requireCurrentAuthority`로 principal의 `authorityVersion`과 현재 MySQL version을 다시 대조한다. JWT claims나 클라이언트 role은 조회 결과와 권한 판정에 사용하지 않는다. 현재 운영자 capabilities 조회는 #403 명세가 별도로 소유한다.
+
+### 계정 목록
+
+- `GET /api/v1/platform-operators/accounts`는 호출자의 현재 중앙 권한에 `OPERATOR_AUTHORITY_MANAGE`가 있을 때만 실행한다. 권한 검사는 검색보다 먼저 수행한다.
+- 선택 필터는 `status`, `role`, `query`다. `query`는 trim한 1~100자 문자열이며 숫자이면 exact operator ID도 포함하고, 이메일·표시명은 escape한 case-insensitive 부분 일치로 검색한다.
+- `page` 기본값은 0이고 음수를 거부한다. `size` 기본값은 20, 허용 범위는 1~100이다.
+- `sort`는 `operatorId`, `displayName`, `status`, `lastLoginAt`만 허용하고 direction은 `asc` 또는 `desc`만 받는다. 기본은 `operatorId,asc`다. 모든 비-ID 정렬에는 `operatorId ASC`를 마지막 보조 정렬로 추가한다. null `lastLoginAt`은 direction과 무관하게 마지막에 둔다.
+- 역할 필터와 최근 로그인 정렬은 기존 role grant와 auth event 원장을 join하는 읽기 query로 수행한다. 현재 page의 role 집합은 일괄 조회해 N+1을 만들지 않는다.
+- 목록 항목은 문자열 `operatorId`, 마스킹 이메일, `displayName`, `status`, `passwordChangeRequired`, `authorityVersion`, 부여된 `roles`, 가장 최근 성공 `LOGIN` 사건의 `lastLoginAt`만 포함한다.
+
+### 계정 상세
+
+- `GET /api/v1/platform-operators/accounts/{operatorId}`는 호출자의 `OPERATOR_AUTHORITY_MANAGE` 확인 뒤 양수 문자열 ID를 조회한다. 권한 없는 요청은 대상 존재 여부와 무관하게 403이다.
+- 권한을 통과한 뒤 대상이 없으면 `ADMIN_008` 404다. 중지 계정도 관리 조회 대상이며 상태를 그대로 반환한다.
+- 응답은 목록 공통 필드와 부여된 `roles`, 직접 grant인 `directPermissions`, 역할 권한과 직접 권한의 합집합인 `effectivePermissions`, 최근 성공 로그인 시각을 포함한다.
+- 이메일은 local-part가 2자 이하면 첫 글자만, 3자 이상이면 앞 2자만 남기고 나머지를 `*`로 바꾼다. domain은 첫 label의 첫 글자만 남기고 나머지를 `*`로 바꾸며 public suffix는 유지한다. 형식이 손상된 내부 값은 전체를 `***`로 반환해 원문 노출에 실패 폐쇄한다.
+- `passwordHash`, 임시 비밀번호, Access·Refresh token, session ID·version, 재인증 승인, 로그인 event key는 어떤 응답에도 포함하지 않는다. 조회 parameter와 결과의 개인정보·인증정보를 로그로 남기지 않는다.
+
+### 최근 로그인 원천
+
+- `lastLoginAt`의 단일 진실 원천은 `platform_operator_auth_events`다.
+- `event_type = LOGIN AND outcome = SUCCESS`인 사건의 최대 `occurred_at`만 사용한다. 실패 LOGIN과 refresh·reauthentication·logout·session revoke는 제외한다.
+- 별도 최근 로그인 열, 로그인 이력, 권한 snapshot 또는 read-model 테이블을 추가하지 않는다.
+
 ## 불변 감사 원장
 
 - #275 `platform_operator_auth_events`는 유지하며 `AUTH:{numericId}`로 읽는다.
@@ -87,6 +116,8 @@
 | Method | Path | 결과 |
 | --- | --- | --- |
 | `POST` | `/api/v1/platform-operators/accounts` | 비슈퍼관리자 생성 |
+| `GET` | `/api/v1/platform-operators/accounts` | 권한 관리용 운영자 계정 목록 |
+| `GET` | `/api/v1/platform-operators/accounts/{operatorId}` | 운영자 계정·부여 권한·유효 권한 상세 |
 | `PUT` | `/api/v1/platform-operators/accounts/{operatorId}/authority` | 역할·직접 권한 전체 교체 |
 | `PUT` | `/api/v1/platform-operators/accounts/{operatorId}/suspension` | 계정 중지 |
 | `GET` | `/api/v1/platform-operators/audit-events` | 감사 검색 |
@@ -106,6 +137,7 @@
 | 이메일 충돌 | 409 | `ADMIN_005` |
 | 감사 사건 없음 | 404 | `ADMIN_006` |
 | 유효하지 않은 보정 | 409 | `ADMIN_007` |
+| 권한 확인 뒤 운영자 계정 없음 | 404 | `ADMIN_008` |
 | 민감정보·형식·구조화 사유 오류 | 400 | `COMMON_001` |
 | 멱등 충돌 | 409 | `COMMON_007` |
 | 변경 경합 | 409 | `COMMON_008` |
@@ -116,6 +148,7 @@
 - `V43__create_platform_operator_management_audit.sql`로 고정한다. V41·V42와 기존 migration은 변경하지 않는다.
 - V43은 `SUPER_ADMIN` 조건부 singleton unique index와 감사 테이블·검색 인덱스·불변 trigger를 추가한다. 관리 명령 멱등성은 V4 공통 `idempotency_commands` 원장을 재사용하고 별도 중복 원장을 만들지 않는다.
 - ADMIN-009 공통 기간이 확정되기 전에는 자동 파기를 구현하지 않는다.
+- #415 읽기 확장은 V39 계정·인증 사건과 V41 역할·권한 grant를 그대로 조회한다. 새 migration, index, snapshot 열과 중복 테이블을 추가하지 않는다.
 
 ## 정확한 변경 allowlist
 
@@ -148,6 +181,14 @@
 - `backend/src/main/java/com/miriyum/domain/platformoperator/repository/{PlatformOperatorAccountRepository,PlatformOperatorAuthEventRepository,PlatformOperatorRoleGrantRepository,PlatformOperatorPermissionGrantRepository,PlatformOperatorReauthenticationApprovalRepository,PlatformOperatorAuditEventRepository}.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/service/{PlatformOperatorManagementService,PlatformOperatorManagementRequestFingerprint,PlatformOperatorSessionRevocationAfterCommit,PlatformOperatorAuditService,PlatformOperatorAuditWriter,OperatorAuthorityService,LastSuperAdminPolicy}.java`
 
+### #415 읽기 확장 Backend
+
+- `backend/src/main/java/com/miriyum/domain/platformoperator/controller/management/PlatformOperatorAccountQueryController.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/dto/management/{PlatformOperatorAccountSearchRequest,PlatformOperatorAccountSummaryData,PlatformOperatorAccountPageData,PlatformOperatorAccountDetailData}.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/service/{PlatformOperatorAccountQueryService,PlatformOperatorEmailMasker}.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/repository/{PlatformOperatorAccountRepository,PlatformOperatorRoleGrantRepository,PlatformOperatorPermissionGrantRepository,PlatformOperatorAuthEventRepository}.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/exception/AdminAuthorizationErrorCode.java`
+
 ### 테스트
 
 - `backend/src/test/java/com/miriyum/domain/platformoperator/**`
@@ -163,6 +204,14 @@
 - `backend/src/test/resources/META-INF/services/org.junit.jupiter.api.extension.Extension`
 - `backend/src/test/java/com/miriyum/domain/{notification/payment/store/reservation}/**/*MigrationTest.java` (V43 trigger migration compatibility only)
 
+### #415 읽기 확장 테스트
+
+- `backend/src/test/java/com/miriyum/domain/platformoperator/PlatformOperatorOpenApiContractTest.java`
+- `backend/src/test/java/com/miriyum/architecture/HttpApiNamespaceContractTest.java`
+- `backend/src/test/java/com/miriyum/domain/platformoperator/controller/management/{PlatformOperatorAccountQueryControllerTest,PlatformOperatorAccountQueryHttpIT}.java`
+- `backend/src/test/java/com/miriyum/domain/platformoperator/service/{PlatformOperatorAccountQueryServiceTest,PlatformOperatorEmailMaskerTest}.java`
+- `backend/src/test/java/com/miriyum/domain/platformoperator/repository/PlatformOperatorAccountQueryRepositoryIT.java`
+
 기존 migration, 다른 도메인의 Entity·Repository·Service·Controller, `SecurityConfig`, frontend, deploy와 `docs/superpowers/**`는 변경하지 않는다. allowlist 밖 변경이 필요하면 중단하고 spec을 다시 승인받는다.
 
 ## TDD 구현 순서
@@ -176,6 +225,16 @@
 7. HTTP 권한·DTO·민감정보 비노출와 OpenAPI drift를 검증한다.
 8. 전체 unit, MySQL·Valkey integration, build, Redocly와 allowlist 회귀를 실행한다.
 
+### #415 읽기 확장 TDD 순서
+
+1. audience path·schema·operation과 runtime GET mapping drift 테스트를 먼저 실패시킨다.
+2. OpenAPI와 통합 audience ref를 확정하고 계약 테스트를 통과시킨다.
+3. 이메일 마스킹과 query validation 단위 테스트를 실패시킨 뒤 최소 구현한다.
+4. 목록·상세 Service 성공·401 version 불일치·403·404·유효 권한 합산 테스트를 실패시킨 뒤 구현한다.
+5. 상태·역할·세 필드 검색·페이지 경계·결정적 정렬·최근 성공 LOGIN query의 실제 MySQL 통합 테스트를 실패시킨 뒤 Repository query를 구현한다.
+6. MockMvc와 실제 보호 chain 통합 테스트로 token namespace, 중앙 session 회수, 제한 session, feature flag, 민감정보 비노출을 검증한다.
+7. 기존 관리 쓰기 테스트, OpenAPI lint·drift와 정확한 allowlist를 집중 회귀한다. 로컬 전체 suite는 실행하지 않고 GitHub CI를 전체 증거로 사용한다.
+
 ## 인수 조건
 
 - 일반 운영자·일반 사용자·매장 운영자는 운영자나 슈퍼관리자를 생성할 수 없다.
@@ -185,3 +244,7 @@
 - 실제 MySQL에서 감사 UPDATE·DELETE가 거부되고 보정 뒤 원 사건과 모든 보정이 함께 남는다.
 - 검색·상세는 최소 권한·배정·사유를 요구하고 허용·거부 조회가 모두 감사된다.
 - HTTP, OpenAPI와 전체 회귀가 성공하며 ADMIN-009 공통 보존기간을 구현하지 않는다.
+- 계정 목록은 상태·역할·ID·이메일·표시명 검색, 안전한 page/size와 허용 sort만 지원하고 모든 page가 결정적으로 정렬된다.
+- 계정 상세는 권한 검사 뒤 부재를 404로 반환하고 direct/effective permission과 성공 LOGIN만 반영한 `lastLoginAt`을 제공한다.
+- 목록·상세 이메일은 마스킹되며 비밀번호·token·임시 비밀번호·session·승인 원문은 응답과 로그에 없다.
+- feature flag OFF와 최초 비밀번호 변경 제한 session의 기존 비노출·접근 제한은 넓어지지 않는다.

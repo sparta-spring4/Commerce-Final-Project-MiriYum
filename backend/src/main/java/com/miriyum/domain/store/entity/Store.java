@@ -103,6 +103,9 @@ public class Store extends BaseEntity {
     @Column(name = "time_zone_id", nullable = false, length = 64)
     private String timeZoneId;
 
+    @Column(name = "dashboard_authority_version", nullable = false)
+    private long dashboardAuthorityVersion;
+
     @Column(name = "store_category_code", nullable = false, length = 50)
     private String storeCategoryCode;
 
@@ -175,6 +178,7 @@ public class Store extends BaseEntity {
         this.pickupEnabled = pickupEnabled;
         this.platformManagementAllowed = true;
         this.timeZoneId = timeZoneId;
+        this.dashboardAuthorityVersion = 1L;
         this.applicantSelfAttestedAt = onboardingAcceptedAt;
         this.requiredTermsAgreedAt = onboardingAcceptedAt;
         this.requiredTermsVersion = requiredTermsVersion;
@@ -414,7 +418,12 @@ public class Store extends BaseEntity {
             boolean pickupEnabled,
             boolean platformManagementAllowed
     ) {
-        this.operationStatus = Objects.requireNonNull(operationStatus, "operation status is required");
+        OperationStatus requiredOperationStatus = Objects.requireNonNull(
+                operationStatus, "operation status is required");
+        if (this.platformManagementAllowed != platformManagementAllowed) {
+            this.dashboardAuthorityVersion = Math.addExact(this.dashboardAuthorityVersion, 1L);
+        }
+        this.operationStatus = requiredOperationStatus;
         this.reservationEnabled = reservationEnabled;
         this.menuHoldEnabled = menuHoldEnabled;
         this.pickupEnabled = pickupEnabled;

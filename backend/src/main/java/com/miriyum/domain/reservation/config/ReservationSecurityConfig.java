@@ -1,5 +1,6 @@
 package com.miriyum.domain.reservation.config;
 
+import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtAccessDeniedHandler;
 import com.miriyum.domain.auth.jwt.JwtAuthenticationEntryPoint;
 import com.miriyum.domain.auth.jwt.JwtAuthenticationFilter;
@@ -41,10 +42,24 @@ public class ReservationSecurityConfig {
             RESERVATION_REQUEST_ROOT + "/*/finalizations";
     private static final String RESERVATION_REQUEST_ABANDONMENT =
             RESERVATION_REQUEST_ROOT + "/*/abandonments";
+    private static final String CONSUMER_WAITING_STORE_ROOT =
+            "/api/v1/consumers/me/stores/*/waiting-teams";
+    private static final String CONSUMER_WAITING_AVAILABILITY =
+            "/api/v1/consumers/me/stores/*/waiting-availabilities";
+    private static final String CONSUMER_WAITING_LOCATION_PROOF =
+            "/api/v1/consumers/me/stores/*/waiting-location-proofs";
+    private static final String CONSUMER_WAITING_ME_ROOT =
+            "/api/v1/consumers/me/waiting-teams";
+    private static final String CONSUMER_WAITING_ME_FAMILY =
+            CONSUMER_WAITING_ME_ROOT + "/**";
+    private static final String CONSUMER_WAITING_INVITATION_ACCEPTANCE =
+            "/api/v1/consumers/me/waiting-invitation-acceptances";
     private static final String STORE_RESERVATION_ROOT =
             "/api/v1/store-operators/stores/*/reservations";
     private static final String STORE_RESERVATION_FAMILY = STORE_RESERVATION_ROOT + "/**";
     private static final String STORE_RESERVATION_DETAIL = STORE_RESERVATION_ROOT + "/*";
+    private static final String STORE_RESERVATION_PAYMENT_STATUS =
+            STORE_RESERVATION_ROOT + "/*/payment-status";
     private static final String STORE_RESERVATION_CANCELLATION =
             STORE_RESERVATION_ROOT + "/*/cancellations";
     private static final String STORE_RESERVATION_FULFILLMENT =
@@ -72,6 +87,34 @@ public class ReservationSecurityConfig {
             WAITING_SETTING_ROOT + "/deactivation-impact";
 
     @Bean
+    @Order(-2)
+    public SecurityFilterChain storeReservationPaymentStatusFilterChain(
+            HttpSecurity http,
+            JwtTokenProvider jwtTokenProvider,
+            ObjectMapper objectMapper
+    ) throws Exception {
+        http
+                .securityMatcher(STORE_RESERVATION_PAYMENT_STATUS)
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(HttpMethod.GET, STORE_RESERVATION_PAYMENT_STATUS)
+                        .authenticated()
+                        .anyRequest().denyAll())
+                .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint(new JwtAuthenticationEntryPoint(objectMapper))
+                        .accessDeniedHandler(new JwtAccessDeniedHandler(objectMapper)))
+                .addFilterBefore(
+                        new JwtAuthenticationFilter(
+                                jwtTokenProvider,
+                                TokenNamespace.STORE_OPERATOR,
+                                AuthErrorCode.FORBIDDEN),
+                        UsernamePasswordAuthenticationFilter.class);
+        return http.build();
+    }
+
+    @Bean
     @Order(-1)
     public SecurityFilterChain storeReservationFilterChain(
             HttpSecurity http,
@@ -95,6 +138,8 @@ public class ReservationSecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, STORE_RESERVATION_ROOT).authenticated()
                         .requestMatchers(HttpMethod.GET, STORE_RESERVATION_DETAIL).authenticated()
+                        .requestMatchers(HttpMethod.GET, STORE_RESERVATION_PAYMENT_STATUS)
+                        .authenticated()
                         .requestMatchers(HttpMethod.POST, STORE_RESERVATION_CANCELLATION).authenticated()
                         .requestMatchers(HttpMethod.POST, STORE_RESERVATION_FULFILLMENT).authenticated()
                         .requestMatchers(HttpMethod.POST, STORE_RESERVATION_NO_SHOW).authenticated()
@@ -143,7 +188,13 @@ public class ReservationSecurityConfig {
                         RESERVATION_FAMILY,
                         RESERVATION_HISTORY,
                         RESERVATION_REQUEST_ROOT,
-                        RESERVATION_REQUEST_FAMILY)
+                        RESERVATION_REQUEST_FAMILY,
+                        CONSUMER_WAITING_STORE_ROOT,
+                        CONSUMER_WAITING_AVAILABILITY,
+                        CONSUMER_WAITING_LOCATION_PROOF,
+                        CONSUMER_WAITING_ME_ROOT,
+                        CONSUMER_WAITING_ME_FAMILY,
+                        CONSUMER_WAITING_INVITATION_ACCEPTANCE)
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -158,6 +209,33 @@ public class ReservationSecurityConfig {
                         .requestMatchers(HttpMethod.POST, RESERVATION_REQUEST_ABANDONMENT)
                         .authenticated()
                         .requestMatchers(HttpMethod.POST, RESERVATION_CHECK_IN_QR_GRANT).authenticated()
+                        .requestMatchers(HttpMethod.GET, CONSUMER_WAITING_AVAILABILITY).authenticated()
+                        .requestMatchers(HttpMethod.POST, CONSUMER_WAITING_LOCATION_PROOF).authenticated()
+                        .requestMatchers(HttpMethod.POST, CONSUMER_WAITING_STORE_ROOT).authenticated()
+                        .requestMatchers(HttpMethod.GET,
+                                CONSUMER_WAITING_ME_ROOT + "/current").authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_ME_ROOT + "/*/cancellations").authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_ME_ROOT + "/*/invitations").authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_ME_ROOT + "/*/invitations/*/revocations")
+                        .authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_ME_ROOT + "/*/membership-departures")
+                        .authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_ME_ROOT + "/*/memberships/*/removals")
+                        .authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_ME_ROOT + "/*/representative-transfer-offers")
+                        .authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_ME_ROOT
+                                        + "/*/representative-transfer-offers/*/*")
+                        .authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_INVITATION_ACCEPTANCE).authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint(new JwtAuthenticationEntryPoint(objectMapper))
