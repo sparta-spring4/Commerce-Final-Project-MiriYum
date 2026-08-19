@@ -30,6 +30,18 @@ class SseConnectionRegistryTest {
     }
 
     @Test
+    void consumerLimitDoesNotRejectStoreOperatorWithSameNumericAccountId() {
+        SseConnectionRegistry registry = new SseConnectionRegistry();
+        SseRuntimeProperties.RuntimePolicy policy = policy(3, 2);
+        register(registry, policy, SseStreamScope.notificationConsumer(41L), "notification-route");
+        register(registry, policy, SseStreamScope.waitingConsumer(41L), "waiting-route");
+
+        register(registry, policy, SseStreamScope.waitingStoreOperator(41L, 100L), "store-route");
+
+        assertThat(registry.count()).isEqualTo(3);
+    }
+
+    @Test
     void routingIndexChangesAtomicallyAndCompletionRemovesOnlyOneConnection() {
         SseConnectionRegistry registry = new SseConnectionRegistry();
         SseRuntimeProperties.RuntimePolicy policy = policy(5, 3);
@@ -63,11 +75,20 @@ class SseConnectionRegistryTest {
             long accountId,
             String route
     ) {
+        return register(registry, policy, SseStreamScope.notificationConsumer(accountId), route);
+    }
+
+    private static SseConnection register(
+            SseConnectionRegistry registry,
+            SseRuntimeProperties.RuntimePolicy policy,
+            SseStreamScope scope,
+            String route
+    ) {
         UUID id = UUID.randomUUID();
         AtomicReference<SseConnection> reference = new AtomicReference<>();
         SseConnection connection = new SseConnection(
                 id,
-                SseStreamScope.notificationConsumer(accountId),
+                scope,
                 new SseEmitter(),
                 Instant.parse("2026-08-19T02:00:00Z"),
                 Set.of(route),

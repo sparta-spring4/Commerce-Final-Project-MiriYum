@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
 public class SseConnectionRegistry {
 
     private final Map<UUID, SseConnection> connections = new LinkedHashMap<>();
-    private final Map<Long, Integer> accountCounts = new HashMap<>();
+    private final Map<AccountScope, Integer> accountCounts = new HashMap<>();
     private final Map<String, LinkedHashSet<UUID>> routingIndex = new HashMap<>();
     private int correctionOffset;
 
@@ -25,13 +25,14 @@ public class SseConnectionRegistry {
             SseConnection connection,
             SseRuntimeProperties.RuntimePolicy policy
     ) {
-        int accountCount = accountCounts.getOrDefault(connection.accountId(), 0);
+        AccountScope accountScope = AccountScope.from(connection.scope());
+        int accountCount = accountCounts.getOrDefault(accountScope, 0);
         if (connections.size() >= policy.maxConnectionsTotal()
                 || accountCount >= policy.maxConnectionsPerAccount()) {
             throw new ServiceException(CommonErrorCode.TOO_MANY_REQUESTS);
         }
         connections.put(connection.id(), connection);
-        accountCounts.put(connection.accountId(), accountCount + 1);
+        accountCounts.put(accountScope, accountCount + 1);
         addRoutingKeys(connection.id(), connection.routingKeys());
     }
 
@@ -40,11 +41,12 @@ public class SseConnectionRegistry {
         if (removed == null) {
             return;
         }
-        int nextCount = accountCounts.getOrDefault(removed.accountId(), 1) - 1;
+        AccountScope accountScope = AccountScope.from(removed.scope());
+        int nextCount = accountCounts.getOrDefault(accountScope, 1) - 1;
         if (nextCount == 0) {
-            accountCounts.remove(removed.accountId());
+            accountCounts.remove(accountScope);
         } else {
-            accountCounts.put(removed.accountId(), nextCount);
+            accountCounts.put(accountScope, nextCount);
         }
         removeRoutingKeys(connectionId, removed.routingKeys());
         if (correctionOffset >= connections.size()) {
@@ -111,6 +113,21 @@ public class SseConnectionRegistry {
 
     public synchronized int count() {
         return connections.size();
+    }
+
+    private record AccountScope(AuthenticationNamespace namespace, long accountId) {
+
+        private static AccountScope from(SseStreamScope scope) {
+            AuthenticationNamespace namespace = scope.audience() == SseAudience.WAITING_STORE_OPERATOR
+                    ? AuthenticationNamespace.STORE_OPERATOR
+                    : AuthenticationNamespace.CONSUMER;
+            return new AccountScope(namespace, scope.accountId());
+        }
+    }
+
+    private enum AuthenticationNamespace {
+        CONSUMER,
+        STORE_OPERATOR
     }
 
     private void addRoutingKeys(UUID id, Set<String> keys) {
