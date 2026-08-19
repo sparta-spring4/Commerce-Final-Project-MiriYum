@@ -1171,6 +1171,15 @@ main
                 "logs --tail 100 mysql", compose_path.read_text(encoding="utf-8")
             )
 
+    def test_runtime_config_defaults_to_disabled_without_reading_ssm(self):
+        runtime_config_branch = self.deploy_script.split(
+            'case "${runtime_config_enabled}" in', 1
+        )[1].split("esac", 1)[0]
+        self.assertIn('runtime_config_enabled="${runtime_config_enabled:-false}"', self.deploy_script)
+        self.assertIn("false)", runtime_config_branch)
+        self.assertIn("return 0", runtime_config_branch)
+        self.assertNotIn("aws ssm get-parameter", runtime_config_branch)
+
     @staticmethod
     def run_deploy_script(script, extra_environment):
         environment = os.environ.copy()

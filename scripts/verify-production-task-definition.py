@@ -78,6 +78,18 @@ def validate(contract_path, task_definition_path, application_config_path=None):
             if name not in secrets:
                 errors.append(f"Missing parameter secret reference: {name}")
 
+    for feature_flag, required_secrets in contract.get("conditionalWholeSecrets", {}).items():
+        if environment.get(feature_flag, "false").lower() != "true":
+            for name in required_secrets:
+                if name in secrets:
+                    errors.append(
+                        f"Conditional whole secret must be absent when disabled: {name}"
+                    )
+            continue
+        for name in required_secrets:
+            if name not in secrets:
+                errors.append(f"Missing whole secret reference: {name}")
+
     for feature_flag, required_environment in contract.get("conditionalEnvironment", {}).items():
         if environment.get(feature_flag, "false").lower() != "true":
             continue
@@ -85,7 +97,10 @@ def validate(contract_path, task_definition_path, application_config_path=None):
             if not environment.get(name, ""):
                 errors.append(f"Missing environment value: {name}")
 
-    whole_secrets = set(contract.get("wholeSecrets", []))
+    whole_secrets = (
+        set(contract.get("wholeSecrets", []))
+        | set(contract.get("wholeSecretReferences", {}))
+    )
     whole_secret_references = contract.get("wholeSecretReferences", {})
     parameter_secrets = (
         set(contract.get("parameterSecrets", []))

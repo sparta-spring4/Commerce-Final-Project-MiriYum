@@ -39,8 +39,23 @@ validate_runtime_environment() {
   fi
 }
 
-load_runtime_config() {
-  local runtime_config
+sync_runtime_config_environment() {
+  local runtime_config runtime_config_enabled
+
+  runtime_config_enabled=$(awk -F= '$1 == "MIRIYUM_RUNTIME_CONFIG_ENABLED" { print substr($0, index($0, "=") + 1); exit }' "${ENV_FILE}")
+  runtime_config_enabled="${runtime_config_enabled:-false}"
+  case "${runtime_config_enabled}" in
+    false)
+      unset MIRIYUM_SPRING_APPLICATION_JSON
+      echo "Runtime config disabled; skipping SSM parameter synchronization."
+      return 0
+      ;;
+    true) ;;
+    *)
+      echo "Invalid MIRIYUM_RUNTIME_CONFIG_ENABLED value: ${runtime_config_enabled}" >&2
+      return 1
+      ;;
+  esac
 
   runtime_config=$(aws ssm get-parameter \
     --region "${AWS_REGION}" \
@@ -345,7 +360,7 @@ main() {
   fi
 
   sync_llm_runtime_environment
-  load_runtime_config
+  sync_runtime_config_environment
   validate_runtime_environment
 
   for command in aws curl docker; do

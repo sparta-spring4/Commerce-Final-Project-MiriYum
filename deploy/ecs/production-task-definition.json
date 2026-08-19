@@ -26,6 +26,7 @@
         {"name": "MIRIYUM_ALLOWED_ORIGIN", "value": "REPLACE_WITH_HTTPS_ORIGIN"},
         {"name": "MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED", "value": "false"},
         {"name": "MIRIYUM_KAKAO_ENABLED", "value": "false"},
+        {"name": "MIRIYUM_RUNTIME_CONFIG_ENABLED", "value": "false"},
         {"name": "MIRIYUM_STORE_SEARCH_LLM_ENABLED", "value": "true"},
         {"name": "MIRIYUM_STORE_SEARCH_LLM_MODEL", "value": "gpt-4o-mini"},
         {"name": "MIRIYUM_CLOUDWATCH_METRICS_ENABLED", "value": "true"},
@@ -58,7 +59,6 @@
         {"name": "MIRIYUM_STORE_GEOCODING_REST_API_KEY", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_STORE_GEOCODING_REST_API_KEY::"},
         {"name": "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET::"},
         {"name": "MIRIYUM_VALKEY_PASSWORD", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_VALKEY_PASSWORD::"},
-        {"name": "SPRING_APPLICATION_JSON", "valueFrom": "REPLACE_WITH_RUNTIME_CONFIG_SECRET_ARN"},
         {"name": "OPENAI_API_KEY", "valueFrom": "REPLACE_WITH_OPENAI_API_KEY_PARAMETER_ARN"}
       ],
       "logConfiguration": {
