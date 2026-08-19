@@ -117,6 +117,7 @@ public class PaymentRecoveryCommandService {
                     recoveryCase, context.operatorId(), context.authorityVersion(), clock.instant());
             recoveryCase.queueRequery(request.expectedCaseVersion(), clock.instant());
             cases.saveAndFlush(recoveryCase);
+            inheritAssignment(recoveryCase, context.operatorId());
             executions.saveAndFlush(execution);
             append(context, PlatformOperatorAuditAction.PAYMENT_RECOVERY_REQUERY_REQUESTED,
                     execution.getExecutionKey(), command.idempotencyKey(), before,
@@ -182,6 +183,7 @@ public class PaymentRecoveryCommandService {
                         proposal, selfApproval, clock.instant()));
             }
             cases.saveAndFlush(recoveryCase);
+            inheritAssignment(recoveryCase, context.operatorId());
             append(context, PlatformOperatorAuditAction.PAYMENT_RECOVERY_PROPOSED,
                     caseId + ":" + proposalVersion, command.idempotencyKey(), before,
                     PaymentRecoveryAuditSnapshots.proposalSnapshot(
@@ -222,6 +224,7 @@ public class PaymentRecoveryCommandService {
             recoveryCase.recordAdditionalApproval(request.expectedCaseVersion(), clock.instant());
             recoveryCase.queueExecution(recoveryCase.getCaseVersion(), clock.instant());
             cases.saveAndFlush(recoveryCase);
+            inheritAssignment(recoveryCase, proposal.getRequesterPlatformOperatorAccountId());
             PaymentRecoveryExecution execution = executions.saveAndFlush(
                     PaymentRecoveryExecution.authorize(proposal, approved, clock.instant()));
             append(context, PlatformOperatorAuditAction.PAYMENT_RECOVERY_APPROVED,
@@ -257,6 +260,7 @@ public class PaymentRecoveryCommandService {
             var before = PaymentRecoveryAuditSnapshots.caseSnapshot(recoveryCase);
             recoveryCase.closeUnresolved(request.expectedCaseVersion(), clock.instant());
             cases.saveAndFlush(recoveryCase);
+            inheritAssignment(recoveryCase, context.operatorId());
             append(context, PlatformOperatorAuditAction.PAYMENT_RECOVERY_CLOSED,
                     caseId, command.idempotencyKey(), before,
                     PaymentRecoveryAuditSnapshots.caseSnapshot(recoveryCase));
@@ -268,6 +272,12 @@ public class PaymentRecoveryCommandService {
     private PaymentRecoveryCase locked(String caseId) {
         return cases.findByPublicIdForUpdate(caseId)
                 .orElseThrow(() -> new ServiceException(PaymentRecoveryErrorCode.RECOVERY_CASE_NOT_FOUND));
+    }
+
+    private void inheritAssignment(PaymentRecoveryCase recoveryCase, long operatorId) {
+        assignments.assign(new AdminCaseAssignmentCommand(AdminCaseType.PAYMENT_RECOVERY,
+                recoveryCase.getPublicId(), recoveryCase.getCaseVersion(), operatorId,
+                clock.instant().plus(Duration.ofMinutes(30))));
     }
 
     private HighRiskCommandRequest highRisk(

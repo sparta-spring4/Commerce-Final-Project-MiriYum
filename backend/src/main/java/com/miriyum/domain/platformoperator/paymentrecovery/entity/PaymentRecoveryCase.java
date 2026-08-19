@@ -160,6 +160,43 @@ public class PaymentRecoveryCase {
                 CaseStatus.INVESTIGATING, now);
     }
 
+    public void applyInspection(
+            RecoveryKind kind,
+            ResultStatus inspectedResultStatus,
+            long inspectedOriginalAmountMinor,
+            long inspectedCumulativeRefundedAmountMinor,
+            long inspectedRemainingRefundableAmountMinor,
+            String inspectedCurrency,
+            Set<RecoveryAction> inspectedAllowedActions,
+            String inspectedMaskedProviderReference,
+            long inspectedHandoffVersion,
+            long inspectedPaymentVersion,
+            long inspectedRecoveryVersion
+    ) {
+        long original = requirePositive(inspectedOriginalAmountMinor, "originalAmountMinor");
+        long cumulative = requireNonNegative(
+                inspectedCumulativeRefundedAmountMinor, "cumulativeRefundedAmountMinor");
+        long remaining = requireNonNegative(
+                inspectedRemainingRefundableAmountMinor, "remainingRefundableAmountMinor");
+        if (remaining > original || cumulative > original - remaining) {
+            throw new IllegalArgumentException("refund amounts exceed original amount");
+        }
+        if (inspectedCurrency == null || !inspectedCurrency.matches("^[A-Z]{3}$")) {
+            throw new IllegalArgumentException("currency is invalid");
+        }
+        recoveryKind = Objects.requireNonNull(kind);
+        resultStatus = Objects.requireNonNull(inspectedResultStatus);
+        originalAmountMinor = original;
+        cumulativeRefundedAmountMinor = cumulative;
+        remainingRefundableAmountMinor = remaining;
+        currency = inspectedCurrency;
+        allowedActions = Set.copyOf(Objects.requireNonNull(inspectedAllowedActions));
+        maskedProviderReference = inspectedMaskedProviderReference;
+        handoffVersion = requireNonNegative(inspectedHandoffVersion, "handoffVersion");
+        paymentVersion = requireNonNegative(inspectedPaymentVersion, "paymentVersion");
+        recoveryVersion = requireNonNegative(inspectedRecoveryVersion, "recoveryVersion");
+    }
+
     public void recordProposal(
             long expectedVersion,
             long proposalVersion,

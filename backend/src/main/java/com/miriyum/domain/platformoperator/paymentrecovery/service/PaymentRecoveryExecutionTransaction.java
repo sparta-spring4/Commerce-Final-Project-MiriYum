@@ -3,6 +3,7 @@ package com.miriyum.domain.platformoperator.paymentrecovery.service;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryInspection;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryResultStatus;
 import com.miriyum.domain.platformoperator.dto.authorization.AdminAuditContext;
+import com.miriyum.domain.platformoperator.dto.authorization.AdminCaseAssignmentCommand;
 import com.miriyum.domain.platformoperator.dto.authorization.AdminCaseAssignmentRequest;
 import com.miriyum.domain.platformoperator.dto.authorization.OperatorAuthority;
 import com.miriyum.domain.platformoperator.enums.AdminCaseType;
@@ -22,6 +23,7 @@ import com.miriyum.domain.platformoperator.paymentrecovery.exception.PaymentReco
 import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRecoveryCaseRepository;
 import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRecoveryExecutionRepository;
 import com.miriyum.domain.platformoperator.service.AdminCaseAssignmentVerifier;
+import com.miriyum.domain.platformoperator.service.AdminCaseAssignmentManager;
 import com.miriyum.domain.platformoperator.service.OperatorAuthorityReader;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorAuditWriter;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorAuditWriter.RecoveryEvent;
@@ -45,17 +47,20 @@ public class PaymentRecoveryExecutionTransaction {
     private final PaymentRecoveryCaseRepository cases;
     private final OperatorAuthorityReader authorities;
     private final AdminCaseAssignmentVerifier assignments;
+    private final AdminCaseAssignmentManager assignmentManager;
     private final PlatformOperatorAuditWriter audit;
     private final Clock clock;
 
     public PaymentRecoveryExecutionTransaction(
             PaymentRecoveryExecutionRepository executions, PaymentRecoveryCaseRepository cases,
             OperatorAuthorityReader authorities, AdminCaseAssignmentVerifier assignments,
+            AdminCaseAssignmentManager assignmentManager,
             PlatformOperatorAuditWriter audit, Clock clock) {
         this.executions = executions;
         this.cases = cases;
         this.authorities = authorities;
         this.assignments = assignments;
+        this.assignmentManager = assignmentManager;
         this.audit = audit;
         this.clock = clock;
     }
@@ -99,11 +104,14 @@ public class PaymentRecoveryExecutionTransaction {
         Instant now = clock.instant();
         PaymentRecoveryExecution execution = lockedExecution(claim);
         PaymentRecoveryCase recoveryCase = lockedCase(execution.getCasePublicId());
+        long previousCaseVersion = recoveryCase.getCaseVersion();
         var before = PaymentRecoveryAuditSnapshots.executionStateSnapshot(recoveryCase, execution);
         execution.markUnknown(claim.owner(), claim.leaseToken(), now, now.plusSeconds(10));
         if (recoveryCase.getStatus() == CaseStatus.EXECUTING) {
             recoveryCase.startVerification(recoveryCase.getCaseVersion(), now);
         }
+        inheritAssignmentIfAdvanced(recoveryCase, previousCaseVersion,
+                execution.getRequesterPlatformOperatorAccountId(), now);
         append(claim, execution, recoveryCase,
                 PlatformOperatorAuditAction.PAYMENT_RECOVERY_EXECUTED,
                 PlatformOperatorAuditOutcome.SUCCESS, before);
@@ -114,8 +122,21 @@ public class PaymentRecoveryExecutionTransaction {
         Instant now = clock.instant();
         PaymentRecoveryExecution execution = lockedExecution(claim);
         PaymentRecoveryCase recoveryCase = lockedCase(execution.getCasePublicId());
+        long previousCaseVersion = recoveryCase.getCaseVersion();
         var before = PaymentRecoveryAuditSnapshots.executionStateSnapshot(recoveryCase, execution);
         if (!recoveryCase.getHandoffId().equals(inspection.handoffId())) conflict();
+        recoveryCase.applyInspection(
+                com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.RecoveryKind
+                        .valueOf(inspection.kind().name()),
+                com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.ResultStatus
+                        .valueOf(inspection.resultStatus().name()),
+                inspection.originalAmountMinor(), inspection.cumulativeRefundedAmountMinor(),
+                inspection.remainingRefundableAmountMinor(), inspection.currency(),
+                inspection.allowedActions().stream()
+                        .map(action -> RecoveryAction.valueOf(action.name()))
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet()),
+                inspection.maskedProviderReference(), inspection.handoffVersion(),
+                inspection.paymentVersion(), inspection.recoveryVersion());
         if (inspection.resultStatus() == ManualRecoveryResultStatus.SUCCEEDED) {
             execution.markSucceeded(claim.owner(), claim.leaseToken(), "SUCCEEDED", now);
             if (recoveryCase.getStatus() == CaseStatus.EXECUTING) {
@@ -150,6 +171,8 @@ public class PaymentRecoveryExecutionTransaction {
                     PlatformOperatorAuditAction.PAYMENT_RECOVERY_EXECUTED,
                     PlatformOperatorAuditOutcome.SUCCESS, before);
         }
+        inheritAssignmentIfAdvanced(recoveryCase, previousCaseVersion,
+                execution.getRequesterPlatformOperatorAccountId(), now);
     }
 
     @Transactional
@@ -158,7 +181,21 @@ public class PaymentRecoveryExecutionTransaction {
             scheduleLookup(claim, "RESPONSE_LOST");
             return;
         }
-        recordInspection(claim, unknownInspection(claim));
+        Instant now = clock.instant();
+        PaymentRecoveryExecution execution = lockedExecution(claim);
+        PaymentRecoveryCase recoveryCase = lockedCase(execution.getCasePublicId());
+        long previousCaseVersion = recoveryCase.getCaseVersion();
+        var before = PaymentRecoveryAuditSnapshots.executionStateSnapshot(recoveryCase, execution);
+        execution.markUnknown(claim.owner(), claim.leaseToken(), now,
+                now.plusSeconds(Math.min(300L, 10L << execution.getLookupAttemptCount())));
+        if (recoveryCase.getStatus() == CaseStatus.EXECUTING) {
+            recoveryCase.startVerification(recoveryCase.getCaseVersion(), now);
+        }
+        inheritAssignmentIfAdvanced(recoveryCase, previousCaseVersion,
+                execution.getRequesterPlatformOperatorAccountId(), now);
+        append(claim, execution, recoveryCase,
+                PlatformOperatorAuditAction.PAYMENT_RECOVERY_EXECUTED,
+                PlatformOperatorAuditOutcome.SUCCESS, before);
     }
 
     @Transactional
@@ -166,9 +203,12 @@ public class PaymentRecoveryExecutionTransaction {
         Instant now = clock.instant();
         PaymentRecoveryExecution execution = lockedExecution(claim);
         PaymentRecoveryCase recoveryCase = lockedCase(execution.getCasePublicId());
+        long previousCaseVersion = recoveryCase.getCaseVersion();
         var before = PaymentRecoveryAuditSnapshots.executionStateSnapshot(recoveryCase, execution);
         execution.markFailed(claim.owner(), claim.leaseToken(), "PROVIDER_FAILED", now);
         recoveryCase.fail(recoveryCase.getCaseVersion(), now);
+        inheritAssignmentIfAdvanced(recoveryCase, previousCaseVersion,
+                execution.getRequesterPlatformOperatorAccountId(), now);
         append(claim, execution, recoveryCase,
                 PlatformOperatorAuditAction.PAYMENT_RECOVERY_EXECUTED,
                 PlatformOperatorAuditOutcome.FAILED, before);
@@ -242,13 +282,13 @@ public class PaymentRecoveryExecutionTransaction {
                 .orElseThrow(() -> new ServiceException(PaymentRecoveryErrorCode.RECOVERY_CASE_NOT_FOUND));
     }
 
-    private static ManualRecoveryInspection unknownInspection(Claim claim) {
-        return new ManualRecoveryInspection(claim.handoffId(), claim.expectedHandoffVersion(),
-                claim.expectedPaymentVersion(), claim.expectedRecoveryVersion(),
-                com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryKind.REFUND_RESULT_UNKNOWN,
-                1L, 0L, 0L, "KRW", ManualRecoveryResultStatus.UNKNOWN,
-                Set.of(com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryAction.REQUERY_PROVIDER_RESULT),
-                null);
+    private void inheritAssignmentIfAdvanced(
+            PaymentRecoveryCase recoveryCase, long previousCaseVersion,
+            long operatorId, Instant now) {
+        if (recoveryCase.getCaseVersion() == previousCaseVersion) return;
+        assignmentManager.assign(new AdminCaseAssignmentCommand(AdminCaseType.PAYMENT_RECOVERY,
+                recoveryCase.getPublicId(), recoveryCase.getCaseVersion(), operatorId,
+                now.plus(Duration.ofMinutes(30))));
     }
 
     private static void conflict() {

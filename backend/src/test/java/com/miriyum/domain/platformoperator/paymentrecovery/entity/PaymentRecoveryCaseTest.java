@@ -65,6 +65,34 @@ class PaymentRecoveryCaseTest {
     }
 
     @Test
+    void verifiedInspectionReplacesTheMutablePaymentSnapshot() {
+        PaymentRecoveryCase recovery = unknownRefund();
+
+        recovery.applyInspection(
+                RecoveryKind.REFUND_FAILED,
+                ResultStatus.SUCCEEDED,
+                300_000L,
+                300_000L,
+                0L,
+                "KRW",
+                Set.of(),
+                "port********9999",
+                6L,
+                7L,
+                8L);
+
+        assertThat(recovery.getRecoveryKind()).isEqualTo(RecoveryKind.REFUND_FAILED);
+        assertThat(recovery.getResultStatus()).isEqualTo(ResultStatus.SUCCEEDED);
+        assertThat(recovery.getCumulativeRefundedAmountMinor()).isEqualTo(300_000L);
+        assertThat(recovery.getRemainingRefundableAmountMinor()).isZero();
+        assertThat(recovery.getAllowedActions()).isEmpty();
+        assertThat(recovery.getMaskedProviderReference()).isEqualTo("port********9999");
+        assertThat(recovery.getHandoffVersion()).isEqualTo(6L);
+        assertThat(recovery.getPaymentVersion()).isEqualTo(7L);
+        assertThat(recovery.getRecoveryVersion()).isEqualTo(8L);
+    }
+
+    @Test
     void holdMayResumeOrCloseUnresolvedButTerminalCaseNeverReopens() {
         PaymentRecoveryCase recovery = unknownRefund();
         recovery.beginInvestigation(1L, NOW.plusSeconds(1));

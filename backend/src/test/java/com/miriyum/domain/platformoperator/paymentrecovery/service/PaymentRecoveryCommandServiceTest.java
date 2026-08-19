@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryRefundPreview;
 import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.platformoperator.dto.authorization.AdminAuditContext;
+import com.miriyum.domain.platformoperator.dto.authorization.AdminCaseAssignmentCommand;
 import com.miriyum.domain.platformoperator.enums.AdminCaseType;
 import com.miriyum.domain.platformoperator.enums.AdminCommandPurpose;
 import com.miriyum.domain.platformoperator.enums.AdminTargetType;
@@ -94,6 +95,11 @@ class PaymentRecoveryCommandServiceTest {
         verify(proposals).saveAndFlush(org.mockito.ArgumentMatchers.argThat(
                 proposal -> proposal.getApprovalTier() == ApprovalTier.ADDITIONAL_SUPER_ADMIN
                         && proposal.getCumulativeLineageAmountMinor() == 200_001L));
+        verify(assignments).assign(org.mockito.ArgumentMatchers.argThat(
+                (AdminCaseAssignmentCommand assignment) ->
+                        assignment.caseId().equals(recoveryCase.getPublicId())
+                                && assignment.caseVersion() == recoveryCase.getCaseVersion()
+                                && assignment.operatorId() == principal.accountId()));
     }
 
     @Test
@@ -115,6 +121,11 @@ class PaymentRecoveryCommandServiceTest {
         assertThat(recoveryCase.getStatus()).isEqualTo(CaseStatus.EXECUTING);
         verify(approvals).saveAndFlush(any());
         verify(executions).saveAndFlush(any());
+        verify(assignments).assign(org.mockito.ArgumentMatchers.argThat(
+                (AdminCaseAssignmentCommand assignment) ->
+                        assignment.caseId().equals(recoveryCase.getPublicId())
+                                && assignment.caseVersion() == recoveryCase.getCaseVersion()
+                                && assignment.operatorId() == principal.accountId()));
     }
 
     private static PaymentRecoveryCase investigating() {

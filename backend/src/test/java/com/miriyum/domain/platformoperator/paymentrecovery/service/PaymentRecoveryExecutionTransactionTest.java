@@ -19,6 +19,7 @@ import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecover
 import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRecoveryCaseRepository;
 import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRecoveryExecutionRepository;
 import com.miriyum.domain.platformoperator.service.AdminCaseAssignmentVerifier;
+import com.miriyum.domain.platformoperator.service.AdminCaseAssignmentManager;
 import com.miriyum.domain.platformoperator.service.OperatorAuthorityReader;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorAuditWriter;
 import com.miriyum.global.exception.ServiceException;
@@ -41,6 +42,7 @@ class PaymentRecoveryExecutionTransactionTest {
     @Mock PaymentRecoveryCaseRepository cases;
     @Mock OperatorAuthorityReader authorities;
     @Mock AdminCaseAssignmentVerifier assignments;
+    @Mock AdminCaseAssignmentManager assignmentManager;
     @Mock PlatformOperatorAuditWriter audit;
 
     @Test
@@ -71,7 +73,8 @@ class PaymentRecoveryExecutionTransactionTest {
         when(authorities.requireCurrentAuthority(11L, 7L)).thenThrow(
                 new ServiceException(AdminAuthorizationErrorCode.AUTHORIZATION_DENIED));
         var transaction = new PaymentRecoveryExecutionTransaction(executions, cases,
-                authorities, assignments, audit, Clock.fixed(NOW, ZoneOffset.UTC));
+                authorities, assignments, assignmentManager, audit,
+                Clock.fixed(NOW, ZoneOffset.UTC));
 
         assertThat(transaction.claim("worker-281")).isEmpty();
         assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.HOLD);

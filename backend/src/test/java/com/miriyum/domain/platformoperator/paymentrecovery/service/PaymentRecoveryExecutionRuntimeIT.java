@@ -160,14 +160,39 @@ class PaymentRecoveryExecutionRuntimeIT {
         assertThat(reclaimed.operationId()).isEqualTo(execution.getOperationId());
 
         transactions.recordInspection(reclaimed, new ManualRecoveryInspection(
-                recoveryCase.getHandoffId(), 3L, 4L, 5L,
+                recoveryCase.getHandoffId(), 4L, 5L, 6L,
                 ManualRecoveryKind.REFUND_RESULT_UNKNOWN, 300_000L, 300_000L, 0L,
                 "KRW", ManualRecoveryResultStatus.SUCCEEDED, Set.of(), "port********002"));
+
+        PaymentRecoveryCase completed = cases.findByPublicId(
+                recoveryCase.getPublicId()).orElseThrow();
+        assertThat(completed.getResultStatus()).isEqualTo(ResultStatus.SUCCEEDED);
+        assertThat(completed.getCumulativeRefundedAmountMinor()).isEqualTo(300_000L);
+        assertThat(completed.getRemainingRefundableAmountMinor()).isZero();
+        assertThat(completed.getAllowedActions()).isEmpty();
+        assertThat(completed.getHandoffVersion()).isEqualTo(4L);
+        assertThat(completed.getPaymentVersion()).isEqualTo(5L);
+        assertThat(completed.getRecoveryVersion()).isEqualTo(6L);
+        assertThat(jdbc.queryForObject("""
+                select platform_operator_account_id from admin_case_assignments
+                where case_type = 'PAYMENT_RECOVERY' and case_id = ? and case_version = ?
+                """, Long.class, completed.getPublicId(), completed.getCaseVersion()))
+                .isEqualTo(operator.getId());
 
         assertThat(jdbc.queryForObject("""
                 select count(*) from platform_operator_audit_events
                 where action = 'PAYMENT_RECOVERY_VERIFIED' and target_id = ?
                 """, Long.class, execution.getExecutionKey())).isEqualTo(1L);
+        assertThat(jdbc.queryForObject("""
+                select json_unquote(json_extract(after_snapshot, '$.resultStatus'))
+                from platform_operator_audit_events
+                where action = 'PAYMENT_RECOVERY_VERIFIED' and target_id = ?
+                """, String.class, execution.getExecutionKey())).isEqualTo("SUCCEEDED");
+        assertThat(jdbc.queryForObject("""
+                select cast(json_unquote(json_extract(after_snapshot, '$.paymentVersion')) as unsigned)
+                from platform_operator_audit_events
+                where action = 'PAYMENT_RECOVERY_VERIFIED' and target_id = ?
+                """, Long.class, execution.getExecutionKey())).isEqualTo(5L);
     }
 
     private Optional<PaymentRecoveryExecutionTransaction.Claim> claim(
