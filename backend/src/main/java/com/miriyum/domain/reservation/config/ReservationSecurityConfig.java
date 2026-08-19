@@ -53,6 +53,8 @@ public class ReservationSecurityConfig {
             "/api/v1/store-operators/stores/*/reservations";
     private static final String STORE_RESERVATION_FAMILY = STORE_RESERVATION_ROOT + "/**";
     private static final String STORE_RESERVATION_DETAIL = STORE_RESERVATION_ROOT + "/*";
+    private static final String STORE_RESERVATION_PAYMENT_STATUS =
+            STORE_RESERVATION_ROOT + "/*/payment-status";
     private static final String STORE_RESERVATION_CANCELLATION =
             STORE_RESERVATION_ROOT + "/*/cancellations";
     private static final String STORE_RESERVATION_FULFILLMENT =
@@ -103,6 +105,8 @@ public class ReservationSecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, STORE_RESERVATION_ROOT).authenticated()
                         .requestMatchers(HttpMethod.GET, STORE_RESERVATION_DETAIL).authenticated()
+                        .requestMatchers(HttpMethod.GET, STORE_RESERVATION_PAYMENT_STATUS)
+                        .authenticated()
                         .requestMatchers(HttpMethod.POST, STORE_RESERVATION_CANCELLATION).authenticated()
                         .requestMatchers(HttpMethod.POST, STORE_RESERVATION_FULFILLMENT).authenticated()
                         .requestMatchers(HttpMethod.POST, STORE_RESERVATION_NO_SHOW).authenticated()
