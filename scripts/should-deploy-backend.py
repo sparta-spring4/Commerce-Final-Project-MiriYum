@@ -1,7 +1,7 @@
 import sys
 
 
-DEPLOY_PATH_PREFIXES = ("backend/", "deploy/")
+DEPLOY_PATH_PREFIXES = ("backend/", "deploy/", "frontend/")
 DEPLOY_WORKFLOW = ".github/workflows/backend-cd.yml"
 
 

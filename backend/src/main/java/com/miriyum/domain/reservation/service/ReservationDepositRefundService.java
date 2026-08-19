@@ -2,8 +2,10 @@ package com.miriyum.domain.reservation.service;
 
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
+import static com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoverySourceType.RESERVATION_DEPOSIT_REFUND;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
 import com.miriyum.domain.reservation.entity.ReservationDepositRefundObligation;
+import com.miriyum.domain.reservation.entity.ReservationDepositRefundObligation.Operation;
 import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
 import com.miriyum.domain.reservation.repository.ReservationDepositRefundObligationRepository;
 import java.time.Clock;
@@ -23,12 +25,14 @@ public class ReservationDepositRefundService {
 
     private final ReservationDepositRefundObligationRepository refundRepository;
     private final ReservationDepositProcessRepository processRepository;
+    private final ReservationPaymentRecoveryOutboxService recoveryOutbox;
     private final Clock clock;
     private final Duration leaseDuration;
 
     public ReservationDepositRefundService(
             ReservationDepositRefundObligationRepository refundRepository,
             ReservationDepositProcessRepository processRepository,
+            ReservationPaymentRecoveryOutboxService recoveryOutbox,
             Clock clock,
             @Qualifier("reservationDepositRefundLeaseDuration")
             Duration leaseDuration
@@ -38,6 +42,7 @@ public class ReservationDepositRefundService {
         }
         this.refundRepository = refundRepository;
         this.processRepository = processRepository;
+        this.recoveryOutbox = recoveryOutbox;
         this.clock = clock;
         this.leaseDuration = leaseDuration;
     }
@@ -91,6 +96,9 @@ public class ReservationDepositRefundService {
                         claim.sourceEventId(),
                         claim.idempotencyKey(),
                         claim.reasonCode())
+                || obligation.getOperation() != claim.operation()
+                || obligation.getReconciliationAttemptCount()
+                        != claim.reconciliationAttemptCount()
                 || !obligation.isOwnedBy(claim.owner(), claim.token(), now)) {
             return false;
         }
@@ -134,6 +142,9 @@ public class ReservationDepositRefundService {
                         claim.sourceEventId(),
                         claim.idempotencyKey(),
                         claim.reasonCode())
+                || obligation.getOperation() != claim.operation()
+                || obligation.getReconciliationAttemptCount()
+                        != claim.reconciliationAttemptCount()
                 || !obligation.isOwnedBy(claim.owner(), claim.token(), now)) {
             return false;
         }
@@ -157,9 +168,17 @@ public class ReservationDepositRefundService {
             propagation = Propagation.REQUIRES_NEW,
             isolation = Isolation.READ_COMMITTED,
             timeout = 5)
-    public boolean recordReconciliationRequired(Claim claim, RefundResult refund) {
+    public boolean recordReconciliationRequired(
+            Claim claim,
+            RefundResult refund,
+            Duration queryDelay,
+            int maxAttempts
+    ) {
         if (claim == null || refund == null) {
             throw new IllegalArgumentException("claim and refund are required");
+        }
+        if (queryDelay == null || queryDelay.isNegative() || maxAttempts < 1) {
+            throw new IllegalArgumentException("query policy is invalid");
         }
         if ((refund.status() != RefundStatus.FAILED
                 && refund.status() != RefundStatus.RECONCILIATION_REQUIRED)
@@ -169,7 +188,52 @@ public class ReservationDepositRefundService {
             throw new IllegalStateException(
                     "recovery-required refund does not match obligation");
         }
-        return isolateForRecovery(claim);
+        if (refund.status() == RefundStatus.FAILED
+                || claim.reconciliationAttemptCount() >= maxAttempts) {
+            return isolateForRecovery(claim);
+        }
+        return scheduleReconciliation(claim, queryDelay);
+    }
+
+    @Transactional(
+            propagation = Propagation.REQUIRES_NEW,
+            isolation = Isolation.READ_COMMITTED,
+            timeout = 5)
+    public boolean recordQueryFailure(
+            Claim claim,
+            Duration queryDelay,
+            int maxAttempts
+    ) {
+        if (claim == null || claim.operation() != Operation.QUERY
+                || queryDelay == null || queryDelay.isNegative() || maxAttempts < 1) {
+            throw new IllegalArgumentException("query claim and policy are required");
+        }
+        if (claim.reconciliationAttemptCount() >= maxAttempts) {
+            return isolateForRecovery(claim);
+        }
+        return scheduleReconciliation(claim, queryDelay);
+    }
+
+    private boolean scheduleReconciliation(Claim claim, Duration queryDelay) {
+        Instant now = clock.instant();
+        ReservationDepositRefundObligation obligation = refundRepository
+                .findByIdForUpdate(claim.obligationId())
+                .orElse(null);
+        if (obligation == null
+                || !obligation.matchesRequired(
+                        claim.processId(), claim.paymentId(), claim.refundAmountMinor(),
+                        claim.currency(), claim.refundPolicyVersion(), claim.sourceEventId(),
+                        claim.idempotencyKey(), claim.reasonCode())
+                || obligation.getOperation() != claim.operation()
+                || obligation.getReconciliationAttemptCount()
+                        != claim.reconciliationAttemptCount()
+                || !obligation.isOwnedBy(claim.owner(), claim.token(), now)) {
+            return false;
+        }
+        obligation.scheduleReconciliation(
+                claim.owner(), claim.token(), now, queryDelay);
+        refundRepository.save(obligation);
+        return true;
     }
 
     private boolean isolateForRecovery(Claim claim) {
@@ -187,6 +251,9 @@ public class ReservationDepositRefundService {
                         claim.sourceEventId(),
                         claim.idempotencyKey(),
                         claim.reasonCode())
+                || obligation.getOperation() != claim.operation()
+                || obligation.getReconciliationAttemptCount()
+                        != claim.reconciliationAttemptCount()
                 || !obligation.isOwnedBy(claim.owner(), claim.token(), now)) {
             return false;
         }
@@ -197,6 +264,12 @@ public class ReservationDepositRefundService {
         obligation.requireReconciliation(claim.owner(), claim.token(), now);
         process.requireRecovery(now);
         process.suspendReconciliation();
+        recoveryOutbox.enqueue(
+                RESERVATION_DEPOSIT_REFUND,
+                Long.toString(claim.obligationId()),
+                claim.paymentId(),
+                claim.sourceEventId(),
+                claim.idempotencyKey());
         refundRepository.save(obligation);
         processRepository.saveAndFlush(process);
         return true;
@@ -213,8 +286,21 @@ public class ReservationDepositRefundService {
             String idempotencyKey,
             String reasonCode,
             String owner,
-            long token
+            long token,
+            Operation operation,
+            int reconciliationAttemptCount
     ) {
+        public Claim(
+                long obligationId, long processId, String paymentId,
+                long refundAmountMinor, String currency, long refundPolicyVersion,
+                String sourceEventId, String idempotencyKey, String reasonCode,
+                String owner, long token
+        ) {
+            this(obligationId, processId, paymentId, refundAmountMinor, currency,
+                    refundPolicyVersion, sourceEventId, idempotencyKey, reasonCode,
+                    owner, token, Operation.REQUEST, 0);
+        }
+
         private static Claim from(
                 ReservationDepositRefundObligation obligation,
                 String owner
@@ -233,7 +319,8 @@ public class ReservationDepositRefundService {
                     obligation.getIdempotencyKey(),
                     obligation.getReasonCode(),
                     owner,
-                    obligation.getClaimToken());
+                    obligation.getClaimToken(), obligation.getOperation(),
+                    obligation.getReconciliationAttemptCount());
         }
     }
 }
