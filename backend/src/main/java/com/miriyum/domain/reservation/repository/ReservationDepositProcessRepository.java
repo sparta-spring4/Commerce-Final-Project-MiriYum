@@ -26,6 +26,7 @@ public interface ReservationDepositProcessRepository
 
     @Query("""
             select process.id as processId,
+                   process.reservationHoldId as reservationHoldId,
                    process.status as status,
                    process.finalReservationId as finalReservationId,
                    process.paymentId as paymentId
@@ -83,6 +84,7 @@ public interface ReservationDepositProcessRepository
 
     interface DepositProcessLink {
         long getProcessId();
+        long getReservationHoldId();
         ReservationDepositProcessStatus getStatus();
         Long getFinalReservationId();
         String getPaymentId();
