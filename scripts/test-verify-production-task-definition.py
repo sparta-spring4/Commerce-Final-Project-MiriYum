@@ -269,6 +269,9 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
                     {
                         "requiredSecrets": ["MIRIYUM_DB_PASSWORD"],
                         "parameterSecrets": ["OPENAI_API_KEY"],
+                        "parameterReferencePaths": {
+                            "OPENAI_API_KEY": "miriyum/shared/openai-api-key"
+                        },
                     },
             )
             task_definition = self.write_json(
@@ -297,6 +300,52 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
             )
 
             self.assertEqual([], validate(contract, task_definition))
+
+    def test_rejects_parameter_reference_that_uses_a_different_path(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                    directory,
+                    "contract.json",
+                    {
+                        "parameterSecrets": ["OPENAI_API_KEY"],
+                        "parameterReferencePaths": {
+                            "OPENAI_API_KEY": "miriyum/shared/openai-api-key"
+                        },
+                    },
+            )
+            task_definition = self.write_json(
+                    directory,
+                    "task-definition.json",
+                    {
+                        "requiresCompatibilities": ["FARGATE"],
+                        "networkMode": "awsvpc",
+                        "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                        "containerDefinitions": [
+                            {
+                                "name": "backend",
+                                "secrets": [
+                                    {
+                                        "name": "OPENAI_API_KEY",
+                                        "valueFrom": (
+                                            "arn:aws:ssm:ap-northeast-2:"
+                                            "123456789012:parameter/miriyum/other-key"
+                                        ),
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+            )
+
+            self.assertEqual(
+                    [
+                        "Parameter reference does not match contract path: "
+                        "OPENAI_API_KEY"
+                    ],
+                    validate(contract, task_definition),
+            )
 
     def test_production_task_definition_enables_valkey_tls(self):
         task_definition = json.loads(
