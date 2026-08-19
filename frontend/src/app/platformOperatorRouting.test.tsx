@@ -144,6 +144,52 @@ describe('플랫폼 운영자 route context', () => {
     ).not.toBeInTheDocument()
   })
 
+  test('기본 제재 운영자 권한이면 회원 상세에 진입해 제재 명령을 사용할 수 있다', async () => {
+    vi.stubEnv('VITE_PLATFORM_OPERATOR_ENABLED', 'true')
+    server.use(
+      authenticatedPlatformOperator(),
+      currentPlatformOperator({
+        roles: ['ENFORCEMENT_OPERATOR'],
+        permissions: [
+          'MEMBER_READ_MINIMAL',
+          'ACCOUNT_SANCTION',
+          'STORE_READ_MINIMAL',
+          'STORE_SANCTION',
+        ],
+      }),
+      http.get(
+        '/api/v1/platform-operators/members/CONSUMER/member-1001',
+        () =>
+          successResponse({
+            accountType: 'CONSUMER',
+            accountId: 'member-1001',
+            status: 'ACTIVE',
+            joinedAt: '2026-08-18T10:00:00+09:00',
+            supportVersion: 3,
+            activeSanctions: [],
+          }),
+      ),
+    )
+    window.history.pushState(
+      {},
+      '',
+      '/admin/members/CONSUMER/member-1001',
+    )
+
+    const { default: App } = await import('./App')
+    render(<App />)
+
+    expect(
+      await screen.findByRole('heading', { name: '회원 상세' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: '회원 관리' }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByRole('form', { name: '제재 적용' }),
+    ).toBeInTheDocument()
+  })
+
   test('감사 조회 권한만 있으면 상세는 보되 보정 명령 UI는 노출하지 않는다', async () => {
     vi.stubEnv('VITE_PLATFORM_OPERATOR_ENABLED', 'true')
     server.use(

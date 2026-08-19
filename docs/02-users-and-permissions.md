@@ -11,7 +11,7 @@
 
 ## 회원지원 활성 계약
 
-- 회원지원 운영자는 `MEMBER_READ_MINIMAL`, `MEMBER_RECOVERY`, `ACCOUNT_APPEAL_REVIEW`의 필요한 권한만 사용하고 제재 운영자는 `ACCOUNT_SANCTION`을 사용한다.
+- 회원지원 운영자는 `MEMBER_READ_MINIMAL`, `MEMBER_RECOVERY`, `ACCOUNT_APPEAL_REVIEW`의 필요한 권한만 사용한다. 제재 운영자는 대상의 최소 상세 조회에 필요한 `MEMBER_READ_MINIMAL`과 명령 권한 `ACCOUNT_SANCTION`을 사용한다.
 - 영구 정지는 제안자와 다른 `SUPER_ADMIN`이 `ACCOUNT_PERMANENT_SANCTION_APPROVE`와 별도 일회 재인증으로 추가 승인해야 한다.
 - 권한 검사는 계정 조회보다 먼저 수행한다. 존재하지 않는 ID와 요청 계정 유형이 다른 ID는 같은 결과로 정규화하며 이메일·휴대전화·인증정보를 회원지원 응답에 노출하지 않는다.
 - 외부 개인인증을 연결하지 않는 단계에서는 목적·계정에 결속된 mock 확인을 사용하고 인증 비밀 원문은 응답·로그·감사에 남기지 않는다. 상세 계약은 [회원지원 기능 명세](specs/member-support/spec.md)를 따른다.
