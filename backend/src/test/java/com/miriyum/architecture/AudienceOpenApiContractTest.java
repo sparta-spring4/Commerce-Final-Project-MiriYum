@@ -60,6 +60,9 @@ class AudienceOpenApiContractTest {
             "/api/v1/store-operators/stores/{storeId}/representative-menus";
     private static final String STORE_DASHBOARD_ANALYTICS_PATH =
             "/api/v1/store-operators/stores/{storeId}/dashboard-statistics";
+    private static final String STORE_RESERVATION_PAYMENT_STATUS_PATH =
+            "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}"
+                    + "/payment-status";
     private static final Set<String> POST_MVP1_AUDIENCE_PATHS =
             Stream.concat(
                     Stream.of(
@@ -70,6 +73,7 @@ class AudienceOpenApiContractTest {
                             OPERATOR_WAITING_EVENTS_PATH,
                             REPRESENTATIVE_MENUS_PATH,
                             STORE_DASHBOARD_ANALYTICS_PATH,
+                            STORE_RESERVATION_PAYMENT_STATUS_PATH,
                             "/api/v1/store-operators/stores/{storeId}/images",
                             "/api/v1/store-operators/stores/{storeId}/images/{imageId}",
                             "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images",
