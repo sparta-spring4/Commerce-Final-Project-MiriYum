@@ -4,16 +4,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.domain.payment.dto.PaymentMonitoringContracts;
+import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import java.lang.reflect.RecordComponent;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 
 class PaymentMonitoringPublicContractTest {
 
     private static final Instant AS_OF = Instant.parse("2026-08-19T06:00:00Z");
+
+    @Test
+    void monitoringFailureHasARecoverySafePublicErrorCode() {
+        assertThat(PaymentErrorCode.MONITORING_SOURCE_UNAVAILABLE.getCode())
+                .isEqualTo("PAYMENT_013");
+        assertThat(PaymentErrorCode.MONITORING_SOURCE_UNAVAILABLE.getHttpStatus())
+                .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+    }
 
     @Test
     void publicRecordsExposeNoEntityRepositoryProviderOrSecretTypes() {
