@@ -80,6 +80,35 @@ class ReservationMonitoringRepositoryIT {
                 .doesNotContain("reservation:699999");
     }
 
+    @Test
+    void qrGrantWithoutStatusTransitionIsExcludedFromChangedCases() {
+        long reservationId = 700_100L;
+        jdbcTemplate.execute("SET FOREIGN_KEY_CHECKS = 0");
+        try {
+            jdbcTemplate.update(insertSql(),
+                    reservationId, 99L, dbTimestamp(CHANGED_AT.minusSeconds(3_600)));
+            jdbcTemplate.update("""
+                    INSERT INTO reservation_check_in_audits (
+                        reservation_id, store_id, event_type, actor_type, actor_id,
+                        token_version, requested_at, occurred_at,
+                        before_status, after_status, command_id
+                    ) VALUES (?, 99, 'QR_GRANT_ISSUED', 'CONSUMER', 1,
+                              1, ?, ?, 'CONFIRMED', 'CONFIRMED', ?)
+                    """,
+                    reservationId, dbTimestamp(CHANGED_AT), dbTimestamp(CHANGED_AT),
+                    "monitoring-qr-grant-" + reservationId);
+        } finally {
+            jdbcTemplate.execute("SET FOREIGN_KEY_CHECKS = 1");
+        }
+
+        ReservationMonitoringContracts.ReferencePage page = service.findChangedCases(
+                new ReservationMonitoringContracts.ChangeQuery(
+                        CHANGED_AT.plusSeconds(1), CHANGED_AT, CHANGED_AT,
+                        "99", Set.of("CONFIRMED"), null, 20));
+
+        assertThat(page.items()).isEmpty();
+    }
+
     private static String insertSql() {
         return """
                 INSERT INTO reservations (

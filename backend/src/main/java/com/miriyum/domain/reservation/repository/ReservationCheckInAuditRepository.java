@@ -19,6 +19,7 @@ public interface ReservationCheckInAuditRepository extends Repository<Reservatio
               LEFT JOIN reservation_deposit_processes process
                 ON process.final_reservation_id = audit.reservation_id
              WHERE audit.occurred_at BETWEEN :changedFrom AND :changedTo
+               AND audit.before_status <> audit.after_status
                AND (:storeId IS NULL OR audit.store_id = :storeId)
                AND (:allStatuses = TRUE
                     OR FIND_IN_SET(audit.after_status, :statusesCsv) > 0)
@@ -38,6 +39,7 @@ public interface ReservationCheckInAuditRepository extends Repository<Reservatio
                       FROM reservation_check_in_audits newer
                      WHERE newer.reservation_id = audit.reservation_id
                        AND newer.occurred_at BETWEEN :changedFrom AND :changedTo
+                       AND newer.before_status <> newer.after_status
                        AND (:allStatuses = TRUE
                             OR FIND_IN_SET(newer.after_status, :statusesCsv) > 0)
                        AND (newer.occurred_at > audit.occurred_at
