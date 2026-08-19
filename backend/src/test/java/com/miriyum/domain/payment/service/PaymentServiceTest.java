@@ -21,8 +21,11 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PrepareWaitingReservation
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.StoreReservationPaymentSnapshot;
+import com.miriyum.domain.payment.dto.PaymentContracts.StoreReservationRefundSnapshot;
 import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservationDeposit;
 import com.miriyum.domain.payment.entity.Payment;
+import com.miriyum.domain.payment.entity.PaymentRefund;
 import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderCancellation;
@@ -36,6 +39,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -53,6 +57,7 @@ class PaymentServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-08-11T01:00:00Z");
     private static final String PAYMENT_ID = "900000000000000001";
+    private static final String SOURCE_REFERENCE_ID = "123";
     private static final String PORTONE_PAYMENT_ID = "payment-reservation-900000000000000001";
 
     @Mock
@@ -60,6 +65,12 @@ class PaymentServiceTest {
 
     @Mock
     private PaymentProviderClient providerClient;
+
+    @Mock
+    private com.miriyum.domain.payment.repository.PaymentRepository payments;
+
+    @Mock
+    private com.miriyum.domain.payment.repository.PaymentRefundRepository refunds;
 
     private PaymentService paymentService;
 
@@ -70,6 +81,123 @@ class PaymentServiceTest {
                 providerClient,
                 Clock.fixed(NOW, ZoneOffset.UTC)
         );
+    }
+
+    @Test
+    void returnsStoredReservationDepositSnapshotWithoutProviderAccess() {
+        StoreReservationPaymentSnapshot expected = new StoreReservationPaymentSnapshot(
+                PAYMENT_ID,
+                30_000L,
+                10_000L,
+                20_000L,
+                "KRW",
+                PaymentStatus.PARTIALLY_REFUNDED,
+                PaymentAttemptStatus.PAID,
+                NOW.minusSeconds(120),
+                NOW.minusSeconds(90),
+                NOW,
+                List.of(new StoreReservationRefundSnapshot(
+                        "910000000000000001",
+                        10_000L,
+                        RefundStatus.COMPLETED,
+                        NOW.minusSeconds(30),
+                        NOW))
+        );
+        when(transactions.findReservationDepositPayment(PAYMENT_ID, SOURCE_REFERENCE_ID))
+                .thenReturn(Optional.of(expected));
+
+        assertThat(paymentService.findReservationDepositPayment(PAYMENT_ID, SOURCE_REFERENCE_ID))
+                .contains(expected);
+        verify(transactions).findReservationDepositPayment(PAYMENT_ID, SOURCE_REFERENCE_ID);
+        verify(providerClient, never()).getPayment(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void reservationDepositSnapshotIsMinimalAndImmutable() {
+        List<StoreReservationRefundSnapshot> mutableRefunds = new java.util.ArrayList<>();
+        StoreReservationPaymentSnapshot snapshot = new StoreReservationPaymentSnapshot(
+                PAYMENT_ID,
+                30_000L,
+                0L,
+                30_000L,
+                "KRW",
+                PaymentStatus.PAID,
+                PaymentAttemptStatus.PAID,
+                NOW.minusSeconds(120),
+                NOW.minusSeconds(90),
+                NOW,
+                mutableRefunds
+        );
+
+        mutableRefunds.add(new StoreReservationRefundSnapshot(
+                "910000000000000001", 10_000L, RefundStatus.COMPLETED, NOW, NOW));
+
+        assertThat(snapshot.refunds()).isEmpty();
+        assertThatThrownBy(() -> snapshot.refunds().add(new StoreReservationRefundSnapshot(
+                "910000000000000002", 10_000L, RefundStatus.PROCESSING, NOW, null)))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThat(recordComponentNames(StoreReservationPaymentSnapshot.class)).containsExactly(
+                "paymentId", "amountMinor", "refundedAmountMinor", "refundableAmountMinor",
+                "currency", "status", "lastAttemptStatus", "createdAt", "paidAt",
+                "updatedAt", "refunds");
+        assertThat(recordComponentNames(StoreReservationRefundSnapshot.class)).containsExactly(
+                "refundId", "amountMinor", "status", "requestedAt", "completedAt");
+    }
+
+    @Test
+    void transactionSnapshotFiltersSourceAndOrdersRefundsDeterministically() {
+        Payment payment = org.mockito.Mockito.mock(Payment.class);
+        PaymentRefund later = org.mockito.Mockito.mock(PaymentRefund.class);
+        PaymentRefund firstByIdAtSameTime = org.mockito.Mockito.mock(PaymentRefund.class);
+        PaymentRefund secondByIdAtSameTime = org.mockito.Mockito.mock(PaymentRefund.class);
+        when(payments.findByPaymentIdAndSourceTypeAndSourceReferenceId(
+                PAYMENT_ID, "RESERVATION_DEPOSIT", SOURCE_REFERENCE_ID))
+                .thenReturn(Optional.of(payment));
+        when(payment.getId()).thenReturn(77L);
+        when(payment.getPaymentId()).thenReturn(PAYMENT_ID);
+        when(payment.getAmountMinor()).thenReturn(30_000L);
+        when(payment.getRefundedAmountMinor()).thenReturn(10_000L);
+        when(payment.getRefundableAmountMinor()).thenReturn(20_000L);
+        when(payment.getCurrency()).thenReturn("KRW");
+        when(payment.getStatus()).thenReturn(Payment.Status.PARTIALLY_REFUNDED);
+        when(payment.getLastAttemptStatus()).thenReturn(Payment.AttemptStatus.PAID);
+        when(payment.getCreatedAt()).thenReturn(NOW.minusSeconds(120));
+        when(payment.getPaidAt()).thenReturn(NOW.minusSeconds(90));
+        when(payment.getUpdatedAt()).thenReturn(NOW);
+        stubRefund(later, "910000000000000003", NOW.minusSeconds(10));
+        stubRefund(secondByIdAtSameTime, "910000000000000002", NOW.minusSeconds(20));
+        stubRefund(firstByIdAtSameTime, "910000000000000001", NOW.minusSeconds(20));
+        when(refunds.findByPayment_IdOrderByRequestedAtAsc(77L))
+                .thenReturn(List.of(later, secondByIdAtSameTime, firstByIdAtSameTime));
+        PaymentTransactionService queryTransactions = new PaymentTransactionService(
+                payments, null, refunds, null, null, null, null, null);
+
+        Optional<StoreReservationPaymentSnapshot> result =
+                queryTransactions.findReservationDepositPayment(PAYMENT_ID, SOURCE_REFERENCE_ID);
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().status()).isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+        assertThat(result.orElseThrow().lastAttemptStatus()).isEqualTo(PaymentAttemptStatus.PAID);
+        assertThat(result.orElseThrow().refunds())
+                .extracting(StoreReservationRefundSnapshot::refundId)
+                .containsExactly(
+                        "910000000000000001",
+                        "910000000000000002",
+                        "910000000000000003");
+    }
+
+    @Test
+    void transactionSnapshotReturnsAbsentForMissingOrWrongSourcePayment() {
+        when(payments.findByPaymentIdAndSourceTypeAndSourceReferenceId(
+                PAYMENT_ID, "RESERVATION_DEPOSIT", SOURCE_REFERENCE_ID))
+                .thenReturn(Optional.empty());
+        PaymentTransactionService queryTransactions = new PaymentTransactionService(
+                payments, null, refunds, null, null, null, null, null);
+
+        assertThat(queryTransactions.findReservationDepositPayment(
+                PAYMENT_ID, SOURCE_REFERENCE_ID)).isEmpty();
+        verify(refunds, never()).findByPayment_IdOrderByRequestedAtAsc(
+                org.mockito.ArgumentMatchers.anyLong());
     }
 
     @ParameterizedTest
@@ -758,6 +886,14 @@ class PaymentServiceTest {
         return Arrays.stream(type.getRecordComponents())
                 .map(component -> component.getName())
                 .toList();
+    }
+
+    private static void stubRefund(PaymentRefund refund, String refundId, Instant requestedAt) {
+        when(refund.getRefundId()).thenReturn(refundId);
+        when(refund.getAmountMinor()).thenReturn(5_000L);
+        when(refund.getStatus()).thenReturn(RefundStatus.COMPLETED);
+        when(refund.getRequestedAt()).thenReturn(requestedAt);
+        when(refund.getCompletedAt()).thenReturn(requestedAt.plusSeconds(1));
     }
 
     private static PrepareReservationDepositCommand prepareCommand() {

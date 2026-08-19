@@ -1,5 +1,6 @@
 package com.miriyum.domain.reservation.config;
 
+import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtAccessDeniedHandler;
 import com.miriyum.domain.auth.jwt.JwtAuthenticationEntryPoint;
 import com.miriyum.domain.auth.jwt.JwtAuthenticationFilter;
@@ -57,6 +58,8 @@ public class ReservationSecurityConfig {
             "/api/v1/store-operators/stores/*/reservations";
     private static final String STORE_RESERVATION_FAMILY = STORE_RESERVATION_ROOT + "/**";
     private static final String STORE_RESERVATION_DETAIL = STORE_RESERVATION_ROOT + "/*";
+    private static final String STORE_RESERVATION_PAYMENT_STATUS =
+            STORE_RESERVATION_ROOT + "/*/payment-status";
     private static final String STORE_RESERVATION_CANCELLATION =
             STORE_RESERVATION_ROOT + "/*/cancellations";
     private static final String STORE_RESERVATION_FULFILLMENT =
@@ -84,6 +87,34 @@ public class ReservationSecurityConfig {
             WAITING_SETTING_ROOT + "/deactivation-impact";
 
     @Bean
+    @Order(-2)
+    public SecurityFilterChain storeReservationPaymentStatusFilterChain(
+            HttpSecurity http,
+            JwtTokenProvider jwtTokenProvider,
+            ObjectMapper objectMapper
+    ) throws Exception {
+        http
+                .securityMatcher(STORE_RESERVATION_PAYMENT_STATUS)
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(HttpMethod.GET, STORE_RESERVATION_PAYMENT_STATUS)
+                        .authenticated()
+                        .anyRequest().denyAll())
+                .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint(new JwtAuthenticationEntryPoint(objectMapper))
+                        .accessDeniedHandler(new JwtAccessDeniedHandler(objectMapper)))
+                .addFilterBefore(
+                        new JwtAuthenticationFilter(
+                                jwtTokenProvider,
+                                TokenNamespace.STORE_OPERATOR,
+                                AuthErrorCode.FORBIDDEN),
+                        UsernamePasswordAuthenticationFilter.class);
+        return http.build();
+    }
+
+    @Bean
     @Order(-1)
     public SecurityFilterChain storeReservationFilterChain(
             HttpSecurity http,
@@ -107,6 +138,8 @@ public class ReservationSecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, STORE_RESERVATION_ROOT).authenticated()
                         .requestMatchers(HttpMethod.GET, STORE_RESERVATION_DETAIL).authenticated()
+                        .requestMatchers(HttpMethod.GET, STORE_RESERVATION_PAYMENT_STATUS)
+                        .authenticated()
                         .requestMatchers(HttpMethod.POST, STORE_RESERVATION_CANCELLATION).authenticated()
                         .requestMatchers(HttpMethod.POST, STORE_RESERVATION_FULFILLMENT).authenticated()
                         .requestMatchers(HttpMethod.POST, STORE_RESERVATION_NO_SHOW).authenticated()

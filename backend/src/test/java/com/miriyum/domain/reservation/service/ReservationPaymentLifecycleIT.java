@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -9,6 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.miriyum.MiriyumApplication;
@@ -19,6 +21,8 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDepositCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareWaitingReservationDepositCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
+import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderCancellation;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderPayment;
@@ -30,6 +34,8 @@ import com.miriyum.domain.reservation.dto.request.ReservationNoShowRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationPartyRequest;
 import com.miriyum.domain.reservation.dto.request.StoreCancellationRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse;
+import com.miriyum.domain.reservation.dto.response.StoreReservationPaymentStatusResponse;
+import com.miriyum.domain.reservation.dto.response.StoreReservationPaymentStatusResponse.StorePaymentResult;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
@@ -49,6 +55,7 @@ import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
 import com.miriyum.domain.schedule.service.StoreScheduleService;
 import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.domain.store.entity.Store;
+import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
@@ -161,6 +168,9 @@ class ReservationPaymentLifecycleIT {
     private PaymentService paymentService;
 
     @Autowired
+    private StoreReservationPaymentStatusQueryService paymentStatusQueryService;
+
+    @Autowired
     private MutableClock clock;
 
     @Autowired
@@ -200,6 +210,108 @@ class ReservationPaymentLifecycleIT {
     void resetExternalBoundaryAndClock() {
         reset(providerClient);
         clock.set(PAYMENT_AT);
+    }
+
+    @Test
+    @DisplayName("운영자 결제 상태 조회는 V1·완료·환불·대사 상태를 저장 원장만으로 조합한다")
+    void operatorPaymentStatusReadComposesPersistedLifecycleWithoutProviderCalls() {
+        Scenario v1 = scenario(false);
+
+        clearInvocations(providerClient);
+        StoreReservationPaymentStatusResponse notApplicable = paymentStatusQueryService.get(
+                v1.operatorId(), v1.storeId(), v1.reservationId());
+
+        assertThat(notApplicable.result()).isEqualTo(StorePaymentResult.NOT_APPLICABLE);
+        assertThat(notApplicable.payment()).isNull();
+        verifyNoInteractions(providerClient);
+
+        FinancialScenario paid = paidV2ScenarioFromPublicCommands();
+        clearInvocations(providerClient);
+        StoreReservationPaymentStatusResponse completed = paymentStatusQueryService.get(
+                paid.operatorId(), paid.storeId(), paid.reservationId());
+
+        assertThat(completed.result()).isEqualTo(StorePaymentResult.COMPLETED);
+        assertThat(completed.reconciliationRequired()).isFalse();
+        assertThat(completed.payment().paymentId()).isEqualTo(paid.paymentId());
+        assertThat(completed.payment().amountMinor()).isEqualTo(AMOUNT_MINOR);
+        assertThat(completed.payment().refundedAmountMinor()).isZero();
+        assertThat(completed.payment().refundableAmountMinor()).isEqualTo(AMOUNT_MINOR);
+        assertThat(completed.payment().currency()).isEqualTo("KRW");
+        assertThat(completed.payment().status()).isEqualTo(PaymentStatus.PAID);
+        assertThat(completed.payment().refunds()).isEmpty();
+        verifyNoInteractions(providerClient);
+
+        FinancialScenario refunded = paidV2ScenarioFromPublicCommands();
+        when(providerClient.cancelPayment(
+                eq(refunded.portOnePaymentId()), anyString(), eq(AMOUNT_MINOR),
+                eq("KRW"), eq("STORE_STATUS_READ_TEST")))
+                .thenAnswer(invocation -> new ProviderCancellation(
+                        "completed-" + invocation.getArgument(1, String.class),
+                        ProviderStatus.CANCELLED,
+                        AMOUNT_MINOR,
+                        "KRW"));
+        assertThat(paymentService.requestRefund(refundCommand(refunded, "completed"))
+                .status()).isEqualTo(RefundStatus.COMPLETED);
+        clearInvocations(providerClient);
+
+        StoreReservationPaymentStatusResponse refundCompleted = paymentStatusQueryService.get(
+                refunded.operatorId(), refunded.storeId(), refunded.reservationId());
+
+        assertThat(refundCompleted.result()).isEqualTo(StorePaymentResult.COMPLETED);
+        assertThat(refundCompleted.payment().status()).isEqualTo(PaymentStatus.REFUNDED);
+        assertThat(refundCompleted.payment().refundedAmountMinor()).isEqualTo(AMOUNT_MINOR);
+        assertThat(refundCompleted.payment().refundableAmountMinor()).isZero();
+        assertThat(refundCompleted.payment().refunds()).singleElement()
+                .satisfies(refund -> {
+                    assertThat(refund.amountMinor()).isEqualTo(AMOUNT_MINOR);
+                    assertThat(refund.status()).isEqualTo(RefundStatus.COMPLETED);
+                    assertThat(refund.completedAt()).isNotNull();
+                });
+        verifyNoInteractions(providerClient);
+
+        FinancialScenario unknown = paidV2ScenarioFromPublicCommands();
+        when(providerClient.cancelPayment(
+                eq(unknown.portOnePaymentId()), anyString(), eq(AMOUNT_MINOR),
+                eq("KRW"), eq("STORE_STATUS_READ_TEST")))
+                .thenThrow(new PaymentProviderClient.ProviderUnavailableException("timeout"));
+        assertThat(paymentService.requestRefund(refundCommand(unknown, "unknown"))
+                .status()).isEqualTo(RefundStatus.RECONCILIATION_REQUIRED);
+        clearInvocations(providerClient);
+
+        StoreReservationPaymentStatusResponse reconciliation = paymentStatusQueryService.get(
+                unknown.operatorId(), unknown.storeId(), unknown.reservationId());
+
+        assertThat(reconciliation.result()).isEqualTo(StorePaymentResult.UNKNOWN);
+        assertThat(reconciliation.reconciliationRequired()).isTrue();
+        assertThat(reconciliation.payment().status())
+                .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        assertThat(reconciliation.payment().refunds()).singleElement()
+                .extracting(StoreReservationPaymentStatusResponse.StoreReservationRefund::status)
+                .isEqualTo(RefundStatus.RECONCILIATION_REQUIRED);
+        verifyNoInteractions(providerClient);
+
+        Scenario otherReservation = scenario(false);
+        FinancialScenario otherPayment = paidLinkedScenario(otherReservation, true);
+        jdbcTemplate.update(
+                "UPDATE reservation_deposit_processes SET payment_id = ? "
+                        + "WHERE final_reservation_id = ?",
+                otherPayment.paymentId(),
+                paid.reservationId());
+        clearInvocations(providerClient);
+
+        assertThatThrownBy(() -> paymentStatusQueryService.get(
+                paid.operatorId(), paid.storeId(), paid.reservationId()))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE));
+        verifyNoInteractions(providerClient);
+
+        assertThatThrownBy(() -> paymentStatusQueryService.get(
+                v1.operatorId(), paid.storeId(), paid.reservationId()))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(StoreErrorCode.STORE_NOT_FOUND));
+        verifyNoInteractions(providerClient);
     }
 
     @Test
@@ -973,6 +1085,19 @@ class ReservationPaymentLifecycleIT {
                         ProviderStatus.CANCELLED,
                         invocation.getArgument(2, Long.class),
                         invocation.getArgument(3, String.class)));
+    }
+
+    private RequestRefundCommand refundCommand(
+            FinancialScenario scenario,
+            String suffix
+    ) {
+        return new RequestRefundCommand(
+                scenario.paymentId(),
+                "store-status-read:" + scenario.reservationId() + ":" + suffix,
+                AMOUNT_MINOR,
+                "STORE_STATUS_READ_TEST",
+                2L,
+                uuid("store-status-read:" + scenario.reservationId() + ":" + suffix));
     }
 
     private void assertCompletedFinancialResult(
