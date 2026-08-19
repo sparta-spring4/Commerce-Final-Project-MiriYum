@@ -102,8 +102,32 @@ function validReservationData() {
     status: 'CONFIRMED',
     menuSelections: [],
     createdAt: '2026-08-14T12:00:00+09:00',
+    depositDisposition: null,
     cancelledBy: null,
     cancellationReason: null,
+  }
+}
+
+function validDepositDispositionData() {
+  return {
+    policyVersion: 2,
+    responsibilityCode: 'CONSUMER',
+    targetRefundRateBasisPoints: 5000,
+    originalAmountMinor: 20000,
+    targetRefundAmountMinor: 10000,
+    completedRefundAmountMinor: null,
+    withheldAmountMinor: 10000,
+    currency: 'KRW',
+    dispositionId: '123e4567-e89b-12d3-a456-426614174000',
+    refundId: null,
+    status: 'PROCESSING',
+    paymentDispositionStatus: 'PROCESSING',
+    failureClassification: null,
+    createdAt: '2026-08-14T12:00:00+09:00',
+    updatedAt: '2026-08-14T12:01:00+09:00',
+    completedAt: null,
+    paymentRequestedAt: '2026-08-14T12:00:30+09:00',
+    paymentUpdatedAt: null,
   }
 }
 
@@ -553,6 +577,61 @@ export default function () {
     account: { email: 'malformed-prepared@example.test', password: 'synthetic-password' },
     tags: { phase: 'preparation' },
   }))
+  const nullDepositDispositionAccepted = !throws(() => runReservationCreate({
+    client: responseClient(201, {
+      ...validReservationData(),
+      depositDisposition: null,
+    }),
+    ...RESERVATION_INPUT,
+  }))
+  const missingDepositDispositionRejected = throws(() => runReservationCreate({
+    client: responseClient(201, (() => {
+      const data = validReservationData()
+      delete data.depositDisposition
+      return data
+    })()),
+    ...RESERVATION_INPUT,
+  }))
+  const depositDispositionObjectAccepted = !throws(() => runReservationCreate({
+    client: responseClient(201, {
+      ...validReservationData(),
+      depositDisposition: validDepositDispositionData(),
+    }),
+    ...RESERVATION_INPUT,
+  }))
+  const depositDispositionMissingField = validDepositDispositionData()
+  delete depositDispositionMissingField.updatedAt
+  const invalidDepositDispositions = [
+    depositDispositionMissingField,
+    { ...validDepositDispositionData(), unexpected: true },
+    { ...validDepositDispositionData(), policyVersion: 1 },
+    { ...validDepositDispositionData(), responsibilityCode: 'UNKNOWN' },
+    { ...validDepositDispositionData(), targetRefundRateBasisPoints: 2500 },
+    { ...validDepositDispositionData(), originalAmountMinor: 0 },
+    { ...validDepositDispositionData(), targetRefundAmountMinor: -1 },
+    { ...validDepositDispositionData(), completedRefundAmountMinor: -1 },
+    { ...validDepositDispositionData(), withheldAmountMinor: -1 },
+    { ...validDepositDispositionData(), currency: 'krw' },
+    { ...validDepositDispositionData(), dispositionId: 'not-a-uuid' },
+    { ...validDepositDispositionData(), refundId: '0' },
+    { ...validDepositDispositionData(), status: 'UNKNOWN' },
+    { ...validDepositDispositionData(), paymentDispositionStatus: 'UNKNOWN' },
+    { ...validDepositDispositionData(), failureClassification: 'UNKNOWN_VALUE' },
+    { ...validDepositDispositionData(), createdAt: '2026-08-14T25:00:00+99:99' },
+    { ...validDepositDispositionData(), updatedAt: null },
+    { ...validDepositDispositionData(), completedAt: '2026-02-30T12:00:00+09:00' },
+    { ...validDepositDispositionData(), paymentRequestedAt: 'not-a-timestamp' },
+    { ...validDepositDispositionData(), paymentUpdatedAt: '2026-08-14' },
+  ]
+  const invalidDepositDispositionValuesRejected = invalidDepositDispositions.every(
+    (depositDisposition) => throws(() => runReservationCreate({
+      client: responseClient(201, {
+        ...validReservationData(),
+        depositDisposition,
+      }),
+      ...RESERVATION_INPUT,
+    })),
+  )
 
   check(null, {
     'smoke requires one reservation template': () =>
@@ -690,6 +769,14 @@ export default function () {
         }),
         ...RESERVATION_INPUT,
       })),
+    'reservation creation accepts the required null deposit disposition': () =>
+      nullDepositDispositionAccepted,
+    'reservation creation rejects a missing deposit disposition': () =>
+      missingDepositDispositionRejected,
+    'reservation creation accepts a valid deposit disposition object': () =>
+      depositDispositionObjectAccepted,
+    'reservation creation rejects invalid deposit disposition fields and values': () =>
+      invalidDepositDispositionValuesRejected,
     'rate-limited login is classified but does not complete auth refresh': () =>
       rateLimitedAuth.classification === 'expected_4xx'
       && rateLimitedAuth.completed === false,
