@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Pageable;
 
 public interface MenuHoldTransitionAuditRepository
         extends JpaRepository<MenuHoldTransitionAudit, Long> {
@@ -14,4 +15,12 @@ public interface MenuHoldTransitionAuditRepository
             Instant asOf);
 
     Optional<MenuHoldTransitionAudit> findFirstByMenuHold_IdOrderByResultVersionAsc(long menuHoldId);
+
+    List<MenuHoldTransitionAudit> findByOccurredAtBetweenOrderByOccurredAtDescIdDesc(
+            Instant changedFrom,
+            Instant changedTo,
+            Pageable pageable);
+
+    List<MenuHoldTransitionAudit> findByMenuHold_IdInOrderByMenuHold_IdAscResultVersionAsc(
+            List<Long> menuHoldIds);
 }
