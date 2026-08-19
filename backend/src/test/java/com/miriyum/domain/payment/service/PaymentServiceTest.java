@@ -57,6 +57,7 @@ class PaymentServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-08-11T01:00:00Z");
     private static final String PAYMENT_ID = "900000000000000001";
+    private static final String SOURCE_REFERENCE_ID = "123";
     private static final String PORTONE_PAYMENT_ID = "payment-reservation-900000000000000001";
 
     @Mock
@@ -102,12 +103,12 @@ class PaymentServiceTest {
                         NOW.minusSeconds(30),
                         NOW))
         );
-        when(transactions.findReservationDepositPayment(PAYMENT_ID))
+        when(transactions.findReservationDepositPayment(PAYMENT_ID, SOURCE_REFERENCE_ID))
                 .thenReturn(Optional.of(expected));
 
-        assertThat(paymentService.findReservationDepositPayment(PAYMENT_ID))
+        assertThat(paymentService.findReservationDepositPayment(PAYMENT_ID, SOURCE_REFERENCE_ID))
                 .contains(expected);
-        verify(transactions).findReservationDepositPayment(PAYMENT_ID);
+        verify(transactions).findReservationDepositPayment(PAYMENT_ID, SOURCE_REFERENCE_ID);
         verify(providerClient, never()).getPayment(org.mockito.ArgumentMatchers.anyString());
     }
 
@@ -149,7 +150,8 @@ class PaymentServiceTest {
         PaymentRefund later = org.mockito.Mockito.mock(PaymentRefund.class);
         PaymentRefund firstByIdAtSameTime = org.mockito.Mockito.mock(PaymentRefund.class);
         PaymentRefund secondByIdAtSameTime = org.mockito.Mockito.mock(PaymentRefund.class);
-        when(payments.findByPaymentIdAndSourceType(PAYMENT_ID, "RESERVATION_DEPOSIT"))
+        when(payments.findByPaymentIdAndSourceTypeAndSourceReferenceId(
+                PAYMENT_ID, "RESERVATION_DEPOSIT", SOURCE_REFERENCE_ID))
                 .thenReturn(Optional.of(payment));
         when(payment.getId()).thenReturn(77L);
         when(payment.getPaymentId()).thenReturn(PAYMENT_ID);
@@ -171,7 +173,7 @@ class PaymentServiceTest {
                 payments, null, refunds, null, null, null, null, null);
 
         Optional<StoreReservationPaymentSnapshot> result =
-                queryTransactions.findReservationDepositPayment(PAYMENT_ID);
+                queryTransactions.findReservationDepositPayment(PAYMENT_ID, SOURCE_REFERENCE_ID);
 
         assertThat(result).isPresent();
         assertThat(result.orElseThrow().status()).isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
@@ -186,12 +188,14 @@ class PaymentServiceTest {
 
     @Test
     void transactionSnapshotReturnsAbsentForMissingOrWrongSourcePayment() {
-        when(payments.findByPaymentIdAndSourceType(PAYMENT_ID, "RESERVATION_DEPOSIT"))
+        when(payments.findByPaymentIdAndSourceTypeAndSourceReferenceId(
+                PAYMENT_ID, "RESERVATION_DEPOSIT", SOURCE_REFERENCE_ID))
                 .thenReturn(Optional.empty());
         PaymentTransactionService queryTransactions = new PaymentTransactionService(
                 payments, null, refunds, null, null, null, null, null);
 
-        assertThat(queryTransactions.findReservationDepositPayment(PAYMENT_ID)).isEmpty();
+        assertThat(queryTransactions.findReservationDepositPayment(
+                PAYMENT_ID, SOURCE_REFERENCE_ID)).isEmpty();
         verify(refunds, never()).findByPayment_IdOrderByRequestedAtAsc(
                 org.mockito.ArgumentMatchers.anyLong());
     }

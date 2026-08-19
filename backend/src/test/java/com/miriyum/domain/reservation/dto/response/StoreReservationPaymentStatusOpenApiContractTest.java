@@ -40,8 +40,13 @@ class StoreReservationPaymentStatusOpenApiContractTest {
                         .containsEntry("in", "path"))
                 .extracting(parameter -> String.valueOf(map(parameter).get("name")))
                 .containsExactly("storeId", "reservationId");
-        assertThat(map(operation.get("responses")).keySet())
+        Map<String, Object> responses = map(operation.get("responses"));
+        assertThat(responses.keySet())
                 .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "503");
+        assertThat(map(responses.get("401"))).containsEntry(
+                "$ref", "../mvp1-common/openapi.yaml#/components/responses/Unauthorized");
+        assertThat(map(responses.get("403"))).containsEntry(
+                "$ref", "../mvp1-common/openapi.yaml#/components/responses/Forbidden");
 
         Map<String, Object> schemas = map(map(contract.get("components")).get("schemas"));
         assertStrictSchema(schemas, "StoreReservationPaymentStatus",

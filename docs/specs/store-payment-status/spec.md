@@ -18,8 +18,8 @@ Reservation이 nested store-reservation HTTP use-case를 소유한다. 처리 �
 2. 매장 부재와 다른 운영자 소유 매장은 모두 `STORE_001` 404다.
 3. Reservation은 `(reservationId, storeId)`로 자기 Entity를 조회한다. 부재와 다른 매장 예약은 모두 `RESERVATION_001` 404다.
 4. V1 또는 비금전 예약은 Payment를 호출하지 않고 `NOT_APPLICABLE`을 반환한다.
-5. V2 예약은 Reservation 소유 deposit process link에서 `paymentId` scalar만 얻는다.
-6. Payment 공개 Service는 `paymentId`와 정확한 source type `RESERVATION_DEPOSIT`으로 최소 immutable snapshot을 반환한다.
+5. V2 예약은 Reservation 소유 deposit process link에서 `paymentId`와 `reservationHoldId` scalar를 얻는다.
+6. Payment 공개 Service는 `paymentId`, 정확한 source type `RESERVATION_DEPOSIT`, expected `reservationHoldId` source reference를 모두 대조해 최소 immutable snapshot을 반환한다.
 7. Reservation이 snapshot을 HTTP DTO로 조합한다.
 
 Reservation은 Payment Entity·Repository를, Payment는 Reservation Entity·Repository·Service를 참조하지 않는다. Controller도 Repository를 직접 호출하지 않는다. 기존 `Reservation -> Payment` 의존 방향을 유지한다.

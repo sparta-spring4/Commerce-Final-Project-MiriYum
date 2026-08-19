@@ -1,5 +1,6 @@
 package com.miriyum.domain.reservation.config;
 
+import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtAccessDeniedHandler;
 import com.miriyum.domain.auth.jwt.JwtAuthenticationEntryPoint;
 import com.miriyum.domain.auth.jwt.JwtAuthenticationFilter;
@@ -80,6 +81,34 @@ public class ReservationSecurityConfig {
     private static final String WAITING_SETTING_FAMILY = WAITING_SETTING_ROOT + "/**";
     private static final String WAITING_SETTING_DEACTIVATION_IMPACT =
             WAITING_SETTING_ROOT + "/deactivation-impact";
+
+    @Bean
+    @Order(-2)
+    public SecurityFilterChain storeReservationPaymentStatusFilterChain(
+            HttpSecurity http,
+            JwtTokenProvider jwtTokenProvider,
+            ObjectMapper objectMapper
+    ) throws Exception {
+        http
+                .securityMatcher(STORE_RESERVATION_PAYMENT_STATUS)
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(HttpMethod.GET, STORE_RESERVATION_PAYMENT_STATUS)
+                        .authenticated()
+                        .anyRequest().denyAll())
+                .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint(new JwtAuthenticationEntryPoint(objectMapper))
+                        .accessDeniedHandler(new JwtAccessDeniedHandler(objectMapper)))
+                .addFilterBefore(
+                        new JwtAuthenticationFilter(
+                                jwtTokenProvider,
+                                TokenNamespace.STORE_OPERATOR,
+                                AuthErrorCode.FORBIDDEN),
+                        UsernamePasswordAuthenticationFilter.class);
+        return http.build();
+    }
 
     @Bean
     @Order(-1)

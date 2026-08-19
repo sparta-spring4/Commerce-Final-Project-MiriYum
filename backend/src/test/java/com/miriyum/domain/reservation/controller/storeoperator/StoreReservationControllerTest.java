@@ -166,8 +166,20 @@ class StoreReservationControllerTest {
                 .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
         mockMvc.perform(get(PAYMENT_STATUS_URL)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("AUTH_004"));
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_006"));
+
+        then(paymentStatusQueryService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void deniesUnsupportedPaymentStatusMethodBeforeControllerDispatch() throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+
+        mockMvc.perform(post(PAYMENT_STATUS_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_006"));
 
         then(paymentStatusQueryService).shouldHaveNoInteractions();
     }

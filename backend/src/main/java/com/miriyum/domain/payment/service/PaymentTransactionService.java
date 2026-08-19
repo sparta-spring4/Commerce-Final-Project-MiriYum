@@ -1243,9 +1243,11 @@ public class PaymentTransactionService {
 
     @Transactional(readOnly = true)
     public Optional<StoreReservationPaymentSnapshot> findReservationDepositPayment(
-            String paymentId
+            String paymentId,
+            String sourceReferenceId
     ) {
-        return payments.findByPaymentIdAndSourceType(paymentId, RESERVATION_DEPOSIT)
+        return payments.findByPaymentIdAndSourceTypeAndSourceReferenceId(
+                paymentId, RESERVATION_DEPOSIT, sourceReferenceId)
                 .map(this::toStoreReservationPaymentSnapshot);
     }
 

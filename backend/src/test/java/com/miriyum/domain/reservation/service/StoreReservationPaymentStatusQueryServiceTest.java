@@ -45,6 +45,7 @@ class StoreReservationPaymentStatusQueryServiceTest {
     private static final long STORE_ID = 22L;
     private static final long RESERVATION_ID = 77L;
     private static final String PAYMENT_ID = "900000000000000001";
+    private static final long RESERVATION_HOLD_ID = 123L;
     private static final Instant NOW = Instant.parse("2026-08-19T01:00:00Z");
 
     @Mock
@@ -95,7 +96,8 @@ class StoreReservationPaymentStatusQueryServiceTest {
             StorePaymentResult expected
     ) {
         completedV2Link();
-        given(paymentService.findReservationDepositPayment(PAYMENT_ID))
+        given(paymentService.findReservationDepositPayment(
+                PAYMENT_ID, Long.toString(RESERVATION_HOLD_ID)))
                 .willReturn(Optional.of(snapshot));
 
         StoreReservationPaymentStatusResponse response =
@@ -158,7 +160,8 @@ class StoreReservationPaymentStatusQueryServiceTest {
     @Test
     void mapsMissingOrWrongSourcePaymentToServiceUnavailable() {
         completedV2Link();
-        given(paymentService.findReservationDepositPayment(PAYMENT_ID))
+        given(paymentService.findReservationDepositPayment(
+                PAYMENT_ID, Long.toString(RESERVATION_HOLD_ID)))
                 .willReturn(Optional.empty());
 
         assertUnavailable();
@@ -167,7 +170,8 @@ class StoreReservationPaymentStatusQueryServiceTest {
     @Test
     void rejectsStoredStateCombinationOutsideTheProjectionContract() {
         completedV2Link();
-        given(paymentService.findReservationDepositPayment(PAYMENT_ID))
+        given(paymentService.findReservationDepositPayment(
+                PAYMENT_ID, Long.toString(RESERVATION_HOLD_ID)))
                 .willReturn(Optional.of(snapshot(
                         PaymentStatus.READY,
                         PaymentAttemptStatus.PAID,
@@ -188,6 +192,7 @@ class StoreReservationPaymentStatusQueryServiceTest {
         given(depositProcesses.findDepositProcessLinkByFinalReservationId(RESERVATION_ID))
                 .willReturn(Optional.of(processLink));
         given(processLink.getStatus()).willReturn(ReservationDepositProcessStatus.COMPLETED);
+        given(processLink.getReservationHoldId()).willReturn(RESERVATION_HOLD_ID);
         given(processLink.getFinalReservationId()).willReturn(RESERVATION_ID);
         given(processLink.getPaymentId()).willReturn(PAYMENT_ID);
     }
@@ -235,21 +240,30 @@ class StoreReservationPaymentStatusQueryServiceTest {
     private static Stream<Arguments> invalidLinks() {
         DepositProcessLink wrongStatus = org.mockito.Mockito.mock(DepositProcessLink.class);
         given(wrongStatus.getStatus()).willReturn(ReservationDepositProcessStatus.AWAITING_PAYMENT);
+        given(wrongStatus.getReservationHoldId()).willReturn(RESERVATION_HOLD_ID);
         given(wrongStatus.getFinalReservationId()).willReturn(RESERVATION_ID);
         given(wrongStatus.getPaymentId()).willReturn(PAYMENT_ID);
         DepositProcessLink wrongReservation = org.mockito.Mockito.mock(DepositProcessLink.class);
         given(wrongReservation.getStatus()).willReturn(ReservationDepositProcessStatus.COMPLETED);
+        given(wrongReservation.getReservationHoldId()).willReturn(RESERVATION_HOLD_ID);
         given(wrongReservation.getFinalReservationId()).willReturn(88L);
         given(wrongReservation.getPaymentId()).willReturn(PAYMENT_ID);
         DepositProcessLink missingPayment = org.mockito.Mockito.mock(DepositProcessLink.class);
         given(missingPayment.getStatus()).willReturn(ReservationDepositProcessStatus.COMPLETED);
+        given(missingPayment.getReservationHoldId()).willReturn(RESERVATION_HOLD_ID);
         given(missingPayment.getFinalReservationId()).willReturn(RESERVATION_ID);
         given(missingPayment.getPaymentId()).willReturn(null);
+        DepositProcessLink missingHold = org.mockito.Mockito.mock(DepositProcessLink.class);
+        given(missingHold.getStatus()).willReturn(ReservationDepositProcessStatus.COMPLETED);
+        given(missingHold.getReservationHoldId()).willReturn(0L);
+        given(missingHold.getFinalReservationId()).willReturn(RESERVATION_ID);
+        given(missingHold.getPaymentId()).willReturn(PAYMENT_ID);
         return Stream.of(
                 Arguments.of(Optional.empty()),
                 Arguments.of(Optional.of(wrongStatus)),
                 Arguments.of(Optional.of(wrongReservation)),
-                Arguments.of(Optional.of(missingPayment)));
+                Arguments.of(Optional.of(missingPayment)),
+                Arguments.of(Optional.of(missingHold)));
     }
 
     private static StoreReservationPaymentSnapshot snapshot(

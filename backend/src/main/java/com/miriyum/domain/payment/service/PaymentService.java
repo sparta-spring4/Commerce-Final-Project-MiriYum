@@ -221,9 +221,10 @@ public class PaymentService {
 
     /** Reservation이 저장된 예약금 상태만 조회하는 공개 경계다. */
     public Optional<StoreReservationPaymentSnapshot> findReservationDepositPayment(
-            String paymentId
+            String paymentId,
+            String sourceReferenceId
     ) {
-        return transactions.findReservationDepositPayment(paymentId);
+        return transactions.findReservationDepositPayment(paymentId, sourceReferenceId);
     }
 
     public VerifiedWaitingReservationDeposit getVerifiedWaitingReservationDeposit(

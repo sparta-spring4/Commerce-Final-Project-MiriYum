@@ -82,7 +82,9 @@ public class StoreReservationPaymentStatusQueryService {
                 .filter(candidate -> validLink(candidate, reservationId))
                 .orElseThrow(StoreReservationPaymentStatusQueryService::unavailable);
         StoreReservationPaymentSnapshot snapshot = paymentService
-                .findReservationDepositPayment(link.getPaymentId())
+                .findReservationDepositPayment(
+                        link.getPaymentId(),
+                        Long.toString(link.getReservationHoldId()))
                 .orElseThrow(StoreReservationPaymentStatusQueryService::unavailable);
         StorePaymentResult result = project(snapshot);
         return new StoreReservationPaymentStatusResponse(
@@ -95,6 +97,7 @@ public class StoreReservationPaymentStatusQueryService {
 
     private static boolean validLink(DepositProcessLink link, long reservationId) {
         return link.getStatus() == ReservationDepositProcessStatus.COMPLETED
+                && link.getReservationHoldId() > 0
                 && link.getFinalReservationId() != null
                 && link.getFinalReservationId() == reservationId
                 && link.getPaymentId() != null

@@ -225,7 +225,7 @@ class ReservationPaymentLifecycleIT {
         assertThat(notApplicable.payment()).isNull();
         verifyNoInteractions(providerClient);
 
-        FinancialScenario paid = paidV2Scenario(false);
+        FinancialScenario paid = paidV2ScenarioFromPublicCommands();
         clearInvocations(providerClient);
         StoreReservationPaymentStatusResponse completed = paymentStatusQueryService.get(
                 paid.operatorId(), paid.storeId(), paid.reservationId());
@@ -241,7 +241,7 @@ class ReservationPaymentLifecycleIT {
         assertThat(completed.payment().refunds()).isEmpty();
         verifyNoInteractions(providerClient);
 
-        FinancialScenario refunded = paidV2Scenario(false);
+        FinancialScenario refunded = paidV2ScenarioFromPublicCommands();
         when(providerClient.cancelPayment(
                 eq(refunded.portOnePaymentId()), anyString(), eq(AMOUNT_MINOR),
                 eq("KRW"), eq("STORE_STATUS_READ_TEST")))
@@ -269,7 +269,7 @@ class ReservationPaymentLifecycleIT {
                 });
         verifyNoInteractions(providerClient);
 
-        FinancialScenario unknown = paidV2Scenario(false);
+        FinancialScenario unknown = paidV2ScenarioFromPublicCommands();
         when(providerClient.cancelPayment(
                 eq(unknown.portOnePaymentId()), anyString(), eq(AMOUNT_MINOR),
                 eq("KRW"), eq("STORE_STATUS_READ_TEST")))
@@ -288,6 +288,22 @@ class ReservationPaymentLifecycleIT {
         assertThat(reconciliation.payment().refunds()).singleElement()
                 .extracting(StoreReservationPaymentStatusResponse.StoreReservationRefund::status)
                 .isEqualTo(RefundStatus.RECONCILIATION_REQUIRED);
+        verifyNoInteractions(providerClient);
+
+        Scenario otherReservation = scenario(false);
+        FinancialScenario otherPayment = paidLinkedScenario(otherReservation, true);
+        jdbcTemplate.update(
+                "UPDATE reservation_deposit_processes SET payment_id = ? "
+                        + "WHERE final_reservation_id = ?",
+                otherPayment.paymentId(),
+                paid.reservationId());
+        clearInvocations(providerClient);
+
+        assertThatThrownBy(() -> paymentStatusQueryService.get(
+                paid.operatorId(), paid.storeId(), paid.reservationId()))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE));
         verifyNoInteractions(providerClient);
 
         assertThatThrownBy(() -> paymentStatusQueryService.get(
