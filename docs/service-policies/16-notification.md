@@ -38,6 +38,14 @@
 - 이 화면은 보관 중인 기록만 표시하며 새 보관기간을 만들지 않는다. 정확한 보관 항목·기간과 파기는 `NOTI-009`, `PRIV-005`·`PRIV-006`의 기존 `TODO`가 확정된 뒤 그 버전을 따른다.
 - 표시 이력의 유실·지연은 원 거래 상태를 바꾸지 않고, 보관 정책을 확인할 수 없으면 과거 기록이 영구 보존되는 것으로 추정하지 않는다.
 
+## 알림 이력 SSE 변경 신호
+
+- 로그인한 일반 사용자는 `GET /api/v1/consumers/me/notification-events`를 consumer Bearer JWT와 Authorization header를 전달할 수 있는 fetch streaming으로 연결한다. `notifications.changed`는 상태 본문이 아니라 본인 알림 이력 HTTP API를 다시 조회하라는 최소 변경 신호다.
+- 연결 직후와 유효한 `Last-Event-ID` 재연결 뒤 현재 MySQL high-watermark에 결속된 신호를 한 번 보낸다. `id`는 consumer audience·인증 계정·계약 version에 결속된 무결성 보호 opaque cursor이며 client가 해석하거나 수정하지 않는다.
+- 최초 연결·재연결 수렴 신호 뒤의 high-watermark 신호는 새 `IN_APP DELIVERED`가 공개 이력에 보이게 된 경우만 나타낸다. wire frame은 `event: notifications.changed`, opaque `id`, 고정 `data: {}`만 포함하고 계정·알림·목적·상태를 싣지 않으며 필수 빈 줄을 두어 `\n\n`으로 종료한다. 내부 `PENDING`·`FAILED`·`CANCELLED`, provider 상태와 재시도는 공개 신호가 아니다. keepalive comment도 업무 event나 성공 근거가 아니며 cursor를 전진시키지 않는다.
+- Valkey Pub/Sub은 여러 인스턴스의 wake-up hint일 뿐 재생 원장이나 전달 성공의 근거가 아니다. 신호 중복·역순·유실과 재연결 뒤에도 MySQL 이력 조회로 수렴하며, SSE 실패가 알림 작업이나 원 거래 상태를 변경하지 않는다.
+- 형식이 잘못됐거나 다른 audience·계정에 결속된 `Last-Event-ID`는 공통 `400` JSON 오류 envelope로 거절한다. 연결 한도·heartbeat·timeout·correction interval의 운영 수치는 Runtime과 배포 부하 증거에서 별도로 확정한다.
+
 ## IN_APP Reservation·MenuHold·Pickup·Waiting 알림 목적 카탈로그
 
 Reservation·MenuHold·Pickup 기본 목적은 `#247`, 예약 방문 완료·노쇼 목적은 `#426`, Waiting 목적은 `#250`의 contract-first 범위를 소유한다. 모든 목적의 현재 허용 채널은 `IN_APP`이며 외부 SMS·알림톡·푸시·이메일은 `#252`의 별도 게이트를 통과하기 전에는 후보가 아니다. 아래 목적은 모두 거래 이행에 필요한 필수 알림이므로 사용자 설정으로 끄지 않으며 광고·추천 문구를 결합하지 않는다.
@@ -315,3 +323,4 @@ Reservation·MenuHold·Pickup 기본 목적은 `#247`, 예약 방문 완료·노
 | 2026-08-12 | NOTI-001·NOTI-004·NOTI-006·NOTI-008 | Pickup 확정·취소 목적과 원 사건 소유 경계를 추가하고 공개 이력을 `IN_APP` 전달 성공 항목으로 제한 | 검토 중 | Issue #247 Pickup 소유자 결정과 PR #255 리뷰 반영 |
 | 2026-08-16 | NOTI-001·NOTI-004·NOTI-006 | Waiting 입장 임박·호출·취소·미응답·입장 완료·매장 마감 종료를 IN_APP 목적에 추가하고 SSE를 후속으로 분리 | 검토 중 | Issue #250 설계 승인, #271·#272 Runtime 병합 확인 |
 | 2026-08-16 | NOTI-004·NOTI-006·NOTI-007 | 예약 전환 중 입장 임박 보류를 작업 version fencing, 상태 사건 기반 재판정과 유한한 주기 재조회로 수렴 | 검토 중 | PR #384 lost-wakeup 리뷰와 Issue #250 보완 설계 승인 |
+| 2026-08-18 | NOTI-004·NOTI-006 | `notifications.changed`를 MySQL 이력 재조회용 최소 SSE 신호로 확정하고 account-bound opaque 재연결 cursor와 Valkey 비원장 경계를 추가 | 검토 중 | Issue #250 SSE 3단계 설계 승인 |

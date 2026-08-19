@@ -46,6 +46,8 @@ paths:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1kakao-links"
   /api/v1/consumers/me/notifications:
     $ref: "./notification/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notifications"
+  /api/v1/consumers/me/notification-events:
+    $ref: "./notification/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notification-events"
   /api/v1/consumers/me/stores/{storeId}/waiting-availabilities:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1stores~1{storeId}~1waiting-availabilities"
   /api/v1/consumers/me/stores/{storeId}/waiting-location-proofs:
@@ -74,6 +76,8 @@ paths:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1representative-transfer-offers~1{offerId}~1rejections"
   /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1representative-transfer-offers~1{offerId}~1revocations"
+  /api/v1/consumers/me/waiting-events:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-events"
   /api/v1/consumers/me/reservations:
     $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations"
   /api/v1/consumers/me/reservations/{reservationId}:

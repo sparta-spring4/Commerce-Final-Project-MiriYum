@@ -60,6 +60,12 @@ class AudienceOpenApiContractTest {
             "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations");
     private static final String NOTIFICATION_HISTORY_PATH =
             "/api/v1/consumers/me/notifications";
+    private static final String NOTIFICATION_EVENTS_PATH =
+            "/api/v1/consumers/me/notification-events";
+    private static final String CONSUMER_WAITING_EVENTS_PATH =
+            "/api/v1/consumers/me/waiting-events";
+    private static final String OPERATOR_WAITING_EVENTS_PATH =
+            "/api/v1/store-operators/stores/{storeId}/waiting-events";
     private static final String REPRESENTATIVE_MENUS_PATH =
             "/api/v1/store-operators/stores/{storeId}/representative-menus";
     private static final String STORE_DASHBOARD_ANALYTICS_PATH =
@@ -69,6 +75,9 @@ class AudienceOpenApiContractTest {
                     Stream.of(
                             MENU_ALTERNATIVE_SEARCH_PATH,
                             NOTIFICATION_HISTORY_PATH,
+                            NOTIFICATION_EVENTS_PATH,
+                            CONSUMER_WAITING_EVENTS_PATH,
+                            OPERATOR_WAITING_EVENTS_PATH,
                             REPRESENTATIVE_MENUS_PATH,
                             STORE_DASHBOARD_ANALYTICS_PATH,
                             "/api/v1/store-operators/stores/{storeId}/images",
@@ -197,6 +206,27 @@ class AudienceOpenApiContractTest {
                 assertPathReferenceResolves(file, entry.getKey(), map(entry.getValue()));
             }
         }
+    }
+
+    @Test
+    void sseContractsAreExposedOnceThroughTheirOwningAudienceEntrypoints()
+            throws IOException {
+        assertThat(map(paths("consumer-openapi.yaml").get(NOTIFICATION_EVENTS_PATH)))
+                .containsExactly(Map.entry(
+                        "$ref",
+                        "./notification/openapi.yaml#/paths/"
+                                + "~1api~1v1~1consumers~1me~1notification-events"));
+        assertThat(map(paths("consumer-openapi.yaml").get(CONSUMER_WAITING_EVENTS_PATH)))
+                .containsExactly(Map.entry(
+                        "$ref",
+                        "./waiting/openapi.yaml#/paths/"
+                                + "~1api~1v1~1consumers~1me~1waiting-events"));
+        assertThat(map(paths("store-operator-openapi.yaml").get(OPERATOR_WAITING_EVENTS_PATH)))
+                .containsExactly(Map.entry(
+                        "$ref",
+                        "./waiting/openapi.yaml#/paths/"
+                                + "~1api~1v1~1store-operators~1stores~1{storeId}"
+                                + "~1waiting-events"));
     }
 
     private static void assertPathReferenceResolves(
