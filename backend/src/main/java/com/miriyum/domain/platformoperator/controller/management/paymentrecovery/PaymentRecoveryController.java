@@ -1,4 +1,4 @@
-package com.miriyum.domain.platformoperator.paymentrecovery.controller;
+package com.miriyum.domain.platformoperator.controller.management.paymentrecovery;
 
 import com.miriyum.domain.platformoperator.paymentrecovery.dto.PaymentRecoveryRequests.ApprovalRequest;
 import com.miriyum.domain.platformoperator.paymentrecovery.dto.PaymentRecoveryRequests.AssignmentRequest;
