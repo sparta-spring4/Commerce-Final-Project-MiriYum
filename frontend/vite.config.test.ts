@@ -2,19 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { rewriteKakaoStateCookies } from './vite.config'
 
 describe('rewriteKakaoStateCookies', () => {
-  it('removes Secure only from consumer Kakao state cookies', () => {
+  it.each([
+    'MIRIYUM_CONSUMER_KAKAO_LOGIN_STATE',
+    'MIRIYUM_CONSUMER_KAKAO_LINK_STATE',
+    'MIRIYUM_STORE_OPERATOR_KAKAO_LOGIN_STATE',
+    'MIRIYUM_STORE_OPERATOR_KAKAO_LINK_STATE',
+  ])('removes Secure from the allowed %s cookie', (cookieName) => {
     expect(rewriteKakaoStateCookies([
-      'MIRIYUM_CONSUMER_KAKAO_LOGIN_STATE=state; Path=/api/v1; HttpOnly; Secure; SameSite=Lax',
+      `${cookieName}=state; Path=/api/v1; HttpOnly; Secure; SameSite=Lax`,
     ])).toEqual([
-      'MIRIYUM_CONSUMER_KAKAO_LOGIN_STATE=state; Path=/api/v1; HttpOnly; SameSite=Lax',
-    ])
-  })
-
-  it('rewrites store-operator Kakao link state cookies as well', () => {
-    expect(rewriteKakaoStateCookies([
-      'MIRIYUM_STORE_OPERATOR_KAKAO_LINK_STATE=state; Secure; SameSite=Lax',
-    ])).toEqual([
-      'MIRIYUM_STORE_OPERATOR_KAKAO_LINK_STATE=state; SameSite=Lax',
+      `${cookieName}=state; Path=/api/v1; HttpOnly; SameSite=Lax`,
     ])
   })
 
