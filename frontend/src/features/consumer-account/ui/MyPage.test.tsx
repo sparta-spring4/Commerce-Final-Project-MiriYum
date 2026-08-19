@@ -12,7 +12,12 @@ import { authenticatedConsumer } from '../../auth/test/handlers'
 import {
   CONSUMER_ME_CONTACT_PATH,
   CONSUMER_ME_PATH,
+  CONSUMER_CURRENT_WAITING_PATH,
+  CONSUMER_PAYMENTS_PATH,
   consumerAccount,
+  consumerPayment,
+  consumerPaymentHistory,
+  consumerWaitingSnapshot,
 } from '../test/fixtures'
 import { MyPage } from './MyPage'
 
@@ -289,8 +294,70 @@ describe('마이페이지', () => {
       ROUTES.notificationHistory,
     )
 
-    for (const label of ['결제 내역', '환불 내역', '웨이팅', '비밀번호 변경']) {
+    for (const label of ['환불 내역', '지난 웨이팅', '비밀번호 변경']) {
       expect(screen.queryByText(label)).not.toBeInTheDocument()
     }
+  })
+
+  it('실제 결제 이력과 현재 웨이팅을 함께 표시한다', async () => {
+    server.use(
+      authenticatedConsumer(),
+      http.get(CONSUMER_ME_PATH, () => successResponse(consumerAccount())),
+      http.get(CONSUMER_PAYMENTS_PATH, () =>
+        successResponse(consumerPaymentHistory([consumerPayment()])),
+      ),
+      http.get(CONSUMER_CURRENT_WAITING_PATH, () =>
+        successResponse(consumerWaitingSnapshot()),
+      ),
+    )
+
+    renderMyPage()
+
+    expect(await screen.findByText('25,000원')).toBeInTheDocument()
+    expect(screen.getByText('대기 중')).toBeInTheDocument()
+    expect(screen.getByText('7번')).toBeInTheDocument()
+    expect(screen.getByText('3팀')).toBeInTheDocument()
+  })
+
+  it('현재 웨이팅의 WAITING_003 404는 빈 상태로 표시한다', async () => {
+    server.use(
+      authenticatedConsumer(),
+      http.get(CONSUMER_ME_PATH, () => successResponse(consumerAccount())),
+      http.get(CONSUMER_PAYMENTS_PATH, () =>
+        successResponse(consumerPaymentHistory()),
+      ),
+      http.get(CONSUMER_CURRENT_WAITING_PATH, () =>
+        errorResponse(404, 'WAITING_003', '웨이팅 팀을 찾을 수 없습니다.'),
+      ),
+    )
+
+    renderMyPage()
+
+    expect(
+      await screen.findByText('현재 웨이팅이 없습니다.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('현재 웨이팅을 불러오지 못했습니다.')).not.toBeInTheDocument()
+  })
+
+  it('결제 조회 실패는 결제 영역에서 다시 시도할 수 있다', async () => {
+    server.use(
+      authenticatedConsumer(),
+      http.get(CONSUMER_ME_PATH, () => successResponse(consumerAccount())),
+      http.get(CONSUMER_PAYMENTS_PATH, () =>
+        errorResponse(503, 'COMMON_012', '서비스를 일시적으로 이용할 수 없습니다.'),
+      ),
+      http.get(CONSUMER_CURRENT_WAITING_PATH, () =>
+        errorResponse(404, 'WAITING_003', '웨이팅 팀을 찾을 수 없습니다.'),
+      ),
+    )
+
+    renderMyPage()
+
+    expect(
+      await screen.findByText('결제 내역을 불러오지 못했습니다.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '상태 다시 확인' }),
+    ).toBeInTheDocument()
   })
 })

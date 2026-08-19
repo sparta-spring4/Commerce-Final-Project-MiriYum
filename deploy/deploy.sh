@@ -11,6 +11,14 @@ MYSQL_HEALTH_TIMEOUT_SECONDS="${MYSQL_HEALTH_TIMEOUT_SECONDS:-210}"
 VALKEY_HEALTH_TIMEOUT_SECONDS="${VALKEY_HEALTH_TIMEOUT_SECONDS:-190}"
 RISK_EVENT_BACKFILL_MAX_SCAN_PAGES="${RISK_EVENT_BACKFILL_MAX_SCAN_PAGES:-10000}"
 CLOUDWATCH_NAMESPACE="${MIRIYUM_CLOUDWATCH_NAMESPACE:-MiriYum/Staging}"
+OPENAI_API_KEY_PARAMETER_NAME="${OPENAI_API_KEY_PARAMETER_NAME:-/miriyum/shared/openai-api-key}"
+
+compose_command() (
+  # Docker Compose gives the invoking shell precedence over --env-file values.
+  # Keep these runtime values sourced exclusively from the server-side .env file.
+  unset OPENAI_API_KEY MIRIYUM_STORE_SEARCH_LLM_ENABLED
+  docker compose "$@"
+)
 
 publish_deployment_health() {
   local value="$1"
@@ -21,7 +29,7 @@ publish_deployment_health() {
 }
 
 validate_runtime_environment() {
-  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local compose=(compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
 
   # Compose owns required-variable declarations, so this stays in sync with new runtime keys.
   if ! "${compose[@]}" config --quiet; then
@@ -30,8 +38,56 @@ validate_runtime_environment() {
   fi
 }
 
+sync_llm_runtime_environment() {
+  local api_key temporary_env llm_enabled
+
+  llm_enabled=$(awk -F= '$1 == "MIRIYUM_STORE_SEARCH_LLM_ENABLED" { print substr($0, index($0, "=") + 1); exit }' "${ENV_FILE}")
+  llm_enabled="${llm_enabled:-false}"
+  case "${llm_enabled}" in
+    false)
+    temporary_env=$(mktemp "${ENV_FILE}.XXXXXX")
+    chmod 600 "${temporary_env}"
+    awk '!/^OPENAI_API_KEY=/' "${ENV_FILE}" > "${temporary_env}"
+    mv "${temporary_env}" "${ENV_FILE}"
+    echo "LLM runtime disabled; skipping OpenAI parameter synchronization."
+    return 0
+    ;;
+    true) ;;
+    *)
+      echo "Invalid MIRIYUM_STORE_SEARCH_LLM_ENABLED value: ${llm_enabled}" >&2
+      return 1
+      ;;
+  esac
+
+  api_key=$(aws ssm get-parameter \
+    --region "${AWS_REGION}" \
+    --name "${OPENAI_API_KEY_PARAMETER_NAME}" \
+    --with-decryption \
+    --query 'Parameter.Value' \
+    --output text)
+
+  if [[ -z "${api_key}" || "${api_key}" == "None" ]]; then
+    echo "OpenAI API key parameter is empty: ${OPENAI_API_KEY_PARAMETER_NAME}" >&2
+    return 1
+  fi
+
+  temporary_env=$(mktemp "${ENV_FILE}.XXXXXX")
+  chmod 600 "${temporary_env}"
+  awk '!/^OPENAI_API_KEY=/' \
+    "${ENV_FILE}" > "${temporary_env}"
+  printf 'OPENAI_API_KEY=%s\n' "${api_key}" >> "${temporary_env}"
+  if ! grep -q '^MIRIYUM_STORE_SEARCH_LLM_ENABLED=' "${temporary_env}"; then
+    printf '%s\n' 'MIRIYUM_STORE_SEARCH_LLM_ENABLED=true' >> "${temporary_env}"
+  fi
+  if ! grep -q '^MIRIYUM_STORE_SEARCH_LLM_MODEL=' "${temporary_env}"; then
+    printf '%s\n' 'MIRIYUM_STORE_SEARCH_LLM_MODEL=gpt-4o-mini' >> "${temporary_env}"
+  fi
+  mv "${temporary_env}" "${ENV_FILE}"
+  unset api_key
+}
+
 wait_for_mysql_health() {
-  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local compose=(compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
   local deadline container_id health
 
   deadline=$((SECONDS + MYSQL_HEALTH_TIMEOUT_SECONDS))
@@ -55,7 +111,7 @@ wait_for_mysql_health() {
 }
 
 wait_for_valkey_health() {
-  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local compose=(compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
   local deadline container_id health
 
   deadline=$((SECONDS + VALKEY_HEALTH_TIMEOUT_SECONDS))
@@ -79,7 +135,7 @@ wait_for_valkey_health() {
 }
 
 verify_valkey() {
-  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local compose=(compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
   local unauthenticated_result host_port
 
   if ! wait_for_valkey_health; then
@@ -106,14 +162,14 @@ verify_valkey() {
 }
 
 recover_nginx_http() {
-  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local compose=(compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
 
   # A broken TLS configuration must not leave Nginx unavailable after a backend deployment.
   MIRIYUM_STAGING_FORCE_HTTP=true "${compose[@]}" up -d --force-recreate nginx || true
 }
 
 verify_nginx() {
-  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local compose=(compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
 
   if ! "${compose[@]}" ps --status running --services nginx | grep -qx nginx; then
     echo "Nginx is not running after deployment." >&2
@@ -190,7 +246,7 @@ verify_frontend() {
 
 # 구버전 롤백 중 생성된 marker까지 다음 전달 대상에서 누락되지 않게 매 배포 이관한다.
 backfill_pending_risk_event_index() {
-  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local compose=(compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
   local marker_pattern="auth:risk:pending:*"
   local pending_index="auth:risk:pending-index"
 
@@ -234,7 +290,7 @@ backfill_pending_risk_event_index() {
 
 # 배포 전 DB에 기록된 재사용 횟수를 Valkey counter에 이관해 marker 재생성 시 횟수가 줄지 않게 한다.
 backfill_risk_event_occurrence_counters() {
-  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local compose=(compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
   local rows event_key occurrence_count namespace family_id token_hash counter_key family_key
 
   if ! rows="$("${compose[@]}" exec -T mysql sh -ec '
@@ -321,6 +377,7 @@ main() {
     return 1
   fi
 
+  sync_llm_runtime_environment
   validate_runtime_environment
 
   for command in aws curl docker; do
@@ -336,27 +393,27 @@ main() {
   export BACKEND_IMAGE FRONTEND_IMAGE
 
 # 실행 환경은 서버에만 두고 이미지와 배포 파일만 갱신한다.
-  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" pull
+  compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" pull
   # 구버전 writer를 멈춘 뒤에만 위험 사건 상태를 snapshot/backfill해 전환 중 count가 작아지지 않게 한다.
-  if ! docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" stop backend; then
+  if ! compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" stop backend; then
     echo "Could not stop the existing backend before risk event state backfill." >&2
     publish_deployment_health 0
     return 1
   fi
   # 새 backend가 pending Set만 읽기 시작하기 전에 Valkey와 기존 marker 인덱스를 준비한다.
-  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d mysql valkey
+  compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d mysql valkey
 
   if ! wait_for_mysql_health; then
     publish_deployment_health 0
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 mysql || true
+    compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 mysql || true
     return 1
   fi
 
   if ! verify_valkey; then
     publish_deployment_health 0
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey || true
+    compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey || true
     return 1
   fi
 
@@ -364,18 +421,18 @@ main() {
     # Set-only 전달 worker는 marker index와 재사용 횟수 이관이 완료된 상태에서만 시작한다.
     echo "Risk event state backfill failed; aborting deployment before Set-only delivery starts." >&2
     publish_deployment_health 0
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey || true
+    compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey || true
     return 1
   fi
 
-  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --remove-orphans
+  compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --remove-orphans
 
   if ! verify_nginx; then
     recover_nginx_http
     publish_deployment_health 0
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 nginx || true
+    compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 nginx || true
     return 1
   fi
 
@@ -391,8 +448,8 @@ main() {
     if (( SECONDS >= deadline )); then
       echo "Backend health check timed out after ${HEALTH_TIMEOUT_SECONDS}s" >&2
       publish_deployment_health 0
-      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
-      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 backend || true
+      compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+      compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 backend || true
       return 1
     fi
     sleep 3
@@ -400,7 +457,7 @@ main() {
 
   publish_deployment_health 1
 
-  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
+  compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
