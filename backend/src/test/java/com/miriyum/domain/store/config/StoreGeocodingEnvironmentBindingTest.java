@@ -10,6 +10,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 class StoreGeocodingEnvironmentBindingTest {
 
     private static final String CANONICAL_KEY = "canonical-geocoding-key";
+    private static final String LEGACY_KEY = "legacy-geocoding-key";
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withInitializer(new ConfigDataApplicationContextInitializer())
@@ -23,8 +24,23 @@ class StoreGeocodingEnvironmentBindingTest {
     }
 
     @Test
-    @DisplayName("전용 지오코딩 키가 없으면 빈 값으로 바인딩해 실패 폐쇄 경계를 유지한다")
-    void bindsBlankWhenCanonicalKeyIsMissing() {
+    @DisplayName("canonical 키가 없으면 legacy 지오코딩 키를 임시로 사용한다")
+    void bindsLegacyKeyDuringTransition() {
+        assertRestApiKey(LEGACY_KEY,
+                "MIRIYUM_KAKAO_LOCAL_REST_API_KEY=" + LEGACY_KEY);
+    }
+
+    @Test
+    @DisplayName("canonical 키가 있으면 legacy 키보다 우선한다")
+    void canonicalKeyWinsOverLegacyKey() {
+        assertRestApiKey(CANONICAL_KEY,
+                "MIRIYUM_STORE_GEOCODING_REST_API_KEY=" + CANONICAL_KEY,
+                "MIRIYUM_KAKAO_LOCAL_REST_API_KEY=" + LEGACY_KEY);
+    }
+
+    @Test
+    @DisplayName("두 키가 모두 없으면 빈 값으로 바인딩해 실패 폐쇄 경계를 유지한다")
+    void bindsBlankWhenBothKeysAreMissing() {
         assertRestApiKey("");
     }
 
