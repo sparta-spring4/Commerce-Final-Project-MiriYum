@@ -7,6 +7,11 @@
 /** WithRequired type helpers */
 type WithRequired<T, K extends keyof T> = T & { [P in K]-?: T[P] };
 
+/** OneOf type helpers */
+type Without<T, U> = { [P in Exclude<keyof T, keyof U>]?: never };
+type XOR<T, U> = (T | U) extends object ? (Without<T, U> & U) | (Without<U, T> & T) : T | U;
+type OneOf<T extends any[]> = T extends [infer Only] ? Only : T extends [infer A, infer B, ...infer Rest] ? OneOf<[XOR<A, B>, ...Rest]> : never;
+
 export interface paths {
   "/api/v1/store-operators/stores/{storeId}/waiting-settings": {
     /**
@@ -72,10 +77,17 @@ export interface paths {
     /** 현재 웨이팅 접수 가능 상태 조회 */
     get: operations["getConsumerWaitingAvailability"];
   };
+  "/api/v1/consumers/me/stores/{storeId}/waiting-location-proofs": {
+    /**
+     * 웨이팅 등록용 GPS 위치 판정
+     * @description 계정·매장·WAITING_REGISTRATION 목적에 결속된 120초 일회 소비 세션을 발급한다. 좌표·원본 정확도·측정 시각·계산 거리는 요청 처리 중에만 사용하고 응답, DB, 감사, 로그에 저장하지 않는다. 권한 거부·위치 미수신·낮은 정확도·오래된 측정·조작 의심은 성공으로 추정하거나 IP 위치로 대체하지 않고 해당 판정 범주를 HTTP 200으로 반환한다.
+     */
+    post: operations["issueConsumerWaitingLocationProof"];
+  };
   "/api/v1/consumers/me/stores/{storeId}/waiting-teams": {
     /**
      * 웨이팅 등록
-     * @description 위치 증명 세션을 등록과 같은 원자 경계에서 소비하는 #409가 연결되기 전에는 기본 비활성 상태다. 신규 멱등 요청은 팀·순번·membership을 만들지 않고 409 WAITING_012를 반환하되, 이미 성공한 같은 키·지문은 최초 응답을 재생한다.
+     * @description 계정·매장·WAITING_REGISTRATION 목적에 결속된 VERIFIED 위치 증명 세션을 팀·순번·대표자 membership 생성과 같은 멱등 트랜잭션에서 한 번만 소비한다.
      */
     post: operations["createConsumerWaitingTeam"];
   };
@@ -86,6 +98,42 @@ export interface paths {
   "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations": {
     /** 본인 활성 웨이팅 취소 */
     post: operations["cancelCurrentConsumerWaitingTeam"];
+  };
+  "/api/v1/consumers/me/waiting-teams/{teamId}/invitations": {
+    /** 일행 초대 발급 */
+    post: operations["issueWaitingPartyInvitation"];
+  };
+  "/api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations": {
+    /** 일행 초대 철회 */
+    post: operations["revokeWaitingPartyInvitation"];
+  };
+  "/api/v1/consumers/me/waiting-invitation-acceptances": {
+    /** 일행 초대 수락 */
+    post: operations["acceptWaitingPartyInvitation"];
+  };
+  "/api/v1/consumers/me/waiting-teams/{teamId}/membership-departures": {
+    /** 일행 구성원 이탈 */
+    post: operations["departWaitingPartyMembership"];
+  };
+  "/api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals": {
+    /** 대표자의 일행 구성원 제거 */
+    post: operations["removeWaitingPartyMembership"];
+  };
+  "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers": {
+    /** 대표자 이전 제안 */
+    post: operations["proposeWaitingRepresentativeTransfer"];
+  };
+  "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/acceptances": {
+    /** 대상 구성원의 대표자 이전 수락 */
+    post: operations["acceptWaitingRepresentativeTransfer"];
+  };
+  "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/rejections": {
+    /** 대상 구성원의 대표자 이전 거절 */
+    post: operations["rejectWaitingRepresentativeTransfer"];
+  };
+  "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations": {
+    /** 기존 대표자의 대표자 이전 철회 */
+    post: operations["revokeWaitingRepresentativeTransfer"];
   };
   "/api/v1/consumers/me/waiting-events": {
     /**
@@ -190,6 +238,47 @@ export interface components {
       businessDate: string;
       /** @description 대표자가 등록하는 팀 인원수 */
       partySize: number;
+      /**
+       * Format: uuid
+       * @description 같은 계정·매장·등록 목적에 결속된 미소비 VERIFIED 위치 증명 세션
+       */
+      locationProofSessionId: string;
+    };
+    WaitingLocationProofRequest: ({
+      /** @enum {string} */
+      measurementStatus: "MEASURED" | "PERMISSION_DENIED" | "POSITION_UNAVAILABLE";
+      latitude?: number;
+      longitude?: number;
+      accuracyMeters?: number;
+      /** Format: date-time */
+      measuredAt?: string;
+      /** @enum {string} */
+      integrityStatus: "CLEAR" | "MANIPULATION_SUSPECTED";
+    }) & (OneOf<[{
+      /** @constant */
+      measurementStatus?: "MEASURED";
+    }, {
+      /** @enum {unknown} */
+      measurementStatus?: "PERMISSION_DENIED" | "POSITION_UNAVAILABLE";
+      latitude?: never;
+      longitude?: never;
+      accuracyMeters?: never;
+      measuredAt?: never;
+    }]>);
+    WaitingLocationProofSnapshot: {
+      /** Format: uuid */
+      proofSessionId: string;
+      /** @enum {string} */
+      resultCategory: "VERIFIED" | "OUTSIDE_RADIUS" | "ACCURACY_INSUFFICIENT" | "PERMISSION_DENIED" | "MEASUREMENT_STALE" | "POSITION_UNAVAILABLE" | "MANIPULATION_SUSPECTED";
+      /** @enum {string} */
+      accuracyCategory: "ACCEPTABLE" | "INSUFFICIENT" | "NOT_APPLICABLE";
+      /** @enum {string} */
+      policyVersion: "WAITING_LOCATION_V1";
+      /** Format: int64 */
+      storeCoordinateVersion: number;
+      issuedAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      judgedAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      expiresAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
     };
     WaitingReceptionAvailability: {
       storeId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
@@ -222,6 +311,52 @@ export interface components {
       cancelledAt: string | null;
       /** Format: int64 */
       version: number;
+      memberships: components["schemas"]["WaitingPartyMember"][];
+    };
+    WaitingExpectedVersionRequest: {
+      /** Format: int64 */
+      expectedVersion: number;
+    };
+    WaitingInvitationAcceptanceRequest: {
+      invitationCode: string;
+    };
+    WaitingPartyMember: {
+      membershipId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      /** @enum {string} */
+      role: "REPRESENTATIVE" | "MEMBER";
+      joinedAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      self: boolean;
+    };
+    WaitingInvitation: {
+      invitationId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      expiresAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      /** @description 신규 발급 응답에서만 반환 */
+      invitationCode: string | null;
+    };
+    WaitingInvitationSuccessResponse: {
+      /** @constant */
+      code: "SUCCESS";
+      message: string;
+      data: components["schemas"]["WaitingInvitation"];
+    };
+    WaitingTransferProposalRequest: {
+      targetMembershipId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      /** Format: int64 */
+      expectedVersion: number;
+    };
+    WaitingTransferOffer: {
+      offerId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      targetMembershipId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      /** @enum {string} */
+      status: "PROPOSED" | "ACCEPTED" | "REJECTED" | "REVOKED" | "EXPIRED";
+      proposedAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      expiresAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+    };
+    WaitingTransferOfferSuccessResponse: {
+      /** @constant */
+      code: "SUCCESS";
+      message: string;
+      data: components["schemas"]["WaitingTransferOffer"];
     };
     WaitingTeamListItem: {
       waitingTeamId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
@@ -303,6 +438,11 @@ export interface components {
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["WaitingReceptionAvailability"];
     };
+    WaitingLocationProofSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["WaitingLocationProofSnapshot"];
+    };
     WaitingConsumerSnapshotSuccessResponse: {
       code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
@@ -310,6 +450,12 @@ export interface components {
     };
   };
   responses: {
+    /** @description storeId, 조건부 위치 측정 본문 또는 JSON 형식이 올바르지 않음 */
+    WaitingLocationProofBadRequest: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
     /** @description Last-Event-ID 형식·무결성 또는 audience·계정·store 결속이 유효하지 않음 */
     WaitingEventCursorBadRequest: {
       content: {
@@ -418,6 +564,10 @@ export interface components {
     StoreId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
     /** @description 조회하거나 전이할 웨이팅 팀의 공개 문자열 ID */
     WaitingTeamId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+    PartyTeamId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+    InvitationId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+    MembershipId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+    TransferOfferId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
     /** @description #271의 비활성화 명령이 만든 웨이팅 종결 작업의 공개 문자열 ID */
     WaitingCloseJobId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
     /** @description 지정하면 해당 상태의 팀만 반환한다. */
@@ -888,8 +1038,37 @@ export interface operations {
     };
   };
   /**
+   * 웨이팅 등록용 GPS 위치 판정
+   * @description 계정·매장·WAITING_REGISTRATION 목적에 결속된 120초 일회 소비 세션을 발급한다. 좌표·원본 정확도·측정 시각·계산 거리는 요청 처리 중에만 사용하고 응답, DB, 감사, 로그에 저장하지 않는다. 권한 거부·위치 미수신·낮은 정확도·오래된 측정·조작 의심은 성공으로 추정하거나 IP 위치로 대체하지 않고 해당 판정 범주를 HTTP 200으로 반환한다.
+   */
+  issueConsumerWaitingLocationProof: {
+    parameters: {
+      path: {
+        storeId: components["parameters"]["StoreId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WaitingLocationProofRequest"];
+      };
+    };
+    responses: {
+      /** @description 위치 원문을 포함하지 않는 판정 세션 snapshot */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingLocationProofSuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingLocationProofBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      404: components["responses"]["WaitingConsumerStoreNotFound"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /**
    * 웨이팅 등록
-   * @description 위치 증명 세션을 등록과 같은 원자 경계에서 소비하는 #409가 연결되기 전에는 기본 비활성 상태다. 신규 멱등 요청은 팀·순번·membership을 만들지 않고 409 WAITING_012를 반환하되, 이미 성공한 같은 키·지문은 최초 응답을 재생한다.
+   * @description 계정·매장·WAITING_REGISTRATION 목적에 결속된 VERIFIED 위치 증명 세션을 팀·순번·대표자 membership 생성과 같은 멱등 트랜잭션에서 한 번만 소비한다.
    */
   createConsumerWaitingTeam: {
     parameters: {
@@ -955,6 +1134,278 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["WaitingConsumerSnapshotSuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingLedgerBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      404: components["responses"]["WaitingConsumerTeamNotFound"];
+      409: components["responses"]["WaitingConsumerCancelConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 일행 초대 발급 */
+  issueWaitingPartyInvitation: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        teamId: components["parameters"]["PartyTeamId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WaitingExpectedVersionRequest"];
+      };
+    };
+    responses: {
+      /** @description 새 초대 또는 멱등 재생 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingInvitationSuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingLedgerBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      404: components["responses"]["WaitingConsumerTeamNotFound"];
+      409: components["responses"]["WaitingConsumerCancelConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 일행 초대 철회 */
+  revokeWaitingPartyInvitation: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        teamId: components["parameters"]["PartyTeamId"];
+        invitationId: components["parameters"]["InvitationId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WaitingExpectedVersionRequest"];
+      };
+    };
+    responses: {
+      /** @description 철회된 초대 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingInvitationSuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingLedgerBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      404: components["responses"]["WaitingConsumerTeamNotFound"];
+      409: components["responses"]["WaitingConsumerCancelConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 일행 초대 수락 */
+  acceptWaitingPartyInvitation: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WaitingInvitationAcceptanceRequest"];
+      };
+    };
+    responses: {
+      /** @description 참여한 기존 팀 snapshot */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingConsumerSnapshotSuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingLedgerBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      404: components["responses"]["WaitingConsumerTeamNotFound"];
+      409: components["responses"]["WaitingConsumerCreateConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 일행 구성원 이탈 */
+  departWaitingPartyMembership: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        teamId: components["parameters"]["PartyTeamId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WaitingExpectedVersionRequest"];
+      };
+    };
+    responses: {
+      /** @description 이탈 후 팀 snapshot */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingConsumerSnapshotSuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingLedgerBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      404: components["responses"]["WaitingConsumerTeamNotFound"];
+      409: components["responses"]["WaitingConsumerCancelConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 대표자의 일행 구성원 제거 */
+  removeWaitingPartyMembership: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        teamId: components["parameters"]["PartyTeamId"];
+        membershipId: components["parameters"]["MembershipId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WaitingExpectedVersionRequest"];
+      };
+    };
+    responses: {
+      /** @description 제거 후 팀 snapshot */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingConsumerSnapshotSuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingLedgerBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      404: components["responses"]["WaitingConsumerTeamNotFound"];
+      409: components["responses"]["WaitingConsumerCancelConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 대표자 이전 제안 */
+  proposeWaitingRepresentativeTransfer: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        teamId: components["parameters"]["PartyTeamId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WaitingTransferProposalRequest"];
+      };
+    };
+    responses: {
+      /** @description 5분 동안 유효한 대표자 이전 제안 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingTransferOfferSuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingLedgerBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      404: components["responses"]["WaitingConsumerTeamNotFound"];
+      409: components["responses"]["WaitingConsumerCancelConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 대상 구성원의 대표자 이전 수락 */
+  acceptWaitingRepresentativeTransfer: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        teamId: components["parameters"]["PartyTeamId"];
+        offerId: components["parameters"]["TransferOfferId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WaitingExpectedVersionRequest"];
+      };
+    };
+    responses: {
+      /** @description 대표자가 변경된 팀 snapshot */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingConsumerSnapshotSuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingLedgerBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      404: components["responses"]["WaitingConsumerTeamNotFound"];
+      409: components["responses"]["WaitingConsumerCancelConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 대상 구성원의 대표자 이전 거절 */
+  rejectWaitingRepresentativeTransfer: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        teamId: components["parameters"]["PartyTeamId"];
+        offerId: components["parameters"]["TransferOfferId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WaitingExpectedVersionRequest"];
+      };
+    };
+    responses: {
+      /** @description 거절된 제안 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingTransferOfferSuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingLedgerBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      404: components["responses"]["WaitingConsumerTeamNotFound"];
+      409: components["responses"]["WaitingConsumerCancelConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 기존 대표자의 대표자 이전 철회 */
+  revokeWaitingRepresentativeTransfer: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        teamId: components["parameters"]["PartyTeamId"];
+        offerId: components["parameters"]["TransferOfferId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WaitingExpectedVersionRequest"];
+      };
+    };
+    responses: {
+      /** @description 철회된 제안 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingTransferOfferSuccessResponse"];
         };
       };
       400: components["responses"]["WaitingLedgerBadRequest"];
