@@ -448,7 +448,7 @@ esac
         self.assertIn("Unauthenticated Valkey ping did not return NOAUTH.", self.deploy_script)
         self.assertIn('grep -qx PONG', self.deploy_script)
         self.assertIn('port valkey 6379', self.deploy_script)
-        self.assertIn('docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey', self.deploy_script)
+        self.assertIn('compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey', self.deploy_script)
 
     def test_nginx_selector_requires_certificate_and_private_key_for_tls(self):
         self.assertIn('private_key="/etc/letsencrypt/live/${STAGING_DOMAIN}/privkey.pem"', self.nginx_selector)

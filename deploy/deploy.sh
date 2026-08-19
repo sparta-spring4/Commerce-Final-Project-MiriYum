@@ -13,11 +13,12 @@ RISK_EVENT_BACKFILL_MAX_SCAN_PAGES="${RISK_EVENT_BACKFILL_MAX_SCAN_PAGES:-10000}
 CLOUDWATCH_NAMESPACE="${MIRIYUM_CLOUDWATCH_NAMESPACE:-MiriYum/Staging}"
 OPENAI_API_KEY_PARAMETER_NAME="${OPENAI_API_KEY_PARAMETER_NAME:-/miriyum/shared/openai-api-key}"
 
-compose_command() {
+compose_command() (
   # Docker Compose gives the invoking shell precedence over --env-file values.
   # Keep these runtime values sourced exclusively from the server-side .env file.
-  env -u OPENAI_API_KEY -u MIRIYUM_STORE_SEARCH_LLM_ENABLED docker compose "$@"
-}
+  unset OPENAI_API_KEY MIRIYUM_STORE_SEARCH_LLM_ENABLED
+  docker compose "$@"
+)
 
 publish_deployment_health() {
   local value="$1"

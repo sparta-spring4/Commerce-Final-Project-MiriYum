@@ -32,10 +32,8 @@ class DeployLlmRuntimeContractTest(unittest.TestCase):
         self.assertIn('OPENAI_API_KEY_PARAMETER_NAME', self.script)
 
     def test_compose_ignores_host_llm_environment_variables(self):
-        self.assertIn(
-            'env -u OPENAI_API_KEY -u MIRIYUM_STORE_SEARCH_LLM_ENABLED docker compose "$@"',
-            self.script,
-        )
+        self.assertIn("unset OPENAI_API_KEY MIRIYUM_STORE_SEARCH_LLM_ENABLED", self.script)
+        self.assertIn('docker compose "$@"', self.script)
 
     def test_all_compose_calls_use_the_sanitized_environment(self):
         self.assertNotIn('local compose=(docker compose', self.script)
