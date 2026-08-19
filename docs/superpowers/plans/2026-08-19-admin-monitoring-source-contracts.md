@@ -6,7 +6,7 @@
 
 **Architecture:** Each source domain owns its repositories and exposes only an immutable monitoring contract plus query service. Every query receives the same caller-supplied `asOf`; results carry `dataThrough`, raw `statusVersion`, completeness, reconciliation, and optional `historyAvailableFrom`. The later platform runtime depends only on these public services/DTOs.
 
-**Tech Stack:** Java 21, Spring Boot, Spring Data JPA, Flyway, PostgreSQL, JUnit 5, Mockito, AssertJ, Testcontainers, Gradle.
+**Tech Stack:** Java 21, Spring Boot, Spring Data JPA, Flyway, MySQL, JUnit 5, Mockito, AssertJ, Testcontainers, Gradle.
 
 **Spec:** `docs/superpowers/specs/2026-08-19-admin-monitoring-design.md`
 
@@ -62,12 +62,12 @@ Optional<Detail> findCase(DetailQuery query);
 - Modify: `docs/specs/platform-operator-openapi.yaml`
 - Create: `backend/src/test/java/com/miriyum/domain/platformoperator/AdminMonitoringOpenApiContractTest.java`
 
-- [ ] Verify #448 is merged, #459 state, V62 availability, clean worktree, and `git merge-base --is-ancestor origin/dev HEAD`; stop and report if any gate fails.
-- [ ] Write `AdminMonitoringOpenApiContractTest` asserting the aggregate references `/api/v1/platform-operators/admin-monitoring/cases`, the list/detail schemas include `asOf`, `dataThrough`, per-source completeness and failures, and HTTP 200/400/401/403/404/503 contracts.
-- [ ] Run `./gradlew test --tests com.miriyum.docs.AdminMonitoringOpenApiContractTest` and confirm RED because the paths/schemas do not exist.
-- [ ] Add the approved case model, fixed ordering, 31-day filter bound, opaque cursor, masking, assignment, and partial-failure rules to the spec and OpenAPI; reference it from the platform aggregate.
-- [ ] Re-run the named test and confirm GREEN.
-- [ ] Commit: `docs(admin-monitoring): activate source contract specification`.
+- [x] Verify #448 is merged, #459 state, V62 availability, clean worktree, and `git merge-base --is-ancestor origin/dev HEAD`; stop and report if any gate fails.
+- [x] Write `AdminMonitoringOpenApiContractTest` asserting the aggregate references `/api/v1/platform-operators/admin-monitoring/cases`, the list/detail schemas include `asOf`, `dataThrough`, per-source completeness and failures, and HTTP 200/400/401/403/404/503 contracts.
+- [x] Run `./gradlew test --tests com.miriyum.domain.platformoperator.AdminMonitoringOpenApiContractTest` and confirm RED because the paths/schemas do not exist.
+- [x] Add the approved case model, fixed ordering, 31-day filter bound, opaque cursor, masking, assignment, and partial-failure rules to the spec and OpenAPI; reference it from the platform aggregate.
+- [x] Re-run the named test and confirm GREEN.
+- [x] Commit: `docs(admin-monitoring): activate source contract specification`.
 
 ### Task 2: Add the MenuHold V62 status ledger
 
@@ -83,13 +83,13 @@ Optional<Detail> findCase(DetailQuery query);
 - Modify: `backend/src/test/java/com/miriyum/domain/menuhold/service/TemporaryMenuHoldServiceTest.java`
 - Modify: `backend/src/test/java/com/miriyum/domain/menuhold/service/MenuHoldServiceTest.java`
 
-- [ ] Write entity and repository tests for positive monotonic `resultVersion`, immutable `BASELINE|CREATED|TRANSITION`, stable reservation/hold link snapshots, and ordering by `(menuHoldId, resultVersion)`.
-- [ ] Add runtime tests proving creation writes exactly one `CREATED` v0 event, each persisted status transition writes one `TRANSITION` event in the same transaction, and an idempotent replay writes no second event.
-- [ ] Run only the four named tests and confirm RED.
-- [ ] Add `menu_holds.status_version BIGINT NOT NULL DEFAULT 0`; add the append-only audit table, unique `(menu_hold_id,result_version)`, lookup indexes, and exactly one migration-time `BASELINE` event per existing row.
-- [ ] Add `@Version long statusVersion` to `MenuHold`, implement the audit entity/repository, and persist audit events beside successful runtime writes. Do not modify pure transition policy code.
-- [ ] Re-run the four named tests and affected existing `MenuHoldTest`; confirm GREEN.
-- [ ] Commit: `feat(menu-hold): record truthful status transition ledger`.
+- [x] Write entity and repository tests for positive monotonic `resultVersion`, immutable `BASELINE|CREATED|TRANSITION`, stable reservation/hold link snapshots, and ordering by `(menuHoldId, resultVersion)`.
+- [x] Add runtime tests proving creation writes exactly one `CREATED` v0 event, each persisted status transition writes one `TRANSITION` event in the same transaction, and an idempotent replay writes no second event.
+- [x] Run only the four named tests and confirm RED.
+- [x] Add `menu_holds.status_version BIGINT NOT NULL DEFAULT 0`; add the append-only audit table, unique `(menu_hold_id,result_version)`, lookup indexes, and exactly one migration-time `BASELINE` event per existing row.
+- [x] Add `@Version long statusVersion` to `MenuHold`, implement the audit entity/repository, and persist audit events beside successful runtime writes. Do not modify pure transition policy code.
+- [x] Re-run the four named tests and affected existing `MenuHoldTest`; confirm GREEN.
+- [x] Commit: `feat(menu-hold): record truthful status transition ledger`.
 
 ### Task 3: Publish the MenuHold monitoring contract
 
@@ -101,11 +101,11 @@ Optional<Detail> findCase(DetailQuery query);
 - Create: `backend/src/test/java/com/miriyum/domain/menuhold/contract/MenuHoldMonitoringPublicContractTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/menuhold/service/MenuHoldMonitoringQueryServiceTest.java`
 
-- [ ] Write contract validation tests and an integration test covering changed references, bounded batch reads, detail history, BASELINE `historyAvailableFrom`, as-of reconstruction, and stable `reservation-hold:{id}` linkage.
-- [ ] Run both named tests and confirm RED.
-- [ ] Implement repository projections inside MenuHold and the three public service methods. For pre-baseline `asOf`, return `UNAVAILABLE`; for current rows behind `asOf`, return `DELAYED`, never `COMPLETE` by assumption.
-- [ ] Re-run both tests and confirm GREEN.
-- [ ] Commit: `feat(menu-hold): expose public monitoring query contract`.
+- [x] Write contract validation tests and an integration test covering changed references, bounded batch reads, detail history, BASELINE `historyAvailableFrom`, as-of reconstruction, and stable `reservation-hold:{id}` linkage.
+- [x] Run both named tests and confirm RED.
+- [x] Implement repository projections inside MenuHold and the three public service methods. For pre-baseline `asOf`, return `UNAVAILABLE`; for current rows behind `asOf`, return `DELAYED`, never `COMPLETE` by assumption.
+- [x] Re-run both tests and confirm GREEN.
+- [x] Commit: `feat(menu-hold): expose public monitoring query contract`.
 
 ### Task 4: Publish the Reservation monitoring contract
 
@@ -122,11 +122,11 @@ Optional<Detail> findCase(DetailQuery query);
 - Create: `backend/src/test/java/com/miriyum/domain/reservation/contract/ReservationMonitoringPublicContractTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/reservation/service/ReservationMonitoringQueryServiceTest.java`
 
-- [ ] Write tests for `reservation-hold:{holdId}` stability after final reservation creation, direct `reservation:{reservationId}`, confirmed version 0, one terminal transition version 1, check-in/no-show/fulfillment history, and masked contact data.
-- [ ] Run both named tests and confirm RED.
-- [ ] Add source-owned projection queries and implement the public service. `ReservationDepositProcess` is correlation only and must not appear as a state ledger.
-- [ ] Re-run both tests and confirm GREEN.
-- [ ] Commit: `feat(reservation): expose public monitoring query contract`.
+- [x] Write tests for `reservation-hold:{holdId}` stability after final reservation creation, direct `reservation:{reservationId}`, confirmed version 0, one terminal transition version 1, check-in/no-show/fulfillment history, and masked contact data.
+- [x] Run both named tests and confirm RED.
+- [x] Add source-owned projection queries and implement the public service. `ReservationDepositProcess` is correlation only and must not appear as a state ledger.
+- [x] Re-run both tests and confirm GREEN.
+- [x] Commit: `feat(reservation): expose public monitoring query contract`.
 
 ### Task 5: Publish the Payment monitoring contract
 
@@ -139,11 +139,11 @@ Optional<Detail> findCase(DetailQuery query);
 - Create: `backend/src/test/java/com/miriyum/domain/payment/contract/PaymentMonitoringPublicContractTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/payment/service/PaymentMonitoringQueryServiceTest.java`
 
-- [ ] Rebase/check #459's merged Payment contract and repository changes, then write tests for changed references, batch/detail, raw optimistic version, ledger `occurredAt`, refund reconciliation, and masked payment reference.
-- [ ] Run both named tests and confirm RED.
-- [ ] Implement the separate contract/query service and source projections; do not extend `PaymentContracts` or expose Payment entities.
-- [ ] Re-run both tests and confirm GREEN.
-- [ ] Commit: `feat(payment): expose public monitoring query contract`.
+- [x] Rebase/check #459's current Payment contract and repository changes, then write tests for changed references, batch/detail, raw optimistic version, ledger `occurredAt`, refund reconciliation, and masked payment reference.
+- [x] Run both named tests and confirm RED.
+- [x] Implement the separate contract/query service and source projections; do not extend `PaymentContracts` or expose Payment entities.
+- [x] Re-run both tests and confirm GREEN.
+- [x] Commit: `feat(payment): expose public monitoring query contract`.
 
 ### Task 6: Publish the Waiting monitoring contract
 
@@ -155,11 +155,11 @@ Optional<Detail> findCase(DetailQuery query);
 - Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/contract/WaitingMonitoringPublicContractTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/service/WaitingMonitoringQueryServiceTest.java`
 
-- [ ] Write tests for `waiting:{waitingTeamId}`, raw version, as-of transition reconstruction, conversion correlation, data-through, masked subject, and deterministic seek ordering.
-- [ ] Run both named tests and confirm RED.
-- [ ] Implement source projections and the public service against the post-#448 schema.
-- [ ] Re-run both tests and confirm GREEN.
-- [ ] Commit: `feat(waiting): expose public monitoring query contract`.
+- [x] Write tests for `waiting:{waitingTeamId}`, raw version, as-of transition reconstruction, conversion correlation, data-through, masked subject, and deterministic seek ordering.
+- [x] Run both named tests and confirm RED.
+- [x] Implement source projections and the public service against the post-#448 schema.
+- [x] Re-run both tests and confirm GREEN.
+- [x] Commit: `feat(waiting): expose public monitoring query contract`.
 
 ### Task 7: Contract boundary and publication
 
