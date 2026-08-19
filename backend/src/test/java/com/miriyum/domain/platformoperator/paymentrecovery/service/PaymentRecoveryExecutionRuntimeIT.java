@@ -91,7 +91,7 @@ class PaymentRecoveryExecutionRuntimeIT {
         recoveryCase.beginInvestigation(1L, now);
         cases.saveAndFlush(recoveryCase);
         PaymentRecoveryProposal proposal = PaymentRecoveryProposal.propose(
-                recoveryCase.getPublicId(), 1L, RecoveryAction.RETRY_REFUND,
+                recoveryCase.getPublicId(), 1L, 2L, RecoveryAction.RETRY_REFUND,
                 100_000L, 100_000L, 300_000L, "KRW", 3L, 4L, 5L,
                 "a".repeat(64), operator.getId(), 1L,
                 Set.of(PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR),
@@ -106,10 +106,9 @@ class PaymentRecoveryExecutionRuntimeIT {
                 UUID.randomUUID().toString(), now));
         recoveryCase.queueExecution(3L, now);
         cases.saveAndFlush(recoveryCase);
-        executions.saveAndFlush(PaymentRecoveryExecution.authorize(
-                proposal, approval, recoveryCase.getCaseVersion(), now));
+        executions.saveAndFlush(PaymentRecoveryExecution.authorize(proposal, approval, now));
         assignments.saveAndFlush(AdminCaseAssignment.assign(AdminCaseType.PAYMENT_RECOVERY,
-                recoveryCase.getPublicId(), recoveryCase.getCaseVersion(), operator.getId(),
+                recoveryCase.getPublicId(), proposal.getExpectedCaseVersion(), operator.getId(),
                 now.plusSeconds(600), now));
 
         CountDownLatch ready = new CountDownLatch(2);

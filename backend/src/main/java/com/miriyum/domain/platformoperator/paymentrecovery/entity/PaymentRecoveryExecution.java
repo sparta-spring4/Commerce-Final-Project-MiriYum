@@ -84,13 +84,11 @@ public class PaymentRecoveryExecution {
     private long rowVersion;
 
     public static PaymentRecoveryExecution authorize(
-            PaymentRecoveryProposal proposal, PaymentRecoveryApproval approval,
-            long authorizedCaseVersion, Instant now) {
+            PaymentRecoveryProposal proposal, PaymentRecoveryApproval approval, Instant now) {
         Objects.requireNonNull(proposal);
         Objects.requireNonNull(approval);
         if (!proposal.getCasePublicId().equals(approval.getCasePublicId())
-                || proposal.getProposalVersion() != approval.getProposalVersion()
-                || authorizedCaseVersion < 1) conflict();
+                || proposal.getProposalVersion() != approval.getProposalVersion()) conflict();
         PaymentRecoveryExecution value = new PaymentRecoveryExecution();
         value.casePublicId = proposal.getCasePublicId();
         value.proposalVersion = proposal.getProposalVersion();
@@ -98,7 +96,7 @@ public class PaymentRecoveryExecution {
         value.operation = RecoveryAction.RETRY_REFUND;
         value.operationId = UUID.randomUUID().toString();
         value.status = ExecutionStatus.PENDING;
-        value.authorizedCaseVersion = authorizedCaseVersion;
+        value.authorizedCaseVersion = proposal.getExpectedCaseVersion();
         value.expectedHandoffVersion = proposal.getExpectedHandoffVersion();
         value.expectedPaymentVersion = proposal.getExpectedPaymentVersion();
         value.expectedRecoveryVersion = proposal.getExpectedRecoveryVersion();
@@ -106,6 +104,33 @@ public class PaymentRecoveryExecution {
         value.requesterAuthorityVersion = proposal.getRequesterAuthorityVersion();
         value.approverPlatformOperatorAccountId = approval.getApproverPlatformOperatorAccountId();
         value.approverAuthorityVersion = approval.getApproverAuthorityVersion();
+        value.nextAttemptAt = Objects.requireNonNull(now);
+        value.createdAt = now;
+        value.updatedAt = now;
+        return value;
+    }
+
+    public static PaymentRecoveryExecution authorizeRequery(
+            PaymentRecoveryCase recoveryCase, long requesterId,
+            long requesterAuthorityVersion, Instant now) {
+        Objects.requireNonNull(recoveryCase);
+        if (!recoveryCase.getAllowedActions().contains(RecoveryAction.REQUERY_PROVIDER_RESULT)
+                || requesterId <= 0 || requesterAuthorityVersion < 1) conflict();
+        PaymentRecoveryExecution value = new PaymentRecoveryExecution();
+        value.casePublicId = recoveryCase.getPublicId();
+        value.proposalVersion = null;
+        value.executionKey = UUID.randomUUID().toString();
+        value.operation = RecoveryAction.REQUERY_PROVIDER_RESULT;
+        value.operationId = UUID.randomUUID().toString();
+        value.status = ExecutionStatus.PENDING;
+        value.authorizedCaseVersion = recoveryCase.getCaseVersion();
+        value.expectedHandoffVersion = recoveryCase.getHandoffVersion();
+        value.expectedPaymentVersion = recoveryCase.getPaymentVersion();
+        value.expectedRecoveryVersion = recoveryCase.getRecoveryVersion();
+        value.requesterPlatformOperatorAccountId = requesterId;
+        value.requesterAuthorityVersion = requesterAuthorityVersion;
+        value.approverPlatformOperatorAccountId = requesterId;
+        value.approverAuthorityVersion = requesterAuthorityVersion;
         value.nextAttemptAt = Objects.requireNonNull(now);
         value.createdAt = now;
         value.updatedAt = now;

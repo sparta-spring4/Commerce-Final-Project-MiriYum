@@ -49,7 +49,7 @@ class PaymentRecoveryExecutionTransactionTest {
                 "port********abc", 3L, 4L, 5L, NOW);
         recoveryCase.beginInvestigation(1L, NOW);
         PaymentRecoveryProposal proposal = PaymentRecoveryProposal.propose(
-                recoveryCase.getPublicId(), 1L, RecoveryAction.RETRY_REFUND,
+                recoveryCase.getPublicId(), 1L, 2L, RecoveryAction.RETRY_REFUND,
                 100_000L, 100_000L, 300_000L, "KRW", 3L, 4L, 5L,
                 "a".repeat(64), 11L, 7L,
                 Set.of(PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR),
@@ -62,7 +62,7 @@ class PaymentRecoveryExecutionTransactionTest {
                 UUID.randomUUID().toString(), NOW);
         recoveryCase.queueExecution(3L, NOW);
         PaymentRecoveryExecution execution = PaymentRecoveryExecution.authorize(
-                proposal, approval, recoveryCase.getCaseVersion(), NOW);
+                proposal, approval, NOW);
         when(executions.findDueForUpdate(any(), any(), any())).thenReturn(List.of(execution));
         when(cases.findByPublicIdForUpdate(recoveryCase.getPublicId()))
                 .thenReturn(Optional.of(recoveryCase));

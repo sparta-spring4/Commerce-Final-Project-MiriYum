@@ -88,6 +88,7 @@ CREATE TABLE payment_recovery_proposals (
     payment_recovery_proposal_id BIGINT NOT NULL AUTO_INCREMENT,
     case_public_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     proposal_version BIGINT NOT NULL,
+    expected_case_version BIGINT NOT NULL,
     action VARCHAR(30) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     requested_amount_minor BIGINT NOT NULL,
     cumulative_lineage_amount_minor BIGINT NOT NULL,
@@ -116,7 +117,7 @@ CREATE TABLE payment_recovery_proposals (
         'SINGLE_OPERATOR', 'ADDITIONAL_SUPER_ADMIN'
     )),
     CONSTRAINT ck_payment_recovery_proposals_versions CHECK (
-        proposal_version >= 1 AND expected_handoff_version >= 0
+        proposal_version >= 1 AND expected_case_version >= 1 AND expected_handoff_version >= 0
         AND expected_payment_version >= 0 AND expected_recovery_version >= 0
         AND requester_authority_version >= 1
     ),

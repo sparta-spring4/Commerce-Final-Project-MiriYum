@@ -137,9 +137,13 @@ public class PaymentRecoveryExecutionTransaction {
     private static void requireAuthorizedCaseState(
             PaymentRecoveryExecution execution, PaymentRecoveryCase recoveryCase) {
         boolean expectedCaseState = recoveryCase.getStatus() == CaseStatus.EXECUTING
-                && recoveryCase.getCaseVersion() == execution.getAuthorizedCaseVersion();
+                && recoveryCase.getCaseVersion() > execution.getAuthorizedCaseVersion();
         expectedCaseState |= recoveryCase.getStatus() == CaseStatus.VERIFYING
-                && recoveryCase.getCaseVersion() == execution.getAuthorizedCaseVersion() + 1L;
+                && recoveryCase.getCaseVersion() > execution.getAuthorizedCaseVersion();
+        if (execution.getProposalVersion() != null
+                && recoveryCase.getCurrentProposalVersion() != execution.getProposalVersion()) {
+            expectedCaseState = false;
+        }
         if (!expectedCaseState) conflict();
     }
 

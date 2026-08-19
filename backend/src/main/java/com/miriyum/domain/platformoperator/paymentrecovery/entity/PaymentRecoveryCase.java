@@ -184,6 +184,13 @@ public class PaymentRecoveryCase {
         transition(expectedVersion, Set.of(CaseStatus.PROPOSED), CaseStatus.EXECUTING, now);
     }
 
+    public void queueRequery(long expectedVersion, Instant now) {
+        if (!allowedActions.contains(RecoveryAction.REQUERY_PROVIDER_RESULT)) {
+            throw new ServiceException(PaymentRecoveryErrorCode.RECOVERY_ACTION_NOT_ALLOWED);
+        }
+        transition(expectedVersion, Set.of(CaseStatus.INVESTIGATING), CaseStatus.EXECUTING, now);
+    }
+
     public void startVerification(long expectedVersion, Instant now) {
         transition(expectedVersion, Set.of(CaseStatus.EXECUTING), CaseStatus.VERIFYING, now);
     }

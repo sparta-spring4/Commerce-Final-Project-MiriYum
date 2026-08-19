@@ -38,6 +38,8 @@ public class PaymentRecoveryProposal {
     private String casePublicId;
     @Column(name = "proposal_version", nullable = false)
     private long proposalVersion;
+    @Column(name = "expected_case_version", nullable = false)
+    private long expectedCaseVersion;
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private RecoveryAction action;
@@ -76,7 +78,7 @@ public class PaymentRecoveryProposal {
     private Instant createdAt;
 
     public static PaymentRecoveryProposal propose(
-            String casePublicId, long proposalVersion, RecoveryAction action,
+            String casePublicId, long proposalVersion, long expectedCaseVersion, RecoveryAction action,
             long requestedAmountMinor, long cumulativeLineageAmountMinor,
             long originalAmountMinor, String currency,
             long expectedHandoffVersion, long expectedPaymentVersion,
@@ -97,12 +99,13 @@ public class PaymentRecoveryProposal {
         }
         PaymentRecoveryProposal value = new PaymentRecoveryProposal();
         value.casePublicId = requireUuid(casePublicId);
-        if (proposalVersion < 1 || expectedHandoffVersion < 0
+        if (proposalVersion < 1 || expectedCaseVersion < 1 || expectedHandoffVersion < 0
                 || expectedPaymentVersion < 0 || expectedRecoveryVersion < 0
                 || requesterAuthorityVersion < 1) {
             throw new IllegalArgumentException("versions are invalid");
         }
         value.proposalVersion = proposalVersion;
+        value.expectedCaseVersion = expectedCaseVersion;
         value.action = action;
         value.requestedAmountMinor = requestedAmountMinor;
         value.cumulativeLineageAmountMinor = cumulativeLineageAmountMinor;

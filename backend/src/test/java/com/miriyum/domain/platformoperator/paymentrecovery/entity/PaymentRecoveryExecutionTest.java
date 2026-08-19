@@ -43,9 +43,25 @@ class PaymentRecoveryExecutionTest {
         assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.PROCESSING);
     }
 
+    @Test
+    void requeryAuthorizationHasNoProposalAndCanNeverBecomeRefundOperation() {
+        var recoveryCase = PaymentRecoveryCase.open("281",
+                PaymentRecoveryEnums.RecoveryKind.REFUND_RESULT_UNKNOWN,
+                PaymentRecoveryEnums.ResultStatus.UNKNOWN, 300_000L, 0L, 300_000L,
+                "KRW", Set.of(RecoveryAction.REQUERY_PROVIDER_RESULT), "port********abc",
+                3L, 4L, 5L, NOW);
+        recoveryCase.beginInvestigation(1L, NOW);
+        PaymentRecoveryExecution execution = PaymentRecoveryExecution.authorizeRequery(
+                recoveryCase, 11L, 7L, NOW);
+
+        assertThat(execution.getProposalVersion()).isNull();
+        assertThat(execution.getOperation()).isEqualTo(RecoveryAction.REQUERY_PROVIDER_RESULT);
+        assertThat(execution.getAuthorizedCaseVersion()).isEqualTo(2L);
+    }
+
     private static PaymentRecoveryExecution execution() {
         PaymentRecoveryProposal proposal = PaymentRecoveryProposal.propose(
-                "550e8400-e29b-41d4-a716-446655440281", 1L,
+                "550e8400-e29b-41d4-a716-446655440281", 1L, 3L,
                 RecoveryAction.RETRY_REFUND, 100_000L, 100_000L, 300_000L, "KRW",
                 3L, 4L, 5L, "a".repeat(64), 11L, 7L,
                 Set.of(PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR),
@@ -56,6 +72,6 @@ class PaymentRecoveryExecutionTest {
                 Set.of(PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR),
                 Set.of(PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE),
                 "550e8400-e29b-41d4-a716-446655440283", NOW);
-        return PaymentRecoveryExecution.authorize(proposal, approval, 3L, NOW);
+        return PaymentRecoveryExecution.authorize(proposal, approval, NOW);
     }
 }

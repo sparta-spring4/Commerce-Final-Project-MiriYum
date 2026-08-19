@@ -24,6 +24,8 @@ public interface PaymentRecoveryExecutionRepository
     Optional<PaymentRecoveryExecution> findByCasePublicIdAndProposalVersion(
             String casePublicId, long proposalVersion);
 
+    List<PaymentRecoveryExecution> findByCasePublicIdOrderByCreatedAtAsc(String casePublicId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select execution from PaymentRecoveryExecution execution

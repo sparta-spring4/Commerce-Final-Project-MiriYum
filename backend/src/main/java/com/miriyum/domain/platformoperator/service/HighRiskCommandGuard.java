@@ -82,6 +82,27 @@ public class HighRiskCommandGuard {
         }
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    public AdminAuditContext authorizeSecondaryPaymentRecoveryCommand(
+            HighRiskCommandRequest request) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("high-risk authorization requires an active command transaction");
+        }
+        if (request.caseType() != AdminCaseType.PAYMENT_RECOVERY
+                || request.purpose() != AdminCommandPurpose.PAYMENT_RECOVERY
+                || request.targetType() != AdminTargetType.PAYMENT_RECOVERY_CASE
+                || request.requiredPermission()
+                != PlatformOperatorPermission.PAYMENT_RECOVERY_HIGH_VALUE_APPROVE
+                || !request.targetId().startsWith(request.caseId())) {
+            deny();
+        }
+        try {
+            return authorizeAgainstStores(request, false);
+        } catch (DataAccessException exception) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
+    }
+
     private AdminAuditContext authorizeAgainstStores(
             HighRiskCommandRequest request, boolean verifyAssignment) {
         PlatformOperatorAccount account = accounts.findByIdForUpdate(request.principal().accountId())

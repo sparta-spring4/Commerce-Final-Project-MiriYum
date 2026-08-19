@@ -2,6 +2,7 @@ package com.miriyum.domain.platformoperator.paymentrecovery.repository;
 
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryProposal;
 import java.util.Optional;
+import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface PaymentRecoveryProposalRepository
@@ -11,4 +12,6 @@ public interface PaymentRecoveryProposalRepository
 
     Optional<PaymentRecoveryProposal> findByCasePublicIdAndRequestFingerprint(
             String casePublicId, String requestFingerprint);
+
+    List<PaymentRecoveryProposal> findByCasePublicIdOrderByProposalVersionAsc(String casePublicId);
 }

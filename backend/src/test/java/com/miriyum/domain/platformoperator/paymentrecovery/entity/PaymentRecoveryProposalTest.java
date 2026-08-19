@@ -64,7 +64,7 @@ class PaymentRecoveryProposalTest {
             long original
     ) {
         return PaymentRecoveryProposal.propose(
-                CASE_ID, 1L, RecoveryAction.RETRY_REFUND,
+                CASE_ID, 1L, 3L, RecoveryAction.RETRY_REFUND,
                 requested, cumulative, original, "KRW",
                 3L, 4L, 5L, "a".repeat(64),
                 11L, 7L,
