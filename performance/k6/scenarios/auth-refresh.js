@@ -28,6 +28,11 @@ function parseTokenData(response) {
   if (data === null || typeof data !== 'object' || Array.isArray(data)) {
     throw new Error('token response data must be an object')
   }
+  const fields = Object.keys(data)
+  if (fields.length !== 3
+      || fields.some((field) => !['accessToken', 'tokenType', 'expiresIn'].includes(field))) {
+    throw new Error('token response data must match the OpenAPI fields')
+  }
   if (typeof data.accessToken !== 'string' || data.accessToken === '') {
     throw new Error('token response must contain an access token')
   }
