@@ -19,7 +19,7 @@ import org.testcontainers.mysql.MySQLContainer;
 class PaymentRecoveryMigrationIT {
 
     @Test
-    void v64CreatesImmutableVersionedPaymentRecoveryWorkflow() throws Exception {
+    void v66CreatesImmutableVersionedPaymentRecoveryWorkflow() throws Exception {
         try (MySQLContainer mysql = new MySQLContainer("mysql:8.0.40")
                 .withCommand("--log-bin-trust-function-creators=1")) {
             mysql.start();
@@ -30,7 +30,7 @@ class PaymentRecoveryMigrationIT {
 
             assertThat(flyway.info().applied())
                     .extracting(MigrationInfo::getScript)
-                    .contains("V64__create_payment_recovery_workflow.sql");
+                    .contains("V66__create_payment_recovery_workflow.sql");
             try (Connection connection = mysql.createConnection("")) {
                 assertThat(tables(connection)).contains(
                         "payment_recovery_cases",

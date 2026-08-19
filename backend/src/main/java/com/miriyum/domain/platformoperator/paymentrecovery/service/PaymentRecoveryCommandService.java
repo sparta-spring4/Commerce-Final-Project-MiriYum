@@ -88,7 +88,15 @@ public class PaymentRecoveryCommandService {
             AdminAuditContext context = guard.authorizeInitialPaymentRecoveryAssignment(highRisk(
                     principal, PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE, recoveryCase,
                     caseId, approval, correlationId));
-            recoveryCase.beginInvestigation(request.expectedCaseVersion(), clock.instant());
+            switch (recoveryCase.getStatus()) {
+                case RECONCILIATION_PENDING ->
+                        recoveryCase.beginInvestigation(request.expectedCaseVersion(), clock.instant());
+                case HOLD, FAILED ->
+                        recoveryCase.resumeInvestigation(request.expectedCaseVersion(), clock.instant());
+                case INVESTIGATING -> { }
+                default -> throw new ServiceException(
+                        PaymentRecoveryErrorCode.RECOVERY_CASE_STATE_CONFLICT);
+            }
             cases.saveAndFlush(recoveryCase);
             assignments.assign(new AdminCaseAssignmentCommand(AdminCaseType.PAYMENT_RECOVERY,
                     caseId, recoveryCase.getCaseVersion(), principal.accountId(),

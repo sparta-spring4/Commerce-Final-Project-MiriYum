@@ -1,6 +1,7 @@
 package com.miriyum.domain.platformoperator.paymentrecovery.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -16,6 +17,7 @@ import com.miriyum.domain.platformoperator.enums.AdminTargetType;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import com.miriyum.domain.platformoperator.paymentrecovery.dto.PaymentRecoveryRequests.ProposalRequest;
+import com.miriyum.domain.platformoperator.paymentrecovery.dto.PaymentRecoveryRequests.AssignmentRequest;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryCase;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.ApprovalTier;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.CaseStatus;
@@ -26,6 +28,7 @@ import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRec
 import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRecoveryCaseRepository;
 import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRecoveryExecutionRepository;
 import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRecoveryProposalRepository;
+import com.miriyum.domain.platformoperator.paymentrecovery.exception.PaymentRecoveryErrorCode;
 import com.miriyum.domain.platformoperator.service.AdminCaseAssignmentManager;
 import com.miriyum.domain.platformoperator.service.HighRiskCommandGuard;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorAuditWriter;
@@ -34,6 +37,7 @@ import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotentOutcome;
+import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -128,10 +132,73 @@ class PaymentRecoveryCommandServiceTest {
                                 && assignment.operatorId() == principal.accountId()));
     }
 
+    @Test
+    void assignmentResumesHeldCaseAndBindsTheAdvancedVersion() {
+        PaymentRecoveryCase recoveryCase = investigating();
+        recoveryCase.holdFromInvestigation(2L, NOW);
+        when(cases.findByPublicIdForUpdate(recoveryCase.getPublicId())).thenReturn(Optional.of(recoveryCase));
+        when(guard.authorizeInitialPaymentRecoveryAssignment(any())).thenReturn(context());
+
+        service.assign(command(), principal, recoveryCase.getPublicId(),
+                new AssignmentRequest(3L), "approval", "corr-281");
+
+        assertThat(recoveryCase.getStatus()).isEqualTo(CaseStatus.INVESTIGATING);
+        assertThat(recoveryCase.getCaseVersion()).isEqualTo(4L);
+        verify(assignments).assign(org.mockito.ArgumentMatchers.argThat(
+                (AdminCaseAssignmentCommand assignment) -> assignment.caseVersion() == 4L));
+    }
+
+    @Test
+    void assignmentResumesFailedCaseAndBindsTheAdvancedVersion() {
+        PaymentRecoveryCase recoveryCase = investigating();
+        recoveryCase.queueRequery(2L, NOW);
+        recoveryCase.fail(3L, NOW);
+        when(cases.findByPublicIdForUpdate(recoveryCase.getPublicId())).thenReturn(Optional.of(recoveryCase));
+        when(guard.authorizeInitialPaymentRecoveryAssignment(any())).thenReturn(context());
+
+        service.assign(command(), principal, recoveryCase.getPublicId(),
+                new AssignmentRequest(4L), "approval", "corr-281");
+
+        assertThat(recoveryCase.getStatus()).isEqualTo(CaseStatus.INVESTIGATING);
+        assertThat(recoveryCase.getCaseVersion()).isEqualTo(5L);
+        verify(assignments).assign(org.mockito.ArgumentMatchers.argThat(
+                (AdminCaseAssignmentCommand assignment) -> assignment.caseVersion() == 5L));
+    }
+
+    @Test
+    void assignmentRenewsInvestigatingCaseWithoutAdvancingItsVersion() {
+        PaymentRecoveryCase recoveryCase = investigating();
+        when(cases.findByPublicIdForUpdate(recoveryCase.getPublicId())).thenReturn(Optional.of(recoveryCase));
+        when(guard.authorizeInitialPaymentRecoveryAssignment(any())).thenReturn(context());
+
+        service.assign(command(), principal, recoveryCase.getPublicId(),
+                new AssignmentRequest(2L), "approval", "corr-281");
+
+        assertThat(recoveryCase.getStatus()).isEqualTo(CaseStatus.INVESTIGATING);
+        assertThat(recoveryCase.getCaseVersion()).isEqualTo(2L);
+        verify(assignments).assign(org.mockito.ArgumentMatchers.argThat(
+                (AdminCaseAssignmentCommand assignment) -> assignment.caseVersion() == 2L));
+    }
+
+    @Test
+    void assignmentRejectsCaseStatesThatCannotBeInvestigated() {
+        PaymentRecoveryCase recoveryCase = investigating();
+        recoveryCase.recordProposal(2L, 1L, ApprovalTier.SINGLE_OPERATOR, NOW);
+        when(cases.findByPublicIdForUpdate(recoveryCase.getPublicId())).thenReturn(Optional.of(recoveryCase));
+        when(guard.authorizeInitialPaymentRecoveryAssignment(any())).thenReturn(context());
+
+        assertThatThrownBy(() -> service.assign(command(), principal, recoveryCase.getPublicId(),
+                new AssignmentRequest(3L), "approval", "corr-281"))
+                .isInstanceOf(ServiceException.class)
+                .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                        .isEqualTo(PaymentRecoveryErrorCode.RECOVERY_CASE_STATE_CONFLICT));
+    }
+
     private static PaymentRecoveryCase investigating() {
         PaymentRecoveryCase value = PaymentRecoveryCase.open("281", RecoveryKind.REFUND_FAILED,
                 ResultStatus.FAILED, 300_000L, 100_000L, 200_000L, "KRW",
-                Set.of(RecoveryAction.RETRY_REFUND), "port********abc", 3L, 4L, 5L, NOW);
+                Set.of(RecoveryAction.RETRY_REFUND, RecoveryAction.REQUERY_PROVIDER_RESULT),
+                "port********abc", 3L, 4L, 5L, NOW);
         value.beginInvestigation(1L, NOW);
         return value;
     }

@@ -3,6 +3,7 @@ package com.miriyum.domain.platformoperator.service;
 import com.miriyum.domain.platformoperator.dto.authorization.AdminCaseAssignmentRequest;
 import com.miriyum.domain.platformoperator.dto.authorization.AdminCaseAssignmentCommand;
 import com.miriyum.domain.platformoperator.entity.AdminCaseAssignment;
+import com.miriyum.domain.platformoperator.enums.AdminCaseAssignmentStatus;
 import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode;
 import com.miriyum.domain.platformoperator.repository.AdminCaseAssignmentRepository;
 import com.miriyum.global.exception.ServiceException;
@@ -44,14 +45,24 @@ public class AdminCaseAssignmentService implements AdminCaseAssignmentVerifier, 
     @Transactional
     public void assign(AdminCaseAssignmentCommand command) {
         try {
-            if (!command.expiresAt().isAfter(clock.instant())
-                    || assignments.findByCaseForUpdate(command.caseType(), command.caseId(), command.caseVersion())
-                    .isPresent()) {
+            Instant now = clock.instant();
+            if (!command.expiresAt().isAfter(now)) {
                 throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
+            }
+            var current = assignments.findByCaseForUpdate(
+                    command.caseType(), command.caseId(), command.caseVersion());
+            if (current.isPresent()) {
+                AdminCaseAssignment assignment = current.get();
+                if (assignment.isActiveAt(now)
+                        || assignment.getStatus() == AdminCaseAssignmentStatus.CLOSED) {
+                    throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
+                }
+                assignment.reassign(command.operatorId(), command.expiresAt(), now);
+                return;
             }
             assignments.saveAndFlush(AdminCaseAssignment.assign(
                     command.caseType(), command.caseId(), command.caseVersion(), command.operatorId(),
-                    command.expiresAt(), clock.instant()));
+                    command.expiresAt(), now));
         } catch (DataIntegrityViolationException | ConcurrencyFailureException exception) {
             throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
         }

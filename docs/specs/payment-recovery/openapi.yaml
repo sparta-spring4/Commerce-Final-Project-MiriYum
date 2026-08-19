@@ -253,7 +253,7 @@ components:
     CaseSummary:
       type: object
       additionalProperties: false
-      required: [caseId, status, caseVersion, kind, resultStatus, originalAmountMinor, cumulativeRefundedAmountMinor, remainingRefundableAmountMinor, currency, allowedActions, createdAt, updatedAt]
+      required: [caseId, status, caseVersion, kind, resultStatus, originalAmountMinor, cumulativeRefundedAmountMinor, remainingRefundableAmountMinor, currency, allowedActions, handoffVersion, paymentVersion, recoveryVersion, createdAt, updatedAt]
       properties:
         caseId: {type: string, format: uuid}
         status: {$ref: '#/components/schemas/CaseStatus'}
@@ -271,6 +271,9 @@ components:
           type: array
           uniqueItems: true
           items: {$ref: '#/components/schemas/RecoveryAction'}
+        handoffVersion: {type: integer, format: int64, minimum: 0}
+        paymentVersion: {type: integer, format: int64, minimum: 0}
+        recoveryVersion: {type: integer, format: int64, minimum: 0}
         assignedOperatorId: {type: [integer, 'null'], format: int64, minimum: 1}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}

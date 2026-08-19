@@ -6,6 +6,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -60,6 +61,18 @@ class PaymentRecoveryOpenApiContractTest {
         assertThat(map(parameters.get("AdminReauthentication")))
                 .containsEntry("name", "X-Admin-Reauthentication");
         assertThat(map(parameters.get("CorrelationId"))).containsEntry("name", "X-Correlation-Id");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void caseSummaryPublishesEveryVersionRequiredByFollowUpCommands() throws Exception {
+        Map<String, Object> schemas = map(map(document().get("components")).get("schemas"));
+        Map<String, Object> summary = map(schemas.get("CaseSummary"));
+
+        assertThat((List<String>) summary.get("required"))
+                .contains("caseVersion", "handoffVersion", "paymentVersion", "recoveryVersion");
+        assertThat(map(summary.get("properties")))
+                .containsKeys("caseVersion", "handoffVersion", "paymentVersion", "recoveryVersion");
     }
 
     @Test

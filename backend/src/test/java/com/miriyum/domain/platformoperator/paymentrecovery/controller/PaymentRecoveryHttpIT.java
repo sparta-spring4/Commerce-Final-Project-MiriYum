@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -15,6 +17,9 @@ import com.jayway.jsonpath.JsonPath;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryRefundPreview;
+import com.miriyum.domain.payment.service.PaymentService;
+import com.miriyum.domain.platformoperator.entity.AdminCaseAssignment;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorRoleGrant;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
@@ -23,9 +28,12 @@ import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecover
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.RecoveryKind;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.ResultStatus;
 import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRecoveryCaseRepository;
+import com.miriyum.domain.platformoperator.repository.AdminCaseAssignmentRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorRoleGrantRepository;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Tag;
@@ -39,6 +47,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -79,8 +88,10 @@ class PaymentRecoveryHttpIT {
     @Autowired PlatformOperatorAccountRepository accounts;
     @Autowired PlatformOperatorRoleGrantRepository roles;
     @Autowired PaymentRecoveryCaseRepository cases;
+    @Autowired AdminCaseAssignmentRepository assignments;
     @Autowired JwtTokenProvider jwt;
     @Autowired JdbcTemplate jdbc;
+    @MockitoBean PaymentService payments;
 
     @Test
     void authenticatedSelfAssignmentIsReauthenticatedIdempotentAndMasked() throws Exception {
@@ -168,5 +179,187 @@ class PaymentRecoveryHttpIT {
                         .header("Authorization", "Bearer "
                                 + jwt.generateAccessToken(TokenNamespace.CONSUMER, 1L)))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void publicResponseVersionsDriveRequeryAndProposalCommands() throws Exception {
+        createOperator("payment-recovery-versions@example.com");
+        String token = loginAndActivate("payment-recovery-versions@example.com");
+        PaymentRecoveryCase requeryCase = cases.saveAndFlush(PaymentRecoveryCase.open(
+                "282", RecoveryKind.REFUND_RESULT_UNKNOWN, ResultStatus.UNKNOWN,
+                300_000L, 100_000L, 200_000L, "KRW",
+                Set.of(RecoveryAction.REQUERY_PROVIDER_RESULT), "port********rq1",
+                13L, 14L, 15L, Instant.now()));
+        PaymentRecoveryCase proposalCase = cases.saveAndFlush(PaymentRecoveryCase.open(
+                "283", RecoveryKind.REFUND_FAILED, ResultStatus.FAILED,
+                300_000L, 100_000L, 200_000L, "KRW",
+                Set.of(RecoveryAction.RETRY_REFUND), "port********pr1",
+                23L, 24L, 25L, Instant.now()));
+
+        Map<String, Object> requerySummary = publicSummary(token, requeryCase.getPublicId());
+        String assignedRequery = assign(token, requeryCase.getPublicId(),
+                number(requerySummary, "caseVersion"));
+        long assignedRequeryVersion = jsonNumber(assignedRequery, "$.data.caseVersion");
+        long handoffVersion = number(requerySummary, "handoffVersion");
+        long paymentVersion = number(requerySummary, "paymentVersion");
+        long recoveryVersion = number(requerySummary, "recoveryVersion");
+        String requeryBody = "{\"expectedCaseVersion\":" + assignedRequeryVersion
+                + ",\"expectedHandoffVersion\":" + handoffVersion
+                + ",\"expectedPaymentVersion\":" + paymentVersion
+                + ",\"expectedRecoveryVersion\":" + recoveryVersion + "}";
+        mvc.perform(post("/api/v1/platform-operators/payment-recovery-cases/{caseId}/requeries",
+                        requeryCase.getPublicId()).header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", UUID.randomUUID().toString())
+                        .header("X-Admin-Reauthentication", reauthenticate(token, requeryCase.getPublicId()))
+                        .header("X-Correlation-Id", "corr-http-requery-versions")
+                        .contentType(MediaType.APPLICATION_JSON).content(requeryBody))
+                .andExpect(status().isAccepted());
+
+        Map<String, Object> proposalSummary = publicSummary(token, proposalCase.getPublicId());
+        String assignedProposal = assign(token, proposalCase.getPublicId(),
+                number(proposalSummary, "caseVersion"));
+        long proposalCaseVersion = jsonNumber(assignedProposal, "$.data.caseVersion");
+        long proposalHandoffVersion = number(proposalSummary, "handoffVersion");
+        long proposalPaymentVersion = number(proposalSummary, "paymentVersion");
+        long proposalRecoveryVersion = number(proposalSummary, "recoveryVersion");
+        when(payments.previewManualRecoveryRefund(any())).thenReturn(new ManualRecoveryRefundPreview(
+                "283", 23L, 24L, 25L, 300_000L, 100_000L, 50_000L,
+                200_000L, "KRW", true));
+        String proposalBody = "{\"action\":\"RETRY_REFUND\",\"expectedCaseVersion\":"
+                + proposalCaseVersion + ",\"expectedHandoffVersion\":" + proposalHandoffVersion
+                + ",\"expectedPaymentVersion\":" + proposalPaymentVersion
+                + ",\"expectedRecoveryVersion\":" + proposalRecoveryVersion + "}";
+        mvc.perform(post("/api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals",
+                        proposalCase.getPublicId()).header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", UUID.randomUUID().toString())
+                        .header("X-Admin-Reauthentication", reauthenticate(token, proposalCase.getPublicId()))
+                        .header("X-Correlation-Id", "corr-http-proposal-versions")
+                        .contentType(MediaType.APPLICATION_JSON).content(proposalBody))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void heldCaseResumesAndExpiredInvestigatingAssignmentTransfersWithoutStealingActiveWork() throws Exception {
+        PlatformOperatorAccount resumeOperator = createOperator("payment-recovery-resume@example.com");
+        String resumeToken = loginAndActivate("payment-recovery-resume@example.com");
+        PaymentRecoveryCase held = PaymentRecoveryCase.open(
+                "284", RecoveryKind.REFUND_RESULT_UNKNOWN, ResultStatus.UNKNOWN,
+                300_000L, 100_000L, 200_000L, "KRW",
+                Set.of(RecoveryAction.REQUERY_PROVIDER_RESULT), "port********hold",
+                33L, 34L, 35L, Instant.now());
+        held.beginInvestigation(1L, Instant.now());
+        held.queueRequery(2L, Instant.now());
+        held.startVerification(3L, Instant.now());
+        held.hold(4L, Instant.now());
+        cases.saveAndFlush(held);
+
+        String resumed = assign(resumeToken, held.getPublicId(), 5L);
+        assertThat((String) JsonPath.read(resumed, "$.data.status")).isEqualTo("INVESTIGATING");
+        assertThat((Integer) JsonPath.read(resumed, "$.data.caseVersion")).isEqualTo(6);
+        assertThat(jdbc.queryForObject("""
+                select platform_operator_account_id from admin_case_assignments
+                where case_type = 'PAYMENT_RECOVERY' and case_id = ? and case_version = 6
+                """, Long.class, held.getPublicId())).isEqualTo(resumeOperator.getId());
+
+        PlatformOperatorAccount former = createOperator("payment-recovery-former@example.com");
+        PlatformOperatorAccount next = createOperator("payment-recovery-next@example.com");
+        createOperator("payment-recovery-contender@example.com");
+        PaymentRecoveryCase investigating = PaymentRecoveryCase.open(
+                "285", RecoveryKind.REFUND_FAILED, ResultStatus.FAILED,
+                300_000L, 100_000L, 200_000L, "KRW",
+                Set.of(RecoveryAction.RETRY_REFUND), "port********renew",
+                43L, 44L, 45L, Instant.now());
+        investigating.beginInvestigation(1L, Instant.now());
+        cases.saveAndFlush(investigating);
+        assignments.saveAndFlush(AdminCaseAssignment.assign(
+                com.miriyum.domain.platformoperator.enums.AdminCaseType.PAYMENT_RECOVERY,
+                investigating.getPublicId(), 2L, former.getId(),
+                Instant.now().minusSeconds(30), Instant.now().minusSeconds(90)));
+
+        String nextToken = loginAndActivate("payment-recovery-next@example.com");
+        String renewed = assign(nextToken, investigating.getPublicId(), 2L);
+        assertThat((Integer) JsonPath.read(renewed, "$.data.caseVersion")).isEqualTo(2);
+        assertThat(jdbc.queryForObject("""
+                select platform_operator_account_id from admin_case_assignments
+                where case_type = 'PAYMENT_RECOVERY' and case_id = ? and case_version = 2
+                """, Long.class, investigating.getPublicId())).isEqualTo(next.getId());
+
+        String contenderToken = loginAndActivate("payment-recovery-contender@example.com");
+        mvc.perform(post("/api/v1/platform-operators/payment-recovery-cases/{caseId}/assignments",
+                        investigating.getPublicId()).header("Authorization", "Bearer " + contenderToken)
+                        .header("Idempotency-Key", UUID.randomUUID().toString())
+                        .header("X-Admin-Reauthentication",
+                                reauthenticate(contenderToken, investigating.getPublicId()))
+                        .header("X-Correlation-Id", "corr-http-active-takeover")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedCaseVersion\":2}"))
+                .andExpect(status().isConflict());
+        assertThat(jdbc.queryForObject("""
+                select platform_operator_account_id from admin_case_assignments
+                where case_type = 'PAYMENT_RECOVERY' and case_id = ? and case_version = 2
+                """, Long.class, investigating.getPublicId())).isEqualTo(next.getId());
+    }
+
+    private PlatformOperatorAccount createOperator(String email) {
+        PlatformOperatorAccount operator = accounts.saveAndFlush(PlatformOperatorAccount.createTemporary(
+                email, encoder.encode("Password1!"), email.substring(0, email.indexOf('@')),
+                Instant.now().plusSeconds(600)));
+        roles.saveAndFlush(PlatformOperatorRoleGrant.create(
+                operator.getId(), PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR, Instant.now()));
+        return operator;
+    }
+
+    private String loginAndActivate(String email) throws Exception {
+        String limited = JsonPath.read(mvc.perform(post("/api/v1/platform-operators/auth/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + email + "\",\"password\":\"Password1!\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(),
+                "$.data.accessToken");
+        return JsonPath.read(mvc.perform(put("/api/v1/platform-operators/auth/initial-password")
+                        .header("Authorization", "Bearer " + limited)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"Password1!\",\"newPassword\":\"Changed2@\","
+                                + "\"newPasswordConfirm\":\"Changed2@\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(),
+                "$.data.accessToken");
+    }
+
+    private String reauthenticate(String token, String caseId) throws Exception {
+        String body = "{\"currentPassword\":\"Changed2@\",\"purpose\":\"PAYMENT_RECOVERY\","
+                + "\"targetType\":\"PAYMENT_RECOVERY_CASE\",\"targetId\":\"" + caseId + "\"}";
+        return JsonPath.read(mvc.perform(post("/api/v1/platform-operators/reauthentication-approvals")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(),
+                "$.data.approval");
+    }
+
+    private String assign(String token, String caseId, long expectedCaseVersion) throws Exception {
+        return mvc.perform(post("/api/v1/platform-operators/payment-recovery-cases/{caseId}/assignments",
+                        caseId).header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", UUID.randomUUID().toString())
+                        .header("X-Admin-Reauthentication", reauthenticate(token, caseId))
+                        .header("X-Correlation-Id", "corr-http-assign-" + caseId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedCaseVersion\":" + expectedCaseVersion + "}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> publicSummary(String token, String caseId) throws Exception {
+        String body = mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        List<Map<String, Object>> content = JsonPath.read(body, "$.data.content");
+        return content.stream().filter(item -> caseId.equals(item.get("caseId"))).findFirst()
+                .orElseThrow();
+    }
+
+    private static long number(Map<String, Object> value, String key) {
+        return ((Number) value.get(key)).longValue();
+    }
+
+    private static long jsonNumber(String body, String path) {
+        return ((Number) JsonPath.read(body, path)).longValue();
     }
 }
