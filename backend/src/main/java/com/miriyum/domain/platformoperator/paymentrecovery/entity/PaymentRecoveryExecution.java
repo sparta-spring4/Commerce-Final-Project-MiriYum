@@ -150,6 +150,24 @@ public class PaymentRecoveryExecution {
         clearLease();
     }
 
+    public void markFailed(String owner, long token, String maskedOutcome, Instant now) {
+        requireLease(owner, token, now);
+        status = ExecutionStatus.FAILED;
+        this.maskedOutcome = requireOutcome(maskedOutcome);
+        completedAt = now;
+        updatedAt = now;
+        clearLease();
+    }
+
+    public void markHold(String owner, long token, String maskedOutcome, Instant now) {
+        requireLease(owner, token, now);
+        status = ExecutionStatus.HOLD;
+        this.maskedOutcome = requireOutcome(maskedOutcome);
+        completedAt = now;
+        updatedAt = now;
+        clearLease();
+    }
+
     private void requireLease(String owner, long token, Instant now) {
         if (status != ExecutionStatus.PROCESSING || !Objects.equals(leaseOwner, owner)
                 || leaseToken != token || leaseExpiresAt == null || leaseExpiresAt.isBefore(now)) conflict();
@@ -158,6 +176,11 @@ public class PaymentRecoveryExecution {
     private void clearLease() {
         leaseOwner = null;
         leaseExpiresAt = null;
+    }
+
+    private static String requireOutcome(String value) {
+        if (value == null || !value.matches("^[A-Z_]{1,50}$")) conflict();
+        return value;
     }
 
     private static void conflict() {

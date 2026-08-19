@@ -17,6 +17,10 @@ public interface PaymentRecoveryExecutionRepository
         extends JpaRepository<PaymentRecoveryExecution, Long> {
     Optional<PaymentRecoveryExecution> findByExecutionKey(String executionKey);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select execution from PaymentRecoveryExecution execution where execution.id = :id")
+    Optional<PaymentRecoveryExecution> findByIdForUpdate(@Param("id") long id);
+
     Optional<PaymentRecoveryExecution> findByCasePublicIdAndProposalVersion(
             String casePublicId, long proposalVersion);
 
