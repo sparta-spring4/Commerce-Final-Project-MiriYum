@@ -7,10 +7,28 @@ import sse from 'k6/x/sse'
 import { buildSseTargets, endpointPath, validateSseFixture } from './contracts.js'
 import { loadSseConfig } from './config.js'
 import { openChangedStream, prepareSseSession } from './session.js'
+import {
+  createFixtureFingerprint,
+  createTargetFingerprint,
+} from '../lib/smoke-proof.js'
+import { renderSafeSseSummary, validateSseSmokeProof } from './summary.js'
 
 const config = loadSseConfig(__ENV)
-const fixture = JSON.parse(open(config.fixturePath))
+const fixtureText = open(config.fixturePath)
+const fixture = JSON.parse(fixtureText)
 validateSseFixture(fixture)
+const targetFingerprint = createTargetFingerprint(config.targetEnv, config.baseUrl)
+const fixtureSha256 = createFixtureFingerprint(fixtureText)
+const prerequisiteSmokeProof = config.profile === 'smoke'
+  ? null
+  : validateSseSmokeProof(JSON.parse(open(config.smokeProofPath)), {
+    targetEnv: config.targetEnv,
+    commitSha: config.commitSha,
+    harnessCommitSha: config.harnessCommitSha,
+    targetFingerprint,
+    fixtureSha256,
+    endpointKinds: config.endpointKinds,
+  })
 
 const availableTargets = buildSseTargets(fixture, config.connectionsPerAccount)
   .filter((target) => config.endpointKinds.includes(target.kind))
@@ -27,6 +45,55 @@ const transportErrors = new Counter('sse_transport_errors')
 const validEvents = new Counter('sse_valid_events')
 const firstEventMilliseconds = new Trend('sse_first_event', true)
 const connectionMilliseconds = new Trend('sse_connection_duration', true)
+const recoveryAttempts = new Counter('sse_recovery_attempts')
+const recoverySuccessful = new Counter('sse_recovery_successful')
+const expected4xx = new Counter('sse_expected_4xx')
+const unexpected4xx = new Counter('sse_unexpected_4xx')
+const server5xx = new Counter('sse_server_5xx')
+const unexpectedStatus = new Counter('sse_unexpected_status')
+
+function thresholds() {
+  const result = {
+    dropped_iterations: ['count==0'],
+    sse_connections_opened: [
+      `count==${config.connections * (config.profile === 'reconnect' ? 2 : 1)}`,
+    ],
+    sse_connections_successful: [
+      `count==${config.connections * (config.profile === 'reconnect' ? 2 : 1)}`,
+    ],
+    sse_connections_rejected: ['count==0'],
+    sse_contract_errors: ['count==0'],
+    sse_transport_errors: ['count==0'],
+    sse_unexpected_4xx: ['count==0'],
+    sse_server_5xx: ['count==0'],
+    sse_unexpected_status: ['count==0'],
+  }
+  if (config.profile === 'reconnect') {
+    result.sse_recovery_attempts = [`count==${config.connections}`]
+    result.sse_recovery_successful = [`count==${config.connections}`]
+  }
+  for (const endpointKind of config.endpointKinds) {
+    const tags = `phase:measured,profile:${config.profile},endpoint_kind:${endpointKind}`
+    result[`checks{${tags}}`] = ['rate==1']
+    result[`http_req_duration{${tags}}`] = ['max>=0']
+    result[`sse_first_event{${tags}}`] = ['max>=0']
+    result[`sse_connection_duration{${tags}}`] = ['max>=0']
+    result[`sse_connections_opened{${tags}}`] = ['count>=0']
+    result[`sse_connections_successful{${tags}}`] = ['count>=0']
+    result[`sse_connections_rejected{${tags}}`] = ['count>=0']
+    result[`sse_contract_errors{${tags}}`] = ['count==0']
+    result[`sse_transport_errors{${tags}}`] = ['count==0']
+    result[`sse_valid_events{${tags}}`] = ['count>=0']
+    result[`sse_recovery_attempts{${tags}}`] = ['count>=0']
+    result[`sse_recovery_successful{${tags}}`] = ['count>=0']
+    result[`sse_expected_4xx{${tags}}`] = ['count>=0']
+    result[`sse_unexpected_4xx{${tags}}`] = ['count==0']
+    result[`sse_server_5xx{${tags}}`] = ['count==0']
+    result[`sse_unexpected_status{${tags}}`] = ['count==0']
+  }
+  result[`dropped_iterations{phase:measured,profile:${config.profile}}`] = ['count==0']
+  return result
+}
 
 function scenarioOptions() {
   const execByProfile = {
@@ -50,12 +117,7 @@ function scenarioOptions() {
 
 export const options = {
   scenarios: scenarioOptions(),
-  thresholds: {
-    checks: ['rate==1'],
-    sse_contract_errors: ['count==0'],
-    sse_transport_errors: ['count==0'],
-    dropped_iterations: ['count==0'],
-  },
+  thresholds: thresholds(),
   insecureSkipTLSVerify: config.targetEnv === 'local',
   setupTimeout: '5m',
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)'],
@@ -129,7 +191,17 @@ function metricAdapter() {
     firstEventMilliseconds: (value, tags) => firstEventMilliseconds.add(value, tags),
     connectionResult: (classification, tags) => {
       if (classification === 'success') successfulConnections.add(1, tags)
-      else if (classification === 'capacity_rejected') rejectedConnections.add(1, tags)
+      else if (classification === 'capacity_rejected') {
+        rejectedConnections.add(1, tags)
+        expected4xx.add(1, tags)
+      } else if (classification === 'unauthorized'
+        || classification === 'unexpected_client_error') {
+        unexpected4xx.add(1, tags)
+      } else if (classification === 'unavailable' || classification === 'server_error') {
+        server5xx.add(1, tags)
+      } else if (classification === 'unexpected_status') {
+        unexpectedStatus.add(1, tags)
+      }
     },
   }
 }
@@ -182,7 +254,10 @@ export function sseReconnect(data) {
     if (!first.completed || lastEventId === null) {
       throw new Error('SSE reconnect cursor was not captured')
     }
-    openSession(session, { mode: 'reconnect' }, lastEventId)
+    recoveryAttempts.add(1, tagsFor(session.target))
+    const recovered = openSession(session, { mode: 'reconnect' }, lastEventId)
+    if (!recovered.completed) throw new Error('SSE reconnect did not recover')
+    recoverySuccessful.add(1, tagsFor(session.target))
     lastEventId = null
   }, session.target)
 }
@@ -199,4 +274,31 @@ export function sseSlowClient(data) {
     delay: sleep,
     delaySeconds: config.slowClientDelaySeconds,
   }), session.target)
+}
+
+export function handleSummary(data) {
+  const rendered = renderSafeSseSummary(data, {
+    targetEnv: config.targetEnv,
+    profile: config.profile,
+    runId: config.runId,
+    prerequisiteSmokeRunId: prerequisiteSmokeProof === null
+      ? null
+      : prerequisiteSmokeProof.runId,
+    commitSha: config.commitSha,
+    harnessCommitSha: config.harnessCommitSha,
+    targetFingerprint,
+    fixtureSha256,
+    endpointKinds: config.endpointKinds,
+    limits: {
+      connections: config.connections,
+      connectionsPerAccount: config.connectionsPerAccount,
+      holdDurationSeconds: config.holdDurationSeconds,
+      slowClientDelaySeconds: config.slowClientDelaySeconds,
+    },
+  })
+  return {
+    stdout: rendered.stdout,
+    [`/results/${config.runId}.json`]: rendered.json,
+    [`/results/${config.runId}.md`]: rendered.markdown,
+  }
 }

@@ -17,6 +17,7 @@ LOADTEST_COMPOSE = ROOT / "deploy" / "local" / "docker-compose.loadtest.yml"
 LOCAL_NGINX = ROOT / "deploy" / "local" / "nginx.sse.conf"
 SSE_SNIPPET = ROOT / "deploy" / "nginx" / "templates" / "snippets" / "sse-location.conf"
 SSE_K6_DOCKERFILE = ROOT / "performance" / "k6" / "sse" / "Dockerfile"
+K6_WORKFLOW = ROOT / ".github" / "workflows" / "k6-contract.yml"
 
 
 def run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -186,6 +187,18 @@ class SseDeploymentContractTest(unittest.TestCase):
         self.assertIn(b"event: notifications.changed", frame)
         self.assertIn(b"data: {}", frame)
         self.assertLess(elapsed, 2.0)
+
+    def test_ci_builds_and_inspects_the_pinned_sse_runner(self) -> None:
+        workflow = K6_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "docker build --tag miriyum/k6-sse:contract performance/k6/sse",
+            workflow,
+        )
+        self.assertIn("k6 v1.2.2", workflow)
+        self.assertIn("github.com/phymbert/xk6-sse v0.1.12", workflow)
+        self.assertIn("miriyum/k6-sse:contract inspect", workflow)
+        self.assertIn('runtime_image="miriyum/k6-sse:contract"', workflow)
 
 
 if __name__ == "__main__":
