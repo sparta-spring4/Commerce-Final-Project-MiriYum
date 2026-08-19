@@ -7,13 +7,11 @@ import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamSnapshot;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActorType;
-import com.miriyum.domain.reservation.waiting.entity.WaitingStatusEvent;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTransitionAudit;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingQueueSequenceRepository;
-import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
 import com.miriyum.global.exception.ServiceException;
@@ -49,7 +47,7 @@ public class WaitingLedgerService {
     private final WaitingQueueSequenceRepository sequenceRepository;
     private final WaitingActiveMembershipRepository membershipRepository;
     private final WaitingTransitionAuditRepository auditRepository;
-    private final WaitingStatusEventRepository eventRepository;
+    private final WaitingStatusEventAppender eventAppender;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
     private final Clock clock;
@@ -60,7 +58,7 @@ public class WaitingLedgerService {
             WaitingQueueSequenceRepository sequenceRepository,
             WaitingActiveMembershipRepository membershipRepository,
             WaitingTransitionAuditRepository auditRepository,
-            WaitingStatusEventRepository eventRepository,
+            WaitingStatusEventAppender eventAppender,
             IdempotencyExecutor idempotencyExecutor,
             ObjectMapper objectMapper,
             Clock clock
@@ -70,7 +68,7 @@ public class WaitingLedgerService {
         this.sequenceRepository = Objects.requireNonNull(sequenceRepository);
         this.membershipRepository = Objects.requireNonNull(membershipRepository);
         this.auditRepository = Objects.requireNonNull(auditRepository);
-        this.eventRepository = Objects.requireNonNull(eventRepository);
+        this.eventAppender = Objects.requireNonNull(eventAppender);
         this.idempotencyExecutor = Objects.requireNonNull(idempotencyExecutor);
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.clock = Objects.requireNonNull(clock);
@@ -297,12 +295,7 @@ public class WaitingLedgerService {
                 occurredAt,
                 createdAt
         ));
-        eventRepository.save(WaitingStatusEvent.pending(
-                team.getId(),
-                team.getVersion() + 1L,
-                team.getStatus(),
-                occurredAt
-        ));
+        eventAppender.append(team, occurredAt);
     }
 
     private static String auditCommandId(IdempotencyCommand command) {

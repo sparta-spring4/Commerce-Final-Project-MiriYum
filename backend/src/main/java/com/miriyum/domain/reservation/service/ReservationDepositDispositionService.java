@@ -4,6 +4,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.ApplyReservationDepositDi
 import com.miriyum.domain.payment.dto.PaymentContracts.DispositionFailureClassification;
 import com.miriyum.domain.payment.dto.PaymentContracts.DispositionResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.GetReservationDepositDispositionQuery;
+import static com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoverySourceType.RESERVATION_DEPOSIT_DISPOSITION;
 import com.miriyum.domain.reservation.entity.ReservationDepositDispositionObligation;
 import com.miriyum.domain.reservation.repository.ReservationDepositDispositionObligationRepository;
 import java.time.Clock;
@@ -22,11 +23,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class ReservationDepositDispositionService {
 
     private final ReservationDepositDispositionObligationRepository repository;
+    private final ReservationPaymentRecoveryOutboxService recoveryOutbox;
     private final Clock clock;
     private final Duration leaseDuration;
 
     public ReservationDepositDispositionService(
             ReservationDepositDispositionObligationRepository repository,
+            ReservationPaymentRecoveryOutboxService recoveryOutbox,
             Clock clock,
             @Qualifier("reservationDepositDispositionLeaseDuration")
             Duration leaseDuration
@@ -35,6 +38,7 @@ public class ReservationDepositDispositionService {
             throw new IllegalArgumentException("leaseDuration must be positive");
         }
         this.repository = repository;
+        this.recoveryOutbox = recoveryOutbox;
         this.clock = clock;
         this.leaseDuration = leaseDuration;
     }
@@ -120,6 +124,10 @@ public class ReservationDepositDispositionService {
                 }
             }
         }
+        if (obligation.getStatus()
+                == ReservationDepositDispositionObligation.Status.RECOVERY_REQUIRED) {
+            enqueueRecovery(obligation);
+        }
         repository.saveAndFlush(obligation);
         return completed;
     }
@@ -143,6 +151,7 @@ public class ReservationDepositDispositionService {
         }
         if (claim.attemptCount() >= maxAttempts) {
             obligation.requireRecovery(claim.owner(), claim.token(), now, null);
+            enqueueRecovery(obligation);
         } else if (claim.operation()
                 == ReservationDepositDispositionObligation.Operation.QUERY) {
             obligation.requeueQuery(
@@ -168,8 +177,18 @@ public class ReservationDepositDispositionService {
             return false;
         }
         obligation.requireRecovery(claim.owner(), claim.token(), now, null);
+        enqueueRecovery(obligation);
         repository.saveAndFlush(obligation);
         return true;
+    }
+
+    private void enqueueRecovery(ReservationDepositDispositionObligation obligation) {
+        recoveryOutbox.enqueue(
+                RESERVATION_DEPOSIT_DISPOSITION,
+                Long.toString(obligation.getId()),
+                obligation.getPaymentId(),
+                obligation.getSourceEventId(),
+                obligation.getObligationKey());
     }
 
     private ReservationDepositDispositionObligation current(Claim claim, Instant now) {

@@ -56,6 +56,15 @@ public interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Lo
     );
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select r from PaymentRefund r join fetch r.payment
+            where r.payment.id = :paymentId and r.sourceEventId = :sourceEventId
+            """)
+    Optional<PaymentRefund> findByPayment_IdAndSourceEventIdForUpdate(
+            @Param("paymentId") Long paymentId,
+            @Param("sourceEventId") String sourceEventId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select r from PaymentRefund r join fetch r.payment where r.refundId = :refundId")
     Optional<PaymentRefund> findByRefundIdForUpdate(@Param("refundId") String refundId);
 }
