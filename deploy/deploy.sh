@@ -5,6 +5,8 @@ set -Eeuo pipefail
 APP_DIR="${APP_DIR:-/opt/miriyum}"
 COMPOSE_FILE="${COMPOSE_FILE:-${APP_DIR}/docker-compose.prod.yml}"
 ENV_FILE="${ENV_FILE:-${APP_DIR}/.env}"
+RUNTIME_ENVIRONMENT_CONTRACT_FILE="${RUNTIME_ENVIRONMENT_CONTRACT_FILE:-${APP_DIR}/backend-runtime-environment.txt}"
+BACKEND_RUNTIME_ENV_FILE="${BACKEND_RUNTIME_ENV_FILE:-${APP_DIR}/backend.env}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/actuator/health}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-90}"
 MYSQL_HEALTH_TIMEOUT_SECONDS="${MYSQL_HEALTH_TIMEOUT_SECONDS:-210}"
@@ -28,6 +30,31 @@ validate_runtime_environment() {
     echo "Runtime environment validation failed. Check required keys in ${ENV_FILE}; values are not printed." >&2
     return 1
   fi
+}
+
+sync_backend_runtime_environment() {
+  local temporary_env key
+
+  if [[ ! -f "${RUNTIME_ENVIRONMENT_CONTRACT_FILE}" ]]; then
+    echo "Missing backend runtime environment contract: ${RUNTIME_ENVIRONMENT_CONTRACT_FILE}" >&2
+    return 1
+  fi
+
+  temporary_env=$(mktemp "${BACKEND_RUNTIME_ENV_FILE}.XXXXXX")
+  chmod 600 "${temporary_env}"
+
+  while IFS= read -r key || [[ -n "${key}" ]]; do
+    [[ -z "${key}" || "${key}" == \#* ]] && continue
+    if ! [[ "${key}" =~ ^(MIRIYUM_[A-Z0-9_]+|OPENAI_API_KEY)$ ]]; then
+      echo "Invalid backend runtime environment contract entry: ${key}" >&2
+      rm -f "${temporary_env}"
+      return 1
+    fi
+    grep -m1 "^${key}=" "${ENV_FILE}" >> "${temporary_env}" || true
+  done < "${RUNTIME_ENVIRONMENT_CONTRACT_FILE}"
+
+  mv "${temporary_env}" "${BACKEND_RUNTIME_ENV_FILE}"
+  export BACKEND_RUNTIME_ENV_FILE
 }
 
 wait_for_mysql_health() {
@@ -268,6 +295,7 @@ main() {
     return 1
   fi
 
+  sync_backend_runtime_environment
   validate_runtime_environment
 
   for command in aws curl docker; do

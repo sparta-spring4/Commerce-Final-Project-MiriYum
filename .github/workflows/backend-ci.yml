@@ -239,6 +239,9 @@ jobs:
       - name: Verify backend CI path filter
         run: python3 scripts/test-backend-ci-path-filter.py
 
+      - name: Verify backend runtime environment contract
+        run: python3 scripts/test-backend-runtime-environment-contract.py
+
       - name: Verify production task definition secret contract
         run: |
           python3 scripts/test-verify-production-task-definition.py

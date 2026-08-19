@@ -258,6 +258,7 @@ jobs:
         run: |
           # 실행 .env는 EC2의 제한된 권한으로만 유지하므로 의도적으로 전송 대상에서 제외한다.
           compose_base64=$(base64 --wrap=0 deploy/docker-compose.prod.yml)
+          backend_runtime_environment_contract_base64=$(base64 --wrap=0 deploy/backend-runtime-environment.txt)
           nginx_http_base64=$(base64 --wrap=0 deploy/nginx/templates/http.conf.template)
           nginx_https_base64=$(base64 --wrap=0 deploy/nginx/templates/https.conf.template)
           nginx_entrypoint_base64=$(base64 --wrap=0 deploy/nginx/entrypoint/40-select-server-config.sh)
@@ -279,6 +280,7 @@ jobs:
                 "set -Eeuo pipefail",
                 "install -d -m 0755 /opt/miriyum/nginx/templates /opt/miriyum/nginx/entrypoint",
                 "echo '$compose_base64' | base64 --decode > /opt/miriyum/docker-compose.prod.yml",
+                "echo '$backend_runtime_environment_contract_base64' | base64 --decode > /opt/miriyum/backend-runtime-environment.txt",
                 "echo '$nginx_http_base64' | base64 --decode > /opt/miriyum/nginx/templates/http.conf.template",
                 "echo '$nginx_https_base64' | base64 --decode > /opt/miriyum/nginx/templates/https.conf.template",
                 "echo '$nginx_entrypoint_base64' | base64 --decode > /opt/miriyum/nginx/entrypoint/40-select-server-config.sh",

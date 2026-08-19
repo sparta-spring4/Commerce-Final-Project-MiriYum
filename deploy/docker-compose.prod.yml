@@ -37,6 +37,10 @@ services:
     # 배포 시 CD 워크플로가 변경 불가능한 ECR 이미지 태그를 주입한다.
     # deploy.sh가 BACKEND_IMAGE 누락을 먼저 검사하므로 Compose에는 단일 이미지 참조만 둔다.
     image: "${BACKEND_IMAGE}"
+    # deploy.sh가 server .env에서 허용 목록의 값만 추려 생성한다.
+    # 새 backend runtime 변수는 backend-runtime-environment.txt에 한 번만 추가한다.
+    env_file:
+      - "${BACKEND_RUNTIME_ENV_FILE:-./.env.example}"
     environment:
       MIRIYUM_DB_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
       MIRIYUM_DB_USERNAME: ${MYSQL_USER}

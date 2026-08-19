@@ -108,6 +108,12 @@ class ShouldDeployBackendTest(unittest.TestCase):
         self.assertIn("scripts/verify-production-task-definition.py", run)
         self.assertIn("--application-config backend/src/main/resources/application.yml", run)
 
+    def test_backend_ci_verifies_runtime_environment_contract(self):
+        backend_ci = Path(".github/workflows/backend-ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn("Verify backend runtime environment contract", backend_ci)
+        self.assertIn("scripts/test-backend-runtime-environment-contract.py", backend_ci)
+
 
 if __name__ == "__main__":
     unittest.main()
