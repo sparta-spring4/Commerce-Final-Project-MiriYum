@@ -247,9 +247,29 @@ jobs:
             exit 1
           fi
 
-          jq --arg image "$IMAGE_URI" --arg container "$ECS_CONTAINER_NAME" '
+          account_id=$(aws sts get-caller-identity --query Account --output text)
+          openai_parameter_arn="arn:aws:ssm:${AWS_REGION}:${account_id}:parameter/miriyum/shared/openai-api-key"
+
+          jq --arg image "$IMAGE_URI" --arg container "$ECS_CONTAINER_NAME" \
+            --arg openai_parameter_arn "$openai_parameter_arn" '
             .containerDefinitions |= map(
-              if .name == $container then .image = $image else . end
+              if .name == $container then
+                .image = $image
+                | .environment = ((.environment // [] | map(select(
+                    .name != "MIRIYUM_STORE_SEARCH_LLM_ENABLED"
+                    and .name != "MIRIYUM_STORE_SEARCH_LLM_MODEL"
+                    and .name != "MIRIYUM_CLOUDWATCH_METRICS_ENABLED"
+                    and .name != "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE"
+                  ))) + [
+                    {name: "MIRIYUM_STORE_SEARCH_LLM_ENABLED", value: "true"},
+                    {name: "MIRIYUM_STORE_SEARCH_LLM_MODEL", value: "gpt-4o-mini"},
+                    {name: "MIRIYUM_CLOUDWATCH_METRICS_ENABLED", value: "true"},
+                    {name: "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE", value: "MiriYum/Production"}
+                  ])
+                | .secrets = ((.secrets // [] | map(select(.name != "OPENAI_API_KEY"))) + [
+                    {name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}
+                  ])
+              else . end
             )
             | del(
                 .taskDefinitionArn,

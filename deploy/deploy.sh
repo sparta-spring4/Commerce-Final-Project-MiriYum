@@ -11,6 +11,7 @@ MYSQL_HEALTH_TIMEOUT_SECONDS="${MYSQL_HEALTH_TIMEOUT_SECONDS:-210}"
 VALKEY_HEALTH_TIMEOUT_SECONDS="${VALKEY_HEALTH_TIMEOUT_SECONDS:-190}"
 RISK_EVENT_BACKFILL_MAX_SCAN_PAGES="${RISK_EVENT_BACKFILL_MAX_SCAN_PAGES:-10000}"
 CLOUDWATCH_NAMESPACE="${MIRIYUM_CLOUDWATCH_NAMESPACE:-MiriYum/Staging}"
+OPENAI_API_KEY_PARAMETER_NAME="${OPENAI_API_KEY_PARAMETER_NAME:-/miriyum/shared/openai-api-key}"
 
 publish_deployment_health() {
   local value="$1"
@@ -28,6 +29,36 @@ validate_runtime_environment() {
     echo "Runtime environment validation failed. Check required keys in ${ENV_FILE}; values are not printed." >&2
     return 1
   fi
+}
+
+sync_llm_runtime_environment() {
+  local api_key temporary_env
+
+  api_key=$(aws ssm get-parameter \
+    --region "${AWS_REGION}" \
+    --name "${OPENAI_API_KEY_PARAMETER_NAME}" \
+    --with-decryption \
+    --query 'Parameter.Value' \
+    --output text)
+
+  if [[ -z "${api_key}" || "${api_key}" == "None" ]]; then
+    echo "OpenAI API key parameter is empty: ${OPENAI_API_KEY_PARAMETER_NAME}" >&2
+    return 1
+  fi
+
+  temporary_env=$(mktemp "${ENV_FILE}.XXXXXX")
+  chmod 600 "${temporary_env}"
+  awk '!/^OPENAI_API_KEY=/' \
+    "${ENV_FILE}" > "${temporary_env}"
+  printf 'OPENAI_API_KEY=%s\n' "${api_key}" >> "${temporary_env}"
+  if ! grep -q '^MIRIYUM_STORE_SEARCH_LLM_ENABLED=' "${temporary_env}"; then
+    printf '%s\n' 'MIRIYUM_STORE_SEARCH_LLM_ENABLED=true' >> "${temporary_env}"
+  fi
+  if ! grep -q '^MIRIYUM_STORE_SEARCH_LLM_MODEL=' "${temporary_env}"; then
+    printf '%s\n' 'MIRIYUM_STORE_SEARCH_LLM_MODEL=gpt-4o-mini' >> "${temporary_env}"
+  fi
+  mv "${temporary_env}" "${ENV_FILE}"
+  unset api_key
 }
 
 wait_for_mysql_health() {
@@ -268,6 +299,7 @@ main() {
     return 1
   fi
 
+  sync_llm_runtime_environment
   validate_runtime_environment
 
   for command in aws curl docker; do

@@ -259,6 +259,45 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
                     validate(contract, task_definition),
             )
 
+    def test_accepts_a_secure_parameter_reference_separate_from_json_secrets(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                    directory,
+                    "contract.json",
+                    {
+                        "requiredSecrets": ["MIRIYUM_DB_PASSWORD"],
+                        "parameterSecrets": ["OPENAI_API_KEY"],
+                    },
+            )
+            task_definition = self.write_json(
+                    directory,
+                    "task-definition.json",
+                    {
+                        "requiresCompatibilities": ["FARGATE"],
+                        "networkMode": "awsvpc",
+                        "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                        "containerDefinitions": [
+                            {
+                                "name": "backend",
+                                "secrets": [
+                                    {
+                                        "name": "MIRIYUM_DB_PASSWORD",
+                                        "valueFrom": "APPLICATION:MIRIYUM_DB_PASSWORD::",
+                                    },
+                                    {
+                                        "name": "OPENAI_API_KEY",
+                                        "valueFrom": "arn:aws:ssm:ap-northeast-2:123456789012:parameter/miriyum/shared/openai-api-key",
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+            )
+
+            self.assertEqual([], validate(contract, task_definition))
+
     def test_production_task_definition_enables_valkey_tls(self):
         task_definition = json.loads(
                 Path("deploy/ecs/production-task-definition.json").read_text(encoding="utf-8"))

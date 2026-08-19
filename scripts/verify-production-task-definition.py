@@ -45,7 +45,8 @@ def validate(contract_path, task_definition_path, application_config_path=None):
     ):
         errors.append("Task definition must declare ARM64 Fargate runtime")
 
-    for name in contract.get("requiredSecrets", []):
+    required_secrets = set(contract.get("requiredSecrets", [])) | set(contract.get("parameterSecrets", []))
+    for name in required_secrets:
         if name not in secrets:
             errors.append(f"Missing secret reference: {name}")
 
@@ -68,8 +69,13 @@ def validate(contract_path, task_definition_path, application_config_path=None):
             if not environment.get(name, ""):
                 errors.append(f"Missing environment value: {name}")
 
+    parameter_secrets = set(contract.get("parameterSecrets", []))
     secret_prefixes = set()
     for name, value_from in secrets.items():
+        if name in parameter_secrets:
+            if not value_from or value_from.endswith(f":{name}::"):
+                errors.append(f"Parameter reference must not select a JSON key: {name}")
+            continue
         if not value_from.endswith(f":{name}::"):
             errors.append(f"Secret reference must select its matching JSON key: {name}")
             continue

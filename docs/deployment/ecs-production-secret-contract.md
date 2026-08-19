@@ -78,6 +78,16 @@ Before registering the task definition, replace these placeholders through the a
 
 The execution role needs `secretsmanager:GetSecretValue` only for the application secret ARN. The task role receives only the runtime permissions the application needs; it must not receive broad Secrets Manager access.
 
+## OpenAI search key
+
+`OPENAI_API_KEY` is a separate SSM SecureString parameter, not a key in `miriyum/production/application`. Store it at `/miriyum/shared/openai-api-key`; the ECS execution role needs `ssm:GetParameter` for only that parameter ARN. Production CD derives that ARN from the deployment account and injects it through the ECS `secrets` field, so neither the API key nor its value is registered as a normal task environment variable.
+
+The production task enables `MIRIYUM_STORE_SEARCH_LLM_ENABLED=true` with model `gpt-4o-mini`. Set the flag to `false` and deploy a new task revision to disable provider calls while retaining exact search and non-LLM recommendations.
+
+### CloudWatch LLM metrics
+
+The backend publishes only `miriyum.search.llm.calls`, `miriyum.search.llm.latency`, `miriyum.search.llm.outcomes`, and `miriyum.search.llm.tokens`. The production task role must allow `cloudwatch:PutMetricData` only when `cloudwatch:namespace` equals `MiriYum/Production`; staging EC2 uses the equivalent `MiriYum/Staging` namespace. Do not add broad CloudWatch write access or export unrelated JVM and HTTP meters.
+
 ## Local verification
 
 ```bash
