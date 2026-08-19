@@ -49,15 +49,8 @@ public final class PaymentContracts {
         UNKNOWN
     }
 
-    /** Reservation deposit이 관리자 모니터링에서 귀속되는 사건 종류다. */
-    public enum ReservationDepositCaseType {
-        RESERVATION_HOLD,
-        RESERVATION
-    }
-
     public record PrepareReservationDepositCommand(
             String sourceReferenceId,
-            ReservationDepositCaseType caseType,
             long storeId,
             long consumerAccountId,
             long amountMinor,
@@ -68,9 +61,6 @@ public final class PaymentContracts {
     ) {
         public PrepareReservationDepositCommand {
             requirePublicId(sourceReferenceId, "sourceReferenceId");
-            if (caseType == null) {
-                throw new IllegalArgumentException("caseType must not be null");
-            }
             requirePositive(storeId, "storeId");
             requirePositive(consumerAccountId, "consumerAccountId");
             requirePositive(amountMinor, "amountMinor");
@@ -80,21 +70,6 @@ public final class PaymentContracts {
             }
             requirePositive(sourcePolicyVersion, "sourcePolicyVersion");
             requireIdempotencyKey(idempotencyKey);
-        }
-
-        public PrepareReservationDepositCommand(
-                String sourceReferenceId,
-                long storeId,
-                long consumerAccountId,
-                long amountMinor,
-                String currency,
-                Instant sourceExpiresAt,
-                long sourcePolicyVersion,
-                String idempotencyKey
-        ) {
-            this(sourceReferenceId, ReservationDepositCaseType.RESERVATION_HOLD,
-                    storeId, consumerAccountId, amountMinor, currency,
-                    sourceExpiresAt, sourcePolicyVersion, idempotencyKey);
         }
     }
 

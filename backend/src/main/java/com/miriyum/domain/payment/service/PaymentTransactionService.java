@@ -246,7 +246,7 @@ public class PaymentTransactionService {
         return prepare(
                 RESERVATION_DEPOSIT,
                 command.sourceReferenceId(),
-                command.caseType().name(),
+                "RESERVATION_HOLD",
                 command.sourceReferenceId(),
                 command.storeId(),
                 command.consumerAccountId(),
@@ -360,7 +360,7 @@ public class PaymentTransactionService {
         return replayPreparation(
                 RESERVATION_DEPOSIT,
                 command.sourceReferenceId(),
-                command.caseType().name(),
+                "RESERVATION_HOLD",
                 command.storeId(),
                 command.idempotencyKey(),
                 preparationFingerprint(command),
@@ -1631,7 +1631,6 @@ public class PaymentTransactionService {
     private static String preparationFingerprint(PrepareReservationDepositCommand command) {
         return preparationFingerprint(
                 command.sourceReferenceId(),
-                command.caseType().name(),
                 command.storeId(),
                 command.consumerAccountId(),
                 command.amountMinor(),
@@ -1644,7 +1643,6 @@ public class PaymentTransactionService {
     private static String preparationFingerprint(PrepareWaitingReservationDepositCommand command) {
         return preparationFingerprint(
                 command.sourceReferenceId(),
-                "WAITING",
                 command.storeId(),
                 command.consumerAccountId(),
                 command.amountMinor(),
@@ -1682,7 +1680,6 @@ public class PaymentTransactionService {
 
     private static String preparationFingerprint(
             String sourceReferenceId,
-            String monitoringCaseType,
             long storeId,
             long consumerAccountId,
             long amountMinor,
@@ -1690,8 +1687,7 @@ public class PaymentTransactionService {
             Instant sourceExpiresAt,
             long sourcePolicyVersion
     ) {
-        return sha256(sourceReferenceId + "\n" + monitoringCaseType
-                + "\n" + storeId + "\n" + consumerAccountId
+        return sha256(sourceReferenceId + "\n" + storeId + "\n" + consumerAccountId
                 + "\n" + amountMinor + "\n" + currency
                 + "\n" + sourceExpiresAt.truncatedTo(ChronoUnit.MICROS)
                 + "\n" + sourcePolicyVersion);
