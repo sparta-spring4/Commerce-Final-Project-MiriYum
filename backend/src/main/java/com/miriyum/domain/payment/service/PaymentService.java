@@ -12,6 +12,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDeposit
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareWaitingReservationDepositCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.StoreReservationPaymentSnapshot;
 import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservationDeposit;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.AcknowledgeManualRecoveryHandoffCommand;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ClaimManualRecoveryHandoffsCommand;
@@ -36,6 +37,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.Optional;
 import java.util.Set;
 import java.util.List;
 import org.hibernate.exception.ConstraintViolationException;
@@ -235,6 +237,14 @@ public class PaymentService {
 
     public PaymentResult getOwnedPayment(String paymentId, String consumerAccountId) {
         return transactions.getOwnedPayment(paymentId, parsePositiveId(consumerAccountId));
+    }
+
+    /** Reservation이 저장된 예약금 상태만 조회하는 공개 경계다. */
+    public Optional<StoreReservationPaymentSnapshot> findReservationDepositPayment(
+            String paymentId,
+            String sourceReferenceId
+    ) {
+        return transactions.findReservationDepositPayment(paymentId, sourceReferenceId);
     }
 
     public VerifiedWaitingReservationDeposit getVerifiedWaitingReservationDeposit(

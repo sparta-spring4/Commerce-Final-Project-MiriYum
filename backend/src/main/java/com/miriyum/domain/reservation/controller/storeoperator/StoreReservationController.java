@@ -6,11 +6,13 @@ import com.miriyum.domain.reservation.dto.request.StoreCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
 import com.miriyum.domain.reservation.dto.response.StoreReservationPageResponse;
+import com.miriyum.domain.reservation.dto.response.StoreReservationPaymentStatusResponse;
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandResult;
 import com.miriyum.domain.reservation.service.ReservationFulfillmentCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationFulfillmentCommandResult;
+import com.miriyum.domain.reservation.service.StoreReservationPaymentStatusQueryService;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -40,6 +42,7 @@ public class StoreReservationController {
     private final ReservationService reservationService;
     private final ReservationCancellationCommandFacade reservationCancellationCommandFacade;
     private final ReservationFulfillmentCommandFacade reservationFulfillmentCommandFacade;
+    private final StoreReservationPaymentStatusQueryService paymentStatusQueryService;
 
     /**
      * 대상 매장의 예약 목록을 날짜·상태·페이지·단일 정렬 조건으로 조회한다.
@@ -99,6 +102,20 @@ public class StoreReservationController {
                 storeId,
                 reservationId
         );
+        return ApiResponse.success("조회되었습니다.", response);
+    }
+
+    /** 저장된 Payment·refund 상태만 조합해 자기 매장 예약의 결제 상태를 반환한다. */
+    @GetMapping("/{reservationId}/payment-status")
+    public ApiResponse<StoreReservationPaymentStatusResponse> getPaymentStatus(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable @Positive long storeId,
+            @PathVariable @Positive long reservationId
+    ) {
+        StoreReservationPaymentStatusResponse response = paymentStatusQueryService.get(
+                principal.accountId(),
+                storeId,
+                reservationId);
         return ApiResponse.success("조회되었습니다.", response);
     }
 

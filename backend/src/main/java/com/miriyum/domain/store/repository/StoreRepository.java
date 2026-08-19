@@ -13,6 +13,8 @@ import org.springframework.data.domain.Pageable;
 
 public interface StoreRepository extends JpaRepository<Store, Long> {
 
+    boolean existsByIdAndStoreOperatorAccountId(long storeId, long operatorAccountId);
+
     @Query("""
             select store.storeOperatorAccountId
             from Store store

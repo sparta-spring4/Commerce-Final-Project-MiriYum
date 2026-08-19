@@ -372,6 +372,43 @@ class StoreServiceTest {
     }
 
     @Test
+    void concealedReadOwnershipAcceptsOnlyTheOwnedStore() {
+        given(storeRepository.existsByIdAndStoreOperatorAccountId(STORE_ID, OPERATOR_ID))
+                .willReturn(true);
+
+        storeService.requireConcealedReadOwnership(OPERATOR_ID, STORE_ID);
+
+        then(operatorAccountService).should().getMe(OPERATOR_ID);
+        then(storeRepository).should()
+                .existsByIdAndStoreOperatorAccountId(STORE_ID, OPERATOR_ID);
+        then(storeRepository).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    void concealedReadOwnershipHidesMissingStoreAsNotFound() {
+        given(storeRepository.existsByIdAndStoreOperatorAccountId(STORE_ID, OPERATOR_ID))
+                .willReturn(false);
+
+        assertThatThrownBy(() ->
+                storeService.requireConcealedReadOwnership(OPERATOR_ID, STORE_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_NOT_FOUND);
+    }
+
+    @Test
+    void concealedReadOwnershipHidesForeignStoreAsTheSameNotFoundError() {
+        given(storeRepository.existsByIdAndStoreOperatorAccountId(STORE_ID, OPERATOR_ID))
+                .willReturn(false);
+
+        assertThatThrownBy(() ->
+                storeService.requireConcealedReadOwnership(OPERATOR_ID, STORE_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_NOT_FOUND);
+    }
+
+    @Test
     void dashboardAuthorityReturnsOwnedStoreTimeZoneAndVersion() {
         Store store = storeOwnedBy(OPERATOR_ID);
         ReflectionTestUtils.setField(store, "id", STORE_ID);
