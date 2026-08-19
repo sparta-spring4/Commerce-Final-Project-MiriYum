@@ -20,7 +20,7 @@ SSE는 `data: {}` 변경 신호이며 결과 상태는 Notification 이력 또�
 | 실제 Nginx first frame | PASS | Alpine fake upstream이 종료되기 전에 실제 Nginx를 거친 `notifications.changed`, `data: {}` frame을 2초 안에 수신 |
 | SSE 실행기 build | PASS | `grafana/xk6:1.4.11` → `k6 v1.2.2` + `xk6-sse v0.1.12`; 실제 `k6/x/sse` import와 `main.js inspect` 성공 |
 | 순수 k6 계약 | PASS | target·fixture·event·session·profile·safe summary를 `--network none`에서 검증 |
-| 실제 local endpoint smoke | BLOCKED | ignored local SSE fixture와 저장소 밖 synthetic credential 파일 필요 |
+| 실제 local endpoint smoke | BLOCKED | 기존 local DB의 Flyway V43 실패 기록과 부분 적용 DDL을 안전하게 복구해야 backend가 시작됨 |
 | HTTP 비교 3회 | BLOCKED | 같은 SHA·fixture의 성공 SSE smoke proof 필요 |
 | steady 25→50→100→200 | BLOCKED | 실제 local smoke와 승인된 synthetic scope 필요 |
 | reconnect·slow-client | BLOCKED | 마지막 성공 steady 단계와 smoke proof 필요 |
@@ -35,3 +35,11 @@ SSE는 `data: {}` 변경 신호이며 결과 상태는 Notification 이력 또�
 실제 실행은 환경, backend full SHA, harness full SHA, profile, 연결 수, 유지 시간, endpoint kind, 전체 threshold 결과와 비식별 aggregate만 기록한다. 25→50→100→200 중 낮은 단계가 실패하면 상위 단계를 실행하지 않고 마지막 완전 성공 단계만 기록한다. Valkey 중단이나 backend 교체에서 public mutation 승인이 없으면 `BLOCKED`를 유지한다.
 
 운영 timeout·heartbeat·correction·batch·연결 한도와 경보 임계치는 동일 입력의 반복 가능한 부하·장애 증거가 있을 때만 ADR-010과 서비스 정책에 승격한다. 실패 시 `MIRIYUM_SSE_ENABLED=false`로 되돌리고 HTTP/MySQL 재조회를 유지하며, 업무 원장이나 Valkey 데이터를 rollback하지 않는다.
+
+## 2026-08-19 local 실행 시도
+
+- 현재 브랜치 backend Docker build와 SSE 전용 k6 image build는 성공했다.
+- 기존 MySQL volume은 삭제하지 않았다. 값 비노출 `SELECT 1`로 volume과 일치하는 local env를 선택했다.
+- backend startup은 Flyway V43 `create platform operator management audit`의 과거 실패 기록 때문에 중단됐다. 읽기 전용 확인 결과 V43의 CHECK·UNIQUE 제약과 audit table은 존재하지만 두 immutable trigger는 없어서 단순 Flyway repair로 성공 처리할 수 없는 부분 적용 상태다.
+- 주요 비식별 행 수는 consumer account 5, store-operator account 1, store 1, reservation 100, notification task 200, waiting team 0이다. 초기화나 V43 DDL 제거는 실행하지 않았다.
+- 다음 단계는 V43이 만든 항목만 정확히 되돌리고 migration을 재실행하는 데이터 보존형 복구 또는 명시적으로 승인된 local DB 초기화다. 복구 승인 전 endpoint smoke와 이후 부하·장애 단계는 `BLOCKED`다.
