@@ -6,9 +6,12 @@ import com.miriyum.domain.auth.membersupport.MemberStatus;
 import com.miriyum.domain.auth.membersupport.RestrictedFeature;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCaseStatus;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCaseType;
+import com.miriyum.domain.platformoperator.entity.membersupport.MemberSanction;
+import com.miriyum.domain.platformoperator.entity.membersupport.MemberSanctionStatus;
 import com.miriyum.global.response.PageMetadata;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
 
@@ -66,6 +69,40 @@ public final class MemberSupportResponses {
     ) {
         public PendingSanctionApprovalPageResponse {
             content = List.copyOf(content);
+        }
+    }
+
+    /** OpenAPI의 Sanction schema와 일치하는 명령 결과 snapshot. */
+    public record SanctionResponse(
+            String sanctionId,
+            MemberAccountType accountType,
+            String accountId,
+            MemberSanctionLevel level,
+            MemberSanctionStatus status,
+            String policyVersion,
+            long version,
+            Set<RestrictedFeature> restrictedFeatures,
+            OffsetDateTime proposedAt,
+            OffsetDateTime appliedAt,
+            OffsetDateTime endsAt
+    ) {
+        public SanctionResponse {
+            restrictedFeatures = Set.copyOf(restrictedFeatures);
+        }
+
+        public static SanctionResponse from(MemberSanction sanction) {
+            return new SanctionResponse(
+                    sanction.getPublicId(),
+                    sanction.getAccountType(),
+                    Long.toString(sanction.getAccountId()),
+                    sanction.getLevel(),
+                    sanction.getStatus(),
+                    sanction.getPolicyVersion(),
+                    sanction.getRowVersion(),
+                    sanction.restrictedFeatures(),
+                    sanction.getProposedAt().atOffset(ZoneOffset.UTC),
+                    sanction.getAppliedAt() == null ? null : sanction.getAppliedAt().atOffset(ZoneOffset.UTC),
+                    sanction.getEndsAt() == null ? null : sanction.getEndsAt().atOffset(ZoneOffset.UTC));
         }
     }
 }
