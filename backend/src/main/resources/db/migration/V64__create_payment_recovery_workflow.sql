@@ -41,6 +41,7 @@ CREATE TABLE payment_recovery_cases (
     remaining_refundable_amount_minor BIGINT NOT NULL,
     currency CHAR(3) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     masked_provider_reference VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    allowed_actions JSON NOT NULL,
     handoff_version BIGINT NOT NULL,
     payment_version BIGINT NOT NULL,
     recovery_version BIGINT NOT NULL,
