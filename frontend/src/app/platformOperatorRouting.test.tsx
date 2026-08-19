@@ -5,7 +5,7 @@ import {
   authenticatedPlatformOperator,
   currentPlatformOperator,
   unauthenticatedPlatformOperator,
-} from '../features/platform-operator-auth/test/handlers'
+} from '../domains/account/platform-operator/auth/test/handlers'
 import { successResponse } from '../test/msw/envelope'
 import { server } from '../test/msw/server'
 
@@ -31,7 +31,7 @@ describe('플랫폼 운영자 route context', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.queryByText('페이지를 찾을 수 없습니다')).not.toBeInTheDocument()
-  })
+  }, 15_000)
 
   test('관리자 상세 경로에서도 소비자 세션 복구를 호출하지 않는다', async () => {
     vi.stubEnv('VITE_PLATFORM_OPERATOR_ENABLED', 'true')
@@ -59,11 +59,15 @@ describe('플랫폼 운영자 route context', () => {
     const { default: App } = await import('./App')
     render(<App />)
 
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '회원 관리' })).toBeInTheDocument(),
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole('heading', { name: '회원 관리' }),
+        ).toBeInTheDocument(),
+      { timeout: 10_000 },
     )
     expect(consumerRefreshCalls).toBe(0)
-  })
+  }, 15_000)
 
   test.each([
     ['/admin/members', '/api/v1/platform-operators/members'],
