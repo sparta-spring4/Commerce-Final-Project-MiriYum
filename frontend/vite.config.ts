@@ -6,6 +6,16 @@ import { defineConfig } from 'vitest/config'
 // dev server가 /api를 프록시해 same-origin 조건을 만들어야 인증 흐름이 동작한다.
 // 포트를 바꾸면 deploy/local/.env의 MIRIYUM_ALLOWED_ORIGIN도 함께 바꾼다.
 const DEV_SERVER_PORT = 5173
+const KAKAO_STATE_COOKIE = /^MIRIYUM_(?:CONSUMER|STORE_OPERATOR)_KAKAO_(?:LOGIN|LINK)_STATE=/
+
+export function rewriteKakaoStateCookies(cookies: string[]): string[] {
+  return cookies.map((cookie) => {
+    if (!KAKAO_STATE_COOKIE.test(cookie)) {
+      return cookie
+    }
+    return cookie.replace(/;\s*Secure\b/gi, '')
+  })
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'MIRIYUM_')
@@ -31,12 +41,10 @@ export default defineConfig(({ mode }) => {
                 return
               }
 
-              // staging은 HTTPS라 state 쿠키가 Secure로 내려온다. 로컬 Vite는 HTTP이므로
-              // 이 속성을 제거해야 브라우저가 콜백 세션 교환에 필요한 쿠키를 저장한다.
+              // staging은 HTTPS라 Kakao state 쿠키가 Secure로 내려온다. 로컬 Vite는 HTTP이므로
+              // state 쿠키에 한해서만 이 속성을 제거해야 콜백 세션 교환이 가능하다.
               const cookies = Array.isArray(setCookie) ? setCookie : [setCookie]
-              proxyResponse.headers['set-cookie'] = cookies.map((cookie) =>
-                cookie.replace(/;\s*Secure\b/gi, ''),
-              )
+              proxyResponse.headers['set-cookie'] = rewriteKakaoStateCookies(cookies)
             })
           },
         },
