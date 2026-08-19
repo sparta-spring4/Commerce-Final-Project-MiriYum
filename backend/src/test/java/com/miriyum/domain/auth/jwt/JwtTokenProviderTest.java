@@ -33,6 +33,7 @@ class JwtTokenProviderTest {
         // then
         assertThat(parsed.namespace()).isEqualTo(TokenNamespace.CONSUMER);
         assertThat(parsed.accountId()).isEqualTo(42L);
+        assertThat(parsed.expiresAt()).isEqualTo(Instant.parse("2026-07-29T00:15:00Z"));
     }
 
     @Test

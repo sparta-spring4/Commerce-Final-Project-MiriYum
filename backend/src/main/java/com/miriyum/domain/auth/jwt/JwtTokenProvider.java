@@ -232,7 +232,8 @@ public class JwtTokenProvider {
                     claims.get(CLAIM_FAMILY_ID, String.class),
                     claims.get(CLAIM_TOKEN_ID, String.class),
                     sessionClaims,
-                    familyCreatedAt);
+                    familyCreatedAt,
+                    claims.getExpiration().toInstant());
         } catch (IllegalArgumentException exception) {
             throw new ServiceException(invalidCode);
         }
