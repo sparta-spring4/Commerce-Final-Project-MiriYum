@@ -69,6 +69,10 @@ proxy를 추가한다.
 JWT secret 및 `MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET`과 서로 다른 값을 사용한다. 이 값은
 backend에만 전달되며 Nginx, Caddy, k6 컨테이너에는 전달되지 않는다.
 
+기존 HTTP `loadtest`는 `grafana/k6:2.1.0`을 유지한다. SSE는 자동 확장 registry 대신
+`sse-loadtest` 전용 이미지를 빌드해 `k6 v1.2.2`와 `xk6-sse v0.1.12`를 고정한다. 실제 실행
+순서와 summary·장애 복구 경계는 `docs/deployment/sse-runtime-runbook.md`를 따른다.
+
 ```powershell
 docker compose --env-file deploy/local/.env `
   -f deploy/local/docker-compose.dev.yml `

@@ -45,6 +45,7 @@
 - 최초 연결·재연결 수렴 신호 뒤의 high-watermark 신호는 새 `IN_APP DELIVERED`가 공개 이력에 보이게 된 경우만 나타낸다. wire frame은 `event: notifications.changed`, opaque `id`, 고정 `data: {}`만 포함하고 계정·알림·목적·상태를 싣지 않으며 필수 빈 줄을 두어 `\n\n`으로 종료한다. 내부 `PENDING`·`FAILED`·`CANCELLED`, provider 상태와 재시도는 공개 신호가 아니다. keepalive comment도 업무 event나 성공 근거가 아니며 cursor를 전진시키지 않는다.
 - Valkey Pub/Sub은 여러 인스턴스의 wake-up hint일 뿐 재생 원장이나 전달 성공의 근거가 아니다. 신호 중복·역순·유실과 재연결 뒤에도 MySQL 이력 조회로 수렴하며, SSE 실패가 알림 작업이나 원 거래 상태를 변경하지 않는다.
 - 형식이 잘못됐거나 다른 audience·계정에 결속된 `Last-Event-ID`는 공통 `400` JSON 오류 envelope로 거절한다. 연결 한도·heartbeat·timeout·correction interval의 운영 수치는 Runtime과 배포 부하 증거에서 별도로 확정한다.
+- 로컬 배포 검증은 timeout 30초, heartbeat 5초, correction 2초, batch 100, 전체 연결 200, 계정별 연결 6을 시험 입력으로만 사용한다. 이 값은 운영 기본값이나 SLO가 아니며 [SSE Runtime 검증 기록](../performance/sse-runtime-validation.md)의 부하·장애 증거 없이는 승격하지 않는다.
 
 ## IN_APP Reservation·MenuHold·Pickup·Waiting 알림 목적 카탈로그
 

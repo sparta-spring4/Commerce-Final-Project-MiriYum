@@ -28,7 +28,7 @@
 
 - 일반 메뉴 품절, 일반 메뉴 추천, 주변 대체 매장 추천, 가게 찜, 광고·판촉 알림
 - Payment·환불·취소 자리 승계 목적과 원 사건
-- Notification·Waiting SSE production Runtime·Valkey fan-out·배포 설정과 AUTO 접수 오픈 worker
+- Notification·Waiting SSE 운영 활성화·배포 수치 확정과 AUTO 접수 오픈 worker
 - SMS·알림톡·푸시·이메일 provider와 실제 연락처 조회
 - frontend 화면·실시간 동작 구현, Notification runtime·migration·worker 구현
 - `NOTI-009`의 정확한 보관기간과 법률 문구
@@ -259,7 +259,7 @@ Last-Event-ID: {opaqueCursor} # 재연결일 때만
 Accept: text/event-stream
 ```
 
-- 브라우저는 Authorization header를 전달할 수 있는 fetch streaming을 사용한다. 성공 media type은 `text/event-stream`이며 이 계약 PR에서는 production route를 만들지 않고 path item에 `x-miriyum-runtime-status: contract-only`, `x-miriyum-owner-issue: 250`을 유지한다.
+- 브라우저는 Authorization header를 전달할 수 있는 fetch streaming을 사용한다. 성공 media type은 `text/event-stream`이다. PR #474가 세 production Runtime route와 공통 transport를 활성화했으며, 실제 환경 활성화와 proxy·부하·장애 증거는 #250 배포 검증이 소유한다.
 - 업무 event 이름은 `notifications.changed` 하나다. event data는 알림 상태 본문이나 전달 성공의 근거가 아니며, client는 신호를 받으면 `GET /api/v1/consumers/me/notifications`를 다시 조회한다.
 - `Last-Event-ID`가 없으면 최초 연결이다. 연결 직후와 유효한 재연결 뒤 현재 MySQL high-watermark에 결속된 changed signal을 한 번 보내며 이후 신호는 중복 병합할 수 있다.
 - wire frame은 `event: notifications.changed`, opaque `id`, 고정 `data: {}` 세 줄 뒤 필수 빈 줄을 두어 `\n\n`으로 종료한다. 빈 data 객체에 계정·알림·목적·자원·상태 필드를 추가하지 않는다.
@@ -267,7 +267,7 @@ Accept: text/event-stream
 - 최초 연결·유효한 재연결의 수렴 신호는 이력이 비어 있거나 high-watermark가 바뀌지 않았어도 한 번 보낸다. 그 뒤에는 공개 이력에 새 `IN_APP DELIVERED`가 보이게 된 경우만 신호 대상이다. 내부 `PENDING`, `FAILED`, `CANCELLED`, channel attempt와 provider 결과는 제외한다. keepalive comment는 업무 event나 성공 근거가 아니며 cursor를 전진시키지 않는다.
 - Valkey Pub/Sub은 인스턴스 간 wake-up hint이고 MySQL이 유일한 재연결·보정 원본이다. 신호 유실·중복·역순과 구독 재시작 뒤에도 유한한 MySQL correction과 HTTP 재조회로 수렴한다.
 
-Waiting consumer·store-operator SSE endpoint와 `waiting.changed`의 영향 범위는 Waiting 기능 명세가 소유한다. 공통 transport·cursor·connection registry·Valkey·MySQL correction Runtime은 이 계약이 `dev`에 병합된 뒤 #250의 별도 Runtime exact allowlist에서 구현한다.
+Waiting consumer·store-operator SSE endpoint와 `waiting.changed`의 영향 범위는 Waiting 기능 명세가 소유한다. 공통 transport·cursor·connection registry·Valkey·MySQL correction Runtime은 PR #474에 병합됐고, Nginx·배포 설정·부하 및 장애 검증은 #250의 별도 exact allowlist가 소유한다.
 
 ## 오류 계약
 
@@ -290,7 +290,7 @@ Waiting consumer·store-operator SSE endpoint와 `waiting.changed`의 영향 범
 - 목적·source event·cursor는 버전 필드를 가져야 한다. 새 목적과 nullable 필드는 하위 호환 추가만 허용하고 기존 enum 의미를 재사용하지 않는다.
 - `NOTI-009` 확정 전에도 보관 만료를 적용할 수 있는 구조를 갖추되 영구 보존이나 임의 삭제 기간을 기본값으로 넣지 않는다.
 - 외부 채널 추가는 논리 알림과 `IN_APP` 이력이 공유하는 `notificationId`를 바꾸지 않고 같은 논리 알림 아래 내부 채널 시도만 추가한다.
-- 현재 #250 SSE 계약 PR은 세 변경 신호 path·재연결 cursor·HTTP 수렴 의미만 확정하고 production Java, migration, runtime 설정을 변경하지 않는다. SSE path는 Runtime 병합 전까지 `contract-only`와 owner Issue #250을 함께 표시한다. 후속 Runtime PR은 세 path의 production 구현과 함께 이 두 확장 필드를 제거하며, frontend 생성 타입과 소비 구현은 #251·#410·#411이 각각 소유한다.
+- #250 SSE 계약 PR #442와 Runtime PR #474가 세 변경 신호 path·재연결 cursor·HTTP 수렴 및 production Java Runtime을 제공한다. 환경 기본 활성화, proxy·부하·장애 증거는 #250 배포 검증이 소유하고, frontend 생성 타입과 소비 구현은 #251·#410·#411이 각각 소유한다.
 
 ## 인수 조건
 

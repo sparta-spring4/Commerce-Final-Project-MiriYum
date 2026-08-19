@@ -204,3 +204,23 @@ docker compose --env-file deploy/local/.env `
 기존 MySQL 개발 데이터를 임의로 지우지 않도록 `down -v`는 사용하지 않는다. 결과 문서에는 환경 사양, commit SHA, 입력 부하, scenario별 p50/p95/p99·RPS·expected 4xx·unexpected 4xx·5xx와 실행하지 못한 항목만 남긴다. raw HTTP output과 식별 가능한 생성 자원은 보관하지 않는다.
 
 인증 시나리오는 성공한 로그인마다 같은 cookie jar에서 CSRF 토큰을 준비하고 현재 session을 logout한다. CSRF 토큰과 쿠키는 client별로 재사용해 IP당 준비 요청 제한을 iteration 수만큼 소비하지 않는다. setup에서 Reservation·Notification용 Access Token을 준비하는 로그인도 Access Token을 반환하기 전에 Refresh Token family를 같은 방식으로 회수한다. 정리 요청은 `phase=cleanup`으로 태그되어 측정 threshold와 summary에서 제외되지만, CSRF 준비나 logout이 실패하면 해당 iteration 또는 setup은 실패한다. 따라서 정상 종료한 실행은 k6가 만든 Refresh Token family를 Valkey에 남기지 않는다. 강제 중단·프로세스 종료처럼 cleanup 요청 자체가 실행되지 못한 경우에는 합성 계정의 전체 로그인 종료 또는 해당 환경 소유자가 승인한 Valkey 정리 절차로 잔존 family를 회수한 뒤 다시 실행한다.
+
+## SSE 변경 신호 부하 하네스
+
+SSE는 기존 HTTP 기준선과 실행기를 공유하지 않는다. `xk6-sse v0.1.12`가 k6 v2 자동 확장 registry에 없으므로 `sse-loadtest`는 `grafana/xk6:1.4.11`로 `k6 v1.2.2`와 확장을 고정 빌드한다. 기존 `loadtest`는 계속 `grafana/k6:2.1.0`을 사용한다.
+
+```powershell
+docker compose --env-file deploy/local/.env `
+  -f deploy/local/docker-compose.dev.yml `
+  -f deploy/local/docker-compose.loadtest.yml `
+  --profile loadtest build sse-loadtest
+
+docker compose --env-file deploy/local/.env `
+  -f deploy/local/docker-compose.dev.yml `
+  -f deploy/local/docker-compose.loadtest.yml `
+  --profile loadtest run --rm --no-deps sse-loadtest version
+```
+
+SSE fixture는 계정 환경변수 이름과 공개 example ID만 보관하며 inline credential을 거절한다. `smoke`, `reconnect`, `steady`, `slow-client` 네 프로필과 세 endpoint kind만 허용하고 전체 연결은 200, 계정별 연결은 6, 유지 시간은 600초, slow delay는 30초를 넘을 수 없다. smoke 이후 프로필은 같은 target fingerprint, fixture SHA-256, backend·harness full SHA와 endpoint coverage를 가진 성공 JSON artifact를 요구한다.
+
+실행·Valkey 중단·backend 교체·롤백 명령은 [SSE Runtime runbook](../../docs/deployment/sse-runtime-runbook.md), 실제 상태와 비식별 aggregate는 [SSE Runtime 검증 기록](../../docs/performance/sse-runtime-validation.md)에만 기록한다. summary는 `miriyum-k6-sse-summary-v1` allowlist 밖 metadata와 metric을 버리고 Token, cursor, ID, email, URL 또는 응답 원문을 직렬화하지 않는다.

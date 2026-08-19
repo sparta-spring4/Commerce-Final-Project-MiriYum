@@ -8,7 +8,7 @@
 
 ## 문제와 현재 증거
 
-PR #442가 Notification 이력과 소비자·매장 운영자 Waiting 변경을 위한 SSE endpoint 세 개, event 이름, `Last-Event-ID`, 고정 `data: {}`와 HTTP 재조회 계약을 `dev`에 병합했다. 그러나 이 계약은 `contract-only`이며 실제 Spring MVC stream, 재연결 cursor, 다중 instance fan-out, 연결 수명과 장애 보정 Runtime은 아직 없다.
+PR #442가 Notification 이력과 소비자·매장 운영자 Waiting 변경을 위한 SSE endpoint 세 개, event 이름, `Last-Event-ID`, 고정 `data: {}`와 HTTP 재조회 계약을 `dev`에 병합했고 PR #474가 Spring MVC stream, 재연결 cursor, 다중 instance fan-out, 연결 수명과 MySQL 장애 보정 Runtime을 활성화했다. 남은 #250 범위는 실제 Nginx·배포 wiring과 부하·장애 증거다.
 
 SSE event는 업무 상태가 아니라 변경 신호다. 네트워크와 브라우저 재연결에서는 event가 중복·역순·유실될 수 있고, Valkey Pub/Sub도 내구성 있는 원장이 아니다. Notification과 Waiting의 최신 상태는 MySQL이 소유하므로, stream payload나 Valkey 수신만으로 전달 성공·알림 이력·Waiting 상태·`teamsAhead`를 확정하면 오래된 상태가 노출될 수 있다.
 
@@ -16,7 +16,7 @@ Issue #250은 최초 연결·재연결·다중 탭·다중 instance·Valkey 유�
 
 ## 단계 제약과 적용 범위
 
-이번 결정은 #250의 SSE Runtime PR 2에 적용한다.
+이번 결정은 #250의 SSE Runtime과 후속 배포 검증에 적용한다.
 
 - 포함: Spring MVC SSE transport, scope-bound opaque cursor, 로컬 connection registry, Valkey Pub/Sub wake-up hint, 주기 MySQL correction, Notification·Waiting high-watermark adapter, timeout·heartbeat·connection limit 설정과 Runtime 검증
 - 제외: Nginx buffering·timeout, Compose·ECS 환경변수 wiring, 운영 기본 수치·경보 임계치, k6 부하·장애 검증과 runbook, frontend SSE client와 화면
@@ -141,7 +141,7 @@ Redis Streams, Kafka, 분산 lock과 별도 SSE gateway는 현재 connection 규
 
 DB migration은 없다. Runtime은 기본 OFF이며 전용 설정이 모두 유효한 환경에서만 활성화한다. PR 2는 애플리케이션 설정 key와 Runtime을 제공하고 deploy wiring은 PR 3에서 별도 검증한다.
 
-문제가 발생하면 SSE Runtime을 비활성화하고 client가 기존 HTTP 조회를 유지하게 한다. Valkey channel과 로컬 registry는 업무 원장이 아니므로 별도 데이터 rollback이 없다. 코드 rollback 시 PR #442의 공개 계약은 `contract-only`로 되돌리거나 후속 계약 PR에서 상태를 명시적으로 복원한다.
+문제가 발생하면 SSE Runtime을 비활성화하고 client가 기존 HTTP 조회를 유지하게 한다. Valkey channel과 로컬 registry는 업무 원장이 아니므로 별도 데이터 rollback이 없다. 코드 rollback은 공개 endpoint·event 의미를 임의로 되돌리지 않으며, Runtime 가용성은 명시적인 환경 비활성화와 HTTP/MySQL 재조회로 복구한다.
 
 ## 전환 뒤 확인할 새 단점
 
@@ -160,9 +160,13 @@ PR 3에서 실제 proxy buffering, heartbeat 전달, timeout, 연결·재연결 
 - [ADR-006 JWT·Valkey 전환](ADR-006-jwt-valkey-refresh-token.md)
 - [Issue #250](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/250)
 - [PR #442](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/442)
+- [PR #474](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/474)
+- [SSE Runtime 배포·복구 runbook](../deployment/sse-runtime-runbook.md)
+- [SSE Runtime 검증 기록](../performance/sse-runtime-validation.md)
 
 ## 날짜별 개정 이력
 
 | 날짜 | 적용 단계 | 관측 증거 | 결정 또는 변경 | 검증 결과 | 새 단점·후속 조건 |
 |---|---|---|---|---|---|
 | 2026-08-19 | 고도화 | PR #442 계약 병합과 Issue #250 Runtime 인수 조건 | 공통 SSE transport, 소유 high-watermark adapter, Valkey wake-up hint와 MySQL correction 선택 | 설계 승인; Runtime·부하·장애 검증은 후속 PR | 운영 수치·경보 임계치는 PR 3 증거 뒤 확정 |
+| 2026-08-19 | 고도화 | PR #474 Runtime 병합과 고정 xk6 SSE 하네스 계약 | production Runtime 활성 상태를 반영하고 proxy·배포·부하 검증을 PR 3에 유지 | 정적 계약·전용 이미지 build PASS; 실제 부하·장애는 미실행 | 로컬 시험 입력을 운영 기본값으로 승격하지 않음 |
