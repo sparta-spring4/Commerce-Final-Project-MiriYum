@@ -60,10 +60,10 @@ Optional<Detail> findCase(DetailQuery query);
 - Create: `docs/specs/admin-monitoring/spec.md`
 - Create: `docs/specs/admin-monitoring/openapi.yaml`
 - Modify: `docs/specs/platform-operator-openapi.yaml`
-- Create: `backend/src/test/java/com/miriyum/docs/AdminMonitoringOpenApiContractTest.java`
+- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/AdminMonitoringOpenApiContractTest.java`
 
 - [ ] Verify #448 is merged, #459 state, V62 availability, clean worktree, and `git merge-base --is-ancestor origin/dev HEAD`; stop and report if any gate fails.
-- [ ] Write `AdminMonitoringOpenApiContractTest` asserting the aggregate references `/platform/admin/monitoring/cases`, the list/detail schemas include `asOf`, `dataThrough`, per-source completeness and failures, and HTTP 200/400/401/403/404/409/503 contracts.
+- [ ] Write `AdminMonitoringOpenApiContractTest` asserting the aggregate references `/api/v1/platform-operators/admin-monitoring/cases`, the list/detail schemas include `asOf`, `dataThrough`, per-source completeness and failures, and HTTP 200/400/401/403/404/503 contracts.
 - [ ] Run `./gradlew test --tests com.miriyum.docs.AdminMonitoringOpenApiContractTest` and confirm RED because the paths/schemas do not exist.
 - [ ] Add the approved case model, fixed ordering, 31-day filter bound, opaque cursor, masking, assignment, and partial-failure rules to the spec and OpenAPI; reference it from the platform aggregate.
 - [ ] Re-run the named test and confirm GREEN.
@@ -78,10 +78,10 @@ Optional<Detail> findCase(DetailQuery query);
 - Create: `backend/src/main/java/com/miriyum/domain/menuhold/repository/MenuHoldTransitionAuditRepository.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/menuhold/service/TemporaryMenuHoldServiceRuntime.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/menuhold/service/MenuHoldServiceRuntime.java`
-- Create: `backend/src/test/java/com/miriyum/domain/menuhold/entity/MenuHoldTransitionAuditTest.java`
-- Create: `backend/src/test/java/com/miriyum/domain/menuhold/repository/MenuHoldTransitionAuditRepositoryIT.java`
-- Modify: `backend/src/test/java/com/miriyum/domain/menuhold/service/TemporaryMenuHoldServiceRuntimeTest.java`
-- Modify: `backend/src/test/java/com/miriyum/domain/menuhold/service/MenuHoldServiceRuntimeTest.java`
+- Modify: `backend/src/test/java/com/miriyum/domain/menuhold/MenuHoldMigrationContractTest.java`
+- Modify: `backend/src/test/java/com/miriyum/domain/menuhold/entity/MenuHoldTest.java`
+- Modify: `backend/src/test/java/com/miriyum/domain/menuhold/service/TemporaryMenuHoldServiceTest.java`
+- Modify: `backend/src/test/java/com/miriyum/domain/menuhold/service/MenuHoldServiceTest.java`
 
 - [ ] Write entity and repository tests for positive monotonic `resultVersion`, immutable `BASELINE|CREATED|TRANSITION`, stable reservation/hold link snapshots, and ordering by `(menuHoldId, resultVersion)`.
 - [ ] Add runtime tests proving creation writes exactly one `CREATED` v0 event, each persisted status transition writes one `TRANSITION` event in the same transaction, and an idempotent replay writes no second event.
@@ -98,8 +98,8 @@ Optional<Detail> findCase(DetailQuery query);
 - Create: `backend/src/main/java/com/miriyum/domain/menuhold/service/MenuHoldMonitoringQueryService.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/menuhold/repository/MenuHoldRepository.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/menuhold/repository/MenuHoldTransitionAuditRepository.java`
-- Create: `backend/src/test/java/com/miriyum/domain/menuhold/dto/MenuHoldMonitoringContractsTest.java`
-- Create: `backend/src/test/java/com/miriyum/domain/menuhold/service/MenuHoldMonitoringQueryServiceIT.java`
+- Create: `backend/src/test/java/com/miriyum/domain/menuhold/contract/MenuHoldMonitoringPublicContractTest.java`
+- Create: `backend/src/test/java/com/miriyum/domain/menuhold/service/MenuHoldMonitoringQueryServiceTest.java`
 
 - [ ] Write contract validation tests and an integration test covering changed references, bounded batch reads, detail history, BASELINE `historyAvailableFrom`, as-of reconstruction, and stable `reservation-hold:{id}` linkage.
 - [ ] Run both named tests and confirm RED.
@@ -110,7 +110,7 @@ Optional<Detail> findCase(DetailQuery query);
 ### Task 4: Publish the Reservation monitoring contract
 
 **Files:**
-- Create: `backend/src/main/java/com/miriyum/domain/reservation/dto/ReservationMonitoringContracts.java`
+- Create: `backend/src/main/java/com/miriyum/domain/reservation/dto/contract/ReservationMonitoringContracts.java`
 - Create: `backend/src/main/java/com/miriyum/domain/reservation/service/ReservationMonitoringQueryService.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationRepository.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationHoldRepository.java`
@@ -119,8 +119,8 @@ Optional<Detail> findCase(DetailQuery query);
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationFulfillmentAuditRepository.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationNoShowAuditRepository.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationDepositProcessRepository.java`
-- Create: `backend/src/test/java/com/miriyum/domain/reservation/dto/ReservationMonitoringContractsTest.java`
-- Create: `backend/src/test/java/com/miriyum/domain/reservation/service/ReservationMonitoringQueryServiceIT.java`
+- Create: `backend/src/test/java/com/miriyum/domain/reservation/contract/ReservationMonitoringPublicContractTest.java`
+- Create: `backend/src/test/java/com/miriyum/domain/reservation/service/ReservationMonitoringQueryServiceTest.java`
 
 - [ ] Write tests for `reservation-hold:{holdId}` stability after final reservation creation, direct `reservation:{reservationId}`, confirmed version 0, one terminal transition version 1, check-in/no-show/fulfillment history, and masked contact data.
 - [ ] Run both named tests and confirm RED.
@@ -136,8 +136,8 @@ Optional<Detail> findCase(DetailQuery query);
 - Modify: `backend/src/main/java/com/miriyum/domain/payment/repository/PaymentRepository.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/payment/repository/PaymentLedgerEntryRepository.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/payment/repository/PaymentRefundRepository.java`
-- Create: `backend/src/test/java/com/miriyum/domain/payment/dto/PaymentMonitoringContractsTest.java`
-- Create: `backend/src/test/java/com/miriyum/domain/payment/service/PaymentMonitoringQueryServiceIT.java`
+- Create: `backend/src/test/java/com/miriyum/domain/payment/contract/PaymentMonitoringPublicContractTest.java`
+- Create: `backend/src/test/java/com/miriyum/domain/payment/service/PaymentMonitoringQueryServiceTest.java`
 
 - [ ] Rebase/check #459's merged Payment contract and repository changes, then write tests for changed references, batch/detail, raw optimistic version, ledger `occurredAt`, refund reconciliation, and masked payment reference.
 - [ ] Run both named tests and confirm RED.
@@ -152,8 +152,8 @@ Optional<Detail> findCase(DetailQuery query);
 - Create: `backend/src/main/java/com/miriyum/domain/reservation/waiting/service/WaitingMonitoringQueryService.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/waiting/repository/WaitingTeamRepository.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/waiting/repository/WaitingTransitionAuditRepository.java`
-- Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/dto/WaitingMonitoringContractsTest.java`
-- Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/service/WaitingMonitoringQueryServiceIT.java`
+- Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/contract/WaitingMonitoringPublicContractTest.java`
+- Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/service/WaitingMonitoringQueryServiceTest.java`
 
 - [ ] Write tests for `waiting:{waitingTeamId}`, raw version, as-of transition reconstruction, conversion correlation, data-through, masked subject, and deterministic seek ordering.
 - [ ] Run both named tests and confirm RED.
@@ -163,13 +163,11 @@ Optional<Detail> findCase(DetailQuery query);
 
 ### Task 7: Contract boundary and publication
 
-**Files:**
-- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/monitoring/AdminMonitoringSourceBoundaryTest.java`
+**Files:** No additional files; this task verifies the allowlisted contract and service tests created above.
 
-- [ ] Add an architecture test that permits platform monitoring imports only from the four public `dto/*MonitoringContracts` and `service/*MonitoringQueryService` types and rejects source Entity/Repository imports.
-- [ ] Run the architecture test, all four DTO contract tests, four query integration tests, MenuHold ledger tests, and OpenAPI contract test; record exact commands/results. Do not broaden the suite.
+- [ ] Run all four DTO contract tests, four query service tests, MenuHold ledger tests, and OpenAPI contract test; record exact commands/results. Do not broaden the suite.
 - [ ] Run `git diff --check`, compare `git diff --name-only origin/dev...HEAD` with issue #280's source allowlist, and amend the issue before any discrepancy is committed.
-- [ ] Commit: `test(admin-monitoring): enforce public source boundaries`.
+- [ ] Commit: `test(admin-monitoring): verify public source boundaries`.
 - [ ] Push only `feature/280-admin-monitoring-contracts` and open a draft PR to `dev`, explicitly marking the runtime PR blocked until merge and CI success.
 
 ## Completion Gate

@@ -253,7 +253,7 @@ cursor는 내부 값을 직접 노출하지 않는 무결성 보호 문자열이
 - `seekAfterCaseType`
 - `seekAfterCaseId`
 
-손상, 다른 필터와의 재사용, 알 수 없는 contract version은 `400 INVALID_CURSOR`다. 퇴역한 서명 키의 `keyId`이거나 원 도메인이 해당 `asOf`를 더 이상 제공할 수 없으면 `409 EXPIRED_CURSOR`다. #280만의 임의 wall-clock TTL은 추가하지 않는다.
+손상, 다른 필터와의 재사용, 알 수 없는 contract version은 `400 INVALID_CURSOR`다. 퇴역한 서명 키의 `keyId`이거나 원 도메인이 해당 `asOf`를 더 이상 제공할 수 없으면 `400 EXPIRED_CURSOR`다. #280만의 임의 wall-clock TTL은 추가하지 않는다.
 
 cursor의 seek tuple은 마지막으로 반환한 행이 아니라 필터 평가를 끝낸 마지막 후보를 가리킨다. 그래야 연결 원장 필터에서 제외된 후보를 다음 페이지에서 반복 스캔하지 않는다.
 
@@ -290,7 +290,7 @@ Reservation, MenuHold, Payment, Waiting 목록 후보 호출은 서로 독립적
 | 상세 부가 원장 실패 | 200 | 해당 cell만 `UNAVAILABLE`, 전체 `PARTIAL` |
 | 잘못된 필터 | 400 | `INVALID_MONITORING_FILTER` |
 | 손상·필터 불일치 cursor | 400 | `INVALID_CURSOR` |
-| 만료 cursor | 409 | `EXPIRED_CURSOR` |
+| 만료 cursor | 400 | `EXPIRED_CURSOR` |
 
 빈 `items`는 모든 필수 원장이 정상 응답하고 실제 결과가 없을 때만 정상 0건이다.
 

@@ -43,18 +43,17 @@ record CursorPayload(int contractVersion, String keyId, Instant asOf,
                      CaseType caseType, String caseId) {}
 ```
 
-Cursor decode distinguishes malformed/tampered (`400 INVALID_CURSOR`) from an unknown retired `keyId` (`409 CURSOR_EXPIRED`). The codec receives a minimum-32-byte secret through `@Value("${miriyum.platform-operator.admin-monitoring.cursor-secret:}")` and derives a non-secret key ID; secrets are never serialized or logged.
+Cursor decode distinguishes malformed/tampered (`400 INVALID_CURSOR`) from an unknown retired `keyId` (`400 EXPIRED_CURSOR`). The codec receives a minimum-32-byte secret through `@Value("${miriyum.platform-operator.admin-monitoring.cursor-secret:}")` and derives a non-secret key ID; secrets are never serialized or logged.
 
 ---
 
 ### Task 1: Freeze HTTP DTO and lifecycle mapping
 
 **Files:**
-- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/monitoring/dto/AdminMonitoringRequests.java`
-- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/monitoring/dto/AdminMonitoringResponses.java`
-- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/monitoring/service/AdminMonitoringStatusMapper.java`
-- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/monitoring/dto/AdminMonitoringContractsTest.java`
-- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/monitoring/service/AdminMonitoringStatusMapperTest.java`
+- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/adminmonitoring/dto/AdminMonitoringRequests.java`
+- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/adminmonitoring/dto/AdminMonitoringResponses.java`
+- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/adminmonitoring/service/AdminMonitoringStatusMapper.java`
+- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/adminmonitoring/service/AdminMonitoringStatusMapperTest.java`
 
 - [ ] Write DTO validation tests for required range, `changedFrom <= changedTo`, maximum 31 days, size 1..100/default 20, string IDs, positive case version, raw non-negative source versions, sorted history, and permanently masked fields.
 - [ ] Write an explicit table test for every merged Reservation, MenuHold, Payment, and Waiting status. Assert unknown/new source status raises a source-specific mapping failure instead of inventing a lifecycle.
@@ -66,8 +65,8 @@ Cursor decode distinguishes malformed/tampered (`400 INVALID_CURSOR`) from an un
 ### Task 2: Implement the signed cursor contract
 
 **Files:**
-- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/monitoring/service/AdminMonitoringCursorCodec.java`
-- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/monitoring/service/AdminMonitoringCursorCodecTest.java`
+- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/adminmonitoring/service/AdminMonitoringCursorCodec.java`
+- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/adminmonitoring/service/AdminMonitoringCursorCodecTest.java`
 
 - [ ] Write tests for round-trip, fixed canonical filter fingerprint, HMAC tampering, wrong filters, changed sort tuple, malformed payload, secret shorter than 32 bytes, and retired/unknown key ID.
 - [ ] Run the named test and confirm RED.
@@ -78,8 +77,8 @@ Cursor decode distinguishes malformed/tampered (`400 INVALID_CURSOR`) from an un
 ### Task 3: Enforce authority, assignment, and masking
 
 **Files:**
-- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/monitoring/service/AdminMonitoringAuthorizationService.java`
-- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/monitoring/service/AdminMonitoringAuthorizationServiceTest.java`
+- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/adminmonitoring/service/AdminMonitoringAuthorizationService.java`
+- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/adminmonitoring/service/AdminMonitoringAuthorizationServiceTest.java`
 
 - [ ] Write tests proving list calls `OperatorAuthorityReader.requireCurrentAuthority`, rejects stale authority/JWT operator mismatch, and requires `OPERATIONS_MONITOR_READ`.
 - [ ] Add detail tests proving `AdminCaseAssignmentVerifier.verify(new AdminCaseAssignmentRequest(OPERATIONS_MONITORING, caseId, caseVersion, operatorId))` is required after permission and that source version 0 becomes assignment case version 1.
@@ -92,8 +91,8 @@ Cursor decode distinguishes malformed/tampered (`400 INVALID_CURSOR`) from an un
 ### Task 4: Federate source candidates and partial failures
 
 **Files:**
-- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/monitoring/service/AdminMonitoringQueryService.java`
-- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/monitoring/service/AdminMonitoringQueryServiceTest.java`
+- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/adminmonitoring/service/AdminMonitoringQueryService.java`
+- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/adminmonitoring/service/AdminMonitoringQueryServiceTest.java`
 
 - [ ] Write tests that one `asOf` is passed unchanged to every source, candidates from all four sources are merge-sorted and deduplicated by stable case ID, and linked source cells are batch loaded without per-row calls.
 - [ ] Add cursor tests proving the seek tuple is the last evaluated candidate, not the last returned item, and only fully ordered complete pages receive a cursor.
@@ -107,14 +106,14 @@ Cursor decode distinguishes malformed/tampered (`400 INVALID_CURSOR`) from an un
 ### Task 5: Expose list/detail HTTP APIs and OpenAPI
 
 **Files:**
-- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/monitoring/controller/AdminMonitoringController.java`
-- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/monitoring/controller/AdminMonitoringControllerTest.java`
+- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/adminmonitoring/controller/AdminMonitoringController.java`
+- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/adminmonitoring/controller/AdminMonitoringControllerTest.java`
 - Modify: `docs/specs/admin-monitoring/openapi.yaml`
 - Modify: `docs/specs/platform-operator-openapi.yaml`
-- Modify: `backend/src/test/java/com/miriyum/docs/AdminMonitoringOpenApiContractTest.java`
+- Modify: `backend/src/test/java/com/miriyum/domain/platformoperator/AdminMonitoringOpenApiContractTest.java`
 
 - [ ] Write MockMvc tests for `GET /api/v1/platform-operators/admin-monitoring/cases` and `GET /api/v1/platform-operators/admin-monitoring/cases/{caseType}/{caseId}` with JWT principal/authority version propagation and `ApiResponse<T>`.
-- [ ] Cover 200 complete/partial, 400 validation/invalid cursor, 401 unauthenticated, 403 permission or assignment, 404 feature-off or absent detail, 409 expired cursor, and 503 source-unavailable matrices.
+- [ ] Cover 200 complete/partial, 400 validation/invalid or expired cursor, 401 unauthenticated, 403 permission or assignment, 404 feature-off or absent detail, and 503 source-unavailable matrices.
 - [ ] Run controller and OpenAPI contract tests and confirm RED.
 - [ ] Implement the controller with the repository's existing platform-operator feature-off routing convention; activate final schemas/examples in feature and aggregate OpenAPI.
 - [ ] Re-run both tests and confirm GREEN.
@@ -123,12 +122,12 @@ Cursor decode distinguishes malformed/tampered (`400 INVALID_CURSOR`) from an un
 ### Task 6: Verify boundary, targeted integration, and publish
 
 **Files:**
-- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/monitoring/AdminMonitoringArchitectureTest.java`
-- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/monitoring/AdminMonitoringIntegrationTest.java`
+- Modify: `backend/src/test/java/com/miriyum/architecture/DomainPackageArchitectureTest.java`
+- Create: `backend/src/test/java/com/miriyum/domain/platformoperator/adminmonitoring/AdminMonitoringApiIT.java`
 
-- [ ] Write an architecture test rejecting `..entity..` and `..repository..` dependencies from `platformoperator.monitoring` and allowing only the public source contracts/services.
+- [ ] Extend the architecture test to reject `..entity..` and `..repository..` dependencies from `platformoperator.adminmonitoring` and allow only the public source contracts/services.
 - [ ] Write one integration test for a mixed Reservation/Waiting page, linked MenuHold/Payment cells, assignment-protected detail, fixed `asOf/dataThrough`, masking, and a simulated child-source partial response.
-- [ ] Run only `AdminMonitoringContractsTest`, `AdminMonitoringStatusMapperTest`, `AdminMonitoringCursorCodecTest`, `AdminMonitoringAuthorizationServiceTest`, `AdminMonitoringQueryServiceTest`, `AdminMonitoringControllerTest`, `AdminMonitoringOpenApiContractTest`, `AdminMonitoringArchitectureTest`, and `AdminMonitoringIntegrationTest`.
+- [ ] Run only `AdminMonitoringStatusMapperTest`, `AdminMonitoringCursorCodecTest`, `AdminMonitoringAuthorizationServiceTest`, `AdminMonitoringQueryServiceTest`, `AdminMonitoringControllerTest`, `AdminMonitoringOpenApiContractTest`, `DomainPackageArchitectureTest`, and `AdminMonitoringApiIT`.
 - [ ] Run `git diff --check`; compare `git diff --name-only origin/dev...HEAD` byte-for-byte with the issue #280 runtime allowlist. Amend the issue before committing any discrepancy.
 - [ ] Commit: `test(admin-monitoring): verify integration and domain boundary`.
 - [ ] Push only `feature/280-admin-monitoring`, open a draft PR to `dev`, link #280 and the prerequisite PR, and state that full backend verification is pending/authoritative in GitHub CI.
