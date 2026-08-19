@@ -35,6 +35,8 @@ public class PaymentMonitoringSnapshotRepository {
                     SELECT s.payment_id,
                            s.source_type,
                            s.source_reference_id,
+                           s.case_type,
+                           s.case_reference_id,
                            s.store_id,
                            s.source_status,
                            s.status_version,
@@ -46,13 +48,15 @@ public class PaymentMonitoringSnapshotRepository {
                            s.refunded_amount_minor,
                            s.currency,
                            CASE
-                               WHEN s.source_type = 'RESERVATION_DEPOSIT'
-                                   THEN CONCAT('reservation-hold:', s.source_reference_id)
-                               WHEN s.source_type = 'WAITING_RESERVATION_DEPOSIT'
-                                   THEN CONCAT('waiting:', s.source_reference_id)
+                               WHEN s.case_type = 'RESERVATION_HOLD'
+                                   THEN CONCAT('reservation-hold:', s.case_reference_id)
+                               WHEN s.case_type = 'RESERVATION'
+                                   THEN CONCAT('reservation:', s.case_reference_id)
+                               WHEN s.case_type = 'WAITING'
+                                   THEN CONCAT('waiting:', s.case_reference_id)
                            END AS case_id,
                            ROW_NUMBER() OVER (
-                               PARTITION BY s.source_type, s.source_reference_id
+                               PARTITION BY s.case_type, s.case_reference_id
                                ORDER BY s.status_changed_at DESC,
                                         s.payment_monitoring_snapshot_id DESC
                            ) AS rn
@@ -62,11 +66,10 @@ public class PaymentMonitoringSnapshotRepository {
                        AND s.captured_at <= ?
                        AND (? IS NULL OR s.store_id = ?)
                        AND (? = '' OR FIND_IN_SET(s.source_status, ?) > 0)
-                       AND s.source_type IN (
-                           'RESERVATION_DEPOSIT', 'WAITING_RESERVATION_DEPOSIT'
-                       )
+                       AND s.case_type IN ('RESERVATION_HOLD', 'RESERVATION', 'WAITING')
                 )
-                SELECT payment_id, source_type, source_reference_id, store_id,
+                SELECT payment_id, source_type, source_reference_id,
+                       case_type, case_reference_id, store_id,
                        source_status, status_version, history_available_from,
                        status_changed_at, amount_minor, refunded_amount_minor,
                        currency, case_id
@@ -87,12 +90,13 @@ public class PaymentMonitoringSnapshotRepository {
     }
 
     public List<Snapshot> findLatestCases(
-            String sourceType,
-            String sourceReferencesCsv,
+            String caseType,
+            String caseReferencesCsv,
             LocalDateTime asOf
     ) {
         return jdbcTemplate.query("""
-                SELECT s.payment_id, s.source_type, s.source_reference_id, s.store_id,
+                SELECT s.payment_id, s.source_type, s.source_reference_id,
+                       s.case_type, s.case_reference_id, s.store_id,
                        s.source_status, s.status_version,
                        (SELECT MIN(h.captured_at)
                           FROM payment_monitoring_snapshots h
@@ -100,14 +104,16 @@ public class PaymentMonitoringSnapshotRepository {
                        s.status_changed_at, s.amount_minor, s.refunded_amount_minor,
                        s.currency,
                        CASE
-                           WHEN s.source_type = 'RESERVATION_DEPOSIT'
-                               THEN CONCAT('reservation-hold:', s.source_reference_id)
-                           WHEN s.source_type = 'WAITING_RESERVATION_DEPOSIT'
-                               THEN CONCAT('waiting:', s.source_reference_id)
+                           WHEN s.case_type = 'RESERVATION_HOLD'
+                               THEN CONCAT('reservation-hold:', s.case_reference_id)
+                           WHEN s.case_type = 'RESERVATION'
+                               THEN CONCAT('reservation:', s.case_reference_id)
+                           WHEN s.case_type = 'WAITING'
+                               THEN CONCAT('waiting:', s.case_reference_id)
                        END AS case_id
                   FROM payment_monitoring_snapshots s
-                 WHERE s.source_type = ?
-                   AND FIND_IN_SET(s.source_reference_id, ?) > 0
+                 WHERE s.case_type = ?
+                   AND FIND_IN_SET(s.case_reference_id, ?) > 0
                    AND s.payment_monitoring_snapshot_id = (
                        SELECT latest.payment_monitoring_snapshot_id
                          FROM payment_monitoring_snapshots latest
@@ -120,25 +126,25 @@ public class PaymentMonitoringSnapshotRepository {
                    )
                  ORDER BY s.status_changed_at DESC, s.payment_id DESC
                 """, PaymentMonitoringSnapshotRepository::snapshot,
-                sourceType, sourceReferencesCsv, timestamp(asOf), timestamp(asOf));
+                caseType, caseReferencesCsv, timestamp(asOf), timestamp(asOf));
     }
 
     public List<Existence> findExistingCases(
-            String sourceType,
-            String sourceReferencesCsv,
+            String caseType,
+            String caseReferencesCsv,
             LocalDateTime asOf
     ) {
         return jdbcTemplate.query("""
-                SELECT source_type, source_reference_id, created_at
+                SELECT monitoring_case_type, monitoring_case_reference_id, created_at
                   FROM payments
-                 WHERE source_type = ?
-                   AND FIND_IN_SET(source_reference_id, ?) > 0
+                 WHERE monitoring_case_type = ?
+                   AND FIND_IN_SET(monitoring_case_reference_id, ?) > 0
                    AND created_at <= ?
                 """, (resultSet, rowNumber) -> new Existence(
-                        resultSet.getString("source_type"),
-                        resultSet.getString("source_reference_id"),
+                        resultSet.getString("monitoring_case_type"),
+                        resultSet.getString("monitoring_case_reference_id"),
                         instant(resultSet, "created_at")),
-                sourceType, sourceReferencesCsv, timestamp(asOf));
+                caseType, caseReferencesCsv, timestamp(asOf));
     }
 
     private static Snapshot snapshot(ResultSet resultSet, int rowNumber) throws SQLException {
@@ -147,6 +153,8 @@ public class PaymentMonitoringSnapshotRepository {
                 resultSet.getString("payment_id"),
                 resultSet.getString("source_type"),
                 resultSet.getString("source_reference_id"),
+                resultSet.getString("case_type"),
+                resultSet.getString("case_reference_id"),
                 resultSet.getLong("store_id"),
                 Payment.Status.valueOf(resultSet.getString("source_status")),
                 resultSet.getLong("status_version"),
@@ -171,6 +179,8 @@ public class PaymentMonitoringSnapshotRepository {
             String paymentId,
             String sourceType,
             String sourceReferenceId,
+            String caseType,
+            String caseReferenceId,
             long storeId,
             Payment.Status status,
             long version,
@@ -182,6 +192,6 @@ public class PaymentMonitoringSnapshotRepository {
     ) {
     }
 
-    public record Existence(String sourceType, String sourceReferenceId, Instant createdAt) {
+    public record Existence(String caseType, String caseReferenceId, Instant createdAt) {
     }
 }

@@ -86,7 +86,7 @@ class PaymentMonitoringQueryServiceTest {
         var payment = snapshot("501", "RESERVATION_DEPOSIT", "91",
                 Payment.Status.RECONCILIATION_REQUIRED, 7, AS_OF.minusSeconds(2));
         given(snapshotRepository.findLatestCases(
-                "RESERVATION_DEPOSIT", "91", AS_OF_DB))
+                "RESERVATION_HOLD", "91", AS_OF_DB))
                 .willReturn(List.of(payment));
 
         var result = service.findCases(new PaymentMonitoringContracts.BatchQuery(
@@ -101,14 +101,34 @@ class PaymentMonitoringQueryServiceTest {
     }
 
     @Test
+    void directReservationDepositIsAddressableByReservationCaseId() {
+        var payment = new PaymentMonitoringSnapshotRepository.Snapshot(
+                "reservation:92", "503", "RESERVATION_DEPOSIT", "92",
+                "RESERVATION", "92", 12L,
+                Payment.Status.PAID, 3L, CREATED, AS_OF.minusSeconds(3),
+                10000L, 0L, "KRW");
+        given(snapshotRepository.findLatestCases(
+                "RESERVATION", "92", AS_OF_DB))
+                .willReturn(List.of(payment));
+
+        var result = service.findCases(new PaymentMonitoringContracts.BatchQuery(
+                AS_OF, List.of("reservation:92")));
+
+        assertThat(result.cells()).singleElement().satisfies(cell -> {
+            assertThat(cell.caseId()).isEqualTo("reservation:92");
+            assertThat(cell.state().paymentId()).isEqualTo("503");
+        });
+    }
+
+    @Test
     void preBaselinePaymentIsUnavailableWithoutFabricatedState() {
         var existence = new PaymentMonitoringSnapshotRepository.Existence(
-                "RESERVATION_DEPOSIT", "91", CREATED);
+                "RESERVATION_HOLD", "91", CREATED);
         given(snapshotRepository.findLatestCases(
-                "RESERVATION_DEPOSIT", "91", AS_OF_DB))
+                "RESERVATION_HOLD", "91", AS_OF_DB))
                 .willReturn(List.of());
         given(snapshotRepository.findExistingCases(
-                "RESERVATION_DEPOSIT", "91", AS_OF_DB))
+                "RESERVATION_HOLD", "91", AS_OF_DB))
                 .willReturn(List.of(existence));
 
         var cell = service.findCases(new PaymentMonitoringContracts.BatchQuery(
@@ -132,7 +152,7 @@ class PaymentMonitoringQueryServiceTest {
         given(refund.getRequestedAt()).willReturn(AS_OF.minusSeconds(20));
         given(refund.getCompletedAt()).willReturn(AS_OF.minusSeconds(2));
         given(snapshotRepository.findLatestCases(
-                "WAITING_RESERVATION_DEPOSIT", "7", AS_OF_DB))
+                "WAITING", "7", AS_OF_DB))
                 .willReturn(List.of(payment));
         given(ledgerRepository.findMonitoringEvents(
                 org.mockito.ArgumentMatchers.eq("501"),
@@ -167,8 +187,11 @@ class PaymentMonitoringQueryServiceTest {
         String caseId = "RESERVATION_DEPOSIT".equals(sourceType)
                 ? "reservation-hold:" + sourceReferenceId
                 : "waiting:" + sourceReferenceId;
+        String caseType = "RESERVATION_DEPOSIT".equals(sourceType)
+                ? "RESERVATION_HOLD" : "WAITING";
         return new PaymentMonitoringSnapshotRepository.Snapshot(
-                caseId, paymentId, sourceType, sourceReferenceId, 12L,
+                caseId, paymentId, sourceType, sourceReferenceId,
+                caseType, sourceReferenceId, 12L,
                 status, version, CREATED, updatedAt, 10000L,
                 status == Payment.Status.REFUNDED ? 10000L : 0L, "KRW");
     }

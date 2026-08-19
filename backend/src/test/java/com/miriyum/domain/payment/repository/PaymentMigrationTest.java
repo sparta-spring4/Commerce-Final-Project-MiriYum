@@ -102,10 +102,15 @@ class PaymentMigrationTest {
             insertExistingConsumer(mysql);
             try (Connection connection = mysql.createConnection("")) {
                 insertExistingReservationHoldCorrelation(connection);
+                insertExistingDirectReservationCorrelation(connection);
                 insertLegacyPayment(
                         connection,
                         "900000000000000001",
                         "payment-reservation-900000000000000001");
+                insertLegacyDirectReservationPayment(
+                        connection,
+                        "900000000000000002",
+                        "payment-reservation-900000000000000002");
                 insertExistingFailedRefund(connection);
             }
 
@@ -135,6 +140,22 @@ class PaymentMigrationTest {
                         SELECT store_id FROM payments
                          WHERE payment_id = '900000000000000001'
                         """)).isEqualTo(12L);
+                assertThat(singleString(connection, """
+                        SELECT monitoring_case_type FROM payments
+                         WHERE payment_id = '900000000000000001'
+                        """)).isEqualTo("RESERVATION_HOLD");
+                assertThat(singleLong(connection, """
+                        SELECT store_id FROM payments
+                         WHERE payment_id = '900000000000000002'
+                        """)).isEqualTo(13L);
+                assertThat(singleString(connection, """
+                        SELECT monitoring_case_type FROM payments
+                         WHERE payment_id = '900000000000000002'
+                        """)).isEqualTo("RESERVATION");
+                assertThat(singleString(connection, """
+                        SELECT monitoring_case_reference_id FROM payments
+                         WHERE payment_id = '900000000000000002'
+                        """)).isEqualTo("124");
                 assertThat(singleLong(connection, """
                         SELECT COUNT(*) FROM payment_monitoring_snapshots
                          WHERE payment_id = '900000000000000001'
@@ -317,6 +338,32 @@ class PaymentMigrationTest {
         }
     }
 
+    private static void insertLegacyDirectReservationPayment(
+            Connection connection,
+            String paymentId,
+            String portOnePaymentId
+    ) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO payments (
+                    payment_id, source_type, source_reference_id, source_policy_version,
+                    source_expires_at, preparation_idempotency_key,
+                    preparation_request_fingerprint, consumer_account_id,
+                    amount_minor, refunded_amount_minor, currency, portone_payment_id,
+                    order_name,
+                    status, last_attempt_status, created_at, updated_at, version
+                ) VALUES (?, 'RESERVATION_DEPOSIT', '124', 7,
+                          DATE_ADD(NOW(6), INTERVAL 1 HOUR), ?,
+                          REPEAT('a', 64), 10001,
+                          30000, 0, 'KRW', ?, 'MiriYum 예약금 124',
+                          'READY', 'NOT_STARTED', NOW(6), NOW(6), 0)
+                """)) {
+            statement.setString(1, paymentId);
+            statement.setString(2, "550e8400-e29b-41d4-a716-" + paymentId.substring(7));
+            statement.setString(3, portOnePaymentId);
+            statement.executeUpdate();
+        }
+    }
+
     private static void insertExistingReservationHoldCorrelation(Connection connection)
             throws Exception {
         try (Statement statement = connection.createStatement()) {
@@ -342,6 +389,44 @@ class PaymentMigrationTest {
                         'migration-contact', TRUE, 1, 1,
                         'ACTIVE', 0, 'payment-migration-hold',
                         '2026-08-19 00:00:00', '2026-08-19 00:10:00'
+                    )
+                    """);
+            statement.execute("SET FOREIGN_KEY_CHECKS = 1");
+        }
+    }
+
+    private static void insertExistingDirectReservationCorrelation(Connection connection)
+            throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("SET FOREIGN_KEY_CHECKS = 0");
+            statement.executeUpdate("""
+                    INSERT INTO reservations (
+                        reservation_id, consumer_account_id, store_id, store_name_snapshot,
+                        service_date, start_time, end_time,
+                        adult_count, child_count, infant_count,
+                        notification_target_reference, contact_available_at_confirmation,
+                        capacity_policy_version, reservation_policy_version,
+                        status, created_at
+                    ) VALUES (
+                        124, 10001, 13, 'direct reservation migration store',
+                        '2026-08-20', '12:00:00', '13:00:00',
+                        2, 0, 0, 'migration-contact', TRUE, 1, 1,
+                        'CONFIRMED', '2026-08-19 00:00:00'
+                    )
+                    """);
+            statement.executeUpdate("""
+                    INSERT INTO reservations (
+                        reservation_id, consumer_account_id, store_id, store_name_snapshot,
+                        service_date, start_time, end_time,
+                        adult_count, child_count, infant_count,
+                        notification_target_reference, contact_available_at_confirmation,
+                        capacity_policy_version, reservation_policy_version,
+                        status, created_at
+                    ) VALUES (
+                        123, 10001, 14, 'later unrelated reservation',
+                        '2026-08-21', '12:00:00', '13:00:00',
+                        2, 0, 0, 'migration-contact', TRUE, 1, 1,
+                        'CONFIRMED', DATE_ADD(NOW(6), INTERVAL 1 DAY)
                     )
                     """);
             statement.execute("SET FOREIGN_KEY_CHECKS = 1");

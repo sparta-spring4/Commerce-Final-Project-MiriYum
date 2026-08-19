@@ -130,6 +130,17 @@ class PaymentTest {
                 "payment-reservation-900000000000000001", "MiriYum 예약금 123", CREATED_AT));
     }
 
+    @Test
+    @DisplayName("결제 source와 모니터링 사건 유형의 조합이 다르면 준비하지 않는다")
+    void rejectsMonitoringCaseTypeThatContradictsPaymentSource() {
+        assertThatIllegalArgumentException().isThrownBy(() -> Payment.prepare(
+                "900000000000000001", "WAITING_RESERVATION_DEPOSIT", "123",
+                "RESERVATION", "123", 12L, 7L,
+                CREATED_AT.plusSeconds(600), "550e8400-e29b-41d4-a716-446655440000",
+                "a".repeat(64), 11L, 30_000L, "KRW",
+                "payment-reservation-900000000000000001", "MiriYum 예약금 123", CREATED_AT));
+    }
+
     private static Payment preparedPayment() {
         return Payment.prepare(
                 "900000000000000001",

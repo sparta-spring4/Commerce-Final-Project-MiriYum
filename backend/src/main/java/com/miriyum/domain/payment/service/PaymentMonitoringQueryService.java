@@ -28,8 +28,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class PaymentMonitoringQueryService {
 
     private static final int MAX_DETAIL_ROWS = 100;
-    private static final String RESERVATION_DEPOSIT = "RESERVATION_DEPOSIT";
-    private static final String WAITING_RESERVATION_DEPOSIT = "WAITING_RESERVATION_DEPOSIT";
+    private static final String RESERVATION_HOLD = "RESERVATION_HOLD";
+    private static final String RESERVATION = "RESERVATION";
+    private static final String WAITING = "WAITING";
 
     private final PaymentMonitoringSnapshotRepository snapshotRepository;
     private final PaymentLedgerEntryRepository ledgerRepository;
@@ -81,14 +82,19 @@ public class PaymentMonitoringQueryService {
     ) {
         ParsedCases parsed = parse(query.caseIds());
         List<PaymentMonitoringSnapshotRepository.Snapshot> snapshots = new ArrayList<>();
+        if (!parsed.reservationHoldReferences().isEmpty()) {
+            snapshots.addAll(snapshotRepository.findLatestCases(
+                    RESERVATION_HOLD, String.join(",", parsed.reservationHoldReferences()),
+                    utc(query.asOf())));
+        }
         if (!parsed.reservationReferences().isEmpty()) {
             snapshots.addAll(snapshotRepository.findLatestCases(
-                    RESERVATION_DEPOSIT, String.join(",", parsed.reservationReferences()),
+                    RESERVATION, String.join(",", parsed.reservationReferences()),
                     utc(query.asOf())));
         }
         if (!parsed.waitingReferences().isEmpty()) {
             snapshots.addAll(snapshotRepository.findLatestCases(
-                    WAITING_RESERVATION_DEPOSIT, String.join(",", parsed.waitingReferences()),
+                    WAITING, String.join(",", parsed.waitingReferences()),
                     utc(query.asOf())));
         }
         Map<String, PaymentMonitoringSnapshotRepository.Snapshot> latest = snapshots.stream()
@@ -99,15 +105,21 @@ public class PaymentMonitoringQueryService {
                                 ? left : right,
                         LinkedHashMap::new));
         Map<String, PaymentMonitoringSnapshotRepository.Existence> existing = new HashMap<>();
+        if (!parsed.reservationHoldReferences().isEmpty()) {
+            snapshotRepository.findExistingCases(
+                            RESERVATION_HOLD,
+                            String.join(",", parsed.reservationHoldReferences()), utc(query.asOf()))
+                    .forEach(value -> existing.put(caseId(value), value));
+        }
         if (!parsed.reservationReferences().isEmpty()) {
             snapshotRepository.findExistingCases(
-                            RESERVATION_DEPOSIT,
+                            RESERVATION,
                             String.join(",", parsed.reservationReferences()), utc(query.asOf()))
                     .forEach(value -> existing.put(caseId(value), value));
         }
         if (!parsed.waitingReferences().isEmpty()) {
             snapshotRepository.findExistingCases(
-                            WAITING_RESERVATION_DEPOSIT,
+                            WAITING,
                             String.join(",", parsed.waitingReferences()), utc(query.asOf()))
                     .forEach(value -> existing.put(caseId(value), value));
         }
@@ -198,10 +210,11 @@ public class PaymentMonitoringQueryService {
     }
 
     private static String caseId(PaymentMonitoringSnapshotRepository.Existence existence) {
-        return switch (existence.sourceType()) {
-            case RESERVATION_DEPOSIT -> "reservation-hold:" + existence.sourceReferenceId();
-            case WAITING_RESERVATION_DEPOSIT -> "waiting:" + existence.sourceReferenceId();
-            default -> throw new IllegalArgumentException("unsupported payment source type");
+        return switch (existence.caseType()) {
+            case RESERVATION_HOLD -> "reservation-hold:" + existence.caseReferenceId();
+            case RESERVATION -> "reservation:" + existence.caseReferenceId();
+            case WAITING -> "waiting:" + existence.caseReferenceId();
+            default -> throw new IllegalArgumentException("unsupported monitoring case type");
         };
     }
 
@@ -209,6 +222,9 @@ public class PaymentMonitoringQueryService {
         return new ParsedCases(
                 caseIds.stream()
                         .filter(value -> value.startsWith("reservation-hold:"))
+                        .map(PaymentMonitoringQueryService::reference).toList(),
+                caseIds.stream()
+                        .filter(value -> value.startsWith("reservation:"))
                         .map(PaymentMonitoringQueryService::reference).toList(),
                 caseIds.stream()
                         .filter(value -> value.startsWith("waiting:"))
@@ -236,6 +252,7 @@ public class PaymentMonitoringQueryService {
     }
 
     private record ParsedCases(
+            List<String> reservationHoldReferences,
             List<String> reservationReferences,
             List<String> waitingReferences
     ) {

@@ -246,6 +246,8 @@ public class PaymentTransactionService {
         return prepare(
                 RESERVATION_DEPOSIT,
                 command.sourceReferenceId(),
+                command.caseType().name(),
+                command.sourceReferenceId(),
                 command.storeId(),
                 command.consumerAccountId(),
                 command.amountMinor(),
@@ -268,6 +270,8 @@ public class PaymentTransactionService {
         return prepare(
                 WAITING_RESERVATION_DEPOSIT,
                 command.sourceReferenceId(),
+                "WAITING",
+                command.sourceReferenceId(),
                 command.storeId(),
                 command.consumerAccountId(),
                 command.amountMinor(),
@@ -284,6 +288,8 @@ public class PaymentTransactionService {
     private PaymentPreparation prepare(
             String sourceType,
             String sourceReferenceId,
+            String monitoringCaseType,
+            String monitoringCaseReferenceId,
             long storeId,
             long consumerAccountId,
             long amountMinor,
@@ -304,7 +310,8 @@ public class PaymentTransactionService {
         ).orElse(null);
         if (idempotent != null) {
             if (matchesPreparationFingerprint(
-                    idempotent, storeId, fingerprint, legacyFingerprint)) {
+                    idempotent, monitoringCaseType, storeId,
+                    fingerprint, legacyFingerprint)) {
                 return toPreparation(idempotent);
             }
             throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
@@ -322,6 +329,8 @@ public class PaymentTransactionService {
                 paymentId,
                 sourceType,
                 sourceReferenceId,
+                monitoringCaseType,
+                monitoringCaseReferenceId,
                 storeId,
                 sourcePolicyVersion,
                 sourceExpiresAt,
@@ -351,6 +360,7 @@ public class PaymentTransactionService {
         return replayPreparation(
                 RESERVATION_DEPOSIT,
                 command.sourceReferenceId(),
+                command.caseType().name(),
                 command.storeId(),
                 command.idempotencyKey(),
                 preparationFingerprint(command),
@@ -366,6 +376,7 @@ public class PaymentTransactionService {
         return replayPreparation(
                 WAITING_RESERVATION_DEPOSIT,
                 command.sourceReferenceId(),
+                "WAITING",
                 command.storeId(),
                 command.idempotencyKey(),
                 preparationFingerprint(command),
@@ -376,6 +387,7 @@ public class PaymentTransactionService {
     private PaymentPreparation replayPreparation(
             String sourceType,
             String sourceReferenceId,
+            String monitoringCaseType,
             long storeId,
             String idempotencyKey,
             String fingerprint,
@@ -387,7 +399,8 @@ public class PaymentTransactionService {
         ).orElse(null);
         if (idempotent != null) {
             if (matchesPreparationFingerprint(
-                    idempotent, storeId, fingerprint, legacyFingerprint)) {
+                    idempotent, monitoringCaseType, storeId,
+                    fingerprint, legacyFingerprint)) {
                 return toPreparation(idempotent);
             }
             throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
@@ -1618,6 +1631,7 @@ public class PaymentTransactionService {
     private static String preparationFingerprint(PrepareReservationDepositCommand command) {
         return preparationFingerprint(
                 command.sourceReferenceId(),
+                command.caseType().name(),
                 command.storeId(),
                 command.consumerAccountId(),
                 command.amountMinor(),
@@ -1630,6 +1644,7 @@ public class PaymentTransactionService {
     private static String preparationFingerprint(PrepareWaitingReservationDepositCommand command) {
         return preparationFingerprint(
                 command.sourceReferenceId(),
+                "WAITING",
                 command.storeId(),
                 command.consumerAccountId(),
                 command.amountMinor(),
@@ -1667,6 +1682,7 @@ public class PaymentTransactionService {
 
     private static String preparationFingerprint(
             String sourceReferenceId,
+            String monitoringCaseType,
             long storeId,
             long consumerAccountId,
             long amountMinor,
@@ -1674,7 +1690,8 @@ public class PaymentTransactionService {
             Instant sourceExpiresAt,
             long sourcePolicyVersion
     ) {
-        return sha256(sourceReferenceId + "\n" + storeId + "\n" + consumerAccountId
+        return sha256(sourceReferenceId + "\n" + monitoringCaseType
+                + "\n" + storeId + "\n" + consumerAccountId
                 + "\n" + amountMinor + "\n" + currency
                 + "\n" + sourceExpiresAt.truncatedTo(ChronoUnit.MICROS)
                 + "\n" + sourcePolicyVersion);
@@ -1696,14 +1713,16 @@ public class PaymentTransactionService {
 
     private static boolean matchesPreparationFingerprint(
             Payment payment,
+            String requestedMonitoringCaseType,
             long requestedStoreId,
             String fingerprint,
             String legacyFingerprint
     ) {
         String persistedFingerprint = payment.getPreparationRequestFingerprint();
-        return persistedFingerprint.equals(fingerprint)
+        return payment.getMonitoringCaseType().equals(requestedMonitoringCaseType)
+                && (persistedFingerprint.equals(fingerprint)
                 || (payment.getStoreId() == requestedStoreId
-                && persistedFingerprint.equals(legacyFingerprint));
+                && persistedFingerprint.equals(legacyFingerprint)));
     }
 
     private static String confirmationFingerprint(ConfirmPaymentCommand command) {

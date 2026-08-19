@@ -30,6 +30,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PrepareWaitingReservation
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.ReservationDepositCaseType;
 import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservationDeposit;
 import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
@@ -1575,6 +1576,42 @@ class PaymentPersistenceIT {
                 WHERE payment_id = ?
                 """, String.class, waiting.paymentId()))
                 .isEqualTo("WAITING_RESERVATION_DEPOSIT");
+        assertThat(jdbcTemplate.queryForList("""
+                SELECT monitoring_case_type FROM payments
+                 WHERE source_reference_id = '123'
+                 ORDER BY monitoring_case_type
+                """, String.class)).containsExactly("RESERVATION_HOLD", "WAITING");
+    }
+
+    @Test
+    @DisplayName("직접 예약 결제는 reservation 사건 유형을 명시해 snapshot까지 보존한다")
+    void persistsDirectReservationMonitoringCaseType() {
+        Instant expiresAt = Instant.now().plusSeconds(3_600);
+        String idempotencyKey = UUID.nameUUIDFromBytes(
+                "direct-reservation:124".getBytes(StandardCharsets.UTF_8)).toString();
+        var directCommand = new PrepareReservationDepositCommand(
+                "124", ReservationDepositCaseType.RESERVATION,
+                12L, 11L, 30_000L, "KRW", expiresAt, 7L, idempotencyKey);
+        PaymentPreparation preparation = paymentService.prepareReservationDeposit(directCommand);
+
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT monitoring_case_type, monitoring_case_reference_id
+                  FROM payments WHERE payment_id = ?
+                """, preparation.paymentId()))
+                .containsEntry("monitoring_case_type", "RESERVATION")
+                .containsEntry("monitoring_case_reference_id", "124");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_monitoring_snapshots
+                 WHERE payment_id = ? AND case_type = 'RESERVATION'
+                   AND case_reference_id = '124'
+                """, Long.class, preparation.paymentId())).isEqualTo(1L);
+        assertThatThrownBy(() -> paymentService.prepareReservationDeposit(
+                new PrepareReservationDepositCommand(
+                        "124", ReservationDepositCaseType.RESERVATION_HOLD,
+                        12L, 11L, 30_000L, "KRW", expiresAt, 7L, idempotencyKey)))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
     }
 
     @Test
@@ -1658,12 +1695,14 @@ class PaymentPersistenceIT {
         jdbcTemplate.update("""
                 INSERT INTO payments (
                     payment_id, source_type, source_reference_id, store_id,
+                    monitoring_case_type, monitoring_case_reference_id,
                     source_policy_version, source_expires_at,
                     preparation_idempotency_key, preparation_request_fingerprint,
                     consumer_account_id, amount_minor, refunded_amount_minor, currency,
                     portone_payment_id, order_name, status, last_attempt_status,
                     created_at, updated_at, version
-                ) VALUES (?, 'RESERVATION_DEPOSIT', '129', 12, 7, ?, ?, ?,
+                ) VALUES (?, 'RESERVATION_DEPOSIT', '129', 12,
+                          'RESERVATION_HOLD', '129', 7, ?, ?, ?,
                           11, 30000, 0, 'KRW', ?, ?, 'READY', 'NOT_STARTED', ?, ?, 0)
                 """,
                 "900000000000000129", Timestamp.from(expiresAt), idempotencyKey,

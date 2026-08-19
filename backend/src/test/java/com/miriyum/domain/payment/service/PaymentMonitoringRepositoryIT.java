@@ -94,7 +94,7 @@ class PaymentMonitoringRepositoryIT {
                 """, Long.class, dbTimestamp(HISTORY_PAID.plusSeconds(1))))
                 .isEqualTo(1L);
         assertThat(snapshotRepository.findLatestCases(
-                "RESERVATION_DEPOSIT", "91",
+                "RESERVATION_HOLD", "91",
                 LocalDateTime.ofInstant(HISTORY_PAID.plusSeconds(1), ZoneOffset.UTC)))
                 .hasSize(1);
         PaymentMonitoringContracts.SourceCell historical = service.findCases(
@@ -152,9 +152,46 @@ class PaymentMonitoringRepositoryIT {
                 .doesNotContain("reservation-hold:9999");
     }
 
+    @Test
+    void directReservationCaseSupportsBatchAndDetailReads() {
+        insertConsumer();
+        jdbcTemplate.update("""
+                INSERT INTO payments (
+                    payment_id, source_type, source_reference_id, store_id,
+                    monitoring_case_type, monitoring_case_reference_id,
+                    source_policy_version, source_expires_at,
+                    preparation_idempotency_key, preparation_request_fingerprint,
+                    consumer_account_id, amount_minor, refunded_amount_minor, currency,
+                    portone_payment_id, order_name, status, last_attempt_status,
+                    created_at, updated_at, version
+                ) VALUES (
+                    '900000000000000888', 'RESERVATION_DEPOSIT', '92', 12,
+                    'RESERVATION', '92', 1, ?,
+                    '550e8400-e29b-41d4-a716-446655440888', REPEAT('a', 64),
+                    10001, 10000, 0, 'KRW',
+                    'payment-monitoring-direct-888', 'direct reservation monitoring',
+                    'READY', 'NOT_STARTED', ?, ?, 0
+                )
+                """, dbTimestamp(HISTORY_CREATED.plusSeconds(3_600)),
+                dbTimestamp(HISTORY_CREATED), dbTimestamp(HISTORY_CREATED));
+
+        PaymentMonitoringContracts.SourceCell cell = service.findCases(
+                        new PaymentMonitoringContracts.BatchQuery(
+                                HISTORY_PAID.plusSeconds(1), List.of("reservation:92")))
+                .cells().getFirst();
+        PaymentMonitoringContracts.Detail detail = service.findCase(
+                        new PaymentMonitoringContracts.DetailQuery(
+                                HISTORY_PAID.plusSeconds(1), "reservation:92"))
+                .orElseThrow();
+
+        assertThat(cell.caseId()).isEqualTo("reservation:92");
+        assertThat(cell.state().paymentId()).isEqualTo("900000000000000888");
+        assertThat(detail.cell().caseId()).isEqualTo("reservation:92");
+    }
+
     private void insertConsumer() {
         jdbcTemplate.update("""
-                INSERT INTO consumer_accounts (
+                INSERT IGNORE INTO consumer_accounts (
                     consumer_account_id, email, password_hash, name, status, created_at, updated_at
                 ) VALUES (10001, 'monitoring-payment@example.com', 'hash', '결제회원',
                           'ACTIVE', NOW(6), NOW(6))
@@ -188,12 +225,14 @@ class PaymentMonitoringRepositoryIT {
         return """
                 INSERT INTO payments (
                     payment_id, source_type, source_reference_id, store_id,
+                    monitoring_case_type, monitoring_case_reference_id,
                     source_policy_version, source_expires_at,
                     preparation_idempotency_key, preparation_request_fingerprint,
                     consumer_account_id, amount_minor, refunded_amount_minor, currency,
                     portone_payment_id, order_name, status, last_attempt_status,
                     created_at, updated_at, version
-                ) VALUES (?, 'RESERVATION_DEPOSIT', ?, ?, 1, ?, ?, REPEAT('a', 64),
+                ) VALUES (?, 'RESERVATION_DEPOSIT', ?, ?, 'RESERVATION_HOLD', ?,
+                          1, ?, ?, REPEAT('a', 64),
                           10001, 10000, 0, 'KRW', ?, 'monitoring payment',
                           'READY', 'NOT_STARTED', ?, ?, 0)
                 """;
@@ -211,6 +250,7 @@ class PaymentMonitoringRepositoryIT {
                 paymentId,
                 sourceReference,
                 storeId,
+                sourceReference,
                 dbTimestamp(createdAt.plusSeconds(3_600)),
                 idempotency,
                 "payment-monitoring-" + paymentId,

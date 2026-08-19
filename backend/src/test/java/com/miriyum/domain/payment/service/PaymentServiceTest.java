@@ -1041,7 +1041,7 @@ class PaymentServiceTest {
     @DisplayName("Reservation 공개 준비·환불 DTO는 Payment 정본의 scalar 필드만 정확히 노출한다")
     void exposesCanonicalReservationPaymentContracts() {
         assertThat(recordComponentNames(PrepareReservationDepositCommand.class)).containsExactly(
-                "sourceReferenceId", "storeId", "consumerAccountId", "amountMinor", "currency",
+                "sourceReferenceId", "caseType", "storeId", "consumerAccountId", "amountMinor", "currency",
                 "sourceExpiresAt", "sourcePolicyVersion", "idempotencyKey");
         assertThat(recordComponentNames(PaymentPreparation.class)).containsExactly(
                 "paymentId", "portOnePaymentId", "orderName", "amountMinor", "currency",

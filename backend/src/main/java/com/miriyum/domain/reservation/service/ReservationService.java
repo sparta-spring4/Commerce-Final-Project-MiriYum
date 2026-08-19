@@ -7,6 +7,7 @@ import com.miriyum.domain.menu.dto.contract.RepresentativeMenuSnapshot;
 import com.miriyum.domain.menu.service.RepresentativeMenuQueryService;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDepositCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.ReservationDepositCaseType;
 import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
@@ -528,6 +529,7 @@ public class ReservationService {
         PaymentPreparation preparation = paymentService.prepareReservationDeposit(
                 new PrepareReservationDepositCommand(
                         String.valueOf(hold.getId()),
+                        ReservationDepositCaseType.RESERVATION_HOLD,
                         store.storeId(),
                         consumerAccountId,
                         calculation.amountMinor(),
