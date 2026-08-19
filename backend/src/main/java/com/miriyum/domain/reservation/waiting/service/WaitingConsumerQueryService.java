@@ -59,9 +59,8 @@ public class WaitingConsumerQueryService {
                 .findByConsumerAccountId(consumerAccountId)
                 .orElseThrow(WaitingConsumerQueryService::notFound);
         WaitingTeam team = teamRepository.findById(membership.getWaitingTeamId())
-                .filter(candidate -> candidate.getConsumerAccountId() == consumerAccountId)
                 .orElseThrow(WaitingConsumerQueryService::notFound);
-        return snapshot(team);
+        return snapshot(team, consumerAccountId);
     }
 
     @Transactional(readOnly = true)
@@ -70,13 +69,17 @@ public class WaitingConsumerQueryService {
         WaitingTeam team = teamRepository.findById(waitingTeamId)
                 .filter(candidate -> candidate.getConsumerAccountId() == consumerAccountId)
                 .orElseThrow(WaitingConsumerQueryService::notFound);
-        return snapshot(team);
+        return snapshot(team, consumerAccountId);
     }
 
-    private WaitingConsumerSnapshot snapshot(WaitingTeam team) {
+    private WaitingConsumerSnapshot snapshot(WaitingTeam team, long viewerAccountId) {
         long teamsAhead = teamRepository.countActiveAhead(
                 team.getStoreId(), team.getBusinessDate(), team.getQueueSequence());
-        return WaitingConsumerSnapshot.from(team, teamsAhead);
+        return WaitingConsumerSnapshot.from(
+                team,
+                teamsAhead,
+                membershipRepository.findAllByWaitingTeamIdOrderById(team.getId()),
+                viewerAccountId);
     }
 
     private static ServiceException notFound() {
