@@ -7,12 +7,10 @@ import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservatio
 import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActorType;
-import com.miriyum.domain.reservation.waiting.entity.WaitingStatusEvent;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTransitionAudit;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
-import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
 import com.miriyum.global.exception.ServiceException;
@@ -33,7 +31,7 @@ public class WaitingReservationConversionService {
     private final WaitingTeamRepository teams;
     private final WaitingActiveMembershipRepository memberships;
     private final WaitingTransitionAuditRepository audits;
-    private final WaitingStatusEventRepository events;
+    private final WaitingStatusEventAppender eventAppender;
     private final PaymentService payments;
     private final WaitingConversionCompensationService compensations;
     private final Clock clock;
@@ -44,7 +42,7 @@ public class WaitingReservationConversionService {
             WaitingTeamRepository teams,
             WaitingActiveMembershipRepository memberships,
             WaitingTransitionAuditRepository audits,
-            WaitingStatusEventRepository events,
+            WaitingStatusEventAppender eventAppender,
             PaymentService payments,
             WaitingConversionCompensationService compensations,
             Clock clock,
@@ -53,7 +51,7 @@ public class WaitingReservationConversionService {
         this.teams = teams;
         this.memberships = memberships;
         this.audits = audits;
-        this.events = events;
+        this.eventAppender = eventAppender;
         this.payments = payments;
         this.compensations = compensations;
         this.clock = clock;
@@ -134,11 +132,7 @@ public class WaitingReservationConversionService {
                 "waiting-conversion-begin:" + team.getId() + ':' + preparation.paymentId(),
                 occurredAt,
                 occurredAt));
-        events.save(WaitingStatusEvent.pending(
-                team.getId(),
-                team.getVersion() + 1L,
-                team.getStatus(),
-                occurredAt));
+        eventAppender.append(team, occurredAt);
         return preparation;
     }
 
@@ -164,11 +158,7 @@ public class WaitingReservationConversionService {
                 "waiting-conversion-fail:" + team.getId() + ':' + paymentId,
                 occurredAt,
                 occurredAt));
-        events.save(WaitingStatusEvent.pending(
-                team.getId(),
-                team.getVersion() + 1L,
-                team.getStatus(),
-                occurredAt));
+        eventAppender.append(team, occurredAt);
         return true;
     }
 
@@ -234,11 +224,7 @@ public class WaitingReservationConversionService {
                         + ':' + command.finalReservationId(),
                 occurredAt,
                 occurredAt));
-        events.save(WaitingStatusEvent.pending(
-                team.getId(),
-                team.getVersion() + 1L,
-                team.getStatus(),
-                occurredAt));
+        eventAppender.append(team, occurredAt);
     }
 
     private void recordCompensation(
