@@ -233,7 +233,7 @@ public class PaymentRecoveryExecutionTransaction {
                 execution.getRequesterPlatformOperatorAccountId(), execution.getRequesterAuthorityVersion());
         if (!requester.permissions().contains(PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE)) conflict();
         assignments.verify(new AdminCaseAssignmentRequest(AdminCaseType.PAYMENT_RECOVERY,
-                recoveryCase.getPublicId(), execution.getAuthorizedCaseVersion(),
+                recoveryCase.getPublicId(), recoveryCase.getCaseVersion(),
                 execution.getRequesterPlatformOperatorAccountId()));
         if (execution.getApproverPlatformOperatorAccountId()
                 != execution.getRequesterPlatformOperatorAccountId()) {

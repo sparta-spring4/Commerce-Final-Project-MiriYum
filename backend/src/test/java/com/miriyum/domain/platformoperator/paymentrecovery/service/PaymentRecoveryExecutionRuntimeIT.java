@@ -113,7 +113,7 @@ class PaymentRecoveryExecutionRuntimeIT {
         cases.saveAndFlush(recoveryCase);
         executions.saveAndFlush(PaymentRecoveryExecution.authorize(proposal, approval, now));
         assignments.saveAndFlush(AdminCaseAssignment.assign(AdminCaseType.PAYMENT_RECOVERY,
-                recoveryCase.getPublicId(), proposal.getExpectedCaseVersion(), operator.getId(),
+                recoveryCase.getPublicId(), recoveryCase.getCaseVersion(), operator.getId(),
                 now.plusSeconds(600), now));
 
         CountDownLatch ready = new CountDownLatch(2);
@@ -149,7 +149,8 @@ class PaymentRecoveryExecutionRuntimeIT {
         recoveryCase.queueRequery(2L, originalAttempt);
         cases.saveAndFlush(recoveryCase);
         assignments.saveAndFlush(AdminCaseAssignment.assign(AdminCaseType.PAYMENT_RECOVERY,
-                recoveryCase.getPublicId(), 2L, operator.getId(), now.plusSeconds(600), now));
+                recoveryCase.getPublicId(), recoveryCase.getCaseVersion(), operator.getId(),
+                now.plusSeconds(600), now));
         execution.claim("crashed-query-worker", originalAttempt,
                 originalAttempt.plusSeconds(30));
         executions.saveAndFlush(execution);
@@ -193,6 +194,87 @@ class PaymentRecoveryExecutionRuntimeIT {
                 from platform_operator_audit_events
                 where action = 'PAYMENT_RECOVERY_VERIFIED' and target_id = ?
                 """, Long.class, execution.getExecutionKey())).isEqualTo(5L);
+    }
+
+    @Test
+    void currentVersionReassignmentRejectsRequesterDespiteActiveAuthorizedVersionAssignment() {
+        Instant now = Instant.now();
+        PlatformOperatorAccount requester = operator("current-reassigned-requester@example.com", now);
+        PlatformOperatorAccount replacement = accounts.saveAndFlush(PlatformOperatorAccount.createTemporary(
+                "current-reassigned-owner@example.com", encoder.encode("Password1!"),
+                "current-reassigned-owner", now.plusSeconds(600)));
+        ExecutionFixture fixture = refundExecution("28103", requester, now);
+        assignments.saveAndFlush(AdminCaseAssignment.assign(AdminCaseType.PAYMENT_RECOVERY,
+                fixture.recoveryCase().getPublicId(), fixture.execution().getAuthorizedCaseVersion(),
+                requester.getId(), now.plusSeconds(600), now));
+        assignments.saveAndFlush(AdminCaseAssignment.assign(AdminCaseType.PAYMENT_RECOVERY,
+                fixture.recoveryCase().getPublicId(), fixture.recoveryCase().getCaseVersion(),
+                replacement.getId(), now.plusSeconds(600), now));
+
+        assertThat(transactions.claim("reassigned-worker")).isEmpty();
+
+        assertThat(executions.findById(fixture.execution().getId()).orElseThrow().getStatus())
+                .isEqualTo(com.miriyum.domain.platformoperator.paymentrecovery.entity
+                        .PaymentRecoveryEnums.ExecutionStatus.HOLD);
+    }
+
+    @Test
+    void currentVersionAssignmentAllowsClaimAfterAuthorizedVersionAssignmentExpires() {
+        Instant now = Instant.now();
+        PlatformOperatorAccount requester = operator("current-valid-requester@example.com", now);
+        ExecutionFixture fixture = refundExecution("28104", requester, now);
+        assignments.saveAndFlush(AdminCaseAssignment.assign(AdminCaseType.PAYMENT_RECOVERY,
+                fixture.recoveryCase().getPublicId(), fixture.execution().getAuthorizedCaseVersion(),
+                requester.getId(), now.minusSeconds(60), now.minusSeconds(120)));
+        assignments.saveAndFlush(AdminCaseAssignment.assign(AdminCaseType.PAYMENT_RECOVERY,
+                fixture.recoveryCase().getPublicId(), fixture.recoveryCase().getCaseVersion(),
+                requester.getId(), now.plusSeconds(600), now));
+
+        var claim = transactions.claim("current-assignment-worker").orElseThrow();
+
+        assertThat(claim.executionId()).isEqualTo(fixture.execution().getId());
+    }
+
+    private PlatformOperatorAccount operator(String email, Instant now) {
+        PlatformOperatorAccount operator = accounts.saveAndFlush(PlatformOperatorAccount.createTemporary(
+                email, encoder.encode("Password1!"), email.substring(0, email.indexOf('@')),
+                now.plusSeconds(600)));
+        roles.saveAndFlush(PlatformOperatorRoleGrant.create(
+                operator.getId(), PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR, now));
+        return operator;
+    }
+
+    private ExecutionFixture refundExecution(
+            String handoffId, PlatformOperatorAccount requester, Instant now) {
+        PaymentRecoveryCase recoveryCase = PaymentRecoveryCase.open(
+                handoffId, RecoveryKind.REFUND_FAILED, ResultStatus.FAILED,
+                300_000L, 0L, 300_000L, "KRW", Set.of(RecoveryAction.RETRY_REFUND),
+                "port********" + handoffId.substring(handoffId.length() - 3),
+                3L, 4L, 5L, now);
+        recoveryCase.beginInvestigation(1L, now);
+        cases.saveAndFlush(recoveryCase);
+        PaymentRecoveryProposal proposal = proposals.saveAndFlush(PaymentRecoveryProposal.propose(
+                recoveryCase.getPublicId(), 1L, 2L, RecoveryAction.RETRY_REFUND,
+                100_000L, 100_000L, 300_000L, "KRW", 3L, 4L, 5L,
+                "a".repeat(64), requester.getId(), 1L,
+                Set.of(PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR),
+                Set.of(PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE),
+                UUID.randomUUID().toString(), now));
+        recoveryCase.recordProposal(2L, 1L, proposal.getApprovalTier(), now);
+        PaymentRecoveryApproval approval = approvals.saveAndFlush(PaymentRecoveryApproval.approve(
+                proposal, requester.getId(), 1L,
+                Set.of(PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR),
+                Set.of(PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE),
+                UUID.randomUUID().toString(), now));
+        recoveryCase.queueExecution(3L, now);
+        cases.saveAndFlush(recoveryCase);
+        PaymentRecoveryExecution execution = executions.saveAndFlush(
+                PaymentRecoveryExecution.authorize(proposal, approval, now));
+        return new ExecutionFixture(recoveryCase, execution);
+    }
+
+    private record ExecutionFixture(
+            PaymentRecoveryCase recoveryCase, PaymentRecoveryExecution execution) {
     }
 
     private Optional<PaymentRecoveryExecutionTransaction.Claim> claim(

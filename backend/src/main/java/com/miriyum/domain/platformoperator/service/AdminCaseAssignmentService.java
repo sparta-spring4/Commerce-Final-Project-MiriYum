@@ -27,7 +27,9 @@ public class AdminCaseAssignmentService implements AdminCaseAssignmentVerifier, 
     }
 
     @Override
-    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    @Transactional(
+            propagation = org.springframework.transaction.annotation.Propagation.MANDATORY,
+            noRollbackFor = ServiceException.class)
     public void verify(AdminCaseAssignmentRequest request) {
         boolean valid = assignments.findByCaseForUpdate(request.caseType(), request.caseId(), request.caseVersion())
                 .filter(assignment -> assignment.getPlatformOperatorAccountId() == request.operatorId())
