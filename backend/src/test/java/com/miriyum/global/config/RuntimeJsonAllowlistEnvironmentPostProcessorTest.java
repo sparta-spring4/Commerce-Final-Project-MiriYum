@@ -3,9 +3,25 @@ package com.miriyum.global.config;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.EnvironmentPostProcessor;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
+import org.springframework.core.io.support.SpringFactoriesLoader;
 
 class RuntimeJsonAllowlistEnvironmentPostProcessorTest {
+
+    @Test
+    void registersThroughSpringFactoriesLoader() {
+        List<String> factoryNames = SpringFactoriesLoader.loadFactoryNames(
+                EnvironmentPostProcessor.class, getClass().getClassLoader());
+
+        org.assertj.core.api.Assertions.assertThat(factoryNames)
+                .contains(RuntimeJsonAllowlistEnvironmentPostProcessor.class.getName());
+    }
 
     @Test
     void acceptsEmptyRuntimeJson() {
@@ -57,6 +73,23 @@ class RuntimeJsonAllowlistEnvironmentPostProcessorTest {
     @Test
     void rejectsUnapprovedEmptyObject() {
         assertThatThrownBy(() -> RuntimeJsonAllowlistEnvironmentPostProcessor.validate("{\"spring\":{}}"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("SPRING_APPLICATION_JSON contains an unsupported runtime property");
+    }
+
+    @Test
+    void rejectsForbiddenOriginalJsonWhenParsedJsonPropertySourceMasksIt() {
+        StandardEnvironment environment = new StandardEnvironment();
+        environment.getPropertySources().replace(
+                StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+                new SystemEnvironmentPropertySource(
+                        StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+                        Map.of("SPRING_APPLICATION_JSON", "{\"spring\":{\"datasource\":{\"password\":\"hidden\"}}}")));
+        environment.getPropertySources().addFirst(new MapPropertySource(
+                "spring.application.json", Map.of("spring.application.json", "{}")));
+
+        assertThatThrownBy(() -> new RuntimeJsonAllowlistEnvironmentPostProcessor()
+                .postProcessEnvironment(environment, null))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("SPRING_APPLICATION_JSON contains an unsupported runtime property");
     }

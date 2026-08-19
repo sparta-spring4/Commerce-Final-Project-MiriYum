@@ -8,11 +8,14 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.json.JsonParserFactory;
 import org.springframework.core.Ordered;
 import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.core.env.PropertySource;
 
 /**
  * Restricts centrally supplied runtime JSON to the non-secret S3 settings approved for deployment.
  */
 public final class RuntimeJsonAllowlistEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
+
+    private static final String JSON_PROPERTY_SOURCE_NAME = "spring.application.json";
 
     private static final Set<String> ALLOWED_PROPERTIES = Set.of(
             "miriyum.storage.s3.enabled",
@@ -30,7 +33,25 @@ public final class RuntimeJsonAllowlistEnvironmentPostProcessor implements Envir
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
-        validate(environment.getProperty("spring.application.json"));
+        validate(rawRuntimeJson(environment));
+    }
+
+    /**
+     * Reads the original runtime JSON input without consulting Boot's parsed JSON property source.
+     * A JSON document can otherwise define {@code spring.application.json} itself and mask the
+     * original input during a later environment lookup.
+     */
+    private static String rawRuntimeJson(ConfigurableEnvironment environment) {
+        for (PropertySource<?> propertySource : environment.getPropertySources()) {
+            if (JSON_PROPERTY_SOURCE_NAME.equals(propertySource.getName())) {
+                continue;
+            }
+            Object value = propertySource.getProperty(JSON_PROPERTY_SOURCE_NAME);
+            if (value != null) {
+                return value.toString();
+            }
+        }
+        return null;
     }
 
     static void validate(String runtimeJson) {
@@ -82,7 +103,7 @@ public final class RuntimeJsonAllowlistEnvironmentPostProcessor implements Envir
 
     @Override
     public int getOrder() {
-        // Run after Spring has exposed SPRING_APPLICATION_JSON as an environment property.
-        return Ordered.HIGHEST_PRECEDENCE + 10;
+        // Spring Boot's JSON processor runs at HIGHEST_PRECEDENCE + 5.
+        return Ordered.HIGHEST_PRECEDENCE + 4;
     }
 }

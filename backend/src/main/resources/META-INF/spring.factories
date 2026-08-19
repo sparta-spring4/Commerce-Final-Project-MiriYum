@@ -1,1 +1,2 @@
+org.springframework.boot.env.EnvironmentPostProcessor=\
 com.miriyum.global.config.RuntimeJsonAllowlistEnvironmentPostProcessor
