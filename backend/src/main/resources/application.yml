@@ -144,7 +144,7 @@ miriyum:
       activation-delay-ms: ${MIRIYUM_STORE_SCHEDULE_ACTIVATION_DELAY_MS:1000}
     geocoding:
       base-url: ${MIRIYUM_STORE_GEOCODING_BASE_URL:https://dapi.kakao.com}
-      rest-api-key: ${MIRIYUM_STORE_GEOCODING_REST_API_KEY:${MIRIYUM_KAKAO_REST_API_KEY:${MIRIYUM_KAKAO_LOCAL_REST_API_KEY:}}}
+      rest-api-key: ${MIRIYUM_STORE_GEOCODING_REST_API_KEY:}
       connect-timeout-ms: ${MIRIYUM_STORE_GEOCODING_CONNECT_TIMEOUT_MS:1000}
       response-timeout-ms: ${MIRIYUM_STORE_GEOCODING_RESPONSE_TIMEOUT_MS:2000}
   store-search:
