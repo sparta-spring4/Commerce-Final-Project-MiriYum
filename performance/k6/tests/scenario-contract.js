@@ -278,6 +278,17 @@ function notificationContractThrows(pages) {
   }))
 }
 
+function notificationContractAccepts(item) {
+  return !notificationContractThrows([
+    {
+      items: [item, notificationItem('10')],
+      hasNext: true,
+      nextCursor: 'opaque_cursor_1',
+    },
+    { items: [notificationItem('9')], hasNext: false, nextCursor: null },
+  ])
+}
+
 const RESERVATION_INPUT = {
   baseUrl: 'http://backend:8080',
   accessToken: 'access-token-value',
@@ -369,6 +380,25 @@ class MalformedLoginClient extends RecordingClient {
       return {
         status: 200,
         body: envelope({ tokenType: 'Bearer', expiresIn: 900 }),
+        headers: { 'Set-Cookie': 'MIRIYUM_CONSUMER_REFRESH=refresh-cookie-value' },
+      }
+    }
+    return super.post(url, body, params)
+  }
+}
+
+class AdditionalTokenFieldLoginClient extends RecordingClient {
+  post(url, body, params) {
+    if (url.endsWith('/api/v1/consumers/auth/sessions')) {
+      this.calls.push({ method: 'POST', url, body, ...params })
+      return {
+        status: 200,
+        body: envelope({
+          accessToken: 'access-token-value',
+          tokenType: 'Bearer',
+          expiresIn: 900,
+          unexpected: true,
+        }),
         headers: { 'Set-Cookie': 'MIRIYUM_CONSUMER_REFRESH=refresh-cookie-value' },
       }
     }
@@ -577,6 +607,73 @@ export default function () {
     account: { email: 'malformed-prepared@example.test', password: 'synthetic-password' },
     tags: { phase: 'preparation' },
   }))
+  const additionalTokenFieldClient = new AdditionalTokenFieldLoginClient()
+  const additionalTokenFieldRejected = throws(() => runAuthRefresh({
+    client: additionalTokenFieldClient,
+    baseUrl: 'http://backend:8080',
+    allowedOrigin: 'http://localhost:5173',
+    account: { email: 'additional-field@example.test', password: 'synthetic-password' },
+    tags: { phase: 'measured' },
+  }))
+  const noShowReservationAccepted = !throws(() => runReservationCreate({
+    client: responseClient(201, {
+      ...validReservationData(),
+      status: 'NO_SHOW',
+    }),
+    ...RESERVATION_INPUT,
+  }))
+  const allNotificationContractsAccepted = [
+    { purpose: 'RESERVATION_CONFIRMED', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_CHANGED', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_REJECTED', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_CANCELLED', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_EXPIRED', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_VISIT_REMINDER', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_COORDINATION_REQUIRED', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_VISIT_COMPLETED', resourceType: 'RESERVATION' },
+    { purpose: 'RESERVATION_NO_SHOW', resourceType: 'RESERVATION' },
+    { purpose: 'PICKUP_RESERVATION_CONFIRMED', resourceType: 'PICKUP_RESERVATION' },
+    { purpose: 'PICKUP_RESERVATION_CANCELLED', resourceType: 'PICKUP_RESERVATION' },
+    { purpose: 'MENU_HOLD_FULFILLMENT_AT_RISK', resourceType: 'MENU_HOLD' },
+    { purpose: 'MENU_SUBSTITUTION_PROPOSED', resourceType: 'MENU_SUBSTITUTION_PROPOSAL' },
+    { purpose: 'MENU_SUBSTITUTION_ACCEPTED', resourceType: 'MENU_SUBSTITUTION_PROPOSAL' },
+    { purpose: 'MENU_SUBSTITUTION_REJECTED', resourceType: 'MENU_SUBSTITUTION_PROPOSAL' },
+    { purpose: 'MENU_SUBSTITUTION_EXPIRED', resourceType: 'MENU_SUBSTITUTION_PROPOSAL' },
+    { purpose: 'WAITING_ENTRY_IMMINENT', resourceType: 'WAITING_TEAM' },
+    { purpose: 'WAITING_CALLED', resourceType: 'WAITING_TEAM' },
+    { purpose: 'WAITING_CANCELLED', resourceType: 'WAITING_TEAM' },
+    { purpose: 'WAITING_NO_SHOW', resourceType: 'WAITING_TEAM' },
+    { purpose: 'WAITING_CHECKED_IN', resourceType: 'WAITING_TEAM' },
+    { purpose: 'WAITING_CLOSED_BY_STORE', resourceType: 'WAITING_TEAM' },
+  ].every(({ purpose, resourceType }) => notificationContractAccepts({
+    ...notificationItem('11'),
+    purpose,
+    resource: { type: resourceType, id: '9001' },
+    action: null,
+  }))
+  const terminalNotificationActionsRejected = [
+    'RESERVATION_VISIT_COMPLETED',
+    'RESERVATION_NO_SHOW',
+  ].every((purpose) => notificationContractThrows([
+    {
+      items: [
+        {
+          ...notificationItem('11'),
+          purpose,
+          action: {
+            type: 'RESERVATION_DETAIL',
+            resource: { type: 'RESERVATION', id: '9001' },
+            availability: 'AVAILABLE',
+            expiresAt: null,
+          },
+        },
+        notificationItem('10'),
+      ],
+      hasNext: true,
+      nextCursor: 'opaque_cursor_1',
+    },
+    { items: [notificationItem('9')], hasNext: false, nextCursor: null },
+  ]))
   const nullDepositDispositionAccepted = !throws(() => runReservationCreate({
     client: responseClient(201, {
       ...validReservationData(),
@@ -793,6 +890,15 @@ export default function () {
     'malformed successful prepared login is rejected after session cleanup': () =>
       malformedPreparationRejected
       && malformedPreparationClient.calls.some((call) => call.tags.request === 'consumerLogout'),
+    'token data rejects an additional field after session cleanup': () =>
+      additionalTokenFieldRejected
+      && additionalTokenFieldClient.calls.some((call) => call.tags.request === 'consumerLogout'),
+    'reservation creation accepts the current NO_SHOW status': () =>
+      noShowReservationAccepted,
+    'notification history accepts all current purpose and resource enum values': () =>
+      allNotificationContractsAccepted,
+    'reservation terminal notifications reject a non-null action': () =>
+      terminalNotificationActionsRejected,
     'notification invariant conflict is an unexpected 4xx': () =>
       notificationConflict.classification === 'unexpected_4xx',
     'notification first page omits the cursor': () =>
