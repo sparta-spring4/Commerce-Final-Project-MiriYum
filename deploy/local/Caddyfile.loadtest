@@ -1,0 +1,7 @@
+https://loadtest-proxy:8443 {
+	tls internal
+
+	@sse path /api/v1/consumers/me/notification-events /api/v1/consumers/me/waiting-events /api/v1/store-operators/stores/*/waiting-events
+	reverse_proxy @sse sse-proxy:8080
+	reverse_proxy backend:8080
+}

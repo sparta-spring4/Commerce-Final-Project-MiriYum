@@ -7,7 +7,11 @@ on:
       - 'performance/k6/**'
       - 'deploy/local/docker-compose.dev.yml'
       - 'deploy/local/docker-compose.loadtest.yml'
+      - 'deploy/local/Caddyfile.loadtest'
+      - 'deploy/local/nginx.sse.conf'
       - 'deploy/local/.env.example'
+      - 'deploy/nginx/templates/**'
+      - 'scripts/test-sse-deployment-contract.py'
       - 'deploy/docker-compose.prod.yml'
       - 'deploy/.env.example'
       - '.github/workflows/k6-contract.yml'
@@ -17,7 +21,11 @@ on:
       - 'performance/k6/**'
       - 'deploy/local/docker-compose.dev.yml'
       - 'deploy/local/docker-compose.loadtest.yml'
+      - 'deploy/local/Caddyfile.loadtest'
+      - 'deploy/local/nginx.sse.conf'
       - 'deploy/local/.env.example'
+      - 'deploy/nginx/templates/**'
+      - 'scripts/test-sse-deployment-contract.py'
       - 'deploy/docker-compose.prod.yml'
       - 'deploy/.env.example'
       - '.github/workflows/k6-contract.yml'
@@ -111,6 +119,10 @@ jobs:
               }
             }
           '
+
+      - name: Verify SSE deployment contracts
+        shell: bash
+        run: python3 scripts/test-sse-deployment-contract.py
 
       - name: Run isolated k6 contracts
         shell: bash
