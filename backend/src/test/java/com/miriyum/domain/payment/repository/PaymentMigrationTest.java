@@ -336,13 +336,15 @@ class PaymentMigrationTest {
     ) throws Exception {
         try (PreparedStatement statement = connection.prepareStatement("""
                 INSERT INTO payments (
-                    payment_id, source_type, source_reference_id, store_id, source_policy_version,
+                    payment_id, source_type, source_reference_id, store_id,
+                    monitoring_case_type, monitoring_case_reference_id, source_policy_version,
                     source_expires_at, preparation_idempotency_key,
                     preparation_request_fingerprint, consumer_account_id,
                     amount_minor, refunded_amount_minor, currency, portone_payment_id,
                     order_name,
                     status, last_attempt_status, created_at, updated_at, version
-                ) VALUES (?, 'RESERVATION_DEPOSIT', '123', 12, 7,
+                ) VALUES (?, 'RESERVATION_DEPOSIT', '123', 12,
+                          'RESERVATION_HOLD', '123', 7,
                           DATE_ADD(NOW(6), INTERVAL 1 HOUR), ?,
                           REPEAT('a', 64), 10001,
                           30000, 0, 'KRW', ?, 'MiriYum 예약금 123',
