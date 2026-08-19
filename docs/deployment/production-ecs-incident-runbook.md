@@ -5,7 +5,7 @@
 - ECS 서비스 `miriyum-prod-backend-service`의 desired count는 `2`다.
 - ALB 대상 그룹 `miriyum-prod-backend-tg`에는 정상(Healthy) 대상이 `2`개여야 한다.
 - 롤링 배포는 minimum healthy percent `100`, maximum percent `200`을 유지한다.
-- 운영 health endpoint는 `https://api.miriyum.click/actuator/health`이며 응답의 `status`는 `UP`여야 한다.
+- 운영 health endpoint는 `https://api.miriyum.click/actuator/health`이며 응답의 `status`는 `UP`이어야 한다.
 
 이 문서는 운영 장애와 배포 실패를 안전하게 분류하고 복구하기 위한 실행 절차다. 민감값, 토큰, Secrets Manager 값, DB 비밀번호와 고객 식별자는 캡처·티켓·로그에 남기지 않는다.
 
