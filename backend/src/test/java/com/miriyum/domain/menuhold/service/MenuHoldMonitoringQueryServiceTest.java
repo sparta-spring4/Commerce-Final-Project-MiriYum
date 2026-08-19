@@ -9,7 +9,6 @@ import com.miriyum.domain.menuhold.entity.MenuHold;
 import com.miriyum.domain.menuhold.entity.MenuHoldItemSnapshot;
 import com.miriyum.domain.menuhold.entity.MenuHoldStatus;
 import com.miriyum.domain.menuhold.entity.MenuHoldTransitionAudit;
-import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
 import com.miriyum.domain.menuhold.repository.MenuHoldTransitionAuditRepository;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.global.exception.ServiceException;
@@ -19,7 +18,6 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,7 +35,6 @@ class MenuHoldMonitoringQueryServiceTest {
     private static final Instant CONFIRMED_AT = Instant.parse("2026-08-19T05:10:00Z");
     private static final Instant AS_OF = Instant.parse("2026-08-19T06:00:00Z");
 
-    @Mock MenuHoldRepository holdRepository;
     @Mock MenuHoldTransitionAuditRepository auditRepository;
 
     private MenuHold hold;
@@ -59,7 +56,7 @@ class MenuHoldMonitoringQueryServiceTest {
         MenuHoldStatus before = hold.getStatus();
         hold.confirmTemporary(101L);
         confirmed = MenuHoldTransitionAudit.transition(hold, before, CONFIRMED_AT);
-        service = new MenuHoldMonitoringQueryService(holdRepository, auditRepository);
+        service = new MenuHoldMonitoringQueryService(auditRepository);
     }
 
     @Test
@@ -83,11 +80,8 @@ class MenuHoldMonitoringQueryServiceTest {
     @Test
     void batchReconstructsLatestAuditAtAsOfInsteadOfCurrentEntityState() {
         Instant beforeConfirmation = CONFIRMED_AT.minusSeconds(1);
-        given(holdRepository.findAllByReservationHoldIdIn(List.of(91L)))
-                .willReturn(List.of(hold));
-        given(holdRepository.findAllByReservationIdInAndReservationHoldIdIsNull(List.of()))
-                .willReturn(List.of());
-        given(auditRepository.findByMenuHold_IdInOrderByMenuHold_IdAscResultVersionAsc(List.of(55L)))
+        given(auditRepository.findByReservationHoldIdInOrderByMenuHoldIdAscResultVersionAsc(
+                List.of(91L)))
                 .willReturn(List.of(created, confirmed));
 
         MenuHoldMonitoringContracts.BatchResult result = service.findCases(
@@ -106,11 +100,12 @@ class MenuHoldMonitoringQueryServiceTest {
     @Test
     void beforeBaselineReturnsUnavailableWithoutInventingHistory() {
         Instant beforeBaseline = CREATED_AT.minusSeconds(1);
-        given(holdRepository.findAllByReservationHoldIdIn(List.of(91L)))
-                .willReturn(List.of(hold));
-        given(holdRepository.findAllByReservationIdInAndReservationHoldIdIsNull(List.of()))
-                .willReturn(List.of());
-        given(auditRepository.findByMenuHold_IdInOrderByMenuHold_IdAscResultVersionAsc(List.of(55L)))
+        ReflectionTestUtils.setField(
+                created, "eventType", MenuHoldTransitionAudit.EventType.BASELINE);
+        ReflectionTestUtils.setField(
+                created, "holdCreatedAt", CREATED_AT.minusSeconds(60));
+        given(auditRepository.findByReservationHoldIdInOrderByMenuHoldIdAscResultVersionAsc(
+                List.of(91L)))
                 .willReturn(List.of(created, confirmed));
 
         MenuHoldMonitoringContracts.SourceCell cell = service.findCases(
@@ -128,8 +123,8 @@ class MenuHoldMonitoringQueryServiceTest {
 
     @Test
     void detailReturnsOrderedTransitionsAndMinimumMenuSnapshot() {
-        given(holdRepository.findByReservationHoldId(91L)).willReturn(Optional.of(hold));
-        given(auditRepository.findByMenuHold_IdInOrderByMenuHold_IdAscResultVersionAsc(List.of(55L)))
+        given(auditRepository.findByReservationHoldIdInOrderByMenuHoldIdAscResultVersionAsc(
+                List.of(91L)))
                 .willReturn(List.of(created, confirmed));
 
         MenuHoldMonitoringContracts.Detail detail = service.findCase(
@@ -166,11 +161,9 @@ class MenuHoldMonitoringQueryServiceTest {
         Instant beforeCreation = CREATED_AT.minusSeconds(1);
         ReflectionTestUtils.setField(
                 hold, "createdAt", LocalDateTime.ofInstant(CREATED_AT, ZoneOffset.UTC));
-        given(holdRepository.findAllByReservationHoldIdIn(List.of(91L)))
-                .willReturn(List.of(hold));
-        given(holdRepository.findAllByReservationIdInAndReservationHoldIdIsNull(List.of()))
-                .willReturn(List.of());
-        given(holdRepository.findByReservationHoldId(91L)).willReturn(Optional.of(hold));
+        given(auditRepository.findByReservationHoldIdInOrderByMenuHoldIdAscResultVersionAsc(
+                List.of(91L)))
+                .willReturn(List.of(created, confirmed));
 
         assertThat(service.findCases(new MenuHoldMonitoringContracts.BatchQuery(
                 beforeCreation, List.of("reservation-hold:91"))).cells()).isEmpty();
@@ -182,11 +175,11 @@ class MenuHoldMonitoringQueryServiceTest {
     void preBaselineDetailDoesNotExposeCurrentItemsOrLinks() {
         Instant beforeBaseline = CREATED_AT.minusSeconds(1);
         ReflectionTestUtils.setField(
-                hold, "createdAt",
-                LocalDateTime.ofInstant(CREATED_AT.minusSeconds(60), ZoneOffset.UTC));
-        given(holdRepository.findByReservationHoldId(91L)).willReturn(Optional.of(hold));
-        given(auditRepository.findByMenuHold_IdInOrderByMenuHold_IdAscResultVersionAsc(
-                List.of(55L))).willReturn(List.of(created, confirmed));
+                created, "eventType", MenuHoldTransitionAudit.EventType.BASELINE);
+        ReflectionTestUtils.setField(
+                created, "holdCreatedAt", CREATED_AT.minusSeconds(60));
+        given(auditRepository.findByReservationHoldIdInOrderByMenuHoldIdAscResultVersionAsc(
+                List.of(91L))).willReturn(List.of(created, confirmed));
 
         MenuHoldMonitoringContracts.Detail detail = service.findCase(
                 new MenuHoldMonitoringContracts.DetailQuery(

@@ -58,10 +58,10 @@ class MenuHoldMonitoringRepositoryIT {
                 long holdId = 700_000L + index;
                 long reservationId = 900_000L + index;
                 holds.add(hold(holdId, reservationId, 12L));
-                audits.add(audit(holdId, reservationId, "CONFIRMED"));
+                audits.add(audit(holdId, reservationId, 12L, "CONFIRMED"));
             }
             holds.add(hold(799_999L, 999_999L, 13L));
-            audits.add(audit(799_999L, 999_999L, "CONFIRMED"));
+            audits.add(audit(799_999L, 999_999L, 13L, "CONFIRMED"));
             jdbcTemplate.batchUpdate(insertHoldSql(), holds);
             jdbcTemplate.batchUpdate(insertAuditSql(), audits);
         } finally {
@@ -100,6 +100,45 @@ class MenuHoldMonitoringRepositoryIT {
                 .hasMessageContaining("menu hold transition audits are immutable");
     }
 
+    @Test
+    @Transactional
+    void readsPreservedMonitoringHistoryAfterMenuHoldAggregateIsDeleted() {
+        long holdId = 810_000L;
+        long reservationId = 910_000L;
+        jdbcTemplate.execute("SET FOREIGN_KEY_CHECKS = 0");
+        try {
+            jdbcTemplate.update(insertHoldSql(), hold(holdId, reservationId, 12L));
+            jdbcTemplate.update(insertAuditSql(), auditWithItem(
+                    holdId, reservationId, "CONFIRMED"));
+            jdbcTemplate.update("DELETE FROM menu_holds WHERE menu_hold_id = ?", holdId);
+        } finally {
+            jdbcTemplate.execute("SET FOREIGN_KEY_CHECKS = 1");
+        }
+
+        Instant asOf = CHANGED_AT.plusSeconds(1);
+        MenuHoldMonitoringContracts.ReferencePage changes = service.findChangedCases(
+                new MenuHoldMonitoringContracts.ChangeQuery(
+                        asOf, CHANGED_AT, CHANGED_AT, "12",
+                        Set.of("CONFIRMED"), null, 100));
+        MenuHoldMonitoringContracts.BatchResult batch = service.findCases(
+                new MenuHoldMonitoringContracts.BatchQuery(
+                        asOf, List.of("reservation:" + reservationId)));
+        MenuHoldMonitoringContracts.Detail detail = service.findCase(
+                        new MenuHoldMonitoringContracts.DetailQuery(
+                                asOf, "reservation:" + reservationId))
+                .orElseThrow();
+
+        assertThat(changes.items())
+                .extracting(MenuHoldMonitoringContracts.CaseReference::caseId)
+                .containsExactly("reservation:" + reservationId);
+        assertThat(batch.cells()).hasSize(1);
+        assertThat(batch.cells().getFirst().state().sourceStatus()).isEqualTo("CONFIRMED");
+        assertThat(detail.cell().state().sourceStatus()).isEqualTo("CONFIRMED");
+        assertThat(detail.history()).hasSize(1);
+        assertThat(detail.items()).containsExactly(
+                new MenuHoldMonitoringContracts.Item("77", "아메리카노", 2));
+    }
+
     private static String insertHoldSql() {
         return """
                 INSERT INTO menu_holds (
@@ -122,14 +161,31 @@ class MenuHoldMonitoringRepositoryIT {
     private static String insertAuditSql() {
         return """
                 INSERT INTO menu_hold_transition_audits (
-                    menu_hold_id, reservation_id, reservation_hold_id, event_type,
-                    before_status, after_status, result_version, occurred_at
-                ) VALUES (?, ?, NULL, 'CREATED', NULL, ?, 0, ?)
+                    menu_hold_id, store_id, reservation_id, reservation_hold_id, event_type,
+                    before_status, after_status, result_version, occurred_at,
+                    hold_created_at, item_snapshots
+                ) VALUES (?, ?, ?, NULL, 'CREATED', NULL, ?, 0, ?, ?, ?)
                 """;
     }
 
-    private static Object[] audit(long holdId, long reservationId, String status) {
-        return new Object[]{holdId, reservationId, status, dbTimestamp(CHANGED_AT)};
+    private static Object[] audit(
+            long holdId,
+            long reservationId,
+            long storeId,
+            String status
+    ) {
+        return new Object[]{
+                holdId, storeId, reservationId, status, dbTimestamp(CHANGED_AT),
+                dbTimestamp(CHANGED_AT.minusSeconds(60)), "[]"
+        };
+    }
+
+    private static Object[] auditWithItem(long holdId, long reservationId, String status) {
+        return new Object[]{
+                holdId, 12L, reservationId, status, dbTimestamp(CHANGED_AT),
+                dbTimestamp(CHANGED_AT.minusSeconds(60)),
+                "[{\"menuId\":77,\"displayName\":\"아메리카노\",\"quantity\":2}]"
+        };
     }
 
     private static Timestamp dbTimestamp(Instant value) {

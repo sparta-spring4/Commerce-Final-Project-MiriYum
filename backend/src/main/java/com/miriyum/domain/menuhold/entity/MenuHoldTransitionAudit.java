@@ -4,17 +4,19 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "menu_hold_transition_audits")
@@ -33,9 +35,14 @@ public class MenuHoldTransitionAudit {
     @Column(name = "menu_hold_transition_audit_id")
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "menu_hold_id", nullable = false, updatable = false)
+    @Transient
     private MenuHold menuHold;
+
+    @Column(name = "menu_hold_id", nullable = false, updatable = false)
+    private Long menuHoldId;
+
+    @Column(name = "store_id", nullable = false, updatable = false)
+    private long storeId;
 
     @Column(name = "reservation_id", updatable = false)
     private Long reservationId;
@@ -60,6 +67,22 @@ public class MenuHoldTransitionAudit {
 
     @Column(name = "occurred_at", nullable = false, updatable = false)
     private Instant occurredAt;
+
+    @Column(name = "hold_created_at", nullable = false, updatable = false)
+    private Instant holdCreatedAt;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "item_snapshots", nullable = false, updatable = false,
+            columnDefinition = "json")
+    private List<ItemSnapshot> itemSnapshots;
+
+    public record ItemSnapshot(long menuId, String displayName, int quantity) {
+        public ItemSnapshot {
+            if (menuId <= 0 || displayName == null || displayName.isBlank() || quantity <= 0) {
+                throw new IllegalArgumentException("invalid menu hold item snapshot");
+            }
+        }
+    }
 
     public static MenuHoldTransitionAudit created(MenuHold hold, Instant occurredAt) {
         return of(hold, EventType.CREATED, null, hold.getStatus(), 0L, occurredAt);
@@ -96,6 +119,8 @@ public class MenuHoldTransitionAudit {
         }
         MenuHoldTransitionAudit audit = new MenuHoldTransitionAudit();
         audit.menuHold = hold;
+        audit.menuHoldId = hold.getId();
+        audit.storeId = hold.getStoreId();
         audit.reservationId = hold.getReservationId();
         audit.reservationHoldId = hold.getReservationHoldId();
         audit.eventType = eventType;
@@ -103,6 +128,13 @@ public class MenuHoldTransitionAudit {
         audit.afterStatus = afterStatus;
         audit.resultVersion = resultVersion;
         audit.occurredAt = occurredAt;
+        audit.holdCreatedAt = hold.getCreatedAt() == null
+                ? occurredAt
+                : hold.getCreatedAt().toInstant(ZoneOffset.UTC);
+        audit.itemSnapshots = hold.getItems().stream()
+                .map(item -> new ItemSnapshot(
+                        item.getMenuId(), item.getMenuNameSnapshot(), item.getQuantity()))
+                .toList();
         return audit;
     }
 }

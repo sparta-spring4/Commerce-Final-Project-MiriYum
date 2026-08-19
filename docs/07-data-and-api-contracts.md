@@ -20,7 +20,7 @@ Reservation, MenuHold, Payment, Waiting은 각자 변경 참조·제한된 batch
 
 Reservation·Waiting은 사건의 주 원장이고 MenuHold·Payment는 연결 원장이다. 한 원장의 조회 예외는 다른 원장의 결과나 정상 0건으로 변환하지 않는다. 저장 이력으로 요청 시점 상태를 복원할 수 없으면 현재 행으로 추측하지 않고 `UNAVAILABLE` 또는 `DELAYED`로 공개한다. Payment 조회는 저장된 결제·환불·원장만 사용하며 provider를 재호출하지 않고 PG 식별자·거래 ID·결제 키·승인 토큰·결제수단 원문을 노출하지 않는다.
 
-관리자 전용 snapshot이나 projection 테이블은 두지 않는다. #472가 예약한 V64의 MenuHold `status_version`·append-only 전이 원장과 V65의 Payment·Refund store snapshot·append-only monitoring 원장은 원 도메인 이력 보강이다. 기존 행의 baseline 이전 시점은 복원 불가 경계로 유지하며, `UNAVAILABLE` cell은 확인되지 않은 원본 상태·version·시각을 null state로 구분한다. 목록에는 민감 주체 정보를 포함하지 않고 상세도 내부 사용자·행위자·감사 사유 원문 없이 최소 상관 ID만 제공한다. HTTP 권한·부분 실패·cursor 계약은 [예약·웨이팅 통합 모니터링 명세](specs/admin-monitoring/spec.md)를 따른다.
+관리자 전용 snapshot이나 projection 테이블은 두지 않는다. #472가 예약한 V64의 MenuHold `status_version`·append-only 전이 원장과 V65의 Payment·Refund store snapshot·append-only monitoring 원장은 원 도메인 이력 보강이다. MenuHold 전이 원장은 부모 aggregate 조인 없이 읽을 수 있는 hold·store·예약 연결·생성 시각·최소 item snapshot을 사건마다 보존하므로 부모 lifecycle이 끝난 뒤에도 요청 `asOf`의 변경·cell·상세를 복원한다. 기존 행의 baseline 이전 시점은 복원 불가 경계로 유지하며, `UNAVAILABLE` cell은 확인되지 않은 원본 상태·version·시각을 null state로 구분한다. 목록에는 민감 주체 정보를 포함하지 않고 상세도 내부 사용자·행위자·감사 사유 원문 없이 최소 상관 ID만 제공한다. HTTP 권한·부분 실패·cursor 계약은 [예약·웨이팅 통합 모니터링 명세](specs/admin-monitoring/spec.md)를 따른다.
 
 ## 회원지원 데이터·API 계약
 

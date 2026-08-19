@@ -177,7 +177,7 @@ class MenuHoldRuntimeIT {
             assertThat(hold.getStatus()).isEqualTo(MenuHoldStatus.CONFIRMED);
             assertThat(hold.getStatusVersion()).isZero();
             assertThat(transitionAuditRepository
-                    .findByMenuHold_IdAndOccurredAtLessThanEqualOrderByResultVersionAsc(
+                    .findByMenuHoldIdAndOccurredAtLessThanEqualOrderByResultVersionAsc(
                             hold.getId(), Instant.now().plusSeconds(1)))
                     .singleElement().satisfies(audit -> {
                         assertThat(audit.getEventType())
@@ -308,7 +308,7 @@ class MenuHoldRuntimeIT {
         MenuHold released = holdFor(reservation.getId());
         assertThat(released.getStatusVersion()).isEqualTo(1L);
         assertThat(transitionAuditRepository
-                .findByMenuHold_IdAndOccurredAtLessThanEqualOrderByResultVersionAsc(
+                .findByMenuHoldIdAndOccurredAtLessThanEqualOrderByResultVersionAsc(
                         released.getId(), Instant.now().plusSeconds(1)))
                 .extracting(
                         MenuHoldTransitionAudit::getEventType,

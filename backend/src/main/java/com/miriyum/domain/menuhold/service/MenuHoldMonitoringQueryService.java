@@ -1,14 +1,11 @@
 package com.miriyum.domain.menuhold.service;
 
 import com.miriyum.domain.menuhold.dto.MenuHoldMonitoringContracts;
-import com.miriyum.domain.menuhold.entity.MenuHold;
 import com.miriyum.domain.menuhold.entity.MenuHoldStatus;
 import com.miriyum.domain.menuhold.entity.MenuHoldTransitionAudit;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
-import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
 import com.miriyum.domain.menuhold.repository.MenuHoldTransitionAuditRepository;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
@@ -16,7 +13,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Pageable;
@@ -28,14 +24,11 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class MenuHoldMonitoringQueryService {
 
-    private final MenuHoldRepository holdRepository;
     private final MenuHoldTransitionAuditRepository auditRepository;
 
     public MenuHoldMonitoringQueryService(
-            MenuHoldRepository holdRepository,
             MenuHoldTransitionAuditRepository auditRepository
     ) {
-        this.holdRepository = holdRepository;
         this.auditRepository = auditRepository;
     }
 
@@ -67,13 +60,13 @@ public class MenuHoldMonitoringQueryService {
         for (MenuHoldTransitionAudit audit : changes) {
             String caseId = caseId(audit.getReservationHoldId(), audit.getReservationId());
             if (caseId == null
-                    || !matchesStore(query.storeId(), audit.getMenuHold().getStoreId())
+                    || !matchesStore(query.storeId(), audit.getStoreId())
                     || !matchesStatus(query.sourceStatuses(), audit.getAfterStatus())) {
                 continue;
             }
             references.putIfAbsent(caseId, new MenuHoldMonitoringContracts.CaseReference(
                     caseId,
-                    Long.toString(audit.getMenuHold().getStoreId()),
+                    Long.toString(audit.getStoreId()),
                     audit.getOccurredAt()));
             if (references.size() == query.limit()) {
                 break;
@@ -92,22 +85,11 @@ public class MenuHoldMonitoringQueryService {
     private MenuHoldMonitoringContracts.BatchResult doFindCases(
             MenuHoldMonitoringContracts.BatchQuery query
     ) {
-        ParsedCaseIds parsed = parse(query.caseIds());
-        List<MenuHold> holds = new ArrayList<>();
-        holds.addAll(holdRepository.findAllByReservationHoldIdIn(parsed.reservationHoldIds()));
-        holds.addAll(holdRepository.findAllByReservationIdInAndReservationHoldIdIsNull(
-                parsed.reservationIds()));
-        Map<String, MenuHold> byCaseId = holds.stream().collect(Collectors.toMap(
-                MenuHoldMonitoringQueryService::caseId,
-                Function.identity(),
-                (first, ignored) -> first));
-        Map<Long, List<MenuHoldTransitionAudit>> histories = histories(holds);
+        Map<String, List<MenuHoldTransitionAudit>> histories = histories(query.caseIds());
 
         List<MenuHoldMonitoringContracts.SourceCell> cells = query.caseIds().stream()
-                .map(byCaseId::get)
-                .filter(java.util.Objects::nonNull)
-                .filter(hold -> !createdAfter(hold, query.asOf()))
-                .map(hold -> cell(hold, histories.getOrDefault(hold.getId(), List.of()), query.asOf()))
+                .filter(caseId -> visibleAt(histories.get(caseId), query.asOf()))
+                .map(caseId -> cell(caseId, histories.get(caseId), query.asOf()))
                 .toList();
         return new MenuHoldMonitoringContracts.BatchResult(cells, query.asOf(), query.asOf());
     }
@@ -121,48 +103,52 @@ public class MenuHoldMonitoringQueryService {
     private Optional<MenuHoldMonitoringContracts.Detail> doFindCase(
             MenuHoldMonitoringContracts.DetailQuery query
     ) {
-        Optional<MenuHold> found = findHold(query.caseId());
-        if (found.isEmpty()) {
+        List<MenuHoldTransitionAudit> all = histories(List.of(query.caseId()))
+                .getOrDefault(query.caseId(), List.of());
+        if (!visibleAt(all, query.asOf())) {
             return Optional.empty();
         }
-        MenuHold hold = found.orElseThrow();
-        if (createdAfter(hold, query.asOf())) {
-            return Optional.empty();
-        }
-        List<MenuHoldTransitionAudit> all = auditRepository
-                .findByMenuHold_IdInOrderByMenuHold_IdAscResultVersionAsc(List.of(hold.getId()));
-        MenuHoldMonitoringContracts.SourceCell cell = cell(hold, all, query.asOf());
+        MenuHoldMonitoringContracts.SourceCell cell = cell(query.caseId(), all, query.asOf());
         List<MenuHoldMonitoringContracts.Transition> history = all.stream()
                 .filter(audit -> !audit.getOccurredAt().isAfter(query.asOf()))
                 .map(MenuHoldMonitoringQueryService::transition)
                 .toList();
-        List<MenuHoldMonitoringContracts.Item> items =
-                cell.completeness() == MenuHoldMonitoringContracts.Completeness.UNAVAILABLE
-                        ? List.of()
-                        : hold.getItems().stream()
-                                .map(item -> new MenuHoldMonitoringContracts.Item(
-                                        Long.toString(item.getMenuId()),
-                                        item.getMenuNameSnapshot(),
-                                        item.getQuantity()))
-                                .toList();
+        MenuHoldTransitionAudit latest = latestAt(all, query.asOf());
+        List<MenuHoldMonitoringContracts.Item> items = latest == null
+                ? List.of()
+                : latest.getItemSnapshots().stream()
+                        .sorted(Comparator.comparingLong(
+                                MenuHoldTransitionAudit.ItemSnapshot::menuId))
+                        .map(item -> new MenuHoldMonitoringContracts.Item(
+                                Long.toString(item.menuId()),
+                                item.displayName(),
+                                item.quantity()))
+                        .toList();
         return Optional.of(new MenuHoldMonitoringContracts.Detail(cell, history, items));
     }
 
-    private Map<Long, List<MenuHoldTransitionAudit>> histories(List<MenuHold> holds) {
-        List<Long> holdIds = holds.stream().map(MenuHold::getId).toList();
-        if (holdIds.isEmpty()) {
-            return Map.of();
+    private Map<String, List<MenuHoldTransitionAudit>> histories(List<String> caseIds) {
+        ParsedCaseIds parsed = parse(caseIds);
+        List<MenuHoldTransitionAudit> audits = new ArrayList<>();
+        if (!parsed.reservationHoldIds().isEmpty()) {
+            audits.addAll(auditRepository
+                    .findByReservationHoldIdInOrderByMenuHoldIdAscResultVersionAsc(
+                            parsed.reservationHoldIds()));
         }
-        return auditRepository.findByMenuHold_IdInOrderByMenuHold_IdAscResultVersionAsc(holdIds)
-                .stream()
+        if (!parsed.reservationIds().isEmpty()) {
+            audits.addAll(auditRepository
+                    .findByReservationIdInAndReservationHoldIdIsNullOrderByMenuHoldIdAscResultVersionAsc(
+                            parsed.reservationIds()));
+        }
+        return audits.stream()
                 .collect(Collectors.groupingBy(
-                        audit -> audit.getMenuHold().getId(),
+                        audit -> caseId(audit.getReservationHoldId(), audit.getReservationId()),
                         LinkedHashMap::new,
                         Collectors.toList()));
     }
 
     private static MenuHoldMonitoringContracts.SourceCell cell(
-            MenuHold hold,
+            String requestedCaseId,
             List<MenuHoldTransitionAudit> all,
             Instant asOf
     ) {
@@ -170,13 +156,10 @@ public class MenuHoldMonitoringQueryService {
                 .sorted(Comparator.comparingLong(MenuHoldTransitionAudit::getResultVersion))
                 .toList();
         MenuHoldTransitionAudit first = ordered.isEmpty() ? null : ordered.getFirst();
-        MenuHoldTransitionAudit latest = ordered.stream()
-                .filter(audit -> !audit.getOccurredAt().isAfter(asOf))
-                .reduce((left, right) -> right)
-                .orElse(null);
+        MenuHoldTransitionAudit latest = latestAt(ordered, asOf);
         if (latest == null) {
             return new MenuHoldMonitoringContracts.SourceCell(
-                    caseId(hold),
+                    requestedCaseId,
                     null,
                     null,
                     asOf,
@@ -188,7 +171,7 @@ public class MenuHoldMonitoringQueryService {
         }
         return new MenuHoldMonitoringContracts.SourceCell(
                 caseId(latest.getReservationHoldId(), latest.getReservationId()),
-                Long.toString(hold.getStoreId()),
+                Long.toString(latest.getStoreId()),
                 new MenuHoldMonitoringContracts.ConfirmedState(
                         latest.getAfterStatus().name(),
                         latest.getResultVersion(),
@@ -201,11 +184,31 @@ public class MenuHoldMonitoringQueryService {
                 links(latest));
     }
 
-    private Optional<MenuHold> findHold(String caseId) {
-        if (caseId.startsWith("reservation-hold:")) {
-            return holdRepository.findByReservationHoldId(id(caseId));
+    private static MenuHoldTransitionAudit latestAt(
+            List<MenuHoldTransitionAudit> all,
+            Instant asOf
+    ) {
+        return all.stream()
+                .filter(audit -> !audit.getOccurredAt().isAfter(asOf))
+                .max(Comparator.comparingLong(MenuHoldTransitionAudit::getResultVersion))
+                .orElse(null);
+    }
+
+    private static boolean visibleAt(
+            List<MenuHoldTransitionAudit> all,
+            Instant asOf
+    ) {
+        if (all == null || all.isEmpty()) {
+            return false;
         }
-        return holdRepository.findByReservationIdAndReservationHoldIdIsNull(id(caseId));
+        MenuHoldTransitionAudit first = all.stream()
+                .min(Comparator.comparingLong(MenuHoldTransitionAudit::getResultVersion))
+                .orElseThrow();
+        if (!first.getOccurredAt().isAfter(asOf)) {
+            return true;
+        }
+        return first.getEventType() == MenuHoldTransitionAudit.EventType.BASELINE
+                && !first.getHoldCreatedAt().isAfter(asOf);
     }
 
     private static MenuHoldMonitoringContracts.Transition transition(
@@ -225,17 +228,6 @@ public class MenuHoldMonitoringQueryService {
                 text(audit.getReservationId()), text(audit.getReservationHoldId()));
     }
 
-    private static MenuHoldMonitoringContracts.Links links(
-            MenuHoldTransitionAudit first,
-            MenuHold hold
-    ) {
-        if (first != null) {
-            return links(first);
-        }
-        return new MenuHoldMonitoringContracts.Links(
-                text(hold.getReservationId()), text(hold.getReservationHoldId()));
-    }
-
     private static MenuHoldMonitoringContracts.ReconciliationStatus reconciliation(
             MenuHoldStatus status
     ) {
@@ -252,10 +244,6 @@ public class MenuHoldMonitoringQueryService {
         return expected.isEmpty() || expected.contains(actual.name());
     }
 
-    private static String caseId(MenuHold hold) {
-        return caseId(hold.getReservationHoldId(), hold.getReservationId());
-    }
-
     private static String caseId(Long reservationHoldId, Long reservationId) {
         if (reservationHoldId != null) {
             return "reservation-hold:" + reservationHoldId;
@@ -269,11 +257,6 @@ public class MenuHoldMonitoringQueryService {
 
     private static long id(String caseId) {
         return Long.parseLong(caseId.substring(caseId.indexOf(':') + 1));
-    }
-
-    private static boolean createdAfter(MenuHold hold, Instant asOf) {
-        return hold.getCreatedAt() != null
-                && hold.getCreatedAt().toInstant(ZoneOffset.UTC).isAfter(asOf);
     }
 
     private static <T> T sourceRead(Supplier<T> read) {

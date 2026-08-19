@@ -29,6 +29,8 @@ class MenuHoldTest {
                 hold, before, Instant.parse("2026-08-10T03:11:00Z"));
 
         assertThat(audit.getMenuHold()).isSameAs(hold);
+        assertThat(audit.getMenuHoldId()).isEqualTo(99L);
+        assertThat(audit.getStoreId()).isEqualTo(20L);
         assertThat(audit.getReservationId()).isEqualTo(101L);
         assertThat(audit.getReservationHoldId()).isEqualTo(11L);
         assertThat(audit.getEventType())
@@ -37,6 +39,8 @@ class MenuHoldTest {
         assertThat(audit.getAfterStatus()).isEqualTo(MenuHoldStatus.CONFIRMED);
         assertThat(audit.getResultVersion()).isEqualTo(1L);
         assertThat(audit.getOccurredAt()).isEqualTo(Instant.parse("2026-08-10T03:11:00Z"));
+        assertThat(audit.getItemSnapshots()).containsExactly(
+                new MenuHoldTransitionAudit.ItemSnapshot(40L, "아메리카노", 4));
     }
 
     @Test

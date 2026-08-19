@@ -16,18 +16,17 @@ public interface MenuHoldTransitionAuditRepository
 
     MenuHoldTransitionAudit save(MenuHoldTransitionAudit audit);
 
-    List<MenuHoldTransitionAudit> findByMenuHold_IdAndOccurredAtLessThanEqualOrderByResultVersionAsc(
+    List<MenuHoldTransitionAudit> findByMenuHoldIdAndOccurredAtLessThanEqualOrderByResultVersionAsc(
             long menuHoldId,
             Instant asOf);
 
-    Optional<MenuHoldTransitionAudit> findFirstByMenuHold_IdOrderByResultVersionAsc(long menuHoldId);
+    Optional<MenuHoldTransitionAudit> findFirstByMenuHoldIdOrderByResultVersionAsc(long menuHoldId);
 
     @Query("""
             select audit
               from MenuHoldTransitionAudit audit
-              join audit.menuHold hold
              where audit.occurredAt between :changedFrom and :changedTo
-               and (:storeId is null or hold.storeId = :storeId)
+               and (:storeId is null or audit.storeId = :storeId)
                and (:allStatuses = true or audit.afterStatus in :statuses)
                and (
                     :afterChangedAt is null
@@ -44,7 +43,7 @@ public interface MenuHoldTransitionAuditRepository
                and not exists (
                     select newer.id
                       from MenuHoldTransitionAudit newer
-                     where newer.menuHold.id = audit.menuHold.id
+                     where newer.menuHoldId = audit.menuHoldId
                        and newer.occurredAt between :changedFrom and :changedTo
                        and (:allStatuses = true or newer.afterStatus in :statuses)
                        and (
@@ -70,6 +69,11 @@ public interface MenuHoldTransitionAuditRepository
             @Param("afterCaseId") String afterCaseId,
             Pageable pageable);
 
-    List<MenuHoldTransitionAudit> findByMenuHold_IdInOrderByMenuHold_IdAscResultVersionAsc(
-            List<Long> menuHoldIds);
+    List<MenuHoldTransitionAudit>
+            findByReservationHoldIdInOrderByMenuHoldIdAscResultVersionAsc(
+                    List<Long> reservationHoldIds);
+
+    List<MenuHoldTransitionAudit>
+            findByReservationIdInAndReservationHoldIdIsNullOrderByMenuHoldIdAscResultVersionAsc(
+                    List<Long> reservationIds);
 }
