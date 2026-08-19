@@ -79,6 +79,10 @@ export interface paths {
     /** 회원 제재 적용 또는 영구 정지 제안 */
     post: operations["createMemberSanction"];
   };
+  "/api/v1/platform-operators/member-sanctions/pending-additional-approvals": {
+    /** 추가 승인 대기 영구 정지 목록 조회 */
+    get: operations["listPendingPermanentMemberSanctionApprovals"];
+  };
   "/api/v1/platform-operators/member-sanctions/{sanctionId}/additional-approvals": {
     /** 영구 정지 추가 승인 */
     post: operations["approvePermanentMemberSanction"];
@@ -206,6 +210,28 @@ export interface components {
       /** @constant */
       decision: "APPROVE";
       reasonCode: string;
+    };
+    PendingSanctionApproval: {
+      sanctionId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      /**
+       * Format: int64
+       * @description 추가 승인 If-Match에 사용할 현재 member-support case version
+       */
+      version: number;
+      accountType: components["schemas"]["AccountType"];
+      accountId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      reasonCode: string;
+      policyVersion: string;
+      proposedAt: components["schemas"]["OffsetDateTime"];
+    };
+    PendingSanctionApprovalPageData: {
+      content: components["schemas"]["PendingSanctionApproval"][];
+      page: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PageMetadata"];
+    };
+    PendingSanctionApprovalPageSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["PendingSanctionApprovalPageData"];
     };
     Sanction: {
       sanctionId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
@@ -797,6 +823,26 @@ export interface operations {
       404: components["responses"]["MemberNotFound"];
       409: components["responses"]["StateConflict"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /** 추가 승인 대기 영구 정지 목록 조회 */
+  listPendingPermanentMemberSanctionApprovals: {
+    parameters: {
+      query?: {
+        page?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Page"];
+        size?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Size"];
+      };
+    };
+    responses: {
+      /** @description 현재 permission과 SUPER_ADMIN role을 모두 보유하며 자기 제안을 제외한 대기 목록 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PendingSanctionApprovalPageSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: components["responses"]["OperatorUnauthorized"];
+      403: components["responses"]["AuthorizationDenied"];
     };
   };
   /** 영구 정지 추가 승인 */

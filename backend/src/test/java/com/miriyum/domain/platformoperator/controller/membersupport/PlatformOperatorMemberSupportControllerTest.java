@@ -20,6 +20,7 @@ import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportAs
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportCaseQueryService;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportDecisionService;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportQueryService;
+import com.miriyum.domain.platformoperator.service.membersupport.PendingMemberSanctionQueryService;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import java.time.LocalDateTime;
 import java.util.Set;
@@ -36,7 +37,8 @@ class PlatformOperatorMemberSupportControllerTest {
                     mock(MemberSupportDecisionService.class),
                     sanctionCommands,
                     sanctions,
-                    mock(MemberSupportCaseQueryService.class));
+                    mock(MemberSupportCaseQueryService.class),
+                    mock(PendingMemberSanctionQueryService.class));
 
     @Test
     void sanctionResponseContainsTheCreatedSanctionEnvelopeData() {
