@@ -4,8 +4,22 @@ import http from 'k6/http'
 import { Counter, Trend } from 'k6/metrics'
 import sse from 'k6/x/sse'
 
-import { buildSseTargets, endpointPath, validateSseFixture } from './contracts.js'
+import {
+  buildSseTargets,
+  endpointPath,
+  selectCapacityTargets,
+  selectSseTargets,
+  validateSseFixture,
+} from './contracts.js'
 import { loadSseConfig } from './config.js'
+import {
+  assignSlowClientRoles,
+  buildSseScenarioOptions,
+  buildSseThresholds,
+  captureOwnedHttpBaseline,
+  runOwnedHttpProbe,
+  triggerWaitingChange,
+} from './probe.js'
 import { openChangedStream, prepareSseSession } from './session.js'
 import {
   createFixtureFingerprint,
@@ -30,12 +44,18 @@ const prerequisiteSmokeProof = config.profile === 'smoke'
     endpointKinds: config.endpointKinds,
   })
 
-const availableTargets = buildSseTargets(fixture, config.connectionsPerAccount)
+const availableTargets = buildSseTargets(
+  fixture,
+  config.connectionsPerAccount,
+  config.profile === 'capacity' ? 7 : 6,
+)
   .filter((target) => config.endpointKinds.includes(target.kind))
 if (availableTargets.length < config.connections) {
   throw new Error('SSE fixture does not provide the requested connection capacity')
 }
-const selectedTargets = Object.freeze(availableTargets.slice(0, config.connections))
+const selectedTargets = config.profile === 'capacity'
+  ? selectCapacityTargets(availableTargets, config.endpointKinds[0], config.connections)
+  : selectSseTargets(availableTargets, config.endpointKinds, config.connections)
 
 const openedConnections = new Counter('sse_connections_opened')
 const successfulConnections = new Counter('sse_connections_successful')
@@ -51,23 +71,40 @@ const expected4xx = new Counter('sse_expected_4xx')
 const unexpected4xx = new Counter('sse_unexpected_4xx')
 const server5xx = new Counter('sse_server_5xx')
 const unexpectedStatus = new Counter('sse_unexpected_status')
+const heartbeatFrames = new Counter('sse_heartbeat_frames')
+const ownedHttpBaseline = new Trend('owned_http_baseline', true)
+const ownedHttpDuration = new Trend('owned_http_duration', true)
+const ownedHttpDegradationRatio = new Trend('owned_http_degradation_ratio')
+const ownedHttpSuccess = new Counter('owned_http_success')
+const ownedHttpErrors = new Counter('owned_http_errors')
+const slowClientTriggers = new Counter('slow_client_triggers')
 
 function thresholds() {
+  const expectedCapacityRejections = config.profile === 'capacity'
+    ? config.connectionsPerAccount - 6
+    : 0
   const result = {
     dropped_iterations: ['count==0'],
     sse_connections_opened: [
       `count==${config.connections * (config.profile === 'reconnect' ? 2 : 1)}`,
     ],
     sse_connections_successful: [
-      `count==${config.connections * (config.profile === 'reconnect' ? 2 : 1)}`,
+      `count==${config.connections * (config.profile === 'reconnect' ? 2 : 1)
+        - expectedCapacityRejections}`,
     ],
-    sse_connections_rejected: ['count==0'],
+    sse_connections_rejected: [
+      `count==${expectedCapacityRejections}`,
+    ],
+    sse_expected_4xx: [
+      `count==${expectedCapacityRejections}`,
+    ],
     sse_contract_errors: ['count==0'],
     sse_transport_errors: ['count==0'],
     sse_unexpected_4xx: ['count==0'],
     sse_server_5xx: ['count==0'],
     sse_unexpected_status: ['count==0'],
   }
+  Object.assign(result, buildSseThresholds(config))
   if (config.profile === 'reconnect') {
     result.sse_recovery_attempts = [`count==${config.connections}`]
     result.sse_recovery_successful = [`count==${config.connections}`]
@@ -75,7 +112,6 @@ function thresholds() {
   for (const endpointKind of config.endpointKinds) {
     const tags = `phase:measured,profile:${config.profile},endpoint_kind:${endpointKind}`
     result[`checks{${tags}}`] = ['rate==1']
-    result[`http_req_duration{${tags}}`] = ['max>=0']
     result[`sse_first_event{${tags}}`] = ['max>=0']
     result[`sse_connection_duration{${tags}}`] = ['max>=0']
     result[`sse_connections_opened{${tags}}`] = ['count>=0']
@@ -96,23 +132,7 @@ function thresholds() {
 }
 
 function scenarioOptions() {
-  const execByProfile = {
-    smoke: 'sseSmoke',
-    reconnect: 'sseReconnect',
-    steady: 'sseSteady',
-    'slow-client': 'sseSlowClient',
-  }
-  return {
-    sse: {
-      executor: 'shared-iterations',
-      exec: execByProfile[config.profile],
-      vus: config.connections,
-      iterations: config.connections,
-      maxDuration: `${config.holdDurationSeconds + 90}s`,
-      gracefulStop: '5s',
-      tags: { phase: 'measured', profile: config.profile },
-    },
-  }
+  return buildSseScenarioOptions(config)
 }
 
 export const options = {
@@ -147,7 +167,8 @@ function credentials(reference) {
 
 export function setup() {
   const tokens = new Map()
-  return selectedTargets.map((target) => {
+  const baselines = new Map()
+  let sessions = selectedTargets.map((target) => {
     const cacheKey = `${target.audience}:${target.accountAlias}`
     let accessToken = tokens.get(cacheKey)
     if (accessToken === undefined) {
@@ -155,30 +176,55 @@ export function setup() {
       accessToken = prepareSseSession({
         client: http,
         baseUrl: config.baseUrl,
-        allowedOrigin: fixture.allowedOrigin,
         target,
         credentials: credentials(reference),
         tags: { profile: config.profile },
       })
       tokens.set(cacheKey, accessToken)
     }
-    return { target, accessToken }
+    const baselineKey = `${target.audience}:${target.kind}:${target.storeId || ''}:${target.accountAlias}`
+    let baselineMilliseconds = baselines.get(baselineKey)
+    if (config.profile !== 'smoke' && baselineMilliseconds === undefined) {
+      baselineMilliseconds = captureOwnedHttpBaseline({
+        client: http,
+        baseUrl: config.baseUrl,
+        session: { target, accessToken },
+        samples: 3,
+        metrics: {
+          baseline: (value, tags) => ownedHttpBaseline.add(value, tags),
+        },
+        tags: tagsFor(target, 'owned-http', 'baseline'),
+      })
+      baselines.set(baselineKey, baselineMilliseconds)
+    }
+    return { target, accessToken, baselineMilliseconds: baselineMilliseconds ?? null }
   })
+  if (config.profile === 'slow-client') {
+    sessions = assignSlowClientRoles(sessions, config.slowClientConnections)
+  }
+  return sessions
 }
 
-function selectedSession(data) {
+function isExpectedCapacityRejection() {
+  return config.profile === 'capacity'
+}
+
+function selectedSession(data, role = null) {
   if (!Array.isArray(data) || data.length !== selectedTargets.length) {
     throw new Error('prepared SSE sessions are missing')
   }
-  return data[execution.scenario.iterationInTest % data.length]
+  const candidates = role === null ? data : data.filter((session) => session.role === role)
+  if (candidates.length === 0) throw new Error('prepared SSE session role is missing')
+  return candidates[execution.scenario.iterationInTest % candidates.length]
 }
 
-function tagsFor(target) {
+function tagsFor(target, traffic = 'sse-stream', phase = 'measured') {
   return {
-    phase: 'measured',
+    phase,
     profile: config.profile,
     audience: target.audience,
     endpoint_kind: target.kind,
+    traffic,
   }
 }
 
@@ -186,6 +232,7 @@ function metricAdapter() {
   return {
     opened: (value, tags) => openedConnections.add(value, tags),
     validEvent: (value, tags) => validEvents.add(value, tags),
+    heartbeatFrame: (value, tags) => heartbeatFrames.add(value, tags),
     contractError: (value, tags) => contractErrors.add(value, tags),
     transportError: (value, tags) => transportErrors.add(value, tags),
     firstEventMilliseconds: (value, tags) => firstEventMilliseconds.add(value, tags),
@@ -224,7 +271,8 @@ function openSession(session, behavior, lastEventId = null) {
   })
   connectionMilliseconds.add(Date.now() - startedAt, tagsFor(target))
   check(result, {
-    'SSE stream contract remains valid': (value) => value.completed,
+    'SSE stream contract remains valid': (value) => value.completed
+      || (isExpectedCapacityRejection() && value.classification === 'capacity_rejected'),
   }, tagsFor(target))
   return result
 }
@@ -268,12 +316,71 @@ export function sseSteady(data) {
 }
 
 export function sseSlowClient(data) {
-  const session = selectedSession(data)
+  const session = selectedSession(data, 'slow')
   safelyExecute(() => openSession(session, {
     mode: 'slow-client',
     delay: sleep,
     delaySeconds: config.slowClientDelaySeconds,
+    minimumValidEvents: 2,
+    requireServerClose: true,
   }), session.target)
+}
+
+export function sseCapacity(data) {
+  const session = selectedSession(data)
+  safelyExecute(() => openSession(session, { mode: 'steady' }), session.target)
+}
+
+export function sseCompanion(data) {
+  const session = selectedSession(data, 'companion')
+  safelyExecute(() => openSession(session, {
+    mode: 'steady',
+    minimumValidEvents: 2,
+    requireServerClose: true,
+  }), session.target)
+}
+
+export function ownedHttpProbe(data) {
+  const session = selectedSession(data)
+  const tags = tagsFor(session.target, 'owned-http')
+  try {
+    const result = runOwnedHttpProbe({
+      client: http,
+      baseUrl: config.baseUrl,
+      session,
+      maxP95Ratio: config.httpMaxP95Ratio,
+      metrics: {
+        duration: (value, metricTags) => ownedHttpDuration.add(value, metricTags),
+        degradationRatio: (value, metricTags) => ownedHttpDegradationRatio.add(value, metricTags),
+        success: (value, metricTags) => ownedHttpSuccess.add(value, metricTags),
+        error: (value, metricTags) => ownedHttpErrors.add(value, metricTags),
+      },
+      tags,
+    })
+    check(result, { 'owned HTTP probe remains healthy': (value) => value.success }, tags)
+  } catch (_) {
+    check(null, { 'owned HTTP probe remains healthy': () => false }, tags)
+  }
+}
+
+export function slowClientTrigger(data) {
+  const session = selectedSession(data, 'companion')
+  const tags = tagsFor(session.target, 'trigger')
+  try {
+    const triggered = triggerWaitingChange({
+      client: http,
+      baseUrl: config.baseUrl,
+      session,
+      idempotencyKey: config.slowClientIdempotencyKey,
+      metrics: {
+        trigger: (value, metricTags) => slowClientTriggers.add(value, metricTags),
+      },
+      tags,
+    })
+    check(triggered, { 'slow-client follow-up change is triggered': Boolean }, tags)
+  } catch (_) {
+    check(null, { 'slow-client follow-up change is triggered': () => false }, tags)
+  }
 }
 
 export function handleSummary(data) {
@@ -294,6 +401,9 @@ export function handleSummary(data) {
       connectionsPerAccount: config.connectionsPerAccount,
       holdDurationSeconds: config.holdDurationSeconds,
       slowClientDelaySeconds: config.slowClientDelaySeconds,
+      httpProbeRate: config.httpProbeRate,
+      httpMaxP95Ratio: config.httpMaxP95Ratio,
+      slowClientConnections: config.slowClientConnections,
     },
   })
   return {

@@ -221,6 +221,6 @@ docker compose --env-file deploy/local/.env `
   --profile loadtest run --rm --no-deps sse-loadtest version
 ```
 
-SSE fixture는 계정 환경변수 이름과 공개 example ID만 보관하며 inline credential을 거절한다. `smoke`, `reconnect`, `steady`, `slow-client` 네 프로필과 세 endpoint kind만 허용하고 전체 연결은 200, 계정별 연결은 6, 유지 시간은 600초, slow delay는 30초를 넘을 수 없다. smoke 이후 프로필은 같은 target fingerprint, fixture SHA-256, backend·harness full SHA와 endpoint coverage를 가진 성공 JSON artifact를 요구한다.
+SSE fixture는 계정 환경변수 이름과 공개 example ID만 보관하며 inline credential을 거절한다. `smoke`, `reconnect`, `steady`, `slow-client`, `capacity` 프로필과 세 endpoint kind를 허용한다. 일반 프로필은 전체 연결 200·계정별 연결 6·유지 시간 600초·slow delay 30초를 넘을 수 없고, `capacity`만 단일 endpoint/계정에 7개 연결을 만들어 6개 상한 초과의 예상 429 1건을 검증한다. `steady`·`reconnect`·`slow-client`·`capacity`는 소유 HTTP probe(`SSE_HTTP_PROBE_RATE`, `SSE_HTTP_MAX_P95_RATIO`)를 병행하며, `slow-client`는 명시적 승인과 UUID `SSE_SLOW_CLIENT_IDEMPOTENCY_KEY`가 있어야 후속 Waiting 변경을 만든다. smoke 이후 프로필은 같은 target fingerprint, fixture SHA-256, backend·harness full SHA와 endpoint coverage를 가진 성공 JSON artifact를 요구한다.
 
 실행·Valkey 중단·backend 교체·롤백 명령은 [SSE Runtime runbook](../../docs/deployment/sse-runtime-runbook.md), 실제 상태와 비식별 aggregate는 [SSE Runtime 검증 기록](../../docs/performance/sse-runtime-validation.md)에만 기록한다. summary는 `miriyum-k6-sse-summary-v1` allowlist 밖 metadata와 metric을 버리고 Token, cursor, ID, email, URL 또는 응답 원문을 직렬화하지 않는다.

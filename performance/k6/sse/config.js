@@ -1,7 +1,7 @@
 import { validateShaEvidence } from '../config.js'
 import { assertSafeTarget, parsePositiveInt } from '../lib/safety.js'
 
-const PROFILES = new Set(['smoke', 'reconnect', 'steady', 'slow-client'])
+const PROFILES = new Set(['smoke', 'reconnect', 'steady', 'slow-client', 'capacity'])
 export const SSE_ENDPOINT_KINDS = Object.freeze([
   'notification-consumer',
   'waiting-consumer',
@@ -56,6 +56,14 @@ function parseEndpointKinds(rawValue) {
   return Object.freeze(kinds)
 }
 
+function requireUuid(name, rawValue) {
+  const value = requireText(name, rawValue).toLowerCase()
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value)) {
+    throw new Error(`${name} must be a standard UUID`)
+  }
+  return value
+}
+
 export function loadSseConfig(env) {
   const targetEnv = requireText('TARGET_ENV', env.TARGET_ENV)
   const baseUrl = requireText('BASE_URL', env.BASE_URL).replace(/\/+$/, '')
@@ -66,7 +74,7 @@ export function loadSseConfig(env) {
 
   const profile = requireText('SSE_PROFILE', env.SSE_PROFILE)
   if (!PROFILES.has(profile)) {
-    throw new Error('SSE_PROFILE must be smoke, reconnect, steady, or slow-client')
+    throw new Error('SSE_PROFILE must be smoke, reconnect, steady, slow-client, or capacity')
   }
   if (targetEnv === 'staging' && env.STAGING_APPROVED !== 'true') {
     throw new Error('staging SSE execution requires STAGING_APPROVED=true')
@@ -80,6 +88,52 @@ export function loadSseConfig(env) {
     harnessSourceVerified: env.STAGING_HARNESS_SOURCE_VERIFIED === 'true',
   })
 
+  const connections = parsePositiveInt('SSE_CONNECTIONS', env.SSE_CONNECTIONS, 200)
+  const endpointKinds = parseEndpointKinds(env.SSE_ENDPOINT_KINDS)
+  const httpProbeRate = profile === 'smoke'
+    ? null
+    : parsePositiveInt('SSE_HTTP_PROBE_RATE', env.SSE_HTTP_PROBE_RATE, 100)
+  const httpMaxP95Ratio = profile === 'smoke'
+    ? null
+    : parsePositiveInt('SSE_HTTP_MAX_P95_RATIO', env.SSE_HTTP_MAX_P95_RATIO, 10)
+
+  let slowClientConnections = null
+  let slowClientIdempotencyKey = null
+  if (profile === 'slow-client') {
+    if (endpointKinds.length !== 1 || endpointKinds[0] !== 'waiting-store-operator') {
+      throw new Error('slow-client requires only waiting-store-operator')
+    }
+    if (connections < 2) {
+      throw new Error('slow-client requires slow and companion connections')
+    }
+    slowClientConnections = parsePositiveInt(
+      'SSE_SLOW_CLIENT_CONNECTIONS',
+      env.SSE_SLOW_CLIENT_CONNECTIONS,
+      connections - 1,
+    )
+    if (env.SSE_SLOW_CLIENT_TRIGGER_APPROVED !== 'true') {
+      throw new Error('slow-client requires SSE_SLOW_CLIENT_TRIGGER_APPROVED=true')
+    }
+    slowClientIdempotencyKey = requireUuid(
+      'SSE_SLOW_CLIENT_IDEMPOTENCY_KEY',
+      env.SSE_SLOW_CLIENT_IDEMPOTENCY_KEY,
+    )
+  }
+
+  const connectionsPerAccount = parsePositiveInt(
+    'SSE_CONNECTIONS_PER_ACCOUNT',
+    env.SSE_CONNECTIONS_PER_ACCOUNT,
+    profile === 'capacity' ? 7 : 6,
+  )
+  if (profile === 'capacity'
+    && (endpointKinds.length !== 1
+      || connections !== connectionsPerAccount
+      || connectionsPerAccount <= 6)) {
+    throw new Error(
+      'capacity requires one endpoint kind and exactly 7 connections for one account',
+    )
+  }
+
   return Object.freeze({
     targetEnv,
     baseUrl,
@@ -90,12 +144,8 @@ export function loadSseConfig(env) {
     smokeProofPath: profile === 'smoke'
       ? null
       : requireJsonPath('SSE_SMOKE_PROOF_PATH', env.SSE_SMOKE_PROOF_PATH),
-    connections: parsePositiveInt('SSE_CONNECTIONS', env.SSE_CONNECTIONS, 200),
-    connectionsPerAccount: parsePositiveInt(
-      'SSE_CONNECTIONS_PER_ACCOUNT',
-      env.SSE_CONNECTIONS_PER_ACCOUNT,
-      6,
-    ),
+    connections,
+    connectionsPerAccount,
     holdDurationSeconds: parsePositiveInt(
       'SSE_HOLD_DURATION_SECONDS',
       env.SSE_HOLD_DURATION_SECONDS,
@@ -106,7 +156,11 @@ export function loadSseConfig(env) {
       env.SSE_SLOW_CLIENT_DELAY_SECONDS,
       30,
     ),
-    endpointKinds: parseEndpointKinds(env.SSE_ENDPOINT_KINDS),
+    endpointKinds,
+    httpProbeRate,
+    httpMaxP95Ratio,
+    slowClientConnections,
+    slowClientIdempotencyKey,
     ...shaEvidence,
   })
 }

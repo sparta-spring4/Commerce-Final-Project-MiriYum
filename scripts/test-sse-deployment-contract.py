@@ -15,7 +15,11 @@ LOCAL_ENV = ROOT / "deploy" / "local" / ".env.example"
 LOCAL_COMPOSE = ROOT / "deploy" / "local" / "docker-compose.dev.yml"
 LOADTEST_COMPOSE = ROOT / "deploy" / "local" / "docker-compose.loadtest.yml"
 LOCAL_NGINX = ROOT / "deploy" / "local" / "nginx.sse.conf"
+CADDYFILE = ROOT / "deploy" / "local" / "Caddyfile.loadtest"
 SSE_SNIPPET = ROOT / "deploy" / "nginx" / "templates" / "snippets" / "sse-location.conf"
+HTTP_TEMPLATE = ROOT / "deploy" / "nginx" / "templates" / "http.conf.template"
+HTTPS_TEMPLATE = ROOT / "deploy" / "nginx" / "templates" / "https.conf.template"
+PROD_COMPOSE = ROOT / "deploy" / "docker-compose.prod.yml"
 SSE_K6_DOCKERFILE = ROOT / "performance" / "k6" / "sse" / "Dockerfile"
 K6_WORKFLOW = ROOT / ".github" / "workflows" / "k6-contract.yml"
 
@@ -187,6 +191,25 @@ class SseDeploymentContractTest(unittest.TestCase):
         self.assertIn(b"event: notifications.changed", frame)
         self.assertIn(b"data: {}", frame)
         self.assertLess(elapsed, 2.0)
+
+    def test_production_templates_mount_and_include_the_sse_snippet(self) -> None:
+        include = "include /opt/miriyum-nginx-templates/snippets/sse-location.conf;"
+        self.assertEqual(2, HTTP_TEMPLATE.read_text(encoding="utf-8").count(include))
+        self.assertEqual(2, HTTPS_TEMPLATE.read_text(encoding="utf-8").count(include))
+
+        compose = PROD_COMPOSE.read_text(encoding="utf-8")
+        self.assertIn(
+            "./nginx/templates:/opt/miriyum-nginx-templates:ro",
+            compose,
+        )
+
+    def test_local_caddy_sse_matcher_matches_the_nginx_store_id_contract(self) -> None:
+        caddy = CADDYFILE.read_text(encoding="utf-8")
+        self.assertIn(
+            "path_regexp sse ^/api/v1/(consumers/me/(notification-events|waiting-events)|store-operators/stores/[1-9][0-9]*/waiting-events)$",
+            caddy,
+        )
+        self.assertNotIn("stores/*/waiting-events", caddy)
 
     def test_ci_builds_and_inspects_the_pinned_sse_runner(self) -> None:
         workflow = K6_WORKFLOW.read_text(encoding="utf-8")

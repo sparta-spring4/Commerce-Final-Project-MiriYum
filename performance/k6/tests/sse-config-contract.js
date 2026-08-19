@@ -22,6 +22,11 @@ function validEnv(overrides = {}) {
     SSE_CONNECTIONS_PER_ACCOUNT: '2',
     SSE_HOLD_DURATION_SECONDS: '30',
     SSE_SLOW_CLIENT_DELAY_SECONDS: '2',
+    SSE_HTTP_PROBE_RATE: '3',
+    SSE_HTTP_MAX_P95_RATIO: '2',
+    SSE_SLOW_CLIENT_CONNECTIONS: '1',
+    SSE_SLOW_CLIENT_TRIGGER_APPROVED: 'true',
+    SSE_SLOW_CLIENT_IDEMPOTENCY_KEY: '123e4567-e89b-12d3-a456-426614174000',
     SSE_ENDPOINT_KINDS: 'notification-consumer,waiting-consumer,waiting-store-operator',
     COMMIT_SHA: SHA,
     HARNESS_COMMIT_SHA: SHA,
@@ -43,10 +48,10 @@ export default function () {
     'production host is rejected before SSE resolution': () => {
       const message = errorMessage(() => loadSseConfig(validEnv({
         TARGET_ENV: 'staging',
-        BASE_URL: 'https://production.miriyum.click',
-        ALLOWED_HOSTS: 'production.miriyum.click',
+        BASE_URL: 'https://api.miriyum.com',
+        ALLOWED_HOSTS: 'api.miriyum.com',
       })))
-      return message !== null && message.includes('target')
+      return message === 'production target is forbidden'
     },
     'connection input above the test ceiling is rejected': () => {
       const message = errorMessage(() => loadSseConfig(validEnv({ SSE_CONNECTIONS: '201' })))
@@ -65,15 +70,88 @@ export default function () {
       })))
       return message !== null && message.includes('SSE_SMOKE_PROOF_PATH')
     },
-    'all four SSE profiles are accepted with their required evidence': () => {
-      const profiles = ['smoke', 'reconnect', 'steady', 'slow-client']
+    'all SSE profiles are accepted with their required evidence': () => {
+      const profiles = ['smoke', 'reconnect', 'steady', 'slow-client', 'capacity']
       return profiles.every((profile) => {
         const config = loadSseConfig(validEnv({
           SSE_PROFILE: profile,
           SSE_SMOKE_PROOF_PATH: profile === 'smoke' ? undefined : '/results/sse-smoke.json',
+          ...(profile === 'slow-client' ? {
+            SSE_CONNECTIONS: '2',
+            SSE_ENDPOINT_KINDS: 'waiting-store-operator',
+          } : {}),
+          ...(profile === 'capacity' ? {
+            SSE_CONNECTIONS: '7',
+            SSE_CONNECTIONS_PER_ACCOUNT: '7',
+            SSE_ENDPOINT_KINDS: 'notification-consumer',
+          } : {}),
         }))
         return config.profile === profile
       })
+    },
+    'capacity profile requires a single-account overflow shape': () => {
+      const wrongKinds = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'capacity',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_CONNECTIONS: '7',
+        SSE_CONNECTIONS_PER_ACCOUNT: '7',
+      })))
+      const belowCeiling = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'capacity',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_CONNECTIONS: '6',
+        SSE_CONNECTIONS_PER_ACCOUNT: '6',
+        SSE_ENDPOINT_KINDS: 'notification-consumer',
+      })))
+      return wrongKinds?.includes('capacity') === true
+        && belowCeiling?.includes('capacity') === true
+    },
+    'non-smoke profiles require bounded owned HTTP probe inputs': () => {
+      const missingRate = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'steady',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_HTTP_PROBE_RATE: '',
+      })))
+      const invalidRatio = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'reconnect',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_HTTP_MAX_P95_RATIO: '11',
+      })))
+      return missingRate?.includes('SSE_HTTP_PROBE_RATE') === true
+        && invalidRatio?.includes('SSE_HTTP_MAX_P95_RATIO') === true
+    },
+    'slow-client requires one operator scope and a normal companion': () => {
+      const mixedKinds = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'slow-client',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_CONNECTIONS: '2',
+      })))
+      const noCompanion = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'slow-client',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_CONNECTIONS: '1',
+        SSE_ENDPOINT_KINDS: 'waiting-store-operator',
+      })))
+      return mixedKinds === 'slow-client requires only waiting-store-operator'
+        && noCompanion === 'slow-client requires slow and companion connections'
+    },
+    'slow-client mutation is explicit and fail-closed': () => {
+      const unapproved = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'slow-client',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_CONNECTIONS: '2',
+        SSE_ENDPOINT_KINDS: 'waiting-store-operator',
+        SSE_SLOW_CLIENT_TRIGGER_APPROVED: 'false',
+      })))
+      const invalidKey = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'slow-client',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_CONNECTIONS: '2',
+        SSE_ENDPOINT_KINDS: 'waiting-store-operator',
+        SSE_SLOW_CLIENT_IDEMPOTENCY_KEY: 'not-a-uuid',
+      })))
+      return unapproved?.includes('SSE_SLOW_CLIENT_TRIGGER_APPROVED') === true
+        && invalidKey?.includes('SSE_SLOW_CLIENT_IDEMPOTENCY_KEY') === true
     },
     'unknown SSE profile is rejected': () =>
       errorMessage(() => loadSseConfig(validEnv({ SSE_PROFILE: 'burst' })))

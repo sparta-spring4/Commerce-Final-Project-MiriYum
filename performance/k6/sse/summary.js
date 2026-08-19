@@ -7,7 +7,16 @@ const ENDPOINT_KINDS = new Set([
 const ALLOWED_METRICS = Object.freeze({
   sse_first_event: ['firstEvent', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
   sse_connection_duration: ['connectionDuration', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
+  sse_heartbeat_frames: ['heartbeatFrames', ['count', 'rate']],
   http_req_duration: ['httpRequestDuration', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
+  http_reqs: ['httpRequests', ['count', 'rate']],
+  http_req_failed: ['httpRequestFailures', ['count', 'rate']],
+  owned_http_baseline: ['ownedHttpBaseline', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
+  owned_http_duration: ['ownedHttpDuration', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
+  owned_http_degradation_ratio: ['ownedHttpDegradationRatio', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
+  owned_http_success: ['ownedHttpSuccess', ['count', 'rate']],
+  owned_http_errors: ['ownedHttpErrors', ['count', 'rate']],
+  slow_client_triggers: ['slowClientTriggers', ['count', 'rate']],
   sse_connections_opened: ['openedConnections', ['count', 'rate']],
   sse_connections_successful: ['successfulConnections', ['count', 'rate']],
   sse_connections_rejected: ['rejectedConnections', ['count', 'rate']],
@@ -71,7 +80,7 @@ function copyMetricValues(values, allowedNames) {
 
 function safeMetadata(metadata) {
   const targetEnv = requireText('targetEnv', metadata.targetEnv, /^(local|staging)$/)
-  const profile = requireText('profile', metadata.profile, /^(smoke|reconnect|steady|slow-client)$/)
+  const profile = requireText('profile', metadata.profile, /^(smoke|reconnect|steady|slow-client|capacity)$/)
   const runId = requireText('runId', metadata.runId, /^[A-Za-z0-9._-]{1,100}$/)
   const shaPattern = /^[0-9a-f]{40}$/
   const digestPattern = /^[0-9a-f]{64}$/
@@ -105,7 +114,7 @@ function safeMetadata(metadata) {
     limits: {
       connections: requirePositiveInt('connections', limits.connections, 200),
       connectionsPerAccount: requirePositiveInt(
-        'connectionsPerAccount', limits.connectionsPerAccount, 6,
+        'connectionsPerAccount', limits.connectionsPerAccount, 7,
       ),
       holdDurationSeconds: requirePositiveInt(
         'holdDurationSeconds', limits.holdDurationSeconds, 600,

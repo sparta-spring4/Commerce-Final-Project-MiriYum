@@ -12,6 +12,10 @@ function validEvent(name = 'notifications.changed', id = 'opaque_cursor-1') {
   return { name, data: '{}', id }
 }
 
+function heartbeat(comment = 'keepalive') {
+  return { name: '', data: '', id: '', comment }
+}
+
 function fakeTransport({ status = 200, events = [], fail = false } = {}) {
   const calls = []
   let closeCount = 0
@@ -66,7 +70,13 @@ function openWith({
     endpointKind,
     behavior,
     metrics,
-    tags: { phase: 'measured', profile: behavior.mode, audience: 'consumer', endpoint_kind: endpointKind },
+    tags: {
+      phase: 'measured',
+      profile: behavior.mode,
+      audience: 'consumer',
+      endpoint_kind: endpointKind,
+      traffic: 'sse-stream',
+    },
   })
   return { result, transport }
 }
@@ -98,18 +108,41 @@ export default function () {
       return opened.result.classification === 'success'
         && opened.transport.closeCount === 0
     },
-    'slow client delays only after the first valid frame and then closes': () => {
+    'slow client delays every frame and waits for server completion': () => {
       const delays = []
       const opened = openWith({
+        transport: fakeTransport({
+          events: [validEvent(), heartbeat(), validEvent('notifications.changed', 'opaque_cursor-2')],
+        }),
         behavior: {
           mode: 'slow-client',
           delaySeconds: 2,
           delay: (seconds) => delays.push(seconds),
+          minimumValidEvents: 2,
+          requireServerClose: true,
         },
       })
-      return JSON.stringify(delays) === JSON.stringify([2])
-        && opened.transport.closeCount === 1
+      return JSON.stringify(delays) === JSON.stringify([2, 2, 2])
+        && opened.transport.closeCount === 0
+        && opened.result.validEvents === 2
+        && opened.result.heartbeatFrames === 1
+        && opened.result.serverClosed === true
         && opened.result.classification === 'success'
+    },
+    'slow client requires a second changed signal': () => {
+      const opened = openWith({
+        transport: fakeTransport({ events: [validEvent(), heartbeat()] }),
+        behavior: {
+          mode: 'slow-client',
+          delaySeconds: 2,
+          delay: () => {},
+          minimumValidEvents: 2,
+          requireServerClose: true,
+        },
+      })
+      return opened.result.classification === 'missing_event'
+        && opened.result.validEvents === 1
+        && opened.transport.closeCount === 0
     },
     'validated cursor can be handed to an in-memory callback but not returned': () => {
       let captured = null
@@ -150,7 +183,7 @@ export default function () {
       const opened = openWith()
       const request = opened.transport.calls[0]
       const safeTagNames = Object.keys(request.params.tags).every((tag) =>
-        ['phase', 'profile', 'audience', 'endpoint_kind'].includes(tag))
+        ['phase', 'profile', 'audience', 'endpoint_kind', 'traffic'].includes(tag))
       return request.params.headers.Authorization === 'Bearer access-token-memory-only'
         && safeTagNames
         && !JSON.stringify(opened.result).includes('access-token-memory-only')

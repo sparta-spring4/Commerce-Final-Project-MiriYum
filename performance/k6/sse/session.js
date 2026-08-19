@@ -86,14 +86,12 @@ function parseCsrf(response) {
 export function prepareSseSession({
   client,
   baseUrl,
-  allowedOrigin,
   target,
   credentials,
   tags = {},
 }) {
   const normalizedTarget = requireTarget(target)
   const normalizedBaseUrl = requireText('baseUrl', baseUrl).replace(/\/+$/, '')
-  requireText('allowedOrigin', allowedOrigin)
   const authPath = AUTH_PATHS[normalizedTarget.audience]
   const account = requireCredentials(credentials)
 
@@ -143,7 +141,7 @@ function emitMetric(metrics, name, value, tags) {
 
 function streamTags(tags) {
   const result = {}
-  for (const field of ['phase', 'profile', 'audience', 'endpoint_kind']) {
+  for (const field of ['phase', 'profile', 'audience', 'endpoint_kind', 'traffic']) {
     if (typeof tags[field] === 'string' && tags[field] !== '') result[field] = tags[field]
   }
   return result
@@ -166,6 +164,16 @@ function validateBehavior(behavior) {
   if (behavior.onLastEventId !== undefined && typeof behavior.onLastEventId !== 'function') {
     throw new Error('onLastEventId must be a function')
   }
+  if (behavior.minimumValidEvents !== undefined
+    && (!Number.isInteger(behavior.minimumValidEvents)
+      || behavior.minimumValidEvents <= 0
+      || behavior.minimumValidEvents > 10)) {
+    throw new Error('minimumValidEvents must be bounded')
+  }
+  if (behavior.requireServerClose !== undefined
+    && typeof behavior.requireServerClose !== 'boolean') {
+    throw new Error('requireServerClose must be boolean')
+  }
   if (behavior.timeoutSeconds !== undefined
     && (!Number.isInteger(behavior.timeoutSeconds)
       || behavior.timeoutSeconds <= 0
@@ -173,6 +181,17 @@ function validateBehavior(behavior) {
     throw new Error('SSE stream timeout must be bounded')
   }
   return behavior
+}
+
+function isHeartbeatComment(event) {
+  return event !== null
+    && typeof event === 'object'
+    && !Array.isArray(event)
+    && typeof event.comment === 'string'
+    && event.comment !== ''
+    && (event.name === '' || event.name === undefined)
+    && (event.data === '' || event.data === undefined)
+    && (event.id === '' || event.id === undefined)
 }
 
 function statusClassification(status) {
@@ -220,8 +239,10 @@ export function openChangedStream({
 
   let opened = false
   let validEvents = 0
+  let heartbeatFrames = 0
   let contractError = false
   let transportError = false
+  let clientClosedByHarness = false
   const startedAt = Date.now()
   let response
 
@@ -230,17 +251,29 @@ export function openChangedStream({
       streamUrl,
       request,
       (client) => {
+        const closeClient = () => {
+          clientClosedByHarness = true
+          client.close()
+        }
         client.on('open', () => {
           opened = true
           emitMetric(metrics, 'opened', 1, selectedTags)
         })
         client.on('event', (event) => {
+          if (selectedBehavior.mode === 'slow-client') {
+            selectedBehavior.delay(selectedBehavior.delaySeconds)
+          }
+          if (isHeartbeatComment(event)) {
+            heartbeatFrames += 1
+            emitMetric(metrics, 'heartbeatFrame', 1, selectedTags)
+            return
+          }
           try {
             validateChangedEvent(event, endpointKind)
           } catch (_) {
             contractError = true
             emitMetric(metrics, 'contractError', 1, selectedTags)
-            client.close()
+            closeClient()
             return
           }
 
@@ -253,18 +286,15 @@ export function openChangedStream({
             }
           }
 
-          if (selectedBehavior.mode === 'slow-client' && validEvents === 1) {
-            selectedBehavior.delay(selectedBehavior.delaySeconds)
-            client.close()
-          } else if ((selectedBehavior.mode === 'smoke'
+          if ((selectedBehavior.mode === 'smoke'
             || selectedBehavior.mode === 'reconnect') && validEvents === 1) {
-            client.close()
+            closeClient()
           }
         })
         client.on('error', () => {
           transportError = true
           emitMetric(metrics, 'transportError', 1, selectedTags)
-          client.close()
+          closeClient()
         })
       },
     )
@@ -272,6 +302,8 @@ export function openChangedStream({
     transportError = true
   }
 
+  const minimumValidEvents = selectedBehavior.minimumValidEvents ?? 1
+  const serverClosed = !clientClosedByHarness && !transportError && !contractError
   let classification
   if (transportError) {
     classification = 'transport_error'
@@ -279,7 +311,10 @@ export function openChangedStream({
     classification = 'contract_error'
   } else {
     classification = statusClassification(response?.status)
-      || (validEvents > 0 ? 'success' : 'missing_event')
+      || (validEvents >= minimumValidEvents
+        && (!selectedBehavior.requireServerClose || serverClosed)
+        ? 'success'
+        : 'missing_event')
   }
   emitMetric(metrics, 'connectionResult', classification, selectedTags)
 
@@ -287,6 +322,8 @@ export function openChangedStream({
     classification,
     opened,
     validEvents,
+    heartbeatFrames,
+    serverClosed,
     completed: classification === 'success',
   })
 }

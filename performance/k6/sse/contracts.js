@@ -1,4 +1,4 @@
-const FIXTURE_FIELDS = ['allowedOrigin', 'consumerAccounts', 'storeOperatorAccounts', 'scopes']
+const FIXTURE_FIELDS = ['consumerAccounts', 'storeOperatorAccounts', 'scopes']
 const CONSUMER_FIELDS = ['alias', 'emailEnv', 'passwordEnv']
 const OPERATOR_FIELDS = ['alias', 'emailEnv', 'passwordEnv', 'storeIds']
 const SCOPE_FIELDS = [
@@ -53,10 +53,6 @@ function ensureUnique(name, values) {
 
 function indexFixture(value) {
   requireExactFields('fixture', value, FIXTURE_FIELDS)
-  if (typeof value.allowedOrigin !== 'string'
-    || !/^https:\/\/[^/?#]+$/.test(value.allowedOrigin)) {
-    throw new Error('allowedOrigin must be an HTTPS origin without a path')
-  }
   requireArray('consumerAccounts', value.consumerAccounts)
   requireArray('storeOperatorAccounts', value.storeOperatorAccounts)
   requireExactFields('scopes', value.scopes, SCOPE_FIELDS)
@@ -129,12 +125,17 @@ export function validateSseFixture(value) {
   return Object.freeze({ valid: true })
 }
 
-export function buildSseTargets(fixture, connectionsPerAccount) {
+export function buildSseTargets(fixture, connectionsPerAccount, maximumConnectionsPerAccount = 6) {
   indexFixture(fixture)
   if (!Number.isInteger(connectionsPerAccount)
     || connectionsPerAccount <= 0
-    || connectionsPerAccount > 6) {
-    throw new Error('connectionsPerAccount must be an integer between 1 and 6')
+    || !Number.isInteger(maximumConnectionsPerAccount)
+    || maximumConnectionsPerAccount < 1
+    || maximumConnectionsPerAccount > 7
+    || connectionsPerAccount > maximumConnectionsPerAccount) {
+    throw new Error(
+      `connectionsPerAccount must be an integer between 1 and ${maximumConnectionsPerAccount}`,
+    )
   }
 
   const grouped = new Map()
@@ -164,6 +165,73 @@ export function buildSseTargets(fixture, connectionsPerAccount) {
     }
   }
   return Object.freeze(targets)
+}
+
+export function selectSseTargets(availableTargets, endpointKinds, connections) {
+  if (!Array.isArray(availableTargets)
+    || !Array.isArray(endpointKinds)
+    || endpointKinds.length === 0
+    || new Set(endpointKinds).size !== endpointKinds.length
+    || endpointKinds.some((kind) => !['notification-consumer', 'waiting-consumer', 'waiting-store-operator'].includes(kind))) {
+    throw new Error('SSE target selection input is invalid')
+  }
+  if (!Number.isInteger(connections) || connections <= 0) {
+    throw new Error('SSE target selection connection count is invalid')
+  }
+  const buckets = new Map(endpointKinds.map((kind) => [kind, []]))
+  for (const target of availableTargets) {
+    const bucket = buckets.get(target?.kind)
+    if (bucket !== undefined) bucket.push(target)
+  }
+  if ([...buckets.values()].some((bucket) => bucket.length === 0)
+    || connections < endpointKinds.length) {
+    throw new Error('SSE fixture does not cover every requested endpoint kind')
+  }
+  if ([...buckets.values()].reduce((total, bucket) => total + bucket.length, 0) < connections) {
+    throw new Error('SSE fixture does not provide the requested connection capacity')
+  }
+
+  const offsets = new Map(endpointKinds.map((kind) => [kind, 0]))
+  const selected = []
+  while (selected.length < connections) {
+    let progressed = false
+    for (const kind of endpointKinds) {
+      if (selected.length >= connections) break
+      const bucket = buckets.get(kind)
+      const offset = offsets.get(kind)
+      if (offset < bucket.length) {
+        selected.push(bucket[offset])
+        offsets.set(kind, offset + 1)
+        progressed = true
+      }
+    }
+    if (!progressed) {
+      throw new Error('SSE fixture does not provide the requested connection capacity')
+    }
+  }
+  return Object.freeze(selected)
+}
+
+export function selectCapacityTargets(availableTargets, endpointKind, connections) {
+  if (!Array.isArray(availableTargets)
+    || !['notification-consumer', 'waiting-consumer', 'waiting-store-operator'].includes(endpointKind)
+    || !Number.isInteger(connections)
+    || connections <= 6
+    || connections > 7) {
+    throw new Error('capacity target selection input is invalid')
+  }
+  const groups = new Map()
+  for (const target of availableTargets) {
+    if (target?.kind !== endpointKind) continue
+    const key = `${target.audience}:${target.accountAlias}:${target.storeId || ''}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(target)
+  }
+  const group = [...groups.values()].find((targets) => targets.length >= connections)
+  if (group === undefined) {
+    throw new Error('SSE fixture does not provide one account capacity overflow')
+  }
+  return Object.freeze(group.slice(0, connections))
 }
 
 export function endpointPath(target) {

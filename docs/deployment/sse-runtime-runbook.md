@@ -92,7 +92,7 @@ docker compose --env-file deploy/local/.env `
 
 SSE 전후 HTTP 비교는 [k6 핵심 API 기준선](../../performance/k6/README.md)의 `notificationHistory` local baseline을 같은 SHA·fixture에서 3회 실행한다. 세 실행 모두 unexpected 4xx, 5xx, dropped iteration이 0이어야 하며 p50·p95·p99 범위만 기록한다.
 
-아래 공통 명령에서 `$profile`, `$connections`, `$runId`를 순서대로 바꾼다. `steady`는 25 → 50 → 100 → 200으로 올리며 낮은 단계가 실패하면 즉시 중단한다. `reconnect`는 마지막 성공 steady 연결 수에서, `slow-client`는 한 계정의 상한 6 이하와 별도 계정을 함께 검증한다.
+아래 공통 명령에서 `$profile`, `$connections`, `$runId`를 순서대로 바꾼다. `steady`는 25 → 50 → 100 → 200으로 올리며 낮은 단계가 실패하면 즉시 중단한다. `reconnect`는 마지막 성공 steady 연결 수에서, `slow-client`는 한 계정의 상한 6 이하와 별도 정상 동반 연결을 함께 검증한다. `capacity`는 일반 단계에 섞지 않고 단일 계정·단일 endpoint에 정확히 7개 연결을 만들어 예상 429 1건과 나머지 연결·HTTP probe의 정상성을 확인한다.
 
 ```powershell
 $profile = 'steady'
@@ -115,11 +115,20 @@ docker compose --env-file deploy/local/.env `
   -e SSE_CONNECTIONS_PER_ACCOUNT=6 `
   -e SSE_HOLD_DURATION_SECONDS=30 `
   -e SSE_SLOW_CLIENT_DELAY_SECONDS=2 `
+  -e SSE_HTTP_PROBE_RATE=3 `
+  -e SSE_HTTP_MAX_P95_RATIO=10 `
   -e SSE_ENDPOINT_KINDS=notification-consumer,waiting-consumer,waiting-store-operator `
   /scripts/sse/main.js
 ```
 
-성공 기준은 요청한 모든 연결·event 계약 성공, unexpected 4xx·5xx·transport·contract error·dropped iteration 0, 유한 timeout 종료, 동시 HTTP 이력 오류 0이다. summary JSON과 Markdown은 승인된 aggregate만 보존한다.
+`slow-client` 실행에는 위 명령과 함께 `SSE_ENDPOINT_KINDS=waiting-store-operator`,
+`SSE_CONNECTIONS>=2`, `SSE_SLOW_CLIENT_CONNECTIONS`,
+`SSE_SLOW_CLIENT_TRIGGER_APPROVED=true`,
+`SSE_SLOW_CLIENT_IDEMPOTENCY_KEY=<승인된 UUID>`를 지정한다. `capacity` 실행은
+`SSE_ENDPOINT_KINDS`를 하나로 줄이고 `SSE_CONNECTIONS=7`,
+`SSE_CONNECTIONS_PER_ACCOUNT=7`로 고정한다.
+
+성공 기준은 요청한 모든 연결·event 계약 성공(단, `capacity`의 예상 429 1건은 예외), unexpected 4xx·5xx·transport·contract error·dropped iteration 0, 유한 timeout 종료, 동시 HTTP 이력 오류 0이다. summary JSON과 Markdown은 승인된 aggregate만 보존한다.
 
 ## Valkey 중단과 backend 교체
 

@@ -3,6 +3,8 @@ import { check } from 'k6'
 import {
   buildSseTargets,
   endpointPath,
+  selectCapacityTargets,
+  selectSseTargets,
   validateChangedEvent,
   validateSseFixture,
 } from '../sse/contracts.js'
@@ -15,7 +17,6 @@ export const options = {
 
 function fixture() {
   return {
-    allowedOrigin: 'https://loadtest-proxy:8443',
     consumerAccounts: [
       {
         alias: 'consumer-01',
@@ -110,6 +111,36 @@ export default function () {
     },
     'target builder rejects per-account capacity above the runtime ceiling': () =>
       errorMessage(() => buildSseTargets(fixture(), 7))?.includes('connectionsPerAccount') === true,
+    'capacity target selection keeps all overflow attempts on one account': () => {
+      const targets = buildSseTargets(fixture(), 7, 7)
+      const selected = selectCapacityTargets(targets, 'notification-consumer', 7)
+      return selected.length === 7
+        && new Set(selected.map((target) => target.accountAlias)).size === 1
+        && selected.every((target) => target.kind === 'notification-consumer')
+    },
+    'capacity target selection fails without one account overflow': () =>
+      errorMessage(() => selectCapacityTargets(
+        buildSseTargets(fixture(), 6),
+        'notification-consumer',
+        7,
+      )) === 'SSE fixture does not provide one account capacity overflow',
+    'target selection covers endpoint kinds before adding duplicate connections': () => {
+      const selected = selectSseTargets(
+        buildSseTargets(fixture(), 2),
+        ['notification-consumer', 'waiting-consumer', 'waiting-store-operator'],
+        5,
+      )
+      return selected.length === 5
+        && selected.slice(0, 3).map((target) => target.kind).join(',')
+          === 'notification-consumer,waiting-consumer,waiting-store-operator'
+        && new Set(selected.map((target) => target.kind)).size === 3
+    },
+    'target selection fails before load when one requested kind has no capacity': () =>
+      errorMessage(() => selectSseTargets(
+        buildSseTargets(fixture(), 2).filter((target) => target.kind !== 'waiting-consumer'),
+        ['notification-consumer', 'waiting-consumer'],
+        2,
+      )) === 'SSE fixture does not cover every requested endpoint kind',
     'wrong event name is rejected for the endpoint kind': () =>
       errorMessage(() => validateChangedEvent({
         name: 'waiting.changed',

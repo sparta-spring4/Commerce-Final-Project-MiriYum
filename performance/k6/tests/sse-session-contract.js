@@ -49,7 +49,6 @@ function prepare(audience, client = recordingClient()) {
   const accessToken = prepareSseSession({
     client,
     baseUrl: 'https://loadtest-proxy:8443',
-    allowedOrigin: 'https://loadtest-proxy:8443',
     target: { audience, kind: audience === 'consumer' ? 'notification-consumer' : 'waiting-store-operator' },
     credentials: { email: 'synthetic@example.test', password: 'synthetic-password' },
     tags: { profile: 'smoke', forbidden: 'must-not-propagate' },

@@ -1,5 +1,4 @@
 {
-  "allowedOrigin": "https://loadtest-proxy:8443",
   "consumerAccounts": [
     {
       "alias": "consumer-01",

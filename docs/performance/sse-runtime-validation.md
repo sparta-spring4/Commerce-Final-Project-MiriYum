@@ -9,7 +9,7 @@
 
 SSE는 `data: {}` 변경 신호이며 결과 상태는 Notification 이력 또는 Waiting HTTP API와 MySQL에서 다시 읽는다. Valkey Pub/Sub, SSE payload, cursor 또는 keepalive는 원장·전달 성공·상태 성공의 근거가 아니다. 결과에는 credential, Authorization, Token, cookie, cursor, event ID, account/store/team/notification/reservation ID와 전체 URL을 남기지 않는다.
 
-로컬 loadtest 입력은 timeout 30초, heartbeat 5초, correction 2초, correction batch 100, 전체 연결 상한 200, 계정별 연결 상한 6이다. 아직 운영 기본값이나 SLO로 승인하지 않았다.
+로컬 loadtest 입력은 timeout 30초, heartbeat 5초, correction 2초, correction batch 100, 전체 연결 상한 200, 계정별 연결 상한 6이다. `capacity` 프로필만 단일 계정에 7개 연결을 시도해 예상 429 1건과 나머지 연결·HTTP probe의 격리를 검증하는 음성 테스트이며, 운영 상한이나 SLO로 승격하지 않는다.
 
 ## 현재 증거
 
