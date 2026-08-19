@@ -19,6 +19,32 @@ import org.springframework.data.repository.query.Param;
  */
 public interface ReservationRepository extends JpaRepository<Reservation, Long> {
 
+    List<Reservation> findAllByIdIn(List<Long> reservationIds);
+
+    @Query(value = """
+            SELECT r.*
+              FROM reservations r
+             WHERE (:storeId IS NULL OR r.store_id = :storeId)
+               AND r.created_at <= :changedTo
+               AND (
+                    r.created_at BETWEEN :changedFrom AND :changedTo
+                    OR r.cancelled_at BETWEEN :changedFrom AND :changedTo
+                    OR r.fulfilled_at BETWEEN :changedFrom AND :changedTo
+                    OR r.no_show_at BETWEEN :changedFrom AND :changedTo
+               )
+             ORDER BY GREATEST(
+                    r.created_at,
+                    COALESCE(r.cancelled_at, r.created_at),
+                    COALESCE(r.fulfilled_at, r.created_at),
+                    COALESCE(r.no_show_at, r.created_at)) DESC,
+                    r.reservation_id DESC
+            """, nativeQuery = true)
+    List<Reservation> findMonitoringChanges(
+            @Param("changedFrom") Instant changedFrom,
+            @Param("changedTo") Instant changedTo,
+            @Param("storeId") Long storeId,
+            Pageable pageable);
+
     @Query("""
             select reservation.id
             from Reservation reservation

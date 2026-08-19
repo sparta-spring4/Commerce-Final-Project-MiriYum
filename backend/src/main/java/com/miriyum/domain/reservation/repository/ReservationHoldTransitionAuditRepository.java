@@ -8,6 +8,7 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Pageable;
 
 /** 임시 선점 상태 전이 감사의 append-only 조회·저장 경계다. */
 public interface ReservationHoldTransitionAuditRepository
@@ -26,6 +27,15 @@ public interface ReservationHoldTransitionAuditRepository
     List<ReservationHoldTransitionAudit> findAllByReservationHoldIdOrderByIdAsc(
             Long reservationHoldId
     );
+
+    List<ReservationHoldTransitionAudit>
+            findAllByReservationHoldIdInOrderByReservationHoldIdAscIdAsc(
+                    List<Long> reservationHoldIds);
+
+    List<ReservationHoldTransitionAudit> findByOccurredAtBetweenOrderByOccurredAtDescIdDesc(
+            Instant changedFrom,
+            Instant changedTo,
+            Pageable pageable);
 
     /**
      * RECONCILIATION_REQUIRED 전이 후 경계 시각까지 현재도 보호 중인 선점 수를 센다.

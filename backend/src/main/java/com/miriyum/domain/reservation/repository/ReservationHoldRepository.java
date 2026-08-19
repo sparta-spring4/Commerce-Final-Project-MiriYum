@@ -15,6 +15,8 @@ import org.springframework.data.repository.query.Param;
 /** 임시 선점 루트의 최소 영속성 경계다. */
 public interface ReservationHoldRepository extends JpaRepository<ReservationHold, Long> {
 
+    List<ReservationHold> findAllByIdIn(List<Long> reservationHoldIds);
+
     /** 무잠금 만료 후보 조회가 반환하는 최소 projection이다. */
     interface ExpirationCandidate {
 
