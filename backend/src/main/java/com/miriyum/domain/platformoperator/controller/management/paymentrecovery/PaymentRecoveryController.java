@@ -62,9 +62,9 @@ public class PaymentRecoveryController {
     public ApiResponse<CaseDetail> detail(
             @AuthenticationPrincipal PlatformOperatorPrincipal principal,
             @PathVariable String caseId) {
-        requireUuid(caseId);
+        String normalizedCaseId = requireUuid(caseId);
         return ApiResponse.success("결제 복구 사건을 조회했습니다.",
-                queries.detail(principal, caseId));
+                queries.detail(principal, normalizedCaseId));
     }
 
     @PostMapping("/{caseId}/assignments")
@@ -75,11 +75,12 @@ public class PaymentRecoveryController {
             @RequestHeader("X-Admin-Reauthentication") String approval,
             @RequestHeader("X-Correlation-Id") String correlationId,
             @Valid @RequestBody AssignmentRequest request) {
+        String normalizedCaseId = requireUuid(caseId);
         IdempotencyKey key = key(rawKey);
         return response(commands.assign(command(principal, "PAYMENT_RECOVERY_ASSIGN", key,
-                        "POST /api/v1/platform-operators/payment-recovery-cases/" + requireUuid(caseId)
+                        "POST /api/v1/platform-operators/payment-recovery-cases/" + normalizedCaseId
                                 + "/assignments\nexpectedCaseVersion=" + request.expectedCaseVersion()),
-                principal, caseId, request, approval, correlationId), "결제 복구 사건을 배정했습니다.");
+                principal, normalizedCaseId, request, approval, correlationId), "결제 복구 사건을 배정했습니다.");
     }
 
     @PostMapping("/{caseId}/requeries")
@@ -89,13 +90,14 @@ public class PaymentRecoveryController {
             @RequestHeader("X-Admin-Reauthentication") String approval,
             @RequestHeader("X-Correlation-Id") String correlationId,
             @Valid @RequestBody RequeryRequest request) {
+        String normalizedCaseId = requireUuid(caseId);
         IdempotencyKey key = key(rawKey);
         String canonical = versions("POST /api/v1/platform-operators/payment-recovery-cases/"
-                + requireUuid(caseId) + "/requeries", request.expectedCaseVersion(),
+                + normalizedCaseId + "/requeries", request.expectedCaseVersion(),
                 request.expectedHandoffVersion(), request.expectedPaymentVersion(),
                 request.expectedRecoveryVersion());
         return response(commands.requery(command(principal, "PAYMENT_RECOVERY_REQUERY", key, canonical),
-                principal, caseId, request, approval, correlationId), "결제 결과 재조회를 예약했습니다.");
+                principal, normalizedCaseId, request, approval, correlationId), "결제 결과 재조회를 예약했습니다.");
     }
 
     @PostMapping("/{caseId}/proposals")
@@ -105,13 +107,14 @@ public class PaymentRecoveryController {
             @RequestHeader("X-Admin-Reauthentication") String approval,
             @RequestHeader("X-Correlation-Id") String correlationId,
             @Valid @RequestBody ProposalRequest request) {
+        String normalizedCaseId = requireUuid(caseId);
         IdempotencyKey key = key(rawKey);
         String canonical = versions("POST /api/v1/platform-operators/payment-recovery-cases/"
-                + requireUuid(caseId) + "/proposals\naction=" + request.action(),
+                + normalizedCaseId + "/proposals\naction=" + request.action(),
                 request.expectedCaseVersion(), request.expectedHandoffVersion(),
                 request.expectedPaymentVersion(), request.expectedRecoveryVersion());
         return response(commands.propose(command(principal, "PAYMENT_RECOVERY_PROPOSE", key, canonical),
-                principal, caseId, request, approval, correlationId), "결제 복구 제안을 생성했습니다.");
+                principal, normalizedCaseId, request, approval, correlationId), "결제 복구 제안을 생성했습니다.");
     }
 
     @PostMapping("/{caseId}/proposals/{proposalVersion}/approvals")
@@ -122,13 +125,14 @@ public class PaymentRecoveryController {
             @RequestHeader("X-Admin-Reauthentication") String approval,
             @RequestHeader("X-Correlation-Id") String correlationId,
             @Valid @RequestBody ApprovalRequest request) {
+        String normalizedCaseId = requireUuid(caseId);
         IdempotencyKey key = key(rawKey);
         String canonical = "POST /api/v1/platform-operators/payment-recovery-cases/"
-                + requireUuid(caseId) + "/proposals/" + proposalVersion + "/approvals"
+                + normalizedCaseId + "/proposals/" + proposalVersion + "/approvals"
                 + "\nexpectedCaseVersion=" + request.expectedCaseVersion()
                 + "\nexpectedProposalVersion=" + request.expectedProposalVersion();
         return response(commands.approve(command(principal, "PAYMENT_RECOVERY_APPROVE", key, canonical),
-                principal, caseId, proposalVersion, request, approval, correlationId),
+                principal, normalizedCaseId, proposalVersion, request, approval, correlationId),
                 "결제 복구 제안을 승인했습니다.");
     }
 
@@ -139,13 +143,14 @@ public class PaymentRecoveryController {
             @RequestHeader("X-Admin-Reauthentication") String approval,
             @RequestHeader("X-Correlation-Id") String correlationId,
             @Valid @RequestBody ClosureRequest request) {
+        String normalizedCaseId = requireUuid(caseId);
         IdempotencyKey key = key(rawKey);
         String canonical = "POST /api/v1/platform-operators/payment-recovery-cases/"
-                + requireUuid(caseId) + "/failed-unresolved-closures\nexpectedCaseVersion="
+                + normalizedCaseId + "/failed-unresolved-closures\nexpectedCaseVersion="
                 + request.expectedCaseVersion();
         return response(commands.closeUnresolved(
                 command(principal, "PAYMENT_RECOVERY_CLOSE_UNRESOLVED", key, canonical),
-                principal, caseId, request, approval, correlationId), "결제 복구 사건을 미해결 종결했습니다.");
+                principal, normalizedCaseId, request, approval, correlationId), "결제 복구 사건을 미해결 종결했습니다.");
     }
 
     private static IdempotencyCommand command(
