@@ -48,4 +48,24 @@ public final class MemberSupportResponses {
     public record CasePageResponse(List<CaseResponse> content, PageMetadata page) {
         public CasePageResponse { content = List.copyOf(content); }
     }
+
+    public record PendingSanctionApprovalResponse(
+            String sanctionId,
+            long version,
+            MemberAccountType accountType,
+            String accountId,
+            String reasonCode,
+            String policyVersion,
+            OffsetDateTime proposedAt
+    ) {
+    }
+
+    public record PendingSanctionApprovalPageResponse(
+            List<PendingSanctionApprovalResponse> content,
+            PageMetadata page
+    ) {
+        public PendingSanctionApprovalPageResponse {
+            content = List.copyOf(content);
+        }
+    }
 }

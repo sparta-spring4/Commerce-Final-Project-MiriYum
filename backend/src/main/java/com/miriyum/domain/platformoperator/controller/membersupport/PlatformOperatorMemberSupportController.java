@@ -11,8 +11,10 @@ import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportDe
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSanctionCommandService;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSanctionService;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportCaseQueryService;
+import com.miriyum.domain.platformoperator.service.membersupport.PendingMemberSanctionQueryService;
 import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.CaseResponse;
 import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.CasePageResponse;
+import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.PendingSanctionApprovalPageResponse;
 import com.miriyum.domain.platformoperator.dto.membersupport.PlatformMemberSupportRequests.CaseDecisionRequest;
 import com.miriyum.domain.platformoperator.dto.membersupport.PlatformMemberSupportRequests.SanctionRequest;
 import com.miriyum.domain.platformoperator.dto.membersupport.PlatformMemberSupportRequests.AdditionalApprovalRequest;
@@ -42,19 +44,22 @@ public class PlatformOperatorMemberSupportController {
     private final MemberSanctionCommandService sanctionCommands;
     private final MemberSanctionService sanctions;
     private final MemberSupportCaseQueryService caseQueries;
+    private final PendingMemberSanctionQueryService pendingSanctions;
 
     public PlatformOperatorMemberSupportController(MemberSupportQueryService queries,
                                                    MemberSupportAssignmentService assignments,
                                                    MemberSupportDecisionService decisions,
                                                    MemberSanctionCommandService sanctionCommands,
                                                    MemberSanctionService sanctions,
-                                                   MemberSupportCaseQueryService caseQueries) {
+                                                   MemberSupportCaseQueryService caseQueries,
+                                                   PendingMemberSanctionQueryService pendingSanctions) {
         this.queries = queries;
         this.assignments = assignments;
         this.decisions = decisions;
         this.sanctionCommands = sanctionCommands;
         this.sanctions = sanctions;
         this.caseQueries = caseQueries;
+        this.pendingSanctions = pendingSanctions;
     }
 
     @GetMapping("/members")
@@ -139,6 +144,15 @@ public class PlatformOperatorMemberSupportController {
         sanctions.approvePermanent(principal, sanctionId, version(ifMatch),
                 approval, correlationId, request.reasonCode());
         return ApiResponse.success("영구 정지를 승인했습니다.", null);
+    }
+
+    @GetMapping("/member-sanctions/pending-additional-approvals")
+    public ApiResponse<PendingSanctionApprovalPageResponse> pendingAdditionalApprovals(
+            @AuthenticationPrincipal PlatformOperatorPrincipal principal,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.success("추가 승인 대기 제재를 조회했습니다.",
+                pendingSanctions.list(principal, page, size));
     }
 
     private long version(String header) {
