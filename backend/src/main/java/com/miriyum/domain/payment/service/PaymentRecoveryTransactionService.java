@@ -133,6 +133,20 @@ public class PaymentRecoveryTransactionService {
 
         Payment payment = payments.findByPaymentIdForUpdate(command.paymentId())
                 .orElseThrow(() -> new ServiceException(PaymentErrorCode.PAYMENT_NOT_FOUND));
+        PaymentRecoveryHandoff serializedReplay = handoffs
+                .findBySourceTypeAndSourceIdForUpdate(
+                        command.sourceType(), command.sourceId())
+                .orElse(null);
+        if (serializedReplay != null) {
+            if (!serializedReplay.getPaymentId().equals(command.paymentId())
+                    || !serializedReplay.getSourceEventId().equals(command.sourceEventId())
+                    || !serializedReplay.getRegistrationIdempotencyKey()
+                    .equals(command.idempotencyKey())) {
+                throw new ServiceException(PaymentErrorCode.PAYMENT_RECOVERY_STALE);
+            }
+            return new ManualRecoveryRegistration(
+                    ALREADY_REGISTERED, Long.toString(serializedReplay.getId()));
+        }
         ManualRecoveryKind kind = deriveKind(command, payment);
         if (kind == null) {
             return new ManualRecoveryRegistration(NOT_REQUIRED, null);
