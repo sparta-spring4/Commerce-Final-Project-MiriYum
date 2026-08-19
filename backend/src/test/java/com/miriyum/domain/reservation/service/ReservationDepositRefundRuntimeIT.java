@@ -12,6 +12,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileRefundResultQuery;
 import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
@@ -101,6 +102,7 @@ class ReservationDepositRefundRuntimeIT {
     @BeforeEach
     void resetDatabase() {
         clock.set(NOW);
+        jdbcTemplate.execute("DELETE FROM reservation_payment_recovery_outbox");
         jdbcTemplate.execute("DELETE FROM reservation_deposit_refund_obligations");
         jdbcTemplate.execute("DELETE FROM reservation_deposit_cause_audits");
         jdbcTemplate.execute("DELETE FROM reservation_deposit_calculation_items");
@@ -255,6 +257,78 @@ class ReservationDepositRefundRuntimeIT {
     }
 
     @Test
+    void unknownRefundOnlyCreatesOneHandoffAfterAutomaticRequeryExhaustion() {
+        Fixture fixture = createRefundRequiredFixture();
+        when(paymentService.requestRefund(any(RequestRefundCommand.class)))
+                .thenReturn(unknownRefund());
+        when(paymentService.reconcileRefundResult(any(ReconcileRefundResultQuery.class)))
+                .thenReturn(unknownRefund());
+
+        assertThat(refundJob.runOnce("refund-worker-a", 10)).isZero();
+
+        assertThat(statusOf("reservation_deposit_refund_obligations",
+                "reservation_deposit_refund_obligation_id",
+                fixture.obligationId())).isEqualTo("RECONCILIATION_REQUIRED");
+        assertThat(statusOf("reservation_deposit_processes",
+                "reservation_deposit_process_id",
+                fixture.processId())).isEqualTo("COMPENSATING");
+        assertThat(outboxCount(fixture.obligationId())).isZero();
+
+        clock.advance(Duration.ofSeconds(30));
+        assertThat(refundJob.runOnce("refund-worker-b", 10)).isZero();
+        assertThat(outboxCount(fixture.obligationId())).isZero();
+
+        clock.advance(Duration.ofSeconds(30));
+        assertThat(refundJob.runOnce("refund-worker-c", 10)).isZero();
+        assertThat(outboxCount(fixture.obligationId())).isZero();
+
+        clock.advance(Duration.ofSeconds(30));
+        assertThat(refundJob.runOnce("refund-worker-d", 10)).isZero();
+        assertThat(statusOf("reservation_deposit_processes",
+                "reservation_deposit_process_id",
+                fixture.processId())).isEqualTo("RECOVERY_REQUIRED");
+        assertThat(outboxCount(fixture.obligationId())).isEqualTo(1);
+
+        clock.advance(Duration.ofSeconds(30));
+        assertThat(refundJob.runOnce("refund-worker-e", 10)).isZero();
+        assertThat(outboxCount(fixture.obligationId())).isEqualTo(1);
+        verify(paymentService, times(1)).requestRefund(any(RequestRefundCommand.class));
+        verify(paymentService, times(3))
+                .reconcileRefundResult(any(ReconcileRefundResultQuery.class));
+    }
+
+    @Test
+    void expiredQueryLeaseNeverReclaimsAsARefundRequestAfterProviderFailure() {
+        Fixture fixture = createRefundRequiredFixture();
+        when(paymentService.requestRefund(any(RequestRefundCommand.class)))
+                .thenReturn(unknownRefund());
+        when(paymentService.reconcileRefundResult(any(ReconcileRefundResultQuery.class)))
+                .thenReturn(failedRefund());
+
+        assertThat(refundJob.runOnce("refund-worker-a", 10)).isZero();
+        clock.advance(Duration.ofSeconds(30));
+
+        ReservationDepositRefundService.Claim crashed =
+                refundService.claimDue("crashed-query-worker", 10).getFirst();
+        assertThat(crashed.operation())
+                .isEqualTo(ReservationDepositRefundObligation.Operation.QUERY);
+        paymentService.reconcileRefundResult(new ReconcileRefundResultQuery(
+                crashed.paymentId(), crashed.sourceEventId(),
+                crashed.refundAmountMinor(), crashed.currency()));
+
+        clock.advance(Duration.ofSeconds(30));
+        assertThat(refundJob.runOnce("refund-worker-b", 10)).isZero();
+
+        assertThat(statusOf("reservation_deposit_processes",
+                "reservation_deposit_process_id",
+                fixture.processId())).isEqualTo("RECOVERY_REQUIRED");
+        assertThat(outboxCount(fixture.obligationId())).isEqualTo(1);
+        verify(paymentService, times(1)).requestRefund(any(RequestRefundCommand.class));
+        verify(paymentService, times(2))
+                .reconcileRefundResult(any(ReconcileRefundResultQuery.class));
+    }
+
+    @Test
     void permanentPaymentErrorIsIsolatedAndNotClaimedAgain() {
         Fixture fixture = createRefundRequiredFixture();
         when(paymentService.requestRefund(any(RequestRefundCommand.class)))
@@ -373,6 +447,29 @@ class ReservationDepositRefundRuntimeIT {
                 RefundStatus.FAILED,
                 NOW,
                 clock.instant());
+    }
+
+    private RefundResult unknownRefund() {
+        return new RefundResult(
+                "refund-7001",
+                PAYMENT_ID,
+                4_000L,
+                0L,
+                0L,
+                4_000L,
+                "KRW",
+                RefundStatus.RECONCILIATION_REQUIRED,
+                NOW,
+                null);
+    }
+
+    private int outboxCount(long obligationId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM reservation_payment_recovery_outbox
+                WHERE source_type = 'RESERVATION_DEPOSIT_REFUND'
+                  AND source_id = ?
+                """, Integer.class, Long.toString(obligationId));
     }
 
     private String statusOf(String table, String idColumn, long id) {

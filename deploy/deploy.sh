@@ -228,6 +228,57 @@ verify_nginx() {
   fi
 }
 
+verify_frontend() {
+  local compose=(compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local frontend_domain
+
+  if ! "${compose[@]}" ps --status running --services frontend | grep -qx frontend; then
+    echo "Frontend is not running after deployment." >&2
+    return 1
+  fi
+
+  if ! "${compose[@]}" exec -T frontend wget -q -O /dev/null http://127.0.0.1/; then
+    echo "Frontend container root did not return HTTP 200." >&2
+    return 1
+  fi
+
+  if ! "${compose[@]}" exec -T frontend wget -q -O /dev/null http://127.0.0.1/sign-in; then
+    echo "Frontend SPA fallback did not return HTTP 200." >&2
+    return 1
+  fi
+
+  frontend_domain="$("${compose[@]}" exec -T nginx sh -ec 'printf %s "$STAGING_FRONTEND_DOMAIN"')"
+  if [[ -z "${frontend_domain}" ]]; then
+    echo "Staging frontend domain is empty." >&2
+    return 1
+  fi
+
+  if "${compose[@]}" exec -T nginx grep -Fqx "    listen 443 ssl;" /etc/nginx/conf.d/default.conf; then
+    if ! curl --fail --silent --show-error \
+      --resolve "${frontend_domain}:443:127.0.0.1" \
+      "https://${frontend_domain}/" >/dev/null; then
+      echo "Gateway frontend root did not return HTTP 200 over HTTPS." >&2
+      return 1
+    fi
+    if ! curl --fail --silent --show-error \
+      --resolve "${frontend_domain}:443:127.0.0.1" \
+      "https://${frontend_domain}/sign-in" >/dev/null; then
+      echo "Gateway frontend SPA fallback did not return HTTP 200 over HTTPS." >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if ! curl --fail --silent --show-error -H "Host: ${frontend_domain}" http://127.0.0.1/ >/dev/null; then
+    echo "Gateway frontend root did not return HTTP 200." >&2
+    return 1
+  fi
+  if ! curl --fail --silent --show-error -H "Host: ${frontend_domain}" http://127.0.0.1/sign-in >/dev/null; then
+    echo "Gateway frontend SPA fallback did not return HTTP 200." >&2
+    return 1
+  fi
+}
+
 # 구버전 롤백 중 생성된 marker까지 다음 전달 대상에서 누락되지 않게 매 배포 이관한다.
 backfill_pending_risk_event_index() {
   local compose=(compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
@@ -353,6 +404,8 @@ main() {
 
   : "${AWS_REGION:?AWS_REGION must be set}"
   : "${BACKEND_IMAGE:?BACKEND_IMAGE must be set to an immutable ECR image tag}"
+  # 같은 SHA의 frontend 태그가 기본값이다. CD는 이 값을 명시적으로 전달한다.
+  FRONTEND_IMAGE="${FRONTEND_IMAGE:-${BACKEND_IMAGE}-frontend}"
 
   if [[ ! -f "${ENV_FILE}" ]]; then
     echo "Missing runtime environment file: ${ENV_FILE}" >&2
@@ -373,7 +426,7 @@ main() {
   aws ecr get-login-password --region "${AWS_REGION}" \
     | docker login --username AWS --password-stdin "${registry}"
 
-  export BACKEND_IMAGE
+  export BACKEND_IMAGE FRONTEND_IMAGE
 
 # 실행 환경은 서버에만 두고 이미지와 배포 파일만 갱신한다.
   compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" pull
@@ -416,6 +469,13 @@ main() {
     publish_deployment_health 0
     compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
     compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 nginx || true
+    return 1
+  fi
+
+  if ! verify_frontend; then
+    publish_deployment_health 0
+    compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 frontend || true
     return 1
   fi
 
