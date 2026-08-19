@@ -143,7 +143,7 @@ class PaymentRecoveryPersistenceIT {
 
     @Test
     @DisplayName("실제 MySQL에서 결과 불명 operation replay는 provider 취소를 한 번만 호출한다")
-    void doesNotResendUnknownOperation() {
+    void doesNotResendUnknownOperation() throws Exception {
         String handoffId = paymentService.registerManualRecoveryHandoff(registrationCommand())
                 .handoffId();
         var snapshot = paymentService.inspectManualRecovery(
@@ -151,16 +151,37 @@ class PaymentRecoveryPersistenceIT {
         RequestManualRecoveryRefundCommand command = new RequestManualRecoveryRefundCommand(
                 handoffId, snapshot.handoffVersion(), snapshot.paymentVersion(),
                 snapshot.recoveryVersion(), "550e8400-e29b-41d4-a716-446655440099");
+        CountDownLatch providerEntered = new CountDownLatch(1);
+        CountDownLatch releaseProvider = new CountDownLatch(1);
         when(providerClient.cancelPayment(
                 eq(PROVIDER_ID), anyString(), eq(100_000L),
                 eq("KRW"), eq("RESERVATION_CANCELLED")))
-                .thenThrow(new PaymentProviderClient.ProviderUnavailableException("timeout"));
+                .thenAnswer(ignored -> {
+                    providerEntered.countDown();
+                    if (!releaseProvider.await(5, TimeUnit.SECONDS)) {
+                        throw new AssertionError("provider release timed out");
+                    }
+                    throw new PaymentProviderClient.ProviderUnavailableException("timeout");
+                });
 
-        var first = paymentService.requestManualRecoveryRefund(command);
-        var replay = paymentService.requestManualRecoveryRefund(command);
+        com.miriyum.domain.payment.dto.PaymentContracts.RefundResult first;
+        com.miriyum.domain.payment.dto.PaymentContracts.RefundResult concurrentReplay;
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<com.miriyum.domain.payment.dto.PaymentContracts.RefundResult> execution =
+                    executor.submit(() -> paymentService.requestManualRecoveryRefund(command));
+            assertThat(providerEntered.await(5, TimeUnit.SECONDS)).isTrue();
+            concurrentReplay = executor.submit(
+                    () -> paymentService.requestManualRecoveryRefund(command)).get();
+            releaseProvider.countDown();
+            first = execution.get();
+        } finally {
+            releaseProvider.countDown();
+        }
+        var settledReplay = paymentService.requestManualRecoveryRefund(command);
 
         assertThat(first.status()).isEqualTo(RefundStatus.RECONCILIATION_REQUIRED);
-        assertThat(replay).isEqualTo(first);
+        assertThat(concurrentReplay.status()).isEqualTo(RefundStatus.PROCESSING);
+        assertThat(settledReplay).isEqualTo(first);
         verify(providerClient, times(1)).cancelPayment(
                 eq(PROVIDER_ID), anyString(), eq(100_000L),
                 eq("KRW"), eq("RESERVATION_CANCELLED"));

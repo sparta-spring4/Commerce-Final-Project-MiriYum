@@ -18,10 +18,12 @@ import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryReg
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.InspectManualRecoveryQuery;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.PreviewManualRecoveryRefundQuery;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RequestManualRecoveryRefundCommand;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileManualRecoveryCommand;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RegisterManualRecoveryHandoffCommand;
 import com.miriyum.domain.payment.entity.Payment;
 import com.miriyum.domain.payment.entity.PaymentRecoveryHandoff;
 import com.miriyum.domain.payment.entity.PaymentRefund;
+import com.miriyum.domain.payment.entity.ReservationDepositDisposition;
 import com.miriyum.domain.payment.repository.PaymentRecoveryHandoffRepository;
 import com.miriyum.domain.payment.repository.PaymentRefundRepository;
 import com.miriyum.domain.payment.repository.PaymentRepository;
@@ -112,6 +114,21 @@ class PaymentRecoveryTransactionServiceTest {
                 .thenReturn(Optional.of(payment));
         when(refunds.findByPayment_IdAndSourceEventIdForUpdate(
                 11L, "reservation:1:cancelled")).thenReturn(Optional.of(refund));
+
+        assertThat(service.register(command()))
+                .isEqualTo(new ManualRecoveryRegistration(NOT_REQUIRED, null));
+    }
+
+    @Test
+    @DisplayName("canonical 환불이 없는 결정적 실패 handoff는 영구 재시도하지 않는다")
+    void skipsUnsupportedFailureWithoutCanonicalRefund() {
+        Payment payment = paidPayment();
+        when(handoffs.findBySourceTypeAndSourceIdForUpdate(
+                RESERVATION_DEPOSIT_REFUND, "31")).thenReturn(Optional.empty());
+        when(payments.findByPaymentIdForUpdate("900000000000000001"))
+                .thenReturn(Optional.of(payment));
+        when(refunds.findByPayment_IdAndSourceEventIdForUpdate(
+                11L, "reservation:1:cancelled")).thenReturn(Optional.empty());
 
         assertThat(service.register(command()))
                 .isEqualTo(new ManualRecoveryRegistration(NOT_REQUIRED, null));
@@ -221,6 +238,98 @@ class PaymentRecoveryTransactionServiceTest {
                 "900000000000000001", "reservation:1:cancelled", 100_000L,
                 "RESERVATION_CANCELLED", 1L, KEY));
         assertThat(claim.replayResult()).isNull();
+    }
+
+    @Test
+    @DisplayName("실패 환불 재실행이 결과 불명이 되면 같은 handoff에서 재조회한다")
+    void reconcilesUnknownResultAfterFailedRefundRetry() {
+        Payment payment = paidPayment();
+        PaymentRefund refund = refund(payment);
+        refund.requireReconciliation(NOW.minusSeconds(5));
+        PaymentRecoveryHandoff handoff = failedRefundHandoff();
+        handoff.beginOperation("550e8400-e29b-41d4-a716-446655440099",
+                NOW.minusSeconds(3));
+        handoff.finishOperation("550e8400-e29b-41d4-a716-446655440099",
+                PaymentRecoveryHandoff.OperationStatus.UNKNOWN, NOW.minusSeconds(2));
+        ReflectionTestUtils.setField(handoff, "rowVersion", 3L);
+        ReflectionTestUtils.setField(payment, "version", 4L);
+        ReflectionTestUtils.setField(refund, "version", 5L);
+        when(handoffs.findByIdForUpdate(21L)).thenReturn(Optional.of(handoff));
+        when(payments.findByPaymentIdForUpdate("900000000000000001"))
+                .thenReturn(Optional.of(payment));
+        when(refunds.findByPayment_IdAndSourceEventIdForUpdate(
+                11L, "reservation:1:cancelled")).thenReturn(Optional.of(refund));
+
+        var claim = service.claimReconciliation(new ReconcileManualRecoveryCommand(
+                "21", 3L, 4L, 5L));
+
+        assertThat(claim.target()).isEqualTo(
+                PaymentRecoveryTransactionService.ReconciliationTarget.REFUND);
+        assertThat(claim.refundClaim().refundId()).isEqualTo("910000000000000001");
+    }
+
+    @Test
+    @DisplayName("외부 성공 후 handoff finalize 전 crash는 canonical 완료 상태로 operation을 회복한다")
+    void healsProcessingOperationFromCompletedCanonicalRefund() {
+        Payment payment = paidPayment();
+        PaymentRefund refund = refund(payment);
+        payment.applyCompletedRefund(100_000L, NOW.minusSeconds(4));
+        refund.complete("cancel-1", NOW.minusSeconds(4));
+        PaymentRecoveryHandoff handoff = failedRefundHandoff();
+        String operationId = "550e8400-e29b-41d4-a716-446655440099";
+        handoff.beginOperation(operationId, NOW.minusSeconds(5));
+        ReflectionTestUtils.setField(handoff, "rowVersion", 3L);
+        ReflectionTestUtils.setField(payment, "version", 4L);
+        ReflectionTestUtils.setField(refund, "version", 5L);
+        when(handoffs.findByIdForUpdate(21L)).thenReturn(Optional.of(handoff));
+        when(payments.findByPaymentIdForUpdate("900000000000000001"))
+                .thenReturn(Optional.of(payment));
+        when(refunds.findByPayment_IdAndSourceEventIdForUpdate(
+                11L, "reservation:1:cancelled")).thenReturn(Optional.of(refund));
+
+        var replay = service.claimRefundExecution(
+                new RequestManualRecoveryRefundCommand(
+                        "21", 3L, 4L, 5L, operationId));
+
+        assertThat(replay.replayResult().status()).isEqualTo(
+                com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus.COMPLETED);
+        assertThat(handoff.getOperationStatus()).isEqualTo(
+                PaymentRecoveryHandoff.OperationStatus.SUCCEEDED);
+    }
+
+    @Test
+    @DisplayName("실패 처분에 연결된 canonical 실패 환불은 동일 identity로 preview한다")
+    void previewsCanonicalRefundAttachedToFailedDisposition() {
+        Payment payment = paidPayment();
+        PaymentRefund refund = refund(payment);
+        refund.fail(NOW.minusSeconds(5));
+        ReservationDepositDisposition disposition = ReservationDepositDisposition.create(
+                payment, "920000000000000001", "reservation:1:cancelled",
+                "RESERVATION_CANCELLED", null, 1L, "CONSUMER", 5000,
+                150_000L, 0L,
+                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                NOW.minusSeconds(20));
+        disposition.failRetryable(refund.getRefundId(), NOW.minusSeconds(5));
+        PaymentRecoveryHandoff handoff = PaymentRecoveryHandoff.register(
+                com.miriyum.domain.payment.dto.PaymentRecoveryContracts
+                        .ManualRecoverySourceType.RESERVATION_DEPOSIT_DISPOSITION,
+                "41", 11L, "900000000000000001", "reservation:1:cancelled",
+                com.miriyum.domain.payment.dto.PaymentRecoveryContracts
+                        .ManualRecoveryKind.DISPOSITION_FAILED,
+                "550e8400-e29b-41d4-a716-446655440041", NOW.minusSeconds(1));
+        ReflectionTestUtils.setField(handoff, "id", 31L);
+        when(handoffs.findByIdForUpdate(31L)).thenReturn(Optional.of(handoff));
+        when(payments.findByPaymentIdForUpdate("900000000000000001"))
+                .thenReturn(Optional.of(payment));
+        when(dispositions.findByPayment_IdAndSourceEventIdForUpdate(
+                11L, "reservation:1:cancelled")).thenReturn(Optional.of(disposition));
+        when(refunds.findByRefundIdForUpdate("910000000000000001"))
+                .thenReturn(Optional.of(refund));
+
+        var preview = service.preview(new PreviewManualRecoveryRefundQuery("31"));
+
+        assertThat(preview.requestedAmountMinor()).isEqualTo(100_000L);
+        assertThat(preview.retryable()).isTrue();
     }
 
     private static PaymentRecoveryHandoff failedRefundHandoff() {

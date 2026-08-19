@@ -153,6 +153,10 @@ public class PaymentService {
         if (!claim.requiresProviderCall()) {
             return claim.completedResult();
         }
+        return executeRefundClaim(claim);
+    }
+
+    private RefundResult executeRefundClaim(PaymentTransactionService.RefundClaim claim) {
         try {
             ProviderCancellation cancellation = providerClient.cancelPayment(
                     claim.portOnePaymentId(),
@@ -310,18 +314,41 @@ public class PaymentService {
         PaymentRecoveryTransactionService.ManualRefundExecutionClaim claim =
                 recoveryTransactions.claimRefundExecution(command);
         if (claim.replayResult() != null) {
+            if (claim.dispositionId() != null) {
+                transactions.finalizeDisposition(
+                        claim.dispositionId(), claim.replayResult(), now());
+            }
             return claim.replayResult();
         }
+        PaymentTransactionService.RefundClaim refundClaim;
         try {
-            RefundResult result = requestRefund(claim.command());
-            recoveryTransactions.finishRefundExecution(
-                    command.handoffId(), command.operationId(), result);
-            return result;
+            refundClaim = transactions.claimRefund(claim.command(), now());
+            if (refundClaim.rejectionError() != null) {
+                throw new ServiceException(refundClaim.rejectionError());
+            }
         } catch (RuntimeException exception) {
-            recoveryTransactions.markRefundExecutionUnknown(
+            recoveryTransactions.markRefundExecutionFailed(
                     command.handoffId(), command.operationId());
             throw exception;
         }
+        RefundResult result;
+        if (!refundClaim.requiresProviderCall()) {
+            result = refundClaim.completedResult();
+        } else {
+            try {
+                result = executeRefundClaim(refundClaim);
+            } catch (RuntimeException exception) {
+                recoveryTransactions.markRefundExecutionUnknown(
+                        command.handoffId(), command.operationId());
+                throw exception;
+            }
+        }
+        recoveryTransactions.finishRefundExecution(
+                command.handoffId(), command.operationId(), result);
+        if (claim.dispositionId() != null) {
+            transactions.finalizeDisposition(claim.dispositionId(), result, now());
+        }
+        return result;
     }
 
     public ManualRecoveryRegistration registerManualRecoveryHandoff(

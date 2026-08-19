@@ -84,14 +84,21 @@ public class PaymentRecoveryTransactionService {
 
     record ManualRefundExecutionClaim(
             RequestRefundCommand command,
-            RefundResult replayResult
+            RefundResult replayResult,
+            String dispositionId
     ) {
-        static ManualRefundExecutionClaim execute(RequestRefundCommand command) {
-            return new ManualRefundExecutionClaim(command, null);
+        static ManualRefundExecutionClaim execute(
+                RequestRefundCommand command,
+                String dispositionId
+        ) {
+            return new ManualRefundExecutionClaim(command, null, dispositionId);
         }
 
-        static ManualRefundExecutionClaim replay(RefundResult result) {
-            return new ManualRefundExecutionClaim(null, result);
+        static ManualRefundExecutionClaim replay(
+                RefundResult result,
+                String dispositionId
+        ) {
+            return new ManualRefundExecutionClaim(null, result, dispositionId);
         }
     }
 
@@ -226,11 +233,11 @@ public class PaymentRecoveryTransactionService {
             throw new ServiceException(PaymentErrorCode.PAYMENT_RECOVERY_STALE);
         }
         return switch (handoff.getRecoveryKind()) {
-            case REFUND_RESULT_UNKNOWN -> claimRefundReconciliation(
+            case REFUND_RESULT_UNKNOWN, REFUND_FAILED -> claimRefundReconciliation(
                     command, handoff, payment);
             case DISPOSITION_RESULT_UNKNOWN -> claimDispositionReconciliation(
                     command, handoff, payment);
-            case REFUND_FAILED, DISPOSITION_FAILED -> throw new ServiceException(
+            case DISPOSITION_FAILED -> throw new ServiceException(
                     PaymentErrorCode.PAYMENT_RECOVERY_NOT_REQUIRED);
         };
     }
@@ -260,14 +267,18 @@ public class PaymentRecoveryTransactionService {
         Payment payment = snapshot.payment();
         PaymentRefund refund = snapshot.refund();
         if (command.operationId().equals(handoff.getOperationId())) {
-            return ManualRefundExecutionClaim.replay(toRefundResult(payment, refund));
+            healProcessingOperation(handoff, refund);
+            return ManualRefundExecutionClaim.replay(
+                    toRefundResult(payment, refund), snapshot.dispositionId());
         }
         if (handoff.getRowVersion() != command.expectedHandoffVersion()
                 || payment.getVersion() != command.expectedPaymentVersion()
                 || refund.getVersion() != command.expectedRefundVersion()) {
             throw new ServiceException(PaymentErrorCode.PAYMENT_RECOVERY_STALE);
         }
-        if (handoff.getRecoveryKind() != REFUND_FAILED
+        if ((handoff.getRecoveryKind() != REFUND_FAILED
+                && handoff.getRecoveryKind() != REFUND_RESULT_UNKNOWN
+                && handoff.getRecoveryKind() != DISPOSITION_FAILED)
                 || refund.getStatus() != RefundStatus.FAILED) {
             throw new ServiceException(PaymentErrorCode.PAYMENT_RECOVERY_NOT_REQUIRED);
         }
@@ -279,7 +290,29 @@ public class PaymentRecoveryTransactionService {
         }
         return ManualRefundExecutionClaim.execute(new RequestRefundCommand(
                 payment.getPaymentId(), refund.getSourceEventId(), refund.getAmountMinor(),
-                refund.getReasonCode(), refund.getPolicyVersion(), refund.getIdempotencyKey()));
+                refund.getReasonCode(), refund.getPolicyVersion(), refund.getIdempotencyKey()),
+                snapshot.dispositionId());
+    }
+
+    private void healProcessingOperation(
+            PaymentRecoveryHandoff handoff,
+            PaymentRefund refund
+    ) {
+        if (handoff.getOperationStatus()
+                != PaymentRecoveryHandoff.OperationStatus.PROCESSING) {
+            return;
+        }
+        PaymentRecoveryHandoff.OperationStatus healed = switch (refund.getStatus()) {
+            case COMPLETED -> PaymentRecoveryHandoff.OperationStatus.SUCCEEDED;
+            case FAILED -> PaymentRecoveryHandoff.OperationStatus.FAILED;
+            case RECONCILIATION_REQUIRED -> PaymentRecoveryHandoff.OperationStatus.UNKNOWN;
+            default -> null;
+        };
+        if (healed == null) {
+            return;
+        }
+        handoff.finishOperation(handoff.getOperationId(), healed, clock.instant());
+        handoffs.saveAndFlush(handoff);
     }
 
     @Transactional(
@@ -313,6 +346,17 @@ public class PaymentRecoveryTransactionService {
         finishOperation(handoff, operationId, PaymentRecoveryHandoff.OperationStatus.UNKNOWN);
     }
 
+    @Transactional(
+            propagation = Propagation.REQUIRES_NEW,
+            isolation = Isolation.READ_COMMITTED,
+            timeout = 5)
+    public void markRefundExecutionFailed(String handoffId, String operationId) {
+        PaymentRecoveryHandoff handoff = handoffs.findByIdForUpdate(Long.parseLong(handoffId))
+                .orElseThrow(() -> new ServiceException(
+                        PaymentErrorCode.PAYMENT_RECOVERY_NOT_FOUND));
+        finishOperation(handoff, operationId, PaymentRecoveryHandoff.OperationStatus.FAILED);
+    }
+
     private void finishOperation(
             PaymentRecoveryHandoff handoff,
             String operationId,
@@ -330,6 +374,25 @@ public class PaymentRecoveryTransactionService {
         PaymentRecoveryHandoff handoff = handoffs.findByIdForUpdate(Long.parseLong(handoffId))
                 .orElseThrow(() -> new ServiceException(
                         PaymentErrorCode.PAYMENT_RECOVERY_NOT_FOUND));
+        if (handoff.getRecoveryKind() == DISPOSITION_FAILED) {
+            Payment payment = payments.findByPaymentIdForUpdate(handoff.getPaymentId())
+                    .orElseThrow(() -> new ServiceException(
+                            PaymentErrorCode.PAYMENT_NOT_FOUND));
+            ReservationDepositDisposition disposition = dispositions
+                    .findByPayment_IdAndSourceEventIdForUpdate(
+                            payment.getId(), handoff.getSourceEventId())
+                    .orElseThrow(() -> new ServiceException(
+                            PaymentErrorCode.PAYMENT_RECOVERY_NOT_FOUND));
+            if (disposition.getRefundId() == null) {
+                throw new ServiceException(PaymentErrorCode.PAYMENT_RECOVERY_NOT_SUPPORTED);
+            }
+            PaymentRefund refund = refunds.findByRefundIdForUpdate(disposition.getRefundId())
+                    .filter(found -> found.getPayment().getId().equals(payment.getId()))
+                    .orElseThrow(() -> new ServiceException(
+                            PaymentErrorCode.PAYMENT_RECOVERY_NOT_FOUND));
+            return new RecoveryRefundSnapshot(
+                    handoff, payment, refund, disposition.getDispositionId());
+        }
         if (handoff.getRecoveryKind() != REFUND_FAILED
                 && handoff.getRecoveryKind() != REFUND_RESULT_UNKNOWN) {
             throw new ServiceException(PaymentErrorCode.PAYMENT_RECOVERY_NOT_SUPPORTED);
@@ -340,7 +403,7 @@ public class PaymentRecoveryTransactionService {
                         payment.getId(), handoff.getSourceEventId())
                 .orElseThrow(() -> new ServiceException(
                         PaymentErrorCode.PAYMENT_RECOVERY_NOT_FOUND));
-        return new RecoveryRefundSnapshot(handoff, payment, refund);
+        return new RecoveryRefundSnapshot(handoff, payment, refund, null);
     }
 
     private static RefundResult toRefundResult(Payment payment, PaymentRefund refund) {
@@ -356,7 +419,8 @@ public class PaymentRecoveryTransactionService {
     private record RecoveryRefundSnapshot(
             PaymentRecoveryHandoff handoff,
             Payment payment,
-            PaymentRefund refund
+            PaymentRefund refund,
+            String dispositionId
     ) { }
 
     private ManualReconciliationClaim claimRefundReconciliation(
@@ -434,7 +498,19 @@ public class PaymentRecoveryTransactionService {
             case COMPLETED -> ManualRecoveryResultStatus.SUCCEEDED;
             default -> ManualRecoveryResultStatus.UNKNOWN;
         };
-        return inspection(handoff, payment, disposition.getVersion(), status);
+        Set<ManualRecoveryAction> actions = Set.of();
+        if (status == ManualRecoveryResultStatus.UNKNOWN) {
+            actions = Set.of(ManualRecoveryAction.REQUERY_PROVIDER_RESULT);
+        } else if (status == ManualRecoveryResultStatus.FAILED
+                && disposition.getRefundId() != null) {
+            PaymentRefund refund = refunds.findByRefundIdForUpdate(disposition.getRefundId())
+                    .orElse(null);
+            if (refund != null && refund.getStatus() == RefundStatus.FAILED) {
+                actions = Set.of(ManualRecoveryAction.RETRY_REFUND);
+            }
+        }
+        return inspection(
+                handoff, payment, disposition.getVersion(), status, actions);
     }
 
     private ManualRecoveryInspection inspection(
@@ -446,10 +522,21 @@ public class PaymentRecoveryTransactionService {
         Set<ManualRecoveryAction> actions = switch (status) {
             case UNKNOWN -> Set.of(ManualRecoveryAction.REQUERY_PROVIDER_RESULT);
             case FAILED -> handoff.getRecoveryKind() == REFUND_FAILED
+                    || handoff.getRecoveryKind() == REFUND_RESULT_UNKNOWN
                     ? Set.of(ManualRecoveryAction.RETRY_REFUND)
                     : Set.of();
             case SUCCEEDED -> Set.of();
         };
+        return inspection(handoff, payment, recoveryVersion, status, actions);
+    }
+
+    private ManualRecoveryInspection inspection(
+            PaymentRecoveryHandoff handoff,
+            Payment payment,
+            long recoveryVersion,
+            ManualRecoveryResultStatus status,
+            Set<ManualRecoveryAction> actions
+    ) {
         return new ManualRecoveryInspection(
                 Long.toString(handoff.getId()), handoff.getRowVersion(),
                 payment.getVersion(), recoveryVersion, handoff.getRecoveryKind(),
@@ -478,8 +565,10 @@ public class PaymentRecoveryTransactionService {
     private ManualRecoveryKind refundKind(Payment payment, String sourceEventId) {
         PaymentRefund refund = refunds.findByPayment_IdAndSourceEventIdForUpdate(
                         payment.getId(), sourceEventId)
-                .orElseThrow(() -> new ServiceException(
-                        PaymentErrorCode.PAYMENT_RECOVERY_NOT_REQUIRED));
+                .orElse(null);
+        if (refund == null) {
+            return null;
+        }
         if (refund.getStatus() == RefundStatus.RECONCILIATION_REQUIRED) {
             return REFUND_RESULT_UNKNOWN;
         }
@@ -492,8 +581,10 @@ public class PaymentRecoveryTransactionService {
     private ManualRecoveryKind dispositionKind(Payment payment, String sourceEventId) {
         ReservationDepositDisposition disposition = dispositions
                 .findByPayment_IdAndSourceEventIdForUpdate(payment.getId(), sourceEventId)
-                .orElseThrow(() -> new ServiceException(
-                        PaymentErrorCode.PAYMENT_RECOVERY_NOT_REQUIRED));
+                .orElse(null);
+        if (disposition == null) {
+            return null;
+        }
         if (disposition.getStatus() == DispositionStatus.RECONCILIATION_REQUIRED) {
             return DISPOSITION_RESULT_UNKNOWN;
         }
