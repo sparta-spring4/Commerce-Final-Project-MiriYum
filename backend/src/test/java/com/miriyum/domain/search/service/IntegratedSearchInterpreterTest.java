@@ -50,20 +50,20 @@ class IntegratedSearchInterpreterTest {
     }
 
     @Test
-    void demotesIncompleteReservationConditionToWarningAndGeneralKeyword() {
+    void keepsDateOnlyReservationConditionAndRemovesRecognizedDateToken() {
         given(vocabularyProvider.current()).willReturn(vocabulary());
         IntegratedSearchInterpreter interpreter = new IntegratedSearchInterpreter(
                 vocabularyProvider,
                 Clock.fixed(Instant.parse("2026-08-06T00:00:00Z"), ZoneOffset.UTC));
 
-        var result = interpreter.interpret("서울 내일 2명 라멘");
+        var result = interpreter.interpret("서울 내일 김치찌개");
 
         assertThat(result.condition().regionCodes()).containsExactly("SEOUL");
-        assertThat(result.condition().reservationDate()).isNull();
+        assertThat(result.condition().reservationDate()).hasToString("2026-08-07");
         assertThat(result.condition().reservationTime()).isNull();
         assertThat(result.condition().partySize()).isNull();
-        assertThat(result.condition().remainingKeyword()).contains("내일", "2명", "라멘");
-        assertThat(result.warnings()).isNotEmpty();
+        assertThat(result.condition().remainingKeyword()).isEqualTo("김치찌개");
+        assertThat(result.warnings()).isEmpty();
     }
 
     private static void assertValidationFailure(Runnable invocation) {

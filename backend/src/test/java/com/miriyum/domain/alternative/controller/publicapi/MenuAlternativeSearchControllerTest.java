@@ -10,7 +10,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.domain.alternative.model.MenuAlternativeMode;
+import com.miriyum.domain.alternative.model.MenuAlternativeRankingReason;
 import com.miriyum.domain.alternative.model.MenuAlternativeResult;
+import com.miriyum.domain.alternative.model.MenuAlternativeScore;
+import com.miriyum.domain.alternative.model.ResolvedAlternativeItem;
 import com.miriyum.domain.alternative.service.MenuAlternativeSearchService;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.ratelimit.RateLimitCategory;
@@ -76,6 +79,31 @@ class MenuAlternativeSearchControllerTest {
                                 """))
                 .andExpect(status().isBadRequest());
         then(service).should(never()).search(anyLong(), anyLong(), any());
+    }
+
+    @Test
+    void exposesExplainableAlternativeScore() throws Exception {
+        var item = new ResolvedAlternativeItem(7L, "매장", 11L, "숯불 닭구이",
+                14_500, 3, 0, 500, null, null, null, List.of(),
+                new MenuAlternativeScore(50, 0, 24, 74,
+                        MenuAlternativeRankingReason.LLM_CONCEPT));
+        given(service.search(anyLong(), anyLong(), any())).willReturn(
+                new MenuAlternativeResult(7L, 9L, 1,
+                        OffsetDateTime.parse("2026-08-15T18:30+09:00"),
+                        OffsetDateTime.parse("2026-08-15T20:00+09:00"), "Asia/Seoul",
+                        MenuAlternativeMode.SAME_STORE, List.of(item)));
+
+        mockMvc.perform(post("/api/v1/stores/7/menus/9/alternative-searches")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity":1,"serviceDate":"2026-08-15","startTime":"18:30",
+                                 "partySize":2}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].alternativeScore").value(74))
+                .andExpect(jsonPath("$.data.items[0].rankingReason").value("LLM_CONCEPT"))
+                .andExpect(jsonPath("$.data.items[0].scoreBreakdown.llmConcept").value(50))
+                .andExpect(jsonPath("$.data.items[0].scoreBreakdown.priceSimilarity").value(24));
     }
 
     @Test

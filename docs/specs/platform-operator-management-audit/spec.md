@@ -5,7 +5,7 @@
 > 소유 도메인: platformoperator
 > 관련 정책 ID: ADMIN-001, ADMIN-002, ADMIN-009
 > 소유 Issue: #282
-> 읽기 확장 Issue: #415
+> 계정 읽기 확장 Issue: #415
 > 선행 계약: #275, #276
 > OpenAPI: `docs/specs/platform-operator-management-audit/openapi.yaml`
 > Audience: `docs/specs/platform-operator-openapi.yaml`
@@ -59,16 +59,9 @@
 - 상태를 `SUSPENDED`로 변경하고 `session_version`을 증가시킨 뒤 미사용 재인증 승인과 중앙 세션을 회수한다.
 - MySQL 변경 뒤 Valkey 회수가 실패하면 `COMMON_012`로 실패 폐쇄한다. 증가한 version 때문에 이전 세션은 다시 유효해지지 않는다.
 
-## 운영자 본인·계정·권한 읽기
+## 운영자 계정·권한 읽기
 
-#415는 기존 쓰기 계약을 변경하지 않고 플랫폼 운영자 콘솔이 필요한 현재 중앙 상태를 읽는 세 API를 추가한다. 모든 조회는 #275 보호 chain이 token namespace, 활성 계정, 중앙 세션, session version을 검증한 뒤 시작하며, Service는 `OperatorAuthorityReader.requireCurrentAuthority`로 principal의 `authorityVersion`과 현재 MySQL version을 다시 대조한다. JWT claims나 클라이언트 role은 조회 결과와 권한 판정에 사용하지 않는다.
-
-### 현재 운영자
-
-- `GET /api/v1/platform-operators/me`는 인증된 principal의 계정만 조회한다. 요청에서 operator ID를 받지 않는다.
-- 응답은 문자열 `operatorId`, `displayName`, `status`, `authorityVersion`, 현재 유효 `roles`, 역할 권한과 직접 권한을 합산한 `permissions`, `passwordChangeRequired`만 포함한다.
-- 역할과 권한은 enum 이름 오름차순으로 직렬화한다. `SUPER_ADMIN`도 `PlatformOperatorRole.permissions()`이 실제 제공하는 권한만 갖는다.
-- 최초 비밀번호 변경 제한 principal에는 #275가 부여한 `ROLE_PLATFORM_OPERATOR_INITIAL_PASSWORD`만 있으므로 기존 Security chain이 `/me`를 403으로 거부한다. 이 읽기 확장은 제한 세션의 업무 API 범위를 넓히지 않는다.
+#415는 기존 쓰기 계약을 변경하지 않고 플랫폼 운영자 콘솔이 필요한 계정 목록·상세 API를 추가한다. 모든 조회는 #275 보호 chain이 token namespace, 활성 계정, 중앙 세션, session version을 검증한 뒤 시작하며, Service는 `OperatorAuthorityReader.requireCurrentAuthority`로 principal의 `authorityVersion`과 현재 MySQL version을 다시 대조한다. JWT claims나 클라이언트 role은 조회 결과와 권한 판정에 사용하지 않는다. 현재 운영자 capabilities 조회는 #403 명세가 별도로 소유한다.
 
 ### 계정 목록
 
@@ -123,7 +116,6 @@
 | Method | Path | 결과 |
 | --- | --- | --- |
 | `POST` | `/api/v1/platform-operators/accounts` | 비슈퍼관리자 생성 |
-| `GET` | `/api/v1/platform-operators/me` | 현재 운영자의 중앙 역할·유효 권한 조회 |
 | `GET` | `/api/v1/platform-operators/accounts` | 권한 관리용 운영자 계정 목록 |
 | `GET` | `/api/v1/platform-operators/accounts/{operatorId}` | 운영자 계정·부여 권한·유효 권한 상세 |
 | `PUT` | `/api/v1/platform-operators/accounts/{operatorId}/authority` | 역할·직접 권한 전체 교체 |
@@ -192,7 +184,7 @@
 ### #415 읽기 확장 Backend
 
 - `backend/src/main/java/com/miriyum/domain/platformoperator/controller/management/PlatformOperatorAccountQueryController.java`
-- `backend/src/main/java/com/miriyum/domain/platformoperator/dto/management/{PlatformOperatorAccountSearchRequest,PlatformOperatorCurrentAccountData,PlatformOperatorAccountSummaryData,PlatformOperatorAccountPageData,PlatformOperatorAccountDetailData}.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/dto/management/{PlatformOperatorAccountSearchRequest,PlatformOperatorAccountSummaryData,PlatformOperatorAccountPageData,PlatformOperatorAccountDetailData}.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/service/{PlatformOperatorAccountQueryService,PlatformOperatorEmailMasker}.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/repository/{PlatformOperatorAccountRepository,PlatformOperatorRoleGrantRepository,PlatformOperatorPermissionGrantRepository,PlatformOperatorAuthEventRepository}.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/exception/AdminAuthorizationErrorCode.java`
@@ -238,7 +230,7 @@
 1. audience path·schema·operation과 runtime GET mapping drift 테스트를 먼저 실패시킨다.
 2. OpenAPI와 통합 audience ref를 확정하고 계약 테스트를 통과시킨다.
 3. 이메일 마스킹과 query validation 단위 테스트를 실패시킨 뒤 최소 구현한다.
-4. `/me`와 목록·상세 Service 성공·401 version 불일치·403·404·유효 권한 합산 테스트를 실패시킨 뒤 구현한다.
+4. 목록·상세 Service 성공·401 version 불일치·403·404·유효 권한 합산 테스트를 실패시킨 뒤 구현한다.
 5. 상태·역할·세 필드 검색·페이지 경계·결정적 정렬·최근 성공 LOGIN query의 실제 MySQL 통합 테스트를 실패시킨 뒤 Repository query를 구현한다.
 6. MockMvc와 실제 보호 chain 통합 테스트로 token namespace, 중앙 session 회수, 제한 session, feature flag, 민감정보 비노출을 검증한다.
 7. 기존 관리 쓰기 테스트, OpenAPI lint·drift와 정확한 allowlist를 집중 회귀한다. 로컬 전체 suite는 실행하지 않고 GitHub CI를 전체 증거로 사용한다.
@@ -252,7 +244,6 @@
 - 실제 MySQL에서 감사 UPDATE·DELETE가 거부되고 보정 뒤 원 사건과 모든 보정이 함께 남는다.
 - 검색·상세는 최소 권한·배정·사유를 요구하고 허용·거부 조회가 모두 감사된다.
 - HTTP, OpenAPI와 전체 회귀가 성공하며 ADMIN-009 공통 보존기간을 구현하지 않는다.
-- 현재 운영자 조회는 JWT claims가 아니라 최신 중앙 role·permission 합집합을 반환하며 구 authority version과 무효 중앙 session을 401로 거부한다.
 - 계정 목록은 상태·역할·ID·이메일·표시명 검색, 안전한 page/size와 허용 sort만 지원하고 모든 page가 결정적으로 정렬된다.
 - 계정 상세는 권한 검사 뒤 부재를 404로 반환하고 direct/effective permission과 성공 LOGIN만 반영한 `lastLoginAt`을 제공한다.
 - 목록·상세 이메일은 마스킹되며 비밀번호·token·임시 비밀번호·session·승인 원문은 응답과 로그에 없다.

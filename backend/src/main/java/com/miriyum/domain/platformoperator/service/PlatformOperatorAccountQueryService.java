@@ -5,7 +5,6 @@ import com.miriyum.domain.platformoperator.dto.management.PlatformOperatorAccoun
 import com.miriyum.domain.platformoperator.dto.management.PlatformOperatorAccountPageData;
 import com.miriyum.domain.platformoperator.dto.management.PlatformOperatorAccountSearchRequest;
 import com.miriyum.domain.platformoperator.dto.management.PlatformOperatorAccountSummaryData;
-import com.miriyum.domain.platformoperator.dto.management.PlatformOperatorCurrentAccountData;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventOutcome;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventType;
@@ -55,17 +54,6 @@ public class PlatformOperatorAccountQueryService {
         this.permissions = permissions;
         this.authEvents = authEvents;
         this.authorities = authorities;
-    }
-
-    @Transactional(readOnly = true)
-    public PlatformOperatorCurrentAccountData current(PlatformOperatorPrincipal principal) {
-        OperatorAuthority authority = currentAuthority(principal);
-        PlatformOperatorAccount account = accounts.findById(principal.accountId())
-                .orElseThrow(() -> new ServiceException(AdminAuthorizationErrorCode.OPERATOR_ACCOUNT_NOT_FOUND));
-        return new PlatformOperatorCurrentAccountData(
-                String.valueOf(account.getId()), account.getDisplayName(), account.getStatus().name(),
-                authority.authorityVersion(), sorted(authority.roles()), sorted(authority.permissions()),
-                account.getPasswordState() == PlatformOperatorPasswordState.TEMPORARY);
     }
 
     @Transactional(readOnly = true)

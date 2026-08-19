@@ -189,6 +189,8 @@ export interface components {
     /** @enum {string} */
     AlternativeReasonCode: "SAME_PRIMARY_CATEGORY" | "PRICE_WITHIN_20_PERCENT" | "SECONDARY_CATEGORY_MATCH" | "ALLERGEN_FILTER_PASSED" | "IN_STOCK";
     /** @enum {string} */
+    MenuAlternativeRankingReason: "LLM_CONCEPT" | "SECONDARY_CATEGORY" | "PRICE_SIMILARITY";
+    /** @enum {string} */
     AllergenIngredientCode: "EGG" | "MILK" | "BUCKWHEAT" | "PEANUT" | "SOYBEAN" | "WHEAT" | "MACKEREL" | "CRAB" | "SHRIMP" | "PORK" | "PEACH" | "TOMATO" | "SULFITES" | "WALNUT" | "CHICKEN" | "BEEF" | "SQUID" | "SHELLFISH" | "PINE_NUT";
     MenuAlternativeSearchRequest: {
       quantity: number;
@@ -218,6 +220,14 @@ export interface components {
       distanceMeters: number | null;
       coordinates: components["schemas"]["MenuAlternativeCoordinates"] | null;
       reasonCodes: components["schemas"]["AlternativeReasonCode"][];
+      alternativeScore: number;
+      rankingReason: components["schemas"]["MenuAlternativeRankingReason"];
+      scoreBreakdown: components["schemas"]["MenuAlternativeScoreBreakdown"];
+    };
+    MenuAlternativeScoreBreakdown: {
+      llmConcept: number;
+      secondaryCategory: number;
+      priceSimilarity: number;
     };
     MenuAlternativeSearchData: {
       sourceStoreId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
@@ -998,7 +1008,7 @@ export interface operations {
   searchStores: {
     parameters: {
       query?: {
-        /** @description 2차 MVP 통합 검색 원문. 있으면 cursor 응답 모드를 사용하며 keyword, region, storeCategoryCode, serviceDate, startTime, partySize, page와 혼용할 수 없다. */
+        /** @description 2차 MVP 통합 검색 원문. 있으면 cursor 응답 모드를 사용하며 keyword, region, storeCategoryCode, serviceDate, startTime, partySize, page와 혼용할 수 없다. 원문 안의 날짜·시각·인원은 독립적으로 해석하며 날짜가 있을 때만 예약 가용성을 판정한다. 최초 정확 검색 결과가 부족하면 LLM이 제한된 음식 개념만 해석하고 현재 MySQL 메뉴에서 보완 후보를 다시 조회한다. */
         searchInput?: string;
         keyword?: string;
         region?: components["schemas"]["Region"];
@@ -1008,7 +1018,7 @@ export interface operations {
         partySize?: number;
         /** @description 영유아가 한 명 이상 포함되는지 여부. 생략하면 false다. */
         includesInfants?: boolean;
-        /** @description true이면 선택한 고정 정렬에서 먼저 매칭되는 공개 후보 최대 5,000개의 예약 가용성을 평가하고 AVAILABLE인 매장만 반환한다. */
+        /** @description true이면 선택한 고정 정렬에서 먼저 매칭되는 공개 후보 최대 5,000개의 예약 가용성을 평가하고 AVAILABLE인 매장만 반환한다. 통합 검색에서는 해석된 날짜가 있어야 하며 시각·인원은 선택 조건이다. */
         availableOnly?: boolean;
         page?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Page"];
         size?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Size"];
@@ -1088,7 +1098,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description 같은 매장 우선 메뉴 대안 검색 결과 */
+      /** @description 같은 매장 우선 메뉴 대안 검색 결과. LLM 음식 개념 후보를 기존 일반 후보보다 먼저 검증하되 판매·재고·알레르기·가격·거리·예약 규칙은 서버의 현재 데이터가 결정한다. */
       200: {
         content: {
           "application/json": components["schemas"]["MenuAlternativeSearchSuccessResponse"];

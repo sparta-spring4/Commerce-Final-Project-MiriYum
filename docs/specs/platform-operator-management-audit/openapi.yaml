@@ -10,22 +10,6 @@ servers:
   - url: /
 security: []
 paths:
-  /api/v1/platform-operators/me:
-    get:
-      tags: [Platform Operator Management]
-      summary: 현재 플랫폼 운영자와 중앙 유효 권한 조회
-      operationId: getCurrentPlatformOperator
-      security:
-        - platformOperatorBearerAuth: []
-      responses:
-        "200":
-          $ref: "#/components/responses/CurrentOperatorResult"
-        "401":
-          $ref: "#/components/responses/SessionUnauthorized"
-        "403":
-          $ref: "#/components/responses/InitialPasswordChangeRequired"
-        "503":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/platform-operators/accounts:
     get:
       tags: [Platform Operator Management]
@@ -475,35 +459,6 @@ components:
           uniqueItems: true
           items:
             $ref: "#/components/schemas/NonCorePermission"
-    CurrentOperatorData:
-      type: object
-      additionalProperties: false
-      required: [operatorId, displayName, status, authorityVersion, roles, permissions, passwordChangeRequired]
-      properties:
-        operatorId:
-          $ref: "#/components/schemas/PublicId"
-        displayName:
-          type: string
-          minLength: 1
-          maxLength: 50
-        status:
-          $ref: "#/components/schemas/OperatorAccountStatus"
-        authorityVersion:
-          type: integer
-          format: int64
-          minimum: 1
-        roles:
-          type: array
-          uniqueItems: true
-          items:
-            $ref: "#/components/schemas/OperatorRole"
-        permissions:
-          type: array
-          uniqueItems: true
-          items:
-            $ref: "#/components/schemas/OperatorPermission"
-        passwordChangeRequired:
-          type: boolean
     OperatorAccountSummary:
       type: object
       additionalProperties: false
@@ -690,17 +645,6 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
         data:
           $ref: "#/components/schemas/AccountData"
-    CurrentOperatorResponse:
-      type: object
-      additionalProperties: false
-      required: [code, message, data]
-      properties:
-        code:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
-        message:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
-        data:
-          $ref: "#/components/schemas/CurrentOperatorData"
     OperatorAccountSearchResponse:
       type: object
       additionalProperties: false
@@ -775,12 +719,6 @@ components:
               items:
                 $ref: "#/components/schemas/AuditEventData"
   responses:
-    CurrentOperatorResult:
-      description: 현재 운영자와 중앙 유효 권한
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/CurrentOperatorResponse"
     OperatorAccountSearchResult:
       description: 마스킹된 운영자 계정 페이지
       content:
@@ -841,13 +779,6 @@ components:
               value: {code: AUTH_012, message: 최초 비밀번호 변경이 필요합니다.}
             AuthorizationDenied:
               value: {code: ADMIN_001, message: 요청한 운영 명령을 승인할 수 없습니다.}
-    InitialPasswordChangeRequired:
-      description: 최초 비밀번호 변경 전 제한 세션은 운영 읽기에 접근할 수 없음
-      content:
-        application/json:
-          schema:
-            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          example: {code: AUTH_012, message: 최초 비밀번호 변경이 필요합니다.}
     ManagementBadRequest:
       description: 입력 또는 역할·권한 조합이 유효하지 않음
       content:

@@ -122,6 +122,8 @@ JSON 성공 응답은 `ApiResponse<T>(code, message, data)`를 사용한다. 반
 
 runtime 설정은 실제 구현 Issue에서만 변경한다. YAML은 2칸 들여쓰기를 사용한다. Java 21, Spring Boot 4.1.0, Gradle 9.6.1을 임의 변경하지 않는다. Lombok은 실제 구현 Issue에서 추가하고 Testcontainers MySQL image는 첫 DB 통합 Issue의 검증된 정확 버전으로 고정한다. QueryDSL, Valkey와 외부 SDK는 필요한 단계와 Issue 전에는 추가하지 않는다.
 
+Issue #368의 검색 LLM은 OpenAI `gpt-4o-mini` Structured Outputs 어댑터로 최대 8개의 음식 개념만 반환한다. 정확 MySQL 검색을 먼저 실행하고 최초 응답 부족 시에만 호출하며, 후보·가용성·알레르기 안전·재고·예약·점수·순위는 현재 MySQL과 결정적 코드가 확정한다. 벡터 저장소·외부 색인·캐시는 두지 않는다. `OPENAI_API_KEY`는 환경 Secret으로만 주입하고 원문·응답·Secret을 로그에 남기지 않는다.
+
 Java는 4칸 들여쓰기, UTF-8, final newline, wildcard import 금지를 지킨다. package는 lowercase, constant와 enum은 `UPPER_SNAKE_CASE`다. `process`, `handle`처럼 목적이 모호한 이름을 피한다.
 
 Controller class와 public endpoint, Service class와 public method, cross-domain 공개 Service, Entity 생성·상태 전이, 복잡한 Repository, 공통 응답·오류·Security와 의미 있는 enum·DTO에는 계약 중심 Javadoc을 작성한다. 의미, 사전 조건, 부작용과 실패 조건을 설명하고 필요한 `@param`, `@return`, `@throws`를 사용한다. getter, 명백한 private method와 spec 전체를 반복하지 않는다. author/date 주석은 쓰지 않고 TODO는 `// TODO(#issue): 이유` 형식으로만 사용한다.
