@@ -14,6 +14,7 @@ import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.Invitati
 import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts.TransferProposalRequest;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActiveMembership;
 import com.miriyum.domain.reservation.waiting.entity.WaitingPartyInvitation;
+import com.miriyum.domain.reservation.waiting.entity.WaitingPartyAudit;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingRepresentativeTransferOffer;
@@ -34,6 +35,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
@@ -169,6 +171,47 @@ class WaitingPartyServiceTest {
         assertThat(accepted.data().memberships()).hasSize(2);
         assertThat(saved.get().getStatus())
                 .isEqualTo(WaitingRepresentativeTransferOffer.Status.ACCEPTED);
+    }
+
+    @Test
+    void expiredTransferIsClosedAndAuditedBeforeReplacementProposal() {
+        WaitingTeam team = team(2);
+        WaitingActiveMembership target = membership(402L, 201L, NOW.minusSeconds(30));
+        WaitingRepresentativeTransferOffer expired = WaitingRepresentativeTransferOffer.propose(
+                300L, 200L, 402L, 0L, NOW.minusSeconds(300), NOW);
+        ReflectionTestUtils.setField(expired, "id", 800L);
+        List<WaitingPartyAudit> savedAudits = new ArrayList<>();
+        when(teams.findByIdForUpdate(300L)).thenReturn(Optional.of(team));
+        when(memberships.findByIdAndWaitingTeamId(402L, 300L)).thenReturn(Optional.of(target));
+        when(transfers.findByActiveTeamKey(300L)).thenReturn(Optional.of(expired));
+        when(transfers.save(any())).thenAnswer(invocation -> {
+            WaitingRepresentativeTransferOffer offer = invocation.getArgument(0);
+            ReflectionTestUtils.setField(offer, "id", 801L);
+            return offer;
+        });
+        when(audits.save(any())).thenAnswer(invocation -> {
+            WaitingPartyAudit audit = invocation.getArgument(0);
+            savedAudits.add(audit);
+            return audit;
+        });
+
+        var replacement = service.proposeTransfer(
+                200L, 300L, IdempotencyKey.parse(KEY),
+                new TransferProposalRequest(402L, 0L));
+
+        assertThat(expired.getStatus())
+                .isEqualTo(WaitingRepresentativeTransferOffer.Status.EXPIRED);
+        assertThat(expired.getActiveTeamKey()).isNull();
+        assertThat(expired.getDecidedAt()).isEqualTo(NOW);
+        assertThat(replacement.data().offerId()).isEqualTo("801");
+        assertThat(savedAudits).extracting(audit -> ReflectionTestUtils.getField(
+                        audit, "eventType"))
+                .containsExactly(
+                        WaitingPartyAudit.EventType.REPRESENTATIVE_TRANSFER_EXPIRED,
+                        WaitingPartyAudit.EventType.REPRESENTATIVE_TRANSFER_PROPOSED);
+        assertThat(savedAudits).extracting(audit -> ReflectionTestUtils.getField(
+                        audit, "commandId"))
+                .doesNotHaveDuplicates();
     }
 
     @Test

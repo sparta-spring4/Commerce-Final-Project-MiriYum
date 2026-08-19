@@ -198,10 +198,18 @@ public class WaitingPartyService {
                             .filter(value -> !value.getConsumerAccountId()
                                     .equals(team.getConsumerAccountId()))
                             .orElseThrow(WaitingPartyService::invalidTransfer);
-                    if (transferRepository.findByActiveTeamKey(teamId).isPresent()) {
-                        throw invalidTransfer();
-                    }
                     Instant now = clock.instant();
+                    transferRepository.findByActiveTeamKey(teamId).ifPresent(active -> {
+                        if (now.isBefore(active.getExpiresAt())) {
+                            throw invalidTransfer();
+                        }
+                        active.expire(now);
+                        transferRepository.flush();
+                        audit(team, accountId, active.getTargetMembershipId(),
+                                EventType.REPRESENTATIVE_TRANSFER_EXPIRED,
+                                team.getVersion(), team.getVersion(), "TRANSFER_EXPIRED",
+                                expirationAuditKey(key, active.getId()), now);
+                    });
                     WaitingRepresentativeTransferOffer offer = transferRepository.save(
                             WaitingRepresentativeTransferOffer.propose(
                                     teamId, accountId, target.getId(), team.getVersion(), now,
@@ -350,6 +358,12 @@ public class WaitingPartyService {
 
     private static String transferFingerprint(long teamId, long offerId, long version) {
         return "teamId=" + teamId + "|offerId=" + offerId + "|expectedVersion=" + version;
+    }
+
+    private static IdempotencyKey expirationAuditKey(IdempotencyKey key, long offerId) {
+        String seed = key.value() + "|representative-transfer-expired|" + offerId;
+        return IdempotencyKey.parse(UUID.nameUUIDFromBytes(
+                seed.getBytes(StandardCharsets.UTF_8)).toString());
     }
 
     private static TransferOfferSnapshot transferSnapshot(

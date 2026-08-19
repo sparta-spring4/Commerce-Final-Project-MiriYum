@@ -11,6 +11,7 @@ import org.springframework.data.repository.query.Param;
 public interface WaitingRepresentativeTransferOfferRepository
         extends JpaRepository<WaitingRepresentativeTransferOffer, Long> {
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<WaitingRepresentativeTransferOffer> findByActiveTeamKey(long waitingTeamId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)

@@ -267,6 +267,42 @@ class WaitingPartyConcurrencyIT {
         }
     }
 
+    @Test
+    void expiredRepresentativeTransferIsPersistedBeforeItsReplacement() {
+        long storeId = fixtureStore();
+        long representative = createConsumer();
+        long member = createConsumer();
+        long teamId = createTeam(storeId, representative, 2);
+        String code = parties.issueInvitation(representative, teamId, key(50),
+                new ExpectedVersionRequest(0L)).data().invitationCode();
+        parties.acceptInvitation(member, key(51), new InvitationAcceptanceRequest(code));
+        long memberId = memberships.findByConsumerAccountId(member).orElseThrow().getId();
+        long expiredOfferId = Long.parseLong(parties.proposeTransfer(
+                representative, teamId, key(52),
+                new TransferProposalRequest(memberId, 1L)).data().offerId());
+        jdbc.update("UPDATE waiting_representative_transfer_offers "
+                + "SET proposed_at=DATE_SUB(NOW(6), INTERVAL 301 SECOND), "
+                + "expires_at=DATE_SUB(NOW(6), INTERVAL 1 SECOND) "
+                + "WHERE waiting_representative_transfer_offer_id=?", expiredOfferId);
+
+        long replacementOfferId = Long.parseLong(parties.proposeTransfer(
+                representative, teamId, key(53),
+                new TransferProposalRequest(memberId, 1L)).data().offerId());
+
+        assertThat(replacementOfferId).isNotEqualTo(expiredOfferId);
+        assertThat(jdbc.queryForObject("SELECT status FROM "
+                + "waiting_representative_transfer_offers "
+                + "WHERE waiting_representative_transfer_offer_id=?", String.class,
+                expiredOfferId)).isEqualTo("EXPIRED");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM "
+                + "waiting_representative_transfer_offers "
+                + "WHERE waiting_team_id=? AND status='PROPOSED' AND active_team_key=?",
+                Long.class, teamId, teamId)).isOne();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM waiting_party_audits "
+                + "WHERE waiting_team_id=? AND event_type='REPRESENTATIVE_TRANSFER_EXPIRED'",
+                Long.class, teamId)).isOne();
+    }
+
     private long createTeam(long storeId, long accountId, int partySize) {
         return Long.parseLong(creation.create(storeId, accountId, BUSINESS_DATE, partySize,
                 WaitingSource.REMOTE, key((int) (1000 + accountId))).data().waitingTeamId());
