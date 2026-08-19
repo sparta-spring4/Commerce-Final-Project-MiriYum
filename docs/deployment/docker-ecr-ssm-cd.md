@@ -60,6 +60,10 @@ checks pass in the same staging environment.
 
 - The bucket name and region are present in the server-local `.env`. The
   bucket is private, public access is blocked, and versioning is disabled.
+- Before activation, record a non-sensitive pass/fail result that bucket
+  default encryption is enabled, the bucket policy denies non-TLS requests,
+  and the approved object lifecycle and retention policy exists. Do not enable
+  either flag while any of these settings is undecided or absent.
 - The instance role has only the required access to this bucket and cannot
   access unrelated buckets. Do not copy bucket names, ARNs, secrets, or object
   keys into Issues, PRs, or workflow logs.
@@ -81,6 +85,31 @@ checks pass in the same staging environment.
 4. Confirm reconciliation success, retryable failure, and long-stay observations
    contain aggregate counts only. Do not capture tokens, cookies, source
    filenames, object keys, user IDs, or raw provider errors.
+
+**Reconciliation fault smoke**
+
+1. Use a new synthetic staging store and a generated test-only image. Do not
+   use an existing user, store, menu, object, or business-registration record.
+2. After a successful upload creates the synthetic object, apply the
+   pre-approved staging-only fault that denies `DeleteObject` only for that
+   generated test object's prefix. Do not broaden the denial to production
+   prefixes, the whole bucket, or unrelated actions.
+3. Delete the synthetic image through the normal authorized API. Confirm the
+   response reaches the documented retryable cleanup state without exposing an
+   object key, file ID, user ID, token, or provider error.
+4. Remove the fault before the next reconciliation interval. Confirm one later
+   worker execution converges the synthetic metadata and object cleanup, while
+   the aggregate retryable-failure count stops increasing. If it does not
+   converge within the approved observation window, stop the smoke and follow
+   rollback.
+5. For a separately approved long-stay fixture, keep the same narrowly scoped
+   fault only until the configured long-stay threshold is crossed. Confirm the
+   long-stay observation is an aggregate count, then remove the fault and wait
+   for convergence. Record only the run URL, full SHA, aggregate counters, and
+   success/failure result.
+6. Remove the synthetic store and verify no temporary deny rule remains. Stop
+   immediately and roll back if the fault affects any non-synthetic object or
+   the cleanup worker reports an unexpected error.
 
 **Rollback**
 
