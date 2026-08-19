@@ -383,6 +383,8 @@ public class Payment {
         return portOnePaymentId;
     }
 
+    public long getVersion() { return version; }
+
     public String getOrderName() { return orderName; }
 
     public String getProviderTransactionId() {

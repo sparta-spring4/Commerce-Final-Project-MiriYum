@@ -14,6 +14,18 @@ import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.StoreReservationPaymentSnapshot;
 import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservationDeposit;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.AcknowledgeManualRecoveryHandoffCommand;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ClaimManualRecoveryHandoffsCommand;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.InspectManualRecoveryQuery;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryHandoffClaim;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryInspection;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryRefundPreview;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryRegistration;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.PreviewManualRecoveryRefundQuery;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileManualRecoveryCommand;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileRefundResultQuery;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RegisterManualRecoveryHandoffCommand;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RequestManualRecoveryRefundCommand;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderCancellation;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderPayment;
@@ -27,6 +39,7 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Optional;
 import java.util.Set;
+import java.util.List;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -47,15 +60,18 @@ public class PaymentService {
 
     private final PaymentTransactionService transactions;
     private final PaymentProviderClient providerClient;
+    private final PaymentRecoveryTransactionService recoveryTransactions;
     private final Clock clock;
 
     public PaymentService(
             PaymentTransactionService transactions,
             PaymentProviderClient providerClient,
+            PaymentRecoveryTransactionService recoveryTransactions,
             Clock clock
     ) {
         this.transactions = transactions;
         this.providerClient = providerClient;
+        this.recoveryTransactions = recoveryTransactions;
         this.clock = clock;
     }
 
@@ -140,6 +156,10 @@ public class PaymentService {
         if (!claim.requiresProviderCall()) {
             return claim.completedResult();
         }
+        return executeRefundClaim(claim);
+    }
+
+    private RefundResult executeRefundClaim(PaymentTransactionService.RefundClaim claim) {
         try {
             ProviderCancellation cancellation = providerClient.cancelPayment(
                     claim.portOnePaymentId(),
@@ -247,6 +267,148 @@ public class PaymentService {
 
     public PaymentHistorySlice getConsumerPaymentHistory(PaymentHistoryQuery query) {
         return transactions.getConsumerPaymentHistory(query);
+    }
+
+    public ManualRecoveryInspection inspectManualRecovery(
+            InspectManualRecoveryQuery query
+    ) {
+        return recoveryTransactions.inspect(query);
+    }
+
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public ManualRecoveryInspection reconcileManualRecovery(
+            ReconcileManualRecoveryCommand command
+    ) {
+        PaymentRecoveryTransactionService.ManualReconciliationClaim claim =
+                recoveryTransactions.claimReconciliation(command);
+        if (claim.target()
+                == PaymentRecoveryTransactionService.ReconciliationTarget.DISPOSITION) {
+            getReservationDepositDisposition(new GetReservationDepositDispositionQuery(
+                    claim.paymentId(), claim.sourceEventId()));
+            return recoveryTransactions.inspect(
+                    new InspectManualRecoveryQuery(claim.handoffId()));
+        }
+        PaymentTransactionService.RefundClaim refundClaim = claim.refundClaim();
+        try {
+            ProviderPayment providerPayment = providerClient.getPayment(
+                    refundClaim.portOnePaymentId());
+            String expectedReason = PaymentProviderClient.cancellationReason(
+                    refundClaim.reasonCode(), refundClaim.refundId());
+            List<ProviderCancellation> matching = providerPayment.cancellations().stream()
+                    .filter(cancellation -> expectedReason.equals(cancellation.reason()))
+                    .toList();
+            if (refundClaim.portOnePaymentId().equals(providerPayment.portOnePaymentId())
+                    && claim.paymentAmountMinor() == providerPayment.amountMinor()
+                    && refundClaim.currency().equals(providerPayment.currency())
+                    && matching.size() == 1
+                    && matching.getFirst().amountMinor() == refundClaim.amountMinor()
+                    && refundClaim.currency().equals(matching.getFirst().currency())) {
+                transactions.finalizeRefund(refundClaim, matching.getFirst(), now());
+            }
+        } catch (PaymentProviderClient.ProviderUnavailableException ignored) {
+            // 결과 불명 상태를 유지한다. 수동 복구는 외부 명령을 재전송하지 않는다.
+        }
+        return recoveryTransactions.inspect(
+                new InspectManualRecoveryQuery(claim.handoffId()));
+    }
+
+    /** Requeries an unknown refund result without ever resending the cancellation command. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public RefundResult reconcileRefundResult(ReconcileRefundResultQuery query) {
+        PaymentRecoveryTransactionService.AutomaticRefundReconciliationClaim claim =
+                recoveryTransactions.claimAutomaticRefundReconciliation(query);
+        if (!claim.requiresProviderLookup()) {
+            return claim.completedResult();
+        }
+        PaymentTransactionService.RefundClaim refundClaim = claim.refundClaim();
+        try {
+            ProviderPayment providerPayment = providerClient.getPayment(
+                    refundClaim.portOnePaymentId());
+            String expectedReason = PaymentProviderClient.cancellationReason(
+                    refundClaim.reasonCode(), refundClaim.refundId());
+            List<ProviderCancellation> matching = providerPayment.cancellations().stream()
+                    .filter(cancellation -> expectedReason.equals(cancellation.reason()))
+                    .toList();
+            if (refundClaim.portOnePaymentId().equals(providerPayment.portOnePaymentId())
+                    && claim.paymentAmountMinor() == providerPayment.amountMinor()
+                    && refundClaim.currency().equals(providerPayment.currency())
+                    && matching.size() == 1
+                    && matching.getFirst().amountMinor() == refundClaim.amountMinor()
+                    && refundClaim.currency().equals(matching.getFirst().currency())) {
+                return transactions.finalizeRefund(refundClaim, matching.getFirst(), now());
+            }
+        } catch (PaymentProviderClient.ProviderUnavailableException ignored) {
+            // Preserve UNKNOWN. Automatic reconciliation is GET-only.
+        }
+        return claim.completedResult();
+    }
+
+    public ManualRecoveryRefundPreview previewManualRecoveryRefund(
+            PreviewManualRecoveryRefundQuery query
+    ) {
+        return recoveryTransactions.preview(query);
+    }
+
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public RefundResult requestManualRecoveryRefund(
+            RequestManualRecoveryRefundCommand command
+    ) {
+        PaymentRecoveryTransactionService.ManualRefundExecutionClaim claim =
+                recoveryTransactions.claimRefundExecution(command);
+        if (claim.replayResult() != null) {
+            if (claim.dispositionId() != null) {
+                transactions.finalizeDisposition(
+                        claim.dispositionId(), claim.replayResult(), now());
+            }
+            return claim.replayResult();
+        }
+        PaymentTransactionService.RefundClaim refundClaim;
+        try {
+            refundClaim = transactions.claimRefund(claim.command(), now());
+            if (refundClaim.rejectionError() != null) {
+                throw new ServiceException(refundClaim.rejectionError());
+            }
+        } catch (RuntimeException exception) {
+            recoveryTransactions.markRefundExecutionFailed(
+                    command.handoffId(), command.operationId());
+            throw exception;
+        }
+        RefundResult result;
+        if (!refundClaim.requiresProviderCall()) {
+            result = refundClaim.completedResult();
+        } else {
+            try {
+                result = executeRefundClaim(refundClaim);
+            } catch (RuntimeException exception) {
+                recoveryTransactions.markRefundExecutionUnknown(
+                        command.handoffId(), command.operationId());
+                throw exception;
+            }
+        }
+        recoveryTransactions.finishRefundExecution(
+                command.handoffId(), command.operationId(), result);
+        if (claim.dispositionId() != null) {
+            transactions.finalizeDisposition(claim.dispositionId(), result, now());
+        }
+        return result;
+    }
+
+    public ManualRecoveryRegistration registerManualRecoveryHandoff(
+            RegisterManualRecoveryHandoffCommand command
+    ) {
+        return recoveryTransactions.register(command);
+    }
+
+    public List<ManualRecoveryHandoffClaim> claimManualRecoveryHandoffs(
+            ClaimManualRecoveryHandoffsCommand command
+    ) {
+        return recoveryTransactions.claim(command);
+    }
+
+    public void acknowledgeManualRecoveryHandoff(
+            AcknowledgeManualRecoveryHandoffCommand command
+    ) {
+        recoveryTransactions.acknowledge(command);
     }
 
     private static long parsePositiveId(String value) {

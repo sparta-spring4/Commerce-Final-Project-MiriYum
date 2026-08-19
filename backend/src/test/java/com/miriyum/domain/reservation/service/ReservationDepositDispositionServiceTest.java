@@ -5,6 +5,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoverySourceType.RESERVATION_DEPOSIT_DISPOSITION;
 
 import com.miriyum.domain.payment.dto.PaymentContracts.DispositionFailureClassification;
 import com.miriyum.domain.payment.dto.PaymentContracts.DispositionResult;
@@ -107,7 +108,9 @@ class ReservationDepositDispositionServiceTest {
         ReservationDepositDispositionObligation obligation = claimedObligation();
         ReservationDepositDispositionService.Claim first = claim(obligation, "worker-a", 1L);
         given(repository.findByIdForUpdate(501L)).willReturn(Optional.of(obligation));
-        ReservationDepositDispositionService service = service(repository);
+        ReservationPaymentRecoveryOutboxService outbox =
+                mock(ReservationPaymentRecoveryOutboxService.class);
+        ReservationDepositDispositionService service = service(repository, outbox);
 
         assertThat(service.recordResult(
                 first, unknown(), RETRY_DELAY, QUERY_DELAY, 3)).isFalse();
@@ -124,6 +127,12 @@ class ReservationDepositDispositionServiceTest {
                 thirdAttempt, RETRY_DELAY, 2)).isTrue();
         assertThat(obligation.getStatus())
                 .isEqualTo(ReservationDepositDispositionObligation.Status.RECOVERY_REQUIRED);
+        verify(outbox).enqueue(
+                RESERVATION_DEPOSIT_DISPOSITION,
+                "501",
+                "51",
+                "reservation-cancel:41:550e8400-e29b-41d4-a716-446655440240",
+                "550e8400-e29b-41d4-a716-446655440239");
     }
 
     @Test
@@ -197,7 +206,9 @@ class ReservationDepositDispositionServiceTest {
         ReservationDepositDispositionService.Claim queryClaim =
                 claim(obligation, "worker-a", 2L);
         given(repository.findByIdForUpdate(501L)).willReturn(Optional.of(obligation));
-        ReservationDepositDispositionService service = service(repository);
+        ReservationPaymentRecoveryOutboxService outbox =
+                mock(ReservationPaymentRecoveryOutboxService.class);
+        ReservationDepositDispositionService service = service(repository, outbox);
 
         assertThat(service.recordResult(
                 queryClaim, unknown(), RETRY_DELAY, QUERY_DELAY, 2)).isFalse();
@@ -206,13 +217,27 @@ class ReservationDepositDispositionServiceTest {
                 .isEqualTo(ReservationDepositDispositionObligation.Status.RECOVERY_REQUIRED);
         assertThat(obligation.getPaymentDispositionStatus())
                 .isEqualTo(DispositionStatus.RECONCILIATION_REQUIRED.name());
+        verify(outbox).enqueue(
+                RESERVATION_DEPOSIT_DISPOSITION,
+                "501",
+                "51",
+                "reservation-cancel:41:550e8400-e29b-41d4-a716-446655440240",
+                "550e8400-e29b-41d4-a716-446655440239");
     }
 
     private static ReservationDepositDispositionService service(
             ReservationDepositDispositionObligationRepository repository
     ) {
+        return service(repository, mock(ReservationPaymentRecoveryOutboxService.class));
+    }
+
+    private static ReservationDepositDispositionService service(
+            ReservationDepositDispositionObligationRepository repository,
+            ReservationPaymentRecoveryOutboxService outbox
+    ) {
         return new ReservationDepositDispositionService(
                 repository,
+                outbox,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 Duration.ofSeconds(30));
     }

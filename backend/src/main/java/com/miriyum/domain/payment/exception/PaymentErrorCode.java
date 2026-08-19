@@ -41,6 +41,26 @@ public enum PaymentErrorCode implements ErrorCode {
             HttpStatus.CONFLICT,
             "PAYMENT_008",
             "결제 제공자 결과를 확인할 수 없습니다."
+    ),
+    PAYMENT_RECOVERY_NOT_FOUND(
+            HttpStatus.NOT_FOUND,
+            "PAYMENT_009",
+            "결제 복구 handoff를 찾을 수 없습니다."
+    ),
+    PAYMENT_RECOVERY_NOT_REQUIRED(
+            HttpStatus.CONFLICT,
+            "PAYMENT_010",
+            "현재 결제 상태는 수동 복구 대상이 아닙니다."
+    ),
+    PAYMENT_RECOVERY_STALE(
+            HttpStatus.CONFLICT,
+            "PAYMENT_011",
+            "결제 복구 상태가 변경되었습니다."
+    ),
+    PAYMENT_RECOVERY_NOT_SUPPORTED(
+            HttpStatus.CONFLICT,
+            "PAYMENT_012",
+            "지원하지 않는 결제 복구 작업입니다."
     );
 
     private final HttpStatus httpStatus;

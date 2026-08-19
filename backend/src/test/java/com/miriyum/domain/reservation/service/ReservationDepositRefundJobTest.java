@@ -10,8 +10,10 @@ import static org.mockito.Mockito.times;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileRefundResultQuery;
 import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.config.ReservationDepositProcessConfig;
+import com.miriyum.domain.reservation.entity.ReservationDepositRefundObligation.Operation;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.time.Instant;
@@ -209,14 +211,16 @@ class ReservationDepositRefundJobTest {
                 null);
         given(refundService.claimDue("worker-a", 10)).willReturn(List.of(claim));
         given(paymentService.requestRefund(command)).willReturn(unknown);
-        given(refundService.recordReconciliationRequired(claim, unknown)).willReturn(true);
+        given(refundService.recordReconciliationRequired(
+                claim, unknown, RETRY_DELAY, 3)).willReturn(true);
         ReservationDepositRefundJob job = new ReservationDepositRefundJob(
                 refundService, paymentService);
 
         assertThat(job.runOnce("worker-a", 10)).isZero();
 
         then(refundService).should().claimDue("worker-a", 10);
-        then(refundService).should().recordReconciliationRequired(claim, unknown);
+        then(refundService).should().recordReconciliationRequired(
+                claim, unknown, RETRY_DELAY, 3);
         then(refundService).shouldHaveNoMoreInteractions();
     }
 
@@ -258,15 +262,74 @@ class ReservationDepositRefundJobTest {
                 Instant.parse("2026-08-16T12:00:01Z"));
         given(refundService.claimDue("worker-a", 10)).willReturn(List.of(claim));
         given(paymentService.requestRefund(command)).willReturn(failed);
-        given(refundService.recordReconciliationRequired(claim, failed)).willReturn(true);
+        given(refundService.recordReconciliationRequired(
+                claim, failed, RETRY_DELAY, 3)).willReturn(true);
         ReservationDepositRefundJob job = new ReservationDepositRefundJob(
                 refundService, paymentService);
 
         assertThat(job.runOnce("worker-a", 10)).isZero();
 
         then(refundService).should().claimDue("worker-a", 10);
-        then(refundService).should().recordReconciliationRequired(claim, failed);
+        then(refundService).should().recordReconciliationRequired(
+                claim, failed, RETRY_DELAY, 3);
         then(refundService).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    void reconciliationClaimOnlyRequeriesProviderResultWithoutResendingRefund() {
+        ReservationDepositRefundService refundService =
+                mock(ReservationDepositRefundService.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositRefundService.Claim claim =
+                new ReservationDepositRefundService.Claim(
+                        501L, 99L, "9001", 4_000L, "KRW", 1L,
+                        "reservation-deposit-compensation:99",
+                        "123e4567-e89b-12d3-a456-426614174099",
+                        "FULL_DEPOSIT_COMPENSATION", "worker-a", 2L,
+                        Operation.QUERY, 2);
+        ReconcileRefundResultQuery query = new ReconcileRefundResultQuery(
+                "9001", "reservation-deposit-compensation:99", 4_000L, "KRW");
+        RefundResult unknown = new RefundResult(
+                "7001", "9001", 4_000L, 0L, 0L, 4_000L, "KRW",
+                RefundStatus.RECONCILIATION_REQUIRED,
+                Instant.parse("2026-08-16T12:00:00Z"), null);
+        given(refundService.claimDue("worker-a", 10)).willReturn(List.of(claim));
+        given(paymentService.reconcileRefundResult(query)).willReturn(unknown);
+        ReservationDepositRefundJob job = new ReservationDepositRefundJob(
+                refundService, paymentService);
+
+        assertThat(job.runOnce("worker-a", 10)).isZero();
+
+        then(paymentService).should().reconcileRefundResult(query);
+        then(paymentService).shouldHaveNoMoreInteractions();
+        then(refundService).should().recordReconciliationRequired(
+                claim, unknown, RETRY_DELAY, 3);
+    }
+
+    @Test
+    void reconciliationLookupFailurePreservesQueryOperationAndBoundedPolicy() {
+        ReservationDepositRefundService refundService =
+                mock(ReservationDepositRefundService.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositRefundService.Claim claim =
+                new ReservationDepositRefundService.Claim(
+                        501L, 99L, "9001", 4_000L, "KRW", 1L,
+                        "reservation-deposit-compensation:99",
+                        "123e4567-e89b-12d3-a456-426614174099",
+                        "FULL_DEPOSIT_COMPENSATION", "worker-a", 2L,
+                        Operation.QUERY, 2);
+        ReconcileRefundResultQuery query = new ReconcileRefundResultQuery(
+                "9001", "reservation-deposit-compensation:99", 4_000L, "KRW");
+        given(refundService.claimDue("worker-a", 10)).willReturn(List.of(claim));
+        given(paymentService.reconcileRefundResult(query))
+                .willThrow(new IllegalStateException("temporary lookup failure"));
+        ReservationDepositRefundJob job = new ReservationDepositRefundJob(
+                refundService, paymentService);
+
+        assertThat(job.runOnce("worker-a", 10)).isZero();
+
+        then(refundService).should().recordQueryFailure(
+                claim, RETRY_DELAY, 3);
     }
 
     @ParameterizedTest
