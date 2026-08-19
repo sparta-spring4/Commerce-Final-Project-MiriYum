@@ -37,10 +37,6 @@ export const CONSOLE_NAVIGATION: readonly ConsoleNavigationItem[] = [
     permissions: ['STORE_READ_MINIMAL'],
   },
   {
-    /*
-     * 영구 정지 승인. 승인 대기 목록을 조회하는 계약이 없어(#425) 제안자가
-     * 전달한 값으로 진입하는 화면이지만, 주소를 손으로 치게 두지 않는다.
-     */
     label: '영구 정지 승인',
     path: ROUTES.platformOperatorMemberSanctionApproval,
     permissions: ['ACCOUNT_PERMANENT_SANCTION_APPROVE'],

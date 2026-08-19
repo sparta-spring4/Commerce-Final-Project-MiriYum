@@ -9,6 +9,10 @@ import type { QueryClient } from '@tanstack/react-query'
 export const PLATFORM_OPERATOR_PROTECTED_QUERY_ROOTS = {
   members: ['platform-operator', 'members'],
   memberSupportCases: ['platform-operator', 'member-support-cases'],
+  pendingMemberSanctionApprovals: [
+    'platform-operator',
+    'pending-member-sanction-approvals',
+  ],
   auditEvents: ['platform-operator', 'audit-events'],
   operatorAccounts: ['platform-operator', 'operator-accounts'],
   currentCapabilities: ['platform-operator', 'capabilities'],

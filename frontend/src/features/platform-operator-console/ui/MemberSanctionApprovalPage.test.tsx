@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { http } from 'msw'
+import { delay, http } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { errorResponse, successResponse } from '../../../test/msw/envelope'
 import { server } from '../../../test/msw/server'
@@ -13,6 +13,8 @@ import {
 import { MemberSanctionApprovalPage } from './MemberSanctionApprovalPage'
 
 const REAUTH_PATH = '/api/v1/platform-operators/reauthentication-approvals'
+const PENDING_APPROVALS_PATH =
+  '/api/v1/platform-operators/member-sanctions/pending-additional-approvals'
 const APPROVAL_PATH =
   '/api/v1/platform-operators/member-sanctions/sanction-1/additional-approvals'
 
@@ -24,6 +26,36 @@ function renderPage() {
       </PlatformOperatorAuthProvider>
     </TestQueryProvider>,
   )
+}
+
+function pendingSanction(
+  overrides: Partial<{
+    accountType: 'CONSUMER' | 'STORE_OPERATOR'
+    accountId: string
+  }> = {},
+) {
+  return {
+    sanctionId: 'sanction-1',
+    version: 4,
+    accountType: overrides.accountType ?? 'CONSUMER',
+    accountId: overrides.accountId ?? 'member-1',
+    reasonCode: 'ABUSE_REPORT',
+    policyVersion: 'SANCTION_POLICY_V1',
+    proposedAt: '2026-08-17T09:00:00Z',
+  }
+}
+
+function pendingPage(content = [pendingSanction()]) {
+  return successResponse({
+    content,
+    page: {
+      number: 0,
+      size: 20,
+      totalElements: content.length,
+      totalPages: content.length === 0 ? 0 : 1,
+      hasNext: false,
+    },
+  })
 }
 
 function approvedSanction(status: string) {
@@ -40,24 +72,24 @@ function approvedSanction(status: string) {
   })
 }
 
-/** 유효한 입력을 채우고 제출한다. 제출은 재인증 다이얼로그를 열 뿐이다. */
-async function fillAndSubmit() {
-  fireEvent.change(await screen.findByLabelText('대상 계정 유형'), {
-    target: { value: 'CONSUMER' },
-  })
-  fireEvent.change(screen.getByLabelText('대상 계정 ID'), {
-    target: { value: 'member-1' },
-  })
-  fireEvent.change(screen.getByLabelText('제재 ID'), {
-    target: { value: 'sanction-1' },
-  })
-  fireEvent.change(screen.getByLabelText('제재 version'), {
-    target: { value: '4' },
-  })
-  fireEvent.change(screen.getByLabelText('승인 사유 코드'), {
-    target: { value: 'POLICY_CONFIRMED' },
-  })
+/** 서버 목록 항목을 선택하고 승인 사유를 입력해 재인증을 연다. */
+async function selectAndSubmit(reasonCode = 'POLICY_CONFIRMED') {
+  fireEvent.click(
+    await screen.findByRole('button', { name: '제재 sanction-1 선택' }),
+  )
+  if (reasonCode.length > 0) {
+    fireEvent.change(screen.getByLabelText('승인 사유 코드'), {
+      target: { value: reasonCode },
+    })
+  }
   fireEvent.click(screen.getByRole('button', { name: '영구 정지 승인' }))
+}
+
+async function approveInDialog() {
+  fireEvent.change(await screen.findByLabelText('현재 비밀번호'), {
+    target: { value: 'Miriyum1!' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: '확인' }))
 }
 
 describe('영구 정지 추가 승인', () => {
@@ -68,6 +100,7 @@ describe('영구 정지 추가 승인', () => {
         permissions: ['ACCOUNT_PERMANENT_SANCTION_APPROVE'],
         roles: ['SUPER_ADMIN'],
       }),
+      http.get(PENDING_APPROVALS_PATH, () => pendingPage()),
       http.post(REAUTH_PATH, () =>
         successResponse({
           approval: 'approval-1',
@@ -77,51 +110,66 @@ describe('영구 정지 추가 승인', () => {
     )
   })
 
-  /**
-   * 승인 대기 제재를 조회하는 계약이 없다(#425). 목록을 흉내 내면 화면이
-   * 만들어 낸 데이터를 실제 대기 건으로 오인하게 된다.
-   */
-  it('승인 대기 목록을 만들지 않고 그 사실을 알린다', async () => {
+  it('서버가 반환한 승인 대기 항목을 선택하고 수동 ID 입력을 허용하지 않는다', async () => {
     renderPage()
 
-    expect(
-      await screen.findByText('승인 대기 목록은 제공되지 않습니다.'),
-    ).toBeInTheDocument()
-    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    expect(await screen.findByRole('table')).toBeInTheDocument()
+    expect(screen.getByText('sanction-1')).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: '제재 sanction-1 선택' }),
+    )
+
+    expect(screen.getByText('선택한 제재')).toBeInTheDocument()
+    expect(screen.queryByLabelText('제재 ID')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('제재 version')).not.toBeInTheDocument()
   })
 
-  it('재인증 승인 뒤에 If-Match와 재인증 헤더를 함께 보낸다', async () => {
-    let headers: Headers | null = null
+  it('선택한 항목의 path와 version으로 승인하고 목록을 다시 조회한다', async () => {
+    let pendingRequests = 0
+    let approvalHeaders: Headers | null = null
+    let approvalBody: unknown = null
     server.use(
-      http.post(APPROVAL_PATH, ({ request }) => {
-        headers = request.headers
+      http.get(PENDING_APPROVALS_PATH, () => {
+        pendingRequests += 1
+        return pendingPage()
+      }),
+      http.post(APPROVAL_PATH, async ({ request }) => {
+        approvalHeaders = request.headers
+        approvalBody = await request.json()
         return approvedSanction('APPLIED')
       }),
     )
     renderPage()
-    await fillAndSubmit()
+    await selectAndSubmit()
+    await approveInDialog()
 
-    await screen.findByRole('dialog', { name: '재인증이 필요합니다' })
-    fireEvent.change(screen.getByLabelText('현재 비밀번호'), {
-      target: { value: 'Miriyum1!' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '확인' }))
-
-    await waitFor(() => expect(headers).not.toBeNull())
-    const sent = headers!
+    await waitFor(() => expect(approvalHeaders).not.toBeNull())
+    const sent = approvalHeaders!
     expect(sent.get('X-Admin-Reauthentication')).toBe('approval-1')
     expect(sent.get('If-Match')).toBe('4')
     expect(sent.get('Idempotency-Key')).not.toBeNull()
-
-    // 서버가 준 status를 그대로 전한다.
+    expect(approvalBody).toEqual({
+      decision: 'APPROVE',
+      reasonCode: 'POLICY_CONFIRMED',
+    })
+    await waitFor(() => expect(pendingRequests).toBe(2))
+    expect(screen.queryByText('선택한 제재')).not.toBeInTheDocument()
     expect(
       await screen.findByText('제재 sanction-1가 APPLIED 상태가 됐습니다.'),
     ).toBeInTheDocument()
   })
 
-  it('재인증을 제재 대상 회원 유형과 계정 ID에 결속한다', async () => {
+  it('재인증을 목록이 준 제재 대상 유형과 계정 ID에 결속한다', async () => {
     let reauthenticationBody: unknown = null
     server.use(
+      http.get(PENDING_APPROVALS_PATH, () =>
+        pendingPage([
+          pendingSanction({
+            accountType: 'STORE_OPERATOR',
+            accountId: '9001',
+          }),
+        ]),
+      ),
       http.post(REAUTH_PATH, async ({ request }) => {
         reauthenticationBody = await request.json()
         return successResponse({
@@ -132,28 +180,8 @@ describe('영구 정지 추가 승인', () => {
       http.post(APPROVAL_PATH, () => approvedSanction('APPLIED')),
     )
     renderPage()
-
-    fireEvent.change(await screen.findByLabelText('대상 계정 유형'), {
-      target: { value: 'STORE_OPERATOR' },
-    })
-    fireEvent.change(screen.getByLabelText('대상 계정 ID'), {
-      target: { value: '9001' },
-    })
-    fireEvent.change(screen.getByLabelText('제재 ID'), {
-      target: { value: 'sanction-1' },
-    })
-    fireEvent.change(screen.getByLabelText('제재 version'), {
-      target: { value: '4' },
-    })
-    fireEvent.change(screen.getByLabelText('승인 사유 코드'), {
-      target: { value: 'POLICY_CONFIRMED' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '영구 정지 승인' }))
-
-    fireEvent.change(await screen.findByLabelText('현재 비밀번호'), {
-      target: { value: 'Miriyum1!' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '확인' }))
+    await selectAndSubmit()
+    await approveInDialog()
 
     await waitFor(() => expect(reauthenticationBody).not.toBeNull())
     expect(reauthenticationBody).toMatchObject({
@@ -163,7 +191,7 @@ describe('영구 정지 추가 승인', () => {
     })
   })
 
-  it('입력이 비어 있으면 재인증도 열지 않는다', async () => {
+  it('승인 사유가 비어 있으면 재인증과 명령을 보내지 않는다', async () => {
     let requested = 0
     server.use(
       http.post(APPROVAL_PATH, () => {
@@ -172,13 +200,10 @@ describe('영구 정지 추가 승인', () => {
       }),
     )
     renderPage()
-
-    fireEvent.click(
-      await screen.findByRole('button', { name: '영구 정지 승인' }),
-    )
+    await selectAndSubmit('')
 
     expect(
-      await screen.findByText('제재 ID를 입력해 주세요.'),
+      await screen.findByText('승인 사유 코드를 입력해 주세요.'),
     ).toBeInTheDocument()
     expect(
       screen.queryByRole('dialog', { name: '재인증이 필요합니다' }),
@@ -186,7 +211,6 @@ describe('영구 정지 추가 승인', () => {
     expect(requested).toBe(0)
   })
 
-  /** 제안자 본인이면 서버가 403으로 막는다. 화면은 그 이유를 그대로 전한다. */
   it('제안자 본인 승인 거부를 사용자 언어로 전한다', async () => {
     server.use(
       http.post(APPROVAL_PATH, () =>
@@ -194,13 +218,8 @@ describe('영구 정지 추가 승인', () => {
       ),
     )
     renderPage()
-    await fillAndSubmit()
-
-    await screen.findByRole('dialog', { name: '재인증이 필요합니다' })
-    fireEvent.change(screen.getByLabelText('현재 비밀번호'), {
-      target: { value: 'Miriyum1!' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '확인' }))
+    await selectAndSubmit()
+    await approveInDialog()
 
     expect(
       await screen.findByText(
@@ -209,8 +228,13 @@ describe('영구 정지 추가 승인', () => {
     ).toBeInTheDocument()
   })
 
-  it('이미 종결된 제안이면 최신 상태 확인을 안내한다', async () => {
+  it('409이면 stale 선택을 폐기하고 목록을 다시 조회한다', async () => {
+    let pendingRequests = 0
     server.use(
+      http.get(PENDING_APPROVALS_PATH, () => {
+        pendingRequests += 1
+        return pendingPage()
+      }),
       http.post(APPROVAL_PATH, () =>
         errorResponse(
           409,
@@ -220,40 +244,61 @@ describe('영구 정지 추가 승인', () => {
       ),
     )
     renderPage()
-    await fillAndSubmit()
-
-    await screen.findByRole('dialog', { name: '재인증이 필요합니다' })
-    fireEvent.change(screen.getByLabelText('현재 비밀번호'), {
-      target: { value: 'Miriyum1!' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '확인' }))
+    await selectAndSubmit()
+    await approveInDialog()
 
     expect(
       await screen.findByText(
-        '이미 승인됐거나 종결된 제안입니다. 최신 상태를 확인해 주세요.',
+        '이미 승인됐거나 종결된 제안입니다. 목록을 갱신했습니다.',
       ),
     ).toBeInTheDocument()
+    await waitFor(() => expect(pendingRequests).toBe(2))
+    expect(screen.queryByText('선택한 제재')).not.toBeInTheDocument()
   })
 
-  it('승인 권한이 없으면 폼을 열지 않는다', async () => {
+  it('조회 중과 빈 목록을 구분해 표시한다', async () => {
     server.use(
-      currentPlatformOperator({ permissions: ['MEMBER_READ_MINIMAL'] }),
+      http.get(PENDING_APPROVALS_PATH, async () => {
+        await delay(50)
+        return pendingPage([])
+      }),
     )
     renderPage()
 
     expect(
-      await screen.findByText('이 업무를 수행할 권한이 없습니다.'),
+      await screen.findByText('승인 대기 제재를 불러오는 중입니다.'),
     ).toBeInTheDocument()
     expect(
-      screen.queryByRole('button', { name: '영구 정지 승인' }),
-    ).not.toBeInTheDocument()
+      await screen.findByText('승인 대기 제재가 없습니다.'),
+    ).toBeInTheDocument()
   })
 
-  it('승인 권한이 있어도 슈퍼관리자 역할이 없으면 폼을 열지 않는다', async () => {
+  it('목록 조회 오류에서 다시 시도할 수 있다', async () => {
+    let attempts = 0
     server.use(
-      currentPlatformOperator({
-        permissions: ['ACCOUNT_PERMANENT_SANCTION_APPROVE'],
-        roles: ['MEMBER_SUPPORT_OPERATOR'],
+      http.get(PENDING_APPROVALS_PATH, () => {
+        attempts += 1
+        return attempts === 1
+          ? errorResponse(503, 'COMMON_012', '일시적으로 조회할 수 없습니다.')
+          : pendingPage([])
+      }),
+    )
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '상태 다시 확인' }))
+    expect(
+      await screen.findByText('승인 대기 제재가 없습니다.'),
+    ).toBeInTheDocument()
+    expect(attempts).toBe(2)
+  })
+
+  it('승인 권한이 없으면 목록 query와 폼을 열지 않는다', async () => {
+    let pendingRequests = 0
+    server.use(
+      currentPlatformOperator({ permissions: ['MEMBER_READ_MINIMAL'] }),
+      http.get(PENDING_APPROVALS_PATH, () => {
+        pendingRequests += 1
+        return pendingPage()
       }),
     )
     renderPage()
@@ -261,8 +306,29 @@ describe('영구 정지 추가 승인', () => {
     expect(
       await screen.findByText('이 업무를 수행할 권한이 없습니다.'),
     ).toBeInTheDocument()
+    expect(pendingRequests).toBe(0)
     expect(
       screen.queryByRole('button', { name: '영구 정지 승인' }),
     ).not.toBeInTheDocument()
+  })
+
+  it('승인 권한이 있어도 슈퍼관리자 역할이 없으면 목록 query를 보내지 않는다', async () => {
+    let pendingRequests = 0
+    server.use(
+      currentPlatformOperator({
+        permissions: ['ACCOUNT_PERMANENT_SANCTION_APPROVE'],
+        roles: ['MEMBER_SUPPORT_OPERATOR'],
+      }),
+      http.get(PENDING_APPROVALS_PATH, () => {
+        pendingRequests += 1
+        return pendingPage()
+      }),
+    )
+    renderPage()
+
+    expect(
+      await screen.findByText('이 업무를 수행할 권한이 없습니다.'),
+    ).toBeInTheDocument()
+    expect(pendingRequests).toBe(0)
   })
 })

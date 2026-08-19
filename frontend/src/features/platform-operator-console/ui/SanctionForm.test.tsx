@@ -160,10 +160,12 @@ describe('회원 제재 적용', () => {
 
     const notice = await screen.findByText(/추가 승인 대기로 제안했습니다/)
     expect(notice).toBeInTheDocument()
-    expect(screen.getByText('대상 계정 유형')).toBeInTheDocument()
-    expect(screen.getByText('CONSUMER')).toBeInTheDocument()
-    expect(screen.getByText('대상 계정 ID')).toBeInTheDocument()
-    expect(screen.getByText('member-1')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '전달용 값 복사' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/승인자에게 아래 값을 전달해 주세요/),
+    ).not.toBeInTheDocument()
   })
 
   /**

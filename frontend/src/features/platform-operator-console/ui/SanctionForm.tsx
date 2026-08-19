@@ -25,7 +25,6 @@ const LEVEL_LABEL: Record<SanctionLevel, string> = {
   TEMPORARY_SUSPENSION: '기간 정지',
   PERMANENT_SUSPENSION: '영구 정지 (제안)',
 }
-
 const RESTRICTED_FEATURE_LABEL: Record<RestrictedFeature, string> = {
   RESERVATION: '예약',
   WAITING: '웨이팅',
@@ -69,17 +68,6 @@ export function SanctionForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState<string | null>(null)
   const [result, setResult] = useState<string | null>(null)
-  /*
-   * 영구 정지 제안 뒤 승인자에게 넘겨야 하는 값. 승인 대기 목록을 조회하는
-   * 계약이 없어(#425) 제안자가 직접 전달해야 하므로, 화면 밖으로 복사할 수
-   * 있게 남겨 둔다. 다른 제재는 승인 단계가 없어 null로 둔다.
-   */
-  const [pendingHandoff, setPendingHandoff] = useState<{
-    accountType: AccountType
-    accountId: string
-    sanctionId: string
-    version: number
-  } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [awaitingReauthentication, setAwaitingReauthentication] =
     useState(false)
@@ -156,16 +144,6 @@ export function SanctionForm({
           ? `제재 ${sanction.sanctionId}를 추가 승인 대기로 제안했습니다. 다른 슈퍼관리자가 승인해야 적용됩니다.`
           : `제재 ${sanction.sanctionId}가 ${sanction.status} 상태로 기록됐습니다.`,
       )
-      setPendingHandoff(
-        sanction.status === 'PENDING_ADDITIONAL_APPROVAL'
-          ? {
-              accountType: sanction.accountType,
-              accountId: sanction.accountId,
-              sanctionId: sanction.sanctionId,
-              version: sanction.version,
-            }
-          : null,
-      )
       clearAttempt()
       setReasonCode('')
       setPolicyVersion('')
@@ -198,9 +176,6 @@ export function SanctionForm({
       </h2>
 
       {result !== null && <Alert tone="info" title={result} />}
-      {pendingHandoff !== null && (
-        <PendingApprovalHandoff handoff={pendingHandoff} />
-      )}
       {formError !== null && <Alert tone="error" title={formError} />}
 
       <form
@@ -318,69 +293,4 @@ function sanctionErrorMessage(error: unknown): string {
     default:
       return error.message
   }
-}
-
-/**
- * 승인자에게 넘길 값 안내.
- *
- * 승인 화면은 대상 계정 유형·ID와 제재 ID·version을 입력받는다. 이 값을 조회할
- * 방법이 없으므로 제안 직후 여기서 보여 주고, 복사해서 전달할 수 있게 한다.
- */
-function PendingApprovalHandoff({
-  handoff,
-}: {
-  handoff: {
-    accountType: AccountType
-    accountId: string
-    sanctionId: string
-    version: number
-  }
-}) {
-  const [copied, setCopied] = useState(false)
-  const text =
-    `대상 계정 유형: ${handoff.accountType} / 대상 계정 ID: ${handoff.accountId}` +
-    ` / 제재 ID: ${handoff.sanctionId} / version: ${handoff.version}`
-
-  async function handleCopy() {
-    // 클립보드는 보안 컨텍스트에서만 쓸 수 있다. 없으면 조용히 실패하지 않고
-    // 안내를 그대로 두어 사용자가 직접 선택해 복사하게 한다.
-    if (!navigator.clipboard) {
-      return
-    }
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-    } catch {
-      setCopied(false)
-    }
-  }
-
-  return (
-    <div className="po-card">
-      <p className="po-form__notice">
-        승인자에게 아래 값을 전달해 주세요. 승인 화면에서 그대로 입력합니다.
-      </p>
-      <dl className="po-detail">
-        <div className="po-detail__row">
-          <dt>대상 계정 유형</dt>
-          <dd>{handoff.accountType}</dd>
-        </div>
-        <div className="po-detail__row">
-          <dt>대상 계정 ID</dt>
-          <dd>{handoff.accountId}</dd>
-        </div>
-        <div className="po-detail__row">
-          <dt>제재 ID</dt>
-          <dd>{handoff.sanctionId}</dd>
-        </div>
-        <div className="po-detail__row">
-          <dt>제재 version</dt>
-          <dd>{handoff.version}</dd>
-        </div>
-      </dl>
-      <Button type="button" variant="secondary" onClick={handleCopy}>
-        {copied ? '복사했습니다' : '전달용 값 복사'}
-      </Button>
-    </div>
-  )
 }

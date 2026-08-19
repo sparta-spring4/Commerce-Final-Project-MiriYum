@@ -13,6 +13,10 @@ export type CaseStatus = components['schemas']['CaseStatus']
 export type SanctionLevel = components['schemas']['SanctionLevel']
 export type RestrictedFeature = components['schemas']['RestrictedFeature']
 export type Sanction = components['schemas']['Sanction']
+export type PendingSanctionApproval =
+  components['schemas']['PendingSanctionApproval']
+export type PendingSanctionApprovalPageData =
+  components['schemas']['PendingSanctionApprovalPageData']
 export type ActiveSanctionSummary =
   components['schemas']['ActiveSanctionSummary']
 
@@ -62,6 +66,14 @@ export const supportCaseQueryKeys = {
     [
       ...PLATFORM_OPERATOR_PROTECTED_QUERY_ROOTS.memberSupportCases,
       caseId,
+    ] as const,
+}
+
+export const pendingSanctionApprovalQueryKeys = {
+  list: (page: number, size: number) =>
+    [
+      ...PLATFORM_OPERATOR_PROTECTED_QUERY_ROOTS.pendingMemberSanctionApprovals,
+      { page, size },
     ] as const,
 }
 
@@ -147,6 +159,23 @@ export async function fetchSupportCase(
     {
       method: 'get',
       pathParams: { caseId },
+      signal,
+    },
+  )
+  return response.data
+}
+
+export async function fetchPendingSanctionApprovals(
+  apiClient: ApiClient,
+  page: number,
+  size: number,
+  signal?: AbortSignal,
+): Promise<PendingSanctionApprovalPageData> {
+  const response = await apiClient(
+    '/api/v1/platform-operators/member-sanctions/pending-additional-approvals',
+    {
+      method: 'get',
+      query: { page, size },
       signal,
     },
   )
