@@ -25,6 +25,7 @@
 - Valkey 중앙 세션의 유휴 30분·절대 8시간 만료
 - 계정당 활성 세션 1개와 새 로그인 시 이전 세션 회수
 - 계정 중지, `authority_version` 또는 `session_version` 변경 시 즉시 세션 거부
+- 고정 역할 권한이 배포로 확장될 때는 대상 계정의 `authority_version`과 `session_version`을 애플리케이션 시작 전 migration에서 증가시켜 배포 전 Access·Refresh·중앙 세션을 재사용하지 못하게 한다. stale 세션이 실제 요청되면 기존 `SESSION_REVOKED` 인증 사건을 남긴다.
 - feature flag 기반 Controller·Security·OpenAPI audience 비노출
 - 인증 보안 사건의 최소 append-only 기록
 
