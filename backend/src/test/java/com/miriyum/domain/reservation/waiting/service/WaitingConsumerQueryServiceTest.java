@@ -22,6 +22,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.List;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.junit.jupiter.api.Test;
 
 class WaitingConsumerQueryServiceTest {
@@ -76,17 +78,16 @@ class WaitingConsumerQueryServiceTest {
     }
 
     @Test
-    void currentHidesWhetherAnotherConsumersTeamExists() {
+    void currentHidesWhetherAnOrphanedMembershipsTeamExists() {
         ConsumerAccountService accounts = mock(ConsumerAccountService.class);
         WaitingActiveMembershipRepository memberships = mock(WaitingActiveMembershipRepository.class);
         WaitingTeamRepository teams = mock(WaitingTeamRepository.class);
         WaitingReceptionGate receptionGate = mock(WaitingReceptionGate.class);
         StoreAdministrationService storeAdministration = mock(StoreAdministrationService.class);
         WaitingActiveMembership membership = mock(WaitingActiveMembership.class);
-        WaitingTeam other = waitingTeam(300L, 100L, 999L, 9L);
         when(membership.getWaitingTeamId()).thenReturn(300L);
         when(memberships.findByConsumerAccountId(200L)).thenReturn(Optional.of(membership));
-        when(teams.findById(300L)).thenReturn(Optional.of(other));
+        when(teams.findById(300L)).thenReturn(Optional.empty());
 
         WaitingConsumerQueryService service = new WaitingConsumerQueryService(
                 accounts, memberships, teams, receptionGate, storeAdministration,
@@ -96,6 +97,36 @@ class WaitingConsumerQueryServiceTest {
                 .isInstanceOfSatisfying(ServiceException.class, failure ->
                         assertThat(failure.getErrorCode())
                                 .isEqualTo(ReservationErrorCode.WAITING_TEAM_NOT_FOUND));
+    }
+
+    @Test
+    void activeMemberCanReadCurrentTeamWithoutExposingAccountIdentifiers() {
+        ConsumerAccountService accounts = mock(ConsumerAccountService.class);
+        WaitingActiveMembershipRepository memberships = mock(WaitingActiveMembershipRepository.class);
+        WaitingTeamRepository teams = mock(WaitingTeamRepository.class);
+        WaitingReceptionGate receptionGate = mock(WaitingReceptionGate.class);
+        StoreAdministrationService storeAdministration = mock(StoreAdministrationService.class);
+        WaitingActiveMembership representative = WaitingActiveMembership.create(
+                100L, 200L, 300L, Instant.parse("2026-08-17T00:00:00Z"));
+        WaitingActiveMembership member = WaitingActiveMembership.create(
+                100L, 201L, 300L, Instant.parse("2026-08-17T00:01:00Z"));
+        ReflectionTestUtils.setField(representative, "id", 401L);
+        ReflectionTestUtils.setField(member, "id", 402L);
+        WaitingTeam team = waitingTeam(300L, 100L, 200L, 9L);
+        when(memberships.findByConsumerAccountId(201L)).thenReturn(Optional.of(member));
+        when(memberships.findAllByWaitingTeamIdOrderById(300L))
+                .thenReturn(List.of(representative, member));
+        when(teams.findById(300L)).thenReturn(Optional.of(team));
+
+        WaitingConsumerSnapshot result = new WaitingConsumerQueryService(
+                accounts, memberships, teams, receptionGate, storeAdministration,
+                Clock.fixed(Instant.parse("2026-08-17T00:00:00Z"), ZoneOffset.UTC))
+                .getCurrent(201L);
+
+        assertThat(result.memberships()).hasSize(2);
+        assertThat(result.memberships().get(0).role().name()).isEqualTo("REPRESENTATIVE");
+        assertThat(result.memberships().get(1).self()).isTrue();
+        assertThat(result.toString()).doesNotContain("consumerAccountId", "201");
     }
 
     private static WaitingTeam waitingTeam(

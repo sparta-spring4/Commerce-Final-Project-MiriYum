@@ -13,6 +13,7 @@ import static org.mockito.Mockito.never;
 import com.miriyum.domain.store.dto.contract.StoreDashboardAuthority;
 import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
 import com.miriyum.domain.store.dto.contract.StoreWaitingReceptionProfile;
+import com.miriyum.domain.store.dto.contract.StoreWaitingLocationProfile;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
@@ -49,6 +50,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -276,6 +278,45 @@ class StoreServiceTest {
     }
 
     @Test
+    void returnsVerifiedWaitingLocationThroughPublicProjection() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        ReflectionTestUtils.setField(store, "latitude", new BigDecimal("37.566826000000000"));
+        ReflectionTestUtils.setField(store, "longitude", new BigDecimal("126.978656700000000"));
+        ReflectionTestUtils.setField(store, "geocodingAddressVersion", 2L);
+        ReflectionTestUtils.setField(store, "geocodingStatus", GeocodingStatus.VERIFIED);
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+
+        StoreWaitingLocationProfile profile =
+                storeService.getWaitingLocationProfile(STORE_ID);
+
+        assertThat(profile).isEqualTo(new StoreWaitingLocationProfile(
+                STORE_ID,
+                new BigDecimal("37.566826000000000"),
+                new BigDecimal("126.978656700000000"),
+                2L,
+                true));
+    }
+
+    @Test
+    void waitingLocationFailsClosedWithoutVerifiedCoordinates() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        ReflectionTestUtils.setField(store, "latitude", new BigDecimal("37.566826000000000"));
+        ReflectionTestUtils.setField(store, "longitude", null);
+        ReflectionTestUtils.setField(store, "geocodingAddressVersion", 2L);
+        ReflectionTestUtils.setField(store, "geocodingStatus", GeocodingStatus.UNVERIFIED);
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+
+        StoreWaitingLocationProfile profile =
+                storeService.getWaitingLocationProfile(STORE_ID);
+
+        assertThat(profile.locationProofEligible()).isFalse();
+        assertThat(profile.latitude()).isNull();
+        assertThat(profile.longitude()).isNull();
+    }
+
+    @Test
     void inspectsWaitingReceptionUnderStoreRowLock() {
         Store store = storeOwnedBy(OPERATOR_ID);
         ReflectionTestUtils.setField(store, "id", STORE_ID);
@@ -328,6 +369,43 @@ class StoreServiceTest {
         then(operatorAccountService).should().getMe(OPERATOR_ID);
         then(storeRepository).should().findOperatorAccountIdById(STORE_ID);
         then(storeRepository).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    void concealedReadOwnershipAcceptsOnlyTheOwnedStore() {
+        given(storeRepository.existsByIdAndStoreOperatorAccountId(STORE_ID, OPERATOR_ID))
+                .willReturn(true);
+
+        storeService.requireConcealedReadOwnership(OPERATOR_ID, STORE_ID);
+
+        then(operatorAccountService).should().getMe(OPERATOR_ID);
+        then(storeRepository).should()
+                .existsByIdAndStoreOperatorAccountId(STORE_ID, OPERATOR_ID);
+        then(storeRepository).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    void concealedReadOwnershipHidesMissingStoreAsNotFound() {
+        given(storeRepository.existsByIdAndStoreOperatorAccountId(STORE_ID, OPERATOR_ID))
+                .willReturn(false);
+
+        assertThatThrownBy(() ->
+                storeService.requireConcealedReadOwnership(OPERATOR_ID, STORE_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_NOT_FOUND);
+    }
+
+    @Test
+    void concealedReadOwnershipHidesForeignStoreAsTheSameNotFoundError() {
+        given(storeRepository.existsByIdAndStoreOperatorAccountId(STORE_ID, OPERATOR_ID))
+                .willReturn(false);
+
+        assertThatThrownBy(() ->
+                storeService.requireConcealedReadOwnership(OPERATOR_ID, STORE_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_NOT_FOUND);
     }
 
     @Test

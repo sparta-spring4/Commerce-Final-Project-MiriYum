@@ -13,10 +13,15 @@ import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
+import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession;
+import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession.AccuracyCategory;
+import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession.Purpose;
+import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession.ResultCategory;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingLocationProofSessionRepository;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
@@ -72,7 +77,6 @@ import tools.jackson.databind.ObjectMapper;
             "miriyum.reservation.time-policy.activation-enabled=false",
             "miriyum.waiting.closure.initial-delay-ms=600000",
             "miriyum.waiting.compensation.initial-delay-ms=600000",
-            "miriyum.waiting.consumer-registration.location-proof-connected=true",
             "miriyum.payment.cursor-secret=test-history-cursor-secret-with-enough-entropy",
             "miriyum.payment.portone.api-secret=test-api-secret",
             "miriyum.payment.portone.webhook-secret=whsec_dGVzdC1zZWNyZXQ=",
@@ -101,6 +105,7 @@ class WaitingConsumerApiIT {
     @Autowired Clock clock;
     @Autowired WaitingTeamRepository teams;
     @Autowired WaitingActiveMembershipRepository memberships;
+    @Autowired WaitingLocationProofSessionRepository locationProofs;
     @Autowired StoreRepository stores;
     @Autowired StoreOperatorAccountRepository operators;
     @Autowired JdbcTemplate jdbc;
@@ -113,6 +118,8 @@ class WaitingConsumerApiIT {
                 .thenAnswer(invocation -> List.of(openInterval(
                         invocation.getArgument(0), invocation.getArgument(1))));
         for (String table : new String[]{
+                "waiting_party_audits", "waiting_representative_transfer_offers",
+                "waiting_party_invitations", "waiting_location_proof_sessions",
                 "waiting_status_events", "waiting_transition_audits", "waiting_active_memberships",
                 "waiting_teams", "waiting_queue_sequences", "idempotency_commands",
                 "waiting_setting_audits", "waiting_settings", "store_tag_assignment", "stores",
@@ -166,15 +173,20 @@ class WaitingConsumerApiIT {
     void registrationReplayKeepsTheFirstConsumerSnapshotAfterTheTeamChanges() {
         Fixture fixture = fixture();
         IdempotencyKey createKey = key(30);
+        UUID proofId = verifiedProof(fixture.consumerId(), fixture.firstStoreId());
 
         var first = consumerCommandFacade.create(
-                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, createKey);
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, proofId, createKey);
         long teamId = Long.parseLong(first.data().waitingTeamId());
+        assertThat(first.data().memberships()).singleElement().satisfies(member -> {
+            assertThat(member.role().name()).isEqualTo("REPRESENTATIVE");
+            assertThat(member.self()).isTrue();
+        });
         operatorCommandFacade.call(
                 fixture.operatorId(), fixture.firstStoreId(), teamId, key(31),
                 new WaitingTeamTransitionRequest(0L));
         var replay = consumerCommandFacade.create(
-                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, createKey);
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, proofId, createKey);
 
         JsonNode firstData = objectMapper.valueToTree(first.data());
         JsonNode replayData = objectMapper.valueToTree(replay.data());
@@ -189,22 +201,15 @@ class WaitingConsumerApiIT {
     }
 
     @Test
-    void registrationReplayKeepsTheFirstSuccessAfterLocationProofGateIsDisabled() {
+    void registrationReplayDoesNotConsumeTheLocationProofTwice() {
         Fixture fixture = fixture();
         IdempotencyKey createKey = key(32);
+        UUID proofId = verifiedProof(fixture.consumerId(), fixture.firstStoreId());
         var first = consumerCommandFacade.create(
-                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, createKey);
-        WaitingConsumerCommandFacade disabledFacade = new WaitingConsumerCommandFacade(
-                consumerAccountService,
-                creationService,
-                ledgerService,
-                clock,
-                false,
-                attempt -> 0L,
-                millis -> { });
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, proofId, createKey);
 
-        var replay = disabledFacade.create(
-                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, createKey);
+        var replay = consumerCommandFacade.create(
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, proofId, createKey);
 
         JsonNode firstData = objectMapper.valueToTree(first.data());
         JsonNode replayData = objectMapper.valueToTree(replay.data());
@@ -213,16 +218,21 @@ class WaitingConsumerApiIT {
         assertThat(count("waiting_teams")).isOne();
         assertThat(count("waiting_active_memberships")).isOne();
         assertThat(count("idempotency_commands")).isOne();
+        assertThat(locationProofs.findById(proofId).orElseThrow().getConsumedWaitingTeamId())
+                .isEqualTo(Long.parseLong(first.data().waitingTeamId()));
     }
 
     @Test
     void cancellationReplayKeepsTeamsAheadFromTheFirstResponseAfterTheQueueChanges() {
         Fixture fixture = fixture();
         long aheadConsumerId = createConsumer();
+        UUID aheadProofId = verifiedProof(aheadConsumerId, fixture.firstStoreId());
+        UUID targetProofId = verifiedProof(fixture.consumerId(), fixture.firstStoreId());
         var ahead = consumerCommandFacade.create(
-                fixture.firstStoreId(), aheadConsumerId, BUSINESS_DATE, 2, key(40));
+                fixture.firstStoreId(), aheadConsumerId, BUSINESS_DATE, 2, aheadProofId, key(40));
         var target = consumerCommandFacade.create(
-                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, key(41));
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, targetProofId,
+                key(41));
         long aheadTeamId = Long.parseLong(ahead.data().waitingTeamId());
         long targetTeamId = Long.parseLong(target.data().waitingTeamId());
         IdempotencyKey cancelKey = key(42);
@@ -342,6 +352,56 @@ class WaitingConsumerApiIT {
                 + "VALUES (?,'hashed','consumer','ACTIVE',NOW(6),NOW(6))", email);
         return jdbc.queryForObject(
                 "SELECT consumer_account_id FROM consumer_accounts WHERE email=?", Long.class, email);
+    }
+
+    @Test
+    void sameProofAndIdempotencyKeyInParallelReplayOneAtomicRegistration() throws Exception {
+        Fixture fixture = fixture();
+        UUID proofId = verifiedProof(fixture.consumerId(), fixture.firstStoreId());
+        IdempotencyKey sameKey = key(60);
+
+        var attempts = runTogether(2, ignored -> consumerCommandFacade.create(
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, proofId, sameKey));
+
+        assertThat(attempts).allMatch(Attempt::succeeded);
+        assertThat(attempts).extracting(attempt -> attempt.result().data().waitingTeamId())
+                .containsOnly(attempts.getFirst().result().data().waitingTeamId());
+        assertThat(count("waiting_teams")).isOne();
+        assertThat(count("waiting_active_memberships")).isOne();
+        assertThat(count("idempotency_commands")).isOne();
+        assertThat(locationProofs.findById(proofId).orElseThrow().getConsumedWaitingTeamId())
+                .isNotNull();
+    }
+
+    @Test
+    void sameProofWithDifferentKeysInParallelConsumesOnce() throws Exception {
+        Fixture fixture = fixture();
+        UUID proofId = verifiedProof(fixture.consumerId(), fixture.firstStoreId());
+
+        var attempts = runTogether(2, index -> consumerCommandFacade.create(
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2, proofId,
+                key(61 + index)));
+
+        assertThat(attempts.stream().filter(Attempt::succeeded)).hasSize(1);
+        assertThat(attempts.stream().filter(attempt -> !attempt.succeeded())
+                .map(Attempt::failure)).singleElement()
+                .isInstanceOfSatisfying(ServiceException.class, failure ->
+                        assertThat(failure.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.LOCATION_PROOF_INVALID));
+        assertThat(count("waiting_teams")).isOne();
+        assertThat(count("waiting_active_memberships")).isOne();
+        assertThat(locationProofs.findById(proofId).orElseThrow().getConsumedWaitingTeamId())
+                .isNotNull();
+    }
+
+    private UUID verifiedProof(long consumerId, long storeId) {
+        Instant now = clock.instant();
+        WaitingLocationProofSession proof = locationProofs.saveAndFlush(
+                WaitingLocationProofSession.issue(
+                        UUID.randomUUID(), consumerId, storeId, Purpose.WAITING_REGISTRATION,
+                        ResultCategory.VERIFIED, AccuracyCategory.ACCEPTABLE,
+                        "WAITING_LOCATION_V1", 1L, now, now.plusSeconds(120)));
+        return proof.getId();
     }
 
     private long createStore(long operatorId) {

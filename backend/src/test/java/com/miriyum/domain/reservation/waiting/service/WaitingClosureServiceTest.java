@@ -161,7 +161,7 @@ class WaitingClosureServiceTest {
         given(settingRepository.findByStoreIdForUpdate(22L)).willReturn(java.util.Optional.of(
                 WaitingSetting.create(22L, false, WaitingReceptionMode.PAUSED, 60, NOW)));
         given(teamRepository.findByIdForUpdate(41L)).willReturn(java.util.Optional.of(team));
-        given(membershipRepository.deleteByWaitingTeamId(41L)).willReturn(1L);
+        given(membershipRepository.deleteByWaitingTeamId(41L)).willReturn(3L);
         given(itemRepository.countByWaitingClosureJobIdAndStatus(91L,
                 com.miriyum.domain.reservation.waiting.entity.WaitingClosureItemStatus.COMPLETED)).willReturn(1L);
 
