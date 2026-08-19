@@ -1,0 +1,137 @@
+import { CONSUMER_PATHS } from '../../../../../app/routes/paths/consumerPaths'
+import { PUBLIC_PATHS } from '../../../../../app/routes/paths/publicPaths'
+import type { QueryClient } from '@tanstack/react-query'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { http } from 'msw'
+import { MemoryRouter, Route, Routes } from 'react-router'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { successResponse } from '../../../../../test/msw/envelope'
+import { server } from '../../../../../test/msw/server'
+import { TestQueryProvider } from '../../../../../test/TestQueryProvider'
+import { consumerAccountKeys } from '../../profile'
+import { pickupKeys } from '../../../../pickup/consumer/api/queries'
+import { reservationKeys } from '../../../../reservation/consumer/api/queries'
+import { ConsumerAuthProvider, useConsumerAuth } from '../../../../../app/shells/consumer/ConsumerAuthProvider'
+import { unauthenticatedConsumer } from '../test/handlers'
+import { ConsumerKakaoSignUpPage } from './ConsumerKakaoSignUpPage'
+
+const KAKAO_ACCOUNT_PATH = '/api/v1/consumers/auth/kakao/accounts'
+
+function AuthStatusProbe() {
+  const { status } = useConsumerAuth()
+  return <p data-testid="auth-status">{status}</p>
+}
+
+function renderSignUp() {
+  let queryClient: QueryClient | null = null
+
+  const rendered = render(
+    <TestQueryProvider onReady={(client) => { queryClient = client }}>
+      <ConsumerAuthProvider>
+        <MemoryRouter
+          initialEntries={[
+            {
+              pathname: CONSUMER_PATHS.kakaoSignUp,
+              state: { signUpTicket: 'temporary-ticket' },
+            },
+          ]}
+        >
+          <AuthStatusProbe />
+          <Routes>
+            <Route path={CONSUMER_PATHS.kakaoSignUp} element={<ConsumerKakaoSignUpPage />} />
+            <Route path={PUBLIC_PATHS.home} element={<p>홈</p>} />
+          </Routes>
+        </MemoryRouter>
+      </ConsumerAuthProvider>
+    </TestQueryProvider>,
+  )
+
+  if (queryClient === null) {
+    throw new Error('TestQueryProvider가 QueryClient를 넘겨주지 않았습니다.')
+  }
+
+  return { ...rendered, queryClient: queryClient as QueryClient }
+}
+
+function seedProtectedCache(queryClient: QueryClient) {
+  queryClient.setQueryData(consumerAccountKeys.me(), { nickname: '이전 사용자' })
+  queryClient.setQueryData(
+    ['consumer', 'notification-history', 0],
+    { items: [{ title: '이전 사용자' }] },
+  )
+  queryClient.setQueryData(reservationKeys.detail('r-1'), { storeName: '이전 사용자' })
+  queryClient.setQueryData(pickupKeys.detail('p-1'), { storeName: '이전 사용자' })
+}
+
+function protectedCache(queryClient: QueryClient) {
+  return [
+    queryClient.getQueryData(consumerAccountKeys.me()),
+    queryClient.getQueryData(['consumer', 'notification-history', 0]),
+    queryClient.getQueryData(reservationKeys.detail('r-1')),
+    queryClient.getQueryData(pickupKeys.detail('p-1')),
+  ]
+}
+
+function deferred() {
+  let resolve = () => {}
+  const promise = new Promise<void>((settle) => {
+    resolve = settle
+  })
+  return { promise, resolve: () => resolve() }
+}
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+describe('일반 사용자 카카오 가입 완료', () => {
+  it('가입 티켓과 서비스 필수정보만 보내고 Access Token을 메모리 로그인 상태로 전환한다', async () => {
+    let requestBody: unknown = null
+    server.use(
+      unauthenticatedConsumer,
+      http.post(KAKAO_ACCOUNT_PATH, async ({ request }) => {
+        requestBody = await request.json()
+        return successResponse({
+          status: 'AUTHENTICATED',
+          accessToken: 'kakao-access-token',
+          tokenType: 'Bearer',
+          expiresIn: 900,
+        })
+      }),
+    )
+
+    const { queryClient } = renderSignUp()
+    await waitFor(() => expect(screen.getByTestId('auth-status')).toHaveTextContent('unauthenticated'))
+    seedProtectedCache(queryClient)
+    const cacheClear = deferred()
+    vi.spyOn(queryClient, 'cancelQueries').mockImplementation(() => cacheClear.promise)
+
+    fireEvent.change(screen.getByLabelText('이메일'), { target: { value: 'kakao@example.com' } })
+    fireEvent.change(screen.getByLabelText('휴대전화 번호'), { target: { value: '010-1234-5678' } })
+    fireEvent.change(screen.getByLabelText('닉네임'), { target: { value: '카카오사용자' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: '(필수) 만 14세 이상입니다.' }))
+    fireEvent.click(screen.getByRole('button', { name: '가입 완료' }))
+
+    await waitFor(() => expect(queryClient.cancelQueries).toHaveBeenCalledTimes(4))
+    expect(screen.getByTestId('auth-status')).toHaveTextContent('unauthenticated')
+    expect(screen.getByRole('heading', { name: '카카오로 가입하기' })).toBeInTheDocument()
+    expect(protectedCache(queryClient)).not.toContain(undefined)
+
+    cacheClear.resolve()
+    expect(await screen.findByTestId('auth-status')).toHaveTextContent('authenticated')
+    await waitFor(() => expect(screen.getByText('홈')).toBeInTheDocument())
+    expect(requestBody).toEqual({
+      signUpTicket: 'temporary-ticket',
+      email: 'kakao@example.com',
+      phoneNumber: '01012345678',
+      ageConfirmed: true,
+      nickname: '카카오사용자',
+    })
+    expect(protectedCache(queryClient)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ])
+  })
+})
