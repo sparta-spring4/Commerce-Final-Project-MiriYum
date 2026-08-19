@@ -34,6 +34,12 @@ export function storeErrorMessage(error: unknown): string {
   if (!isApiError(error)) {
     return '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'
   }
+  if (error.status === 413) {
+    return '이미지 파일은 10MB 이하만 등록할 수 있습니다.'
+  }
+  if (error.status === 415) {
+    return 'JPG, PNG, WEBP 이미지 파일만 등록할 수 있습니다.'
+  }
   switch (error.code) {
     case StoreErrorCode.NOT_FOUND:
       return '매장을 찾을 수 없습니다.'
