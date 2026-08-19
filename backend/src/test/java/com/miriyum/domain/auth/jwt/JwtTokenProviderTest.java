@@ -33,6 +33,7 @@ class JwtTokenProviderTest {
         // then
         assertThat(parsed.namespace()).isEqualTo(TokenNamespace.CONSUMER);
         assertThat(parsed.accountId()).isEqualTo(42L);
+        assertThat(parsed.expiresAt()).isEqualTo(Instant.parse("2026-07-29T00:15:00Z"));
     }
 
     @Test
@@ -159,6 +160,24 @@ class JwtTokenProviderTest {
         assertInvalid(provider, forged(ISSUER, "store-operator", "consumer:42", "consumer"));
         assertInvalid(provider, forged(ISSUER, "consumer", "store-operator:42", "consumer"));
         assertInvalid(provider, forged(ISSUER, "consumer", "consumer:unexpected:42", "consumer"));
+    }
+
+    @Test
+    void rejectsSignedAccessTokenWithoutExpirationClaim() {
+        JwtTokenProvider provider = new JwtTokenProvider(
+                SECRET, ISSUER, fixedClock("2026-07-29T00:00:00Z"));
+        Instant now = Instant.parse("2026-07-29T00:00:00Z");
+        String token = Jwts.builder()
+                .issuer(ISSUER)
+                .audience().add("consumer").and()
+                .subject("consumer:42")
+                .claim("namespace", "consumer")
+                .claim("tokenType", "ACCESS")
+                .issuedAt(Date.from(now))
+                .signWith(Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8)))
+                .compact();
+
+        assertInvalid(provider, token);
     }
 
     private void assertInvalid(JwtTokenProvider provider, String token) {
