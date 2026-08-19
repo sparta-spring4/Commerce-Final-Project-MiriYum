@@ -1,10 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '../../../shared/api/client'
+import { ApiError } from '../../../shared/api/apiError'
 import {
   CONSUMER_PROTECTED_QUERY_ROOTS,
   keepsSameListConditions,
 } from '../../../shared/api/consumerSession'
 import type { components } from '../../../shared/api/generated/auth-account'
+import type { components as PaymentComponents } from '../../../shared/api/generated/payment'
+import type { components as WaitingComponents } from '../../../shared/api/generated/waiting'
 import { useConsumerAuth } from '../../auth'
 import type {
   ReservationHistoryStatus,
@@ -12,6 +15,15 @@ import type {
 } from '../model/reservationDisplay'
 
 export type ConsumerAccount = components['schemas']['ConsumerAccount']
+export type ConsumerPayment = PaymentComponents['schemas']['Payment']
+export type ConsumerPaymentHistory =
+  PaymentComponents['schemas']['PaymentHistorySlice']
+export type ConsumerWaitingSnapshot =
+  WaitingComponents['schemas']['WaitingConsumerSnapshot']
+
+const CONSUMER_PAYMENT_HISTORY_PATH = '/api/v1/consumers/me/payments' as const
+const CURRENT_CONSUMER_WAITING_PATH =
+  '/api/v1/consumers/me/waiting-teams/current' as const
 
 export const consumerAccountKeys = {
   // 뿌리는 shared가 소유한다. 세션 종료 정리가 같은 값을 보고 지운다.
@@ -19,6 +31,9 @@ export const consumerAccountKeys = {
   me: () => [...consumerAccountKeys.all, 'me'] as const,
   reservations: (query: ReservationHistoryQuery) =>
     [...consumerAccountKeys.all, 'me', 'reservations', query] as const,
+  payments: () => [...consumerAccountKeys.all, 'me', 'payments'] as const,
+  currentWaiting: () =>
+    [...consumerAccountKeys.all, 'me', 'waiting-teams', 'current'] as const,
 }
 
 export interface ReservationHistoryQuery {
@@ -69,6 +84,56 @@ export function useMyReservations(query: ReservationHistoryQuery) {
       keepsSameListConditions(previousQuery?.queryKey, query)
         ? previous
         : undefined,
+  })
+}
+
+/** 마이페이지에는 최근 결제 다섯 건만 보여 준다. 전체 이력 화면은 별도 계약으로 확장한다. */
+export function useConsumerPayments() {
+  const { apiClient } = useConsumerAuth()
+
+  return useQuery({
+    queryKey: consumerAccountKeys.payments(),
+    queryFn: async ({ signal }): Promise<ConsumerPaymentHistory> => {
+      const response = await apiClient(CONSUMER_PAYMENT_HISTORY_PATH, {
+        method: 'get',
+        query: { size: 5 },
+        signal,
+      })
+      return response.data
+    },
+  })
+}
+
+/**
+ * 현재 활성 웨이팅이 없을 때의 404는 정상적인 빈 상태다.
+ *
+ * 다른 404(예: 경로 계약 불일치)는 ApiError code까지 확인하지 않고 숨기면 안
+ * 되므로, 이 endpoint가 정한 `WAITING_003`만 빈 값으로
+ * 수렴시킨다.
+ */
+export function useCurrentConsumerWaiting() {
+  const { apiClient } = useConsumerAuth()
+
+  return useQuery({
+    queryKey: consumerAccountKeys.currentWaiting(),
+    queryFn: async ({ signal }): Promise<ConsumerWaitingSnapshot | null> => {
+      try {
+        const response = await apiClient(CURRENT_CONSUMER_WAITING_PATH, {
+          method: 'get',
+          signal,
+        })
+        return response.data
+      } catch (error) {
+        if (
+          error instanceof ApiError &&
+          error.status === 404 &&
+          error.code === 'WAITING_003'
+        ) {
+          return null
+        }
+        throw error
+      }
+    },
   })
 }
 
