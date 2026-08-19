@@ -351,8 +351,6 @@ paths:
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/store-operators/stores/{storeId}/waiting-events:
-    x-miriyum-runtime-status: contract-only
-    x-miriyum-owner-issue: 250
     get:
       tags: [Waiting Events]
       summary: 매장 운영자 웨이팅 변경 신호 구독
@@ -784,8 +782,6 @@ paths:
         "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
         "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
   /api/v1/consumers/me/waiting-events:
-    x-miriyum-runtime-status: contract-only
-    x-miriyum-owner-issue: 250
     get:
       tags: [Waiting Events]
       summary: 본인 웨이팅 변경 신호 구독

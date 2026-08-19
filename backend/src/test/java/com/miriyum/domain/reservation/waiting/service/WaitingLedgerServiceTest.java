@@ -20,7 +20,6 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTransitionAudit;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingQueueSequenceRepository;
-import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
@@ -81,7 +80,7 @@ class WaitingLedgerServiceTest {
     @Mock
     private WaitingTransitionAuditRepository auditRepository;
     @Mock
-    private WaitingStatusEventRepository eventRepository;
+    private WaitingStatusEventAppender eventAppender;
     @Mock
     private IdempotencyExecutor idempotencyExecutor;
     @Mock
@@ -99,7 +98,7 @@ class WaitingLedgerServiceTest {
                 sequenceRepository,
                 membershipRepository,
                 auditRepository,
-                eventRepository,
+                eventAppender,
                 idempotencyExecutor,
                 objectMapper,
                 Clock.fixed(AUDIT_CREATED_AT, ZoneOffset.UTC)
@@ -179,7 +178,7 @@ class WaitingLedgerServiceTest {
 
         then(teamRepository).should(never()).findFifoHead(
                 org.mockito.ArgumentMatchers.anyLong(), any(), any());
-        verifyNoInteractions(auditRepository, eventRepository);
+        verifyNoInteractions(auditRepository, eventAppender);
     }
 
     @Test
@@ -203,7 +202,7 @@ class WaitingLedgerServiceTest {
                                 .isEqualTo(ReservationErrorCode.WAITING_NOT_FIFO_HEAD));
 
         assertThat(target.getStatus()).isEqualTo(WaitingTeamStatus.WAITING);
-        verifyNoInteractions(auditRepository, eventRepository);
+        verifyNoInteractions(auditRepository, eventAppender);
     }
 
     @Test
@@ -231,7 +230,7 @@ class WaitingLedgerServiceTest {
                 .isEqualTo("store-operator:11:WAITING_TEAM_CALL:"
                         + "550e8400-e29b-41d4-a716-446655440000");
         verifyNoInteractions(membershipRepository);
-        then(eventRepository).should().save(any());
+        then(eventAppender).should().append(any(), any());
     }
 
     @Test
@@ -265,7 +264,7 @@ class WaitingLedgerServiceTest {
         then(teamRepository).should(never()).findFifoHead(
                 org.mockito.ArgumentMatchers.anyLong(), any(), any());
         assertThat(target.getStatus()).isEqualTo(WaitingTeamStatus.WAITING);
-        verifyNoInteractions(auditRepository, eventRepository);
+        verifyNoInteractions(auditRepository, eventAppender);
     }
 
     @Test
@@ -290,7 +289,7 @@ class WaitingLedgerServiceTest {
         assertThat(result.data().version()).isEqualTo(2L);
         verifyNoInteractions(membershipRepository);
         then(auditRepository).should().save(any());
-        then(eventRepository).should().save(any());
+        then(eventAppender).should().append(any(), any());
     }
 
     @Test
@@ -364,7 +363,7 @@ class WaitingLedgerServiceTest {
         assertThat(result.data().version()).isEqualTo(1L);
         then(membershipRepository).should().deleteByWaitingTeamId(TEAM_ID);
         then(auditRepository).should().save(any());
-        then(eventRepository).should().save(any());
+        then(eventAppender).should().append(any(), any());
     }
 
     @Test
@@ -388,7 +387,7 @@ class WaitingLedgerServiceTest {
                 assertThat(exception.getErrorCode()).isEqualTo(
                         ReservationErrorCode.WAITING_ACTIVE_MEMBERSHIP_CONFLICT));
 
-        verifyNoInteractions(auditRepository, eventRepository);
+        verifyNoInteractions(auditRepository, eventAppender);
     }
 
     @Test

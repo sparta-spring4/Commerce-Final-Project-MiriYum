@@ -124,6 +124,15 @@ miriyum:
       max-retry-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_MAX_RETRY_DELAY_MS:0}
       poll-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_POLL_DELAY_MS:60000}
       initial-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_INITIAL_DELAY_MS:60000}
+  sse:
+    enabled: ${MIRIYUM_SSE_ENABLED:false}
+    cursor-secret: ${MIRIYUM_SSE_CURSOR_SECRET:}
+    timeout: ${MIRIYUM_SSE_TIMEOUT:PT0S}
+    heartbeat-interval: ${MIRIYUM_SSE_HEARTBEAT_INTERVAL:PT0S}
+    correction-interval: ${MIRIYUM_SSE_CORRECTION_INTERVAL:PT0S}
+    correction-batch-size: ${MIRIYUM_SSE_CORRECTION_BATCH_SIZE:0}
+    max-connections-total: ${MIRIYUM_SSE_MAX_CONNECTIONS_TOTAL:0}
+    max-connections-per-account: ${MIRIYUM_SSE_MAX_CONNECTIONS_PER_ACCOUNT:0}
   waiting:
     auto-open:
       enabled: ${MIRIYUM_WAITING_AUTO_OPEN_ENABLED:false}
