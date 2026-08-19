@@ -1,7 +1,7 @@
+import { CONSUMER_PATHS } from './routes/paths/consumerPaths'
+import { STORE_OPERATOR_PATHS } from './routes/paths/storeOperatorPaths'
 import { describe, expect, test } from 'vitest'
 import { readReturnTo, withReturnTo } from './returnTo'
-import { SIGN_IN_PATH } from './routes'
-
 const ORIGIN = 'http://localhost:5173'
 
 function read(raw: string): string | null {
@@ -10,7 +10,7 @@ function read(raw: string): string | null {
 
 describe('허용', () => {
   test('원래 경로를 붙였다가 그대로 되읽는다', () => {
-    const url = withReturnTo(SIGN_IN_PATH.consumer, '/stores/1?partySize=2')
+    const url = withReturnTo(CONSUMER_PATHS.signIn, '/stores/1?partySize=2')
 
     expect(readReturnTo(url.slice(url.indexOf('?')), ORIGIN)).toBe(
       '/stores/1?partySize=2',
@@ -67,6 +67,6 @@ describe('열린 리다이렉트 거절', () => {
 
 describe('shell 분리', () => {
   test('두 계정 유형의 로그인 시작점이 다르다', () => {
-    expect(SIGN_IN_PATH.consumer).not.toBe(SIGN_IN_PATH.storeOperator)
+    expect(CONSUMER_PATHS.signIn).not.toBe(STORE_OPERATOR_PATHS.signIn)
   })
 })

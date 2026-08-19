@@ -1,0 +1,108 @@
+/* ── 예약 내역 ────────────────────────────────────────────────────────── */
+
+.reservation-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding-bottom: var(--space-3);
+}
+
+.reservation-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+}
+
+@media (min-width: 48rem) {
+  .reservation-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 80rem) {
+  .reservation-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.reservation-list__item .mi-card__body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: var(--space-2);
+}
+
+.reservation-list__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.reservation-list__store {
+  margin-top: var(--space-1);
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+  word-break: keep-all;
+}
+
+.reservation-list__store a {
+  color: var(--color-on-surface);
+}
+
+.reservation-list__date {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 3rem;
+  height: 3rem;
+  background-color: var(--color-surface-container-low);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-md);
+  line-height: 1.1;
+}
+
+.reservation-list__date-month {
+  font-size: var(--font-size-label-sm);
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.reservation-list__date-day {
+  font-size: var(--font-size-headline-md);
+  font-weight: 700;
+}
+
+.reservation-list__facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.reservation-list__facts p {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+.reservation-list__fact-mark {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  background-color: var(--color-surface-container);
+  border-radius: var(--radius-full);
+  color: var(--color-outline);
+}
+
+.reservation-list__foot {
+  margin-top: auto;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-surface-container-highest);
+}

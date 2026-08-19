@@ -1,7 +1,6 @@
+import { PUBLIC_PATHS } from './routes/paths/publicPaths'
 import { Link } from 'react-router'
 import { Icon } from '../shared/ui/Icon'
-import { ROUTES } from './routes'
-
 /**
  * 존재하지 않는 경로. 권한 없음(ForbiddenPage)과 구분한다.
  *
@@ -17,10 +16,10 @@ export function NotFoundPage() {
       <h1>페이지를 찾을 수 없습니다</h1>
       <p>주소를 확인해 주세요.</p>
       <div className="app-status__actions">
-        <Link className="mi-button mi-button--primary" to={ROUTES.home}>
+        <Link className="mi-button mi-button--primary" to={PUBLIC_PATHS.home}>
           홈으로 이동
         </Link>
-        <Link className="mi-button mi-button--ghost" to={ROUTES.stores}>
+        <Link className="mi-button mi-button--ghost" to={PUBLIC_PATHS.stores}>
           매장 찾기
         </Link>
       </div>
