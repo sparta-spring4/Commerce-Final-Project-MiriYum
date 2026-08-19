@@ -871,7 +871,8 @@ class MenuHoldRuntimeIT {
         assertThat(indexColumns("menu_hold_items", "idx_menu_hold_items_bucket"))
                 .isEqualTo("menu_inventory_bucket_id,menu_hold_item_id");
         assertThat(constraintNames("menu_hold_transition_audits", "FOREIGN KEY"))
-                .containsExactly("fk_menu_hold_transition_hold");
+                .as("append-only audit history must outlive the MenuHold aggregate")
+                .isEmpty();
         assertThat(constraintNames("menu_hold_transition_audits", "CHECK"))
                 .containsExactlyInAnyOrder(
                         "ck_menu_hold_transition_event_type",
@@ -880,6 +881,39 @@ class MenuHoldRuntimeIT {
         assertThat(indexColumns(
                 "menu_hold_transition_audits", "uk_menu_hold_transition_version"))
                 .isEqualTo("menu_hold_id,result_version");
+    }
+
+    @Test
+    @DisplayName("MenuHold aggregate 삭제 뒤에도 append-only 전이 감사 원장은 보존된다")
+    void deletingMenuHoldPreservesTransitionAuditHistory() {
+        transactions.execute(status -> bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status ->
+                service.create(command(reservation.getId(), 1, "audit-outlives-hold")));
+        Long holdId = jdbcTemplate.queryForObject(
+                "SELECT menu_hold_id FROM menu_holds WHERE reservation_id = ?",
+                Long.class,
+                reservation.getId());
+        Integer auditCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_hold_transition_audits WHERE menu_hold_id = ?",
+                Integer.class,
+                holdId);
+
+        assertThat(auditCount).isPositive();
+        assertThat(jdbcTemplate.update(
+                "DELETE FROM menu_hold_items WHERE menu_hold_id = ?", holdId)).isEqualTo(1);
+        assertThat(jdbcTemplate.update(
+                "DELETE FROM menu_holds WHERE menu_hold_id = ?", holdId)).isEqualTo(1);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_holds WHERE menu_hold_id = ?",
+                Integer.class,
+                holdId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_hold_transition_audits WHERE menu_hold_id = ?",
+                Integer.class,
+                holdId)).isEqualTo(auditCount);
     }
 
     @Test
