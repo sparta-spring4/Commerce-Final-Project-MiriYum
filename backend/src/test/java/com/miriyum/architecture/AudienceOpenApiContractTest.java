@@ -45,9 +45,19 @@ class AudienceOpenApiContractTest {
             "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}");
     private static final Set<String> WAITING_CONSUMER_PATHS = Set.of(
             "/api/v1/consumers/me/stores/{storeId}/waiting-availabilities",
+            "/api/v1/consumers/me/stores/{storeId}/waiting-location-proofs",
             "/api/v1/consumers/me/stores/{storeId}/waiting-teams",
+            "/api/v1/consumers/me/waiting-invitation-acceptances",
             "/api/v1/consumers/me/waiting-teams/current",
-            "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations");
+            "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/invitations",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/membership-departures",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/acceptances",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/rejections",
+            "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations");
     private static final String NOTIFICATION_HISTORY_PATH =
             "/api/v1/consumers/me/notifications";
     private static final String NOTIFICATION_EVENTS_PATH =

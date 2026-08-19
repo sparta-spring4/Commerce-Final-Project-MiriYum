@@ -217,7 +217,7 @@ public class WaitingReservationConversionService {
                 command.paymentId(),
                 command.finalReservationId(),
                 occurredAt);
-        if (memberships.deleteByWaitingTeamId(team.getId()) != 1L) {
+        if (memberships.deleteByWaitingTeamId(team.getId()) < 1L) {
             throw new ServiceException(
                     ReservationErrorCode.WAITING_ACTIVE_MEMBERSHIP_CONFLICT);
         }

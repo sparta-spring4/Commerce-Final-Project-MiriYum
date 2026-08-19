@@ -98,6 +98,82 @@ class WaitingMigrationTest {
     }
 
     @Test
+    @DisplayName("Flyway V61이 위치 증명과 일행 runtime 스키마를 적용한다")
+    void appliesLocationProofAndPartyRuntimeAsFlywayV61() {
+        Flyway flyway = Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .load();
+
+        flyway.migrate();
+
+        assertThat(flyway.info().applied())
+                .anyMatch(migration ->
+                        "61".equals(String.valueOf(migration.getVersion()))
+                                && "V61__create_waiting_location_party_runtime.sql"
+                                .equals(migration.getScript()));
+    }
+
+    @Test
+    @DisplayName("V61 위치 증명 원장은 판정 최소 정보만 저장하고 위치 원문 열을 만들지 않는다")
+    void locationProofLedgerDoesNotPersistRawLocation() throws SQLException {
+        migrate();
+
+        assertThat(queryStrings("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'waiting_location_proof_sessions'
+                ORDER BY ordinal_position
+                """)).contains(
+                "location_proof_session_id",
+                "consumer_account_id",
+                "store_id",
+                "purpose",
+                "result_category",
+                "accuracy_category",
+                "policy_version",
+                "store_coordinate_version",
+                "issued_at",
+                "judged_at",
+                "expires_at",
+                "consumed_at",
+                "consumed_waiting_team_id"
+        ).doesNotContain(
+                "latitude",
+                "longitude",
+                "distance_meters",
+                "accuracy_meters",
+                "measured_at"
+        );
+    }
+
+    @Test
+    @DisplayName("V61은 한 팀의 여러 계정을 허용하되 계정 전체 활성 membership은 한 건만 허용한다")
+    void allowsMultipleTeamMembersButKeepsAccountWideUniqueness() throws SQLException {
+        migrate();
+
+        try (Connection connection = connection()) {
+            connection.createStatement().execute("SET FOREIGN_KEY_CHECKS = 0");
+            connection.createStatement().executeUpdate("""
+                    INSERT INTO waiting_active_memberships (
+                        store_id, consumer_account_id, waiting_team_id, created_at
+                    ) VALUES
+                        (101, 201, 1001, UTC_TIMESTAMP(6)),
+                        (101, 202, 1001, UTC_TIMESTAMP(6))
+                    """);
+
+            assertThat(membershipCount(connection)).isEqualTo(2);
+            assertThatThrownBy(() -> connection.createStatement().executeUpdate("""
+                    INSERT INTO waiting_active_memberships (
+                        store_id, consumer_account_id, waiting_team_id, created_at
+                    ) VALUES (102, 201, 1002, UTC_TIMESTAMP(6))
+                    """))
+                    .isInstanceOf(SQLException.class)
+                    .hasMessageContaining("uk_waiting_active_memberships_consumer_account");
+        }
+    }
+
+    @Test
     @DisplayName("V54 입장 임박 사건 시각은 마이크로초 정밀도를 보존한다")
     void preservesEntryImminentEventTimestampPrecision() throws SQLException {
         migrate();
@@ -116,7 +192,7 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("V54까지 적용하면 Waiting 소유 테이블 열세 개만 존재한다")
+    @DisplayName("V61까지 적용하면 Waiting 소유 위치·일행 원장을 포함한 열일곱 개 테이블만 존재한다")
     void createsExactWaitingLedgerTableSet() throws SQLException {
         migrate();
 
@@ -127,8 +203,12 @@ class WaitingMigrationTest {
                 "waiting_closure_jobs",
                 "waiting_conversion_compensations",
                 "waiting_entry_imminent_events",
+                "waiting_location_proof_sessions",
+                "waiting_party_audits",
+                "waiting_party_invitations",
                 "waiting_queue_sequences",
                 "waiting_reception_windows",
+                "waiting_representative_transfer_offers",
                 "waiting_setting_audits",
                 "waiting_settings",
                 "waiting_status_events",
@@ -152,9 +232,19 @@ class WaitingMigrationTest {
                 "waiting_closure_jobs.store_id->stores.store_id",
                 "waiting_conversion_compensations.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_entry_imminent_events.waiting_team_id->waiting_teams.waiting_team_id",
+                "waiting_location_proof_sessions.consumed_waiting_team_id->waiting_teams.waiting_team_id",
+                "waiting_location_proof_sessions.consumer_account_id->consumer_accounts.consumer_account_id",
+                "waiting_location_proof_sessions.store_id->stores.store_id",
+                "waiting_party_audits.actor_consumer_account_id->consumer_accounts.consumer_account_id",
+                "waiting_party_audits.waiting_team_id->waiting_teams.waiting_team_id",
+                "waiting_party_invitations.accepted_by_consumer_account_id->consumer_accounts.consumer_account_id",
+                "waiting_party_invitations.inviter_consumer_account_id->consumer_accounts.consumer_account_id",
+                "waiting_party_invitations.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_queue_sequences.store_id->stores.store_id",
                 "waiting_reception_windows.opened_by_job_id->waiting_auto_open_jobs.waiting_auto_open_job_id",
                 "waiting_reception_windows.store_id->stores.store_id",
+                "waiting_representative_transfer_offers.from_consumer_account_id->consumer_accounts.consumer_account_id",
+                "waiting_representative_transfer_offers.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_setting_audits.store_id->stores.store_id",
                 "waiting_settings.store_id->stores.store_id",
                 "waiting_status_events.waiting_team_id->waiting_teams.waiting_team_id",
@@ -198,7 +288,10 @@ class WaitingMigrationTest {
         assertThat(uniqueIndexColumns()).contains(
                 "waiting_active_memberships.uk_waiting_active_memberships_consumer_account="
                         + "consumer_account_id",
-                "waiting_active_memberships.uk_waiting_active_memberships_team=waiting_team_id",
+                "waiting_party_audits.uk_waiting_party_audits_command=command_id",
+                "waiting_party_invitations.uk_waiting_party_invitations_token_hash=token_hash",
+                "waiting_representative_transfer_offers.uk_waiting_transfer_active_team="
+                        + "active_team_key",
                 "waiting_closure_job_items.uk_waiting_closure_job_items_job_team="
                         + "waiting_closure_job_id,waiting_team_id",
                 "waiting_closure_jobs.uk_waiting_closure_jobs_store_settings="
@@ -213,7 +306,9 @@ class WaitingMigrationTest {
         );
         assertThat(uniqueIndexColumns()).doesNotContain(
                 "waiting_active_memberships.uk_waiting_active_memberships_store_consumer="
-                        + "store_id,consumer_account_id");
+                        + "store_id,consumer_account_id",
+                "waiting_active_memberships.uk_waiting_active_memberships_team=waiting_team_id"
+        );
     }
 
     @Test
@@ -506,6 +601,7 @@ class WaitingMigrationTest {
 
         assertThat(nonUniqueIndexColumns()).contains(
                 "waiting_active_memberships.idx_waiting_active_memberships_store=store_id",
+                "waiting_active_memberships.idx_waiting_active_memberships_team=waiting_team_id",
                 "waiting_closure_job_items.idx_waiting_closure_job_items_claim="
                         + "waiting_closure_job_id,status,waiting_closure_job_item_id",
                 "waiting_closure_job_items.idx_waiting_closure_job_items_global_claim="
