@@ -79,6 +79,17 @@ export type RequestBodyOf<Op> = [JsonRequestBody<Op>] extends [never]
   ? { body?: never }
   : { body: JsonRequestBody<Op> }
 
+type MultipartRequestBody<Op> = Op extends {
+  requestBody: { content: { 'multipart/form-data': infer Body } }
+}
+  ? Body
+  : never
+
+/** multipart 요청도 OpenAPI에 선언된 operation에서만 허용한다. */
+export type MultipartOf<Op> = [MultipartRequestBody<Op>] extends [never]
+  ? { multipart?: never }
+  : { multipart: FormData }
+
 /**
  * client가 기본으로 좁혀 주는 성공 status다. 전부 application/json 본문을 가지며
  * 204를 선언한 operation은 없다.
@@ -122,3 +133,10 @@ export type CsrfOf<Op> = Op extends {
 }
   ? { csrfToken: string }
   : { csrfToken?: never }
+
+/** 본문 없는 204 성공은 해당 operation이 OpenAPI에 선언한 경우에만 허용한다. */
+export type NoContentOf<Op> = Op extends { responses: infer Responses }
+  ? 204 extends keyof Responses
+    ? { allowNoContent?: true }
+    : { allowNoContent?: never }
+  : { allowNoContent?: never }
