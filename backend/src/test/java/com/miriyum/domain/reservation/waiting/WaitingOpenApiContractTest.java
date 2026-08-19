@@ -245,8 +245,7 @@ class WaitingOpenApiContractTest {
             boolean storeScoped
     ) {
         assertThat(path)
-                .containsEntry("x-miriyum-runtime-status", "contract-only")
-                .containsEntry("x-miriyum-owner-issue", 250);
+                .doesNotContainKeys("x-miriyum-runtime-status", "x-miriyum-owner-issue");
         Map<String, Object> operation = map(path.get("get"));
         assertThat(list(operation.get("security")))
                 .containsExactly(Map.of("bearerAuth", List.of()));

@@ -80,8 +80,7 @@ class NotificationOpenApiContractTest {
 
         Map<String, Object> path = map(map(document.get("paths")).get(NOTIFICATION_EVENTS_PATH));
         assertThat(path)
-                .containsEntry("x-miriyum-runtime-status", "contract-only")
-                .containsEntry("x-miriyum-owner-issue", 250);
+                .doesNotContainKeys("x-miriyum-runtime-status", "x-miriyum-owner-issue");
 
         Map<String, Object> operation = map(path.get("get"));
         assertThat(list(operation.get("security")))
