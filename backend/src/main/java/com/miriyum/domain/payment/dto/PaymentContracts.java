@@ -255,6 +255,35 @@ public final class PaymentContracts {
     ) {
     }
 
+    /** Reservation에 공개하는 저장 환불 상태의 최소 스냅샷이다. */
+    public record StoreReservationRefundSnapshot(
+            String refundId,
+            long amountMinor,
+            RefundStatus status,
+            Instant requestedAt,
+            Instant completedAt
+    ) {
+    }
+
+    /** Reservation에 공개하는 저장 결제 상태이며 provider와 소비자 식별자는 포함하지 않는다. */
+    public record StoreReservationPaymentSnapshot(
+            String paymentId,
+            long amountMinor,
+            long refundedAmountMinor,
+            long refundableAmountMinor,
+            String currency,
+            PaymentStatus status,
+            PaymentAttemptStatus lastAttemptStatus,
+            Instant createdAt,
+            Instant paidAt,
+            Instant updatedAt,
+            List<StoreReservationRefundSnapshot> refunds
+    ) {
+        public StoreReservationPaymentSnapshot {
+            refunds = List.copyOf(refunds);
+        }
+    }
+
     public record PaymentResult(
             String paymentId,
             String reservationReferenceId,
