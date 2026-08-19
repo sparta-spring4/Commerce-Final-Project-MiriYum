@@ -120,3 +120,4 @@ Kafka, 범용 Outbox, 마이크로서비스, WebSocket과 검색 클러스터는
 - [ADR-006 JWT·Valkey 전환](adr/ADR-006-jwt-valkey-refresh-token.md)
 - [ADR-007 규칙 기반 통합 검색](adr/ADR-007-unified-search-mysql.md)
 - [ADR-009 MySQL 우선 LLM 개념 보완 검색](adr/ADR-009-hybrid-semantic-search-qdrant.md)
+- [ADR-010 Notification·Waiting 통합 SSE Runtime](adr/ADR-010-notification-waiting-sse-runtime.md)
