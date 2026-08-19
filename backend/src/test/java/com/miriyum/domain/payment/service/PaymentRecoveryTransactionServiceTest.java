@@ -1,0 +1,164 @@
+package com.miriyum.domain.payment.service;
+
+import static com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryKind.REFUND_RESULT_UNKNOWN;
+import static com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryRegistrationStatus.ALREADY_REGISTERED;
+import static com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryRegistrationStatus.NOT_REQUIRED;
+import static com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryRegistrationStatus.REGISTERED;
+import static com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoverySourceType.RESERVATION_DEPOSIT_REFUND;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.AcknowledgeManualRecoveryHandoffCommand;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ClaimManualRecoveryHandoffsCommand;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryRegistration;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RegisterManualRecoveryHandoffCommand;
+import com.miriyum.domain.payment.entity.Payment;
+import com.miriyum.domain.payment.entity.PaymentRecoveryHandoff;
+import com.miriyum.domain.payment.entity.PaymentRefund;
+import com.miriyum.domain.payment.repository.PaymentRecoveryHandoffRepository;
+import com.miriyum.domain.payment.repository.PaymentRefundRepository;
+import com.miriyum.domain.payment.repository.PaymentRepository;
+import com.miriyum.domain.payment.repository.ReservationDepositDispositionRepository;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Pageable;
+import org.springframework.test.util.ReflectionTestUtils;
+
+class PaymentRecoveryTransactionServiceTest {
+
+    private static final Instant NOW = Instant.parse("2026-08-19T01:00:00Z");
+    private static final String KEY = "550e8400-e29b-41d4-a716-446655440000";
+
+    private PaymentRecoveryHandoffRepository handoffs;
+    private PaymentRepository payments;
+    private PaymentRefundRepository refunds;
+    private ReservationDepositDispositionRepository dispositions;
+    private PaymentRecoveryTransactionService service;
+
+    @BeforeEach
+    void setUp() {
+        handoffs = mock(PaymentRecoveryHandoffRepository.class);
+        payments = mock(PaymentRepository.class);
+        refunds = mock(PaymentRefundRepository.class);
+        dispositions = mock(ReservationDepositDispositionRepository.class);
+        service = new PaymentRecoveryTransactionService(
+                handoffs, payments, refunds, dispositions,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    @Test
+    @DisplayName("결과 불명 환불 source는 Payment가 kind를 판정해 handoff 하나로 등록한다")
+    void registersUnknownRefund() {
+        Payment payment = paidPayment();
+        PaymentRefund refund = refund(payment);
+        refund.requireReconciliation(NOW.minusSeconds(5));
+        when(handoffs.findBySourceTypeAndSourceIdForUpdate(
+                RESERVATION_DEPOSIT_REFUND, "31")).thenReturn(Optional.empty());
+        when(payments.findByPaymentIdForUpdate("900000000000000001"))
+                .thenReturn(Optional.of(payment));
+        when(refunds.findByPayment_IdAndSourceEventIdForUpdate(
+                11L, "reservation:1:cancelled")).thenReturn(Optional.of(refund));
+        when(handoffs.saveAndFlush(any())).thenAnswer(invocation -> {
+            PaymentRecoveryHandoff saved = invocation.getArgument(0);
+            ReflectionTestUtils.setField(saved, "id", 21L);
+            return saved;
+        });
+
+        ManualRecoveryRegistration result = service.register(command());
+
+        assertThat(result.status()).isEqualTo(REGISTERED);
+        assertThat(result.handoffId()).isEqualTo("21");
+    }
+
+    @Test
+    @DisplayName("동일 등록 replay는 새 handoff 없이 기존 ID로 수렴한다")
+    void replaysMatchingRegistration() {
+        PaymentRecoveryHandoff existing = PaymentRecoveryHandoff.register(
+                RESERVATION_DEPOSIT_REFUND, "31", 11L,
+                "900000000000000001", "reservation:1:cancelled",
+                REFUND_RESULT_UNKNOWN, KEY, NOW.minusSeconds(1));
+        ReflectionTestUtils.setField(existing, "id", 21L);
+        when(handoffs.findBySourceTypeAndSourceIdForUpdate(
+                RESERVATION_DEPOSIT_REFUND, "31")).thenReturn(Optional.of(existing));
+
+        ManualRecoveryRegistration result = service.register(command());
+
+        assertThat(result).isEqualTo(new ManualRecoveryRegistration(
+                ALREADY_REGISTERED, "21"));
+    }
+
+    @Test
+    @DisplayName("이미 완료된 환불은 수동 사건 handoff를 만들지 않는다")
+    void skipsAlreadyCompletedRefund() {
+        Payment payment = paidPayment();
+        PaymentRefund refund = refund(payment);
+        refund.complete("cancel-1", NOW.minusSeconds(5));
+        when(handoffs.findBySourceTypeAndSourceIdForUpdate(
+                RESERVATION_DEPOSIT_REFUND, "31")).thenReturn(Optional.empty());
+        when(payments.findByPaymentIdForUpdate("900000000000000001"))
+                .thenReturn(Optional.of(payment));
+        when(refunds.findByPayment_IdAndSourceEventIdForUpdate(
+                11L, "reservation:1:cancelled")).thenReturn(Optional.of(refund));
+
+        assertThat(service.register(command()))
+                .isEqualTo(new ManualRecoveryRegistration(NOT_REQUIRED, null));
+    }
+
+    @Test
+    @DisplayName("claim과 acknowledgement는 handoff lease token을 보존한다")
+    void claimsAndAcknowledges() {
+        PaymentRecoveryHandoff handoff = PaymentRecoveryHandoff.register(
+                RESERVATION_DEPOSIT_REFUND, "31", 11L,
+                "900000000000000001", "reservation:1:cancelled",
+                REFUND_RESULT_UNKNOWN, KEY, NOW.minusSeconds(1));
+        ReflectionTestUtils.setField(handoff, "id", 21L);
+        when(handoffs.findClaimableForUpdate(any(), any(Pageable.class)))
+                .thenReturn(List.of(handoff));
+        when(handoffs.findByIdForUpdate(21L)).thenReturn(Optional.of(handoff));
+
+        var claims = service.claim(new ClaimManualRecoveryHandoffsCommand("intake-a", 10));
+        service.acknowledge(new AcknowledgeManualRecoveryHandoffCommand(
+                "21", "intake-a", claims.getFirst().claimToken(), "recovery-case-1"));
+
+        assertThat(handoff.getStatus()).isEqualTo(PaymentRecoveryHandoff.Status.ACKNOWLEDGED);
+        assertThat(handoff.getAdminCaseId()).isEqualTo("recovery-case-1");
+    }
+
+    private static RegisterManualRecoveryHandoffCommand command() {
+        return new RegisterManualRecoveryHandoffCommand(
+                RESERVATION_DEPOSIT_REFUND, "31", "900000000000000001",
+                "reservation:1:cancelled", KEY);
+    }
+
+    private static Payment paidPayment() {
+        Payment payment = Payment.prepare(
+                "900000000000000001", "RESERVATION_DEPOSIT", "1", 1L,
+                NOW.plusSeconds(3600),
+                "550e8400-e29b-41d4-a716-446655440010",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                101L, 300_000L, "KRW", "provider-payment-1",
+                "예약금", NOW.minusSeconds(100));
+        ReflectionTestUtils.setField(payment, "id", 11L);
+        payment.beginConfirmation(NOW.minusSeconds(90));
+        payment.markPaid("provider-transaction-1", NOW.minusSeconds(80));
+        return payment;
+    }
+
+    private static PaymentRefund refund(Payment payment) {
+        PaymentRefund refund = PaymentRefund.request(
+                "910000000000000001", payment, KEY,
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "reservation:1:cancelled", 100_000L,
+                "RESERVATION_CANCELLED", 1L, NOW.minusSeconds(20));
+        ReflectionTestUtils.setField(refund, "id", 12L);
+        return refund;
+    }
+}
