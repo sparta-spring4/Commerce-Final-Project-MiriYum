@@ -2,20 +2,24 @@ package com.miriyum.domain.payment.service;
 
 import com.miriyum.domain.payment.dto.PaymentMonitoringContracts;
 import com.miriyum.domain.payment.entity.Payment;
+import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.payment.repository.PaymentLedgerEntryRepository;
+import com.miriyum.domain.payment.repository.PaymentMonitoringSnapshotRepository;
 import com.miriyum.domain.payment.repository.PaymentRefundRepository;
-import com.miriyum.domain.payment.repository.PaymentRepository;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Pageable;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,20 +27,20 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class PaymentMonitoringQueryService {
 
-    private static final int SOURCE_FETCH_LIMIT = 100;
+    private static final int MAX_DETAIL_ROWS = 100;
     private static final String RESERVATION_DEPOSIT = "RESERVATION_DEPOSIT";
     private static final String WAITING_RESERVATION_DEPOSIT = "WAITING_RESERVATION_DEPOSIT";
 
-    private final PaymentRepository paymentRepository;
+    private final PaymentMonitoringSnapshotRepository snapshotRepository;
     private final PaymentLedgerEntryRepository ledgerRepository;
     private final PaymentRefundRepository refundRepository;
 
     public PaymentMonitoringQueryService(
-            PaymentRepository paymentRepository,
+            PaymentMonitoringSnapshotRepository snapshotRepository,
             PaymentLedgerEntryRepository ledgerRepository,
             PaymentRefundRepository refundRepository
     ) {
-        this.paymentRepository = paymentRepository;
+        this.snapshotRepository = snapshotRepository;
         this.ledgerRepository = ledgerRepository;
         this.refundRepository = refundRepository;
     }
@@ -44,30 +48,24 @@ public class PaymentMonitoringQueryService {
     public PaymentMonitoringContracts.ReferencePage findChangedCases(
             PaymentMonitoringContracts.ChangeQuery query
     ) {
-        Map<String, PaymentMonitoringContracts.CaseReference> byCase = new HashMap<>();
-        for (PaymentRepository.MonitoringSnapshot snapshot :
-                paymentRepository.findMonitoringChanges(
-                        query.changedFrom(), query.changedTo(), Pageable.ofSize(SOURCE_FETCH_LIMIT))) {
-            String caseId = caseId(snapshot);
-            if (caseId == null || snapshot.getUpdatedAt().isAfter(query.asOf())
-                    || (!query.sourceStatuses().isEmpty()
-                    && !query.sourceStatuses().contains(snapshot.getStatus().name()))) {
-                continue;
-            }
-            var candidate = new PaymentMonitoringContracts.CaseReference(
-                    caseId, snapshot.getUpdatedAt());
-            byCase.merge(caseId, candidate,
-                    (left, right) -> left.statusChangedAt().isAfter(right.statusChangedAt())
-                            ? left : right);
-        }
-        List<PaymentMonitoringContracts.CaseReference> items = byCase.values().stream()
-                .filter(reference -> afterSeek(reference, query.after()))
-                .sorted(Comparator.comparing(
-                                PaymentMonitoringContracts.CaseReference::statusChangedAt)
-                        .reversed()
-                        .thenComparing(PaymentMonitoringContracts.CaseReference::caseId,
-                                Comparator.reverseOrder()))
-                .limit(query.limit())
+        return sourceRead(() -> doFindChangedCases(query));
+    }
+
+    private PaymentMonitoringContracts.ReferencePage doFindChangedCases(
+            PaymentMonitoringContracts.ChangeQuery query
+    ) {
+        Long storeId = query.storeId() == null ? null : Long.valueOf(query.storeId());
+        LocalDateTime afterChangedAt = query.after() == null
+                ? null : utc(query.after().statusChangedAt());
+        String afterCaseId = query.after() == null ? null : query.after().caseId();
+        List<PaymentMonitoringSnapshotRepository.Snapshot> snapshots =
+                snapshotRepository.findChangedCases(
+                        utc(query.changedFrom()), utc(query.changedTo()), utc(query.asOf()),
+                        storeId, String.join(",", query.sourceStatuses()),
+                        afterChangedAt, afterCaseId, query.limit());
+        List<PaymentMonitoringContracts.CaseReference> items = snapshots.stream()
+                .map(snapshot -> new PaymentMonitoringContracts.CaseReference(
+                        snapshot.caseId(), snapshot.statusChangedAt()))
                 .toList();
         return new PaymentMonitoringContracts.ReferencePage(items, query.asOf(), query.asOf());
     }
@@ -75,32 +73,57 @@ public class PaymentMonitoringQueryService {
     public PaymentMonitoringContracts.BatchResult findCases(
             PaymentMonitoringContracts.BatchQuery query
     ) {
+        return sourceRead(() -> doFindCases(query));
+    }
+
+    private PaymentMonitoringContracts.BatchResult doFindCases(
+            PaymentMonitoringContracts.BatchQuery query
+    ) {
         ParsedCases parsed = parse(query.caseIds());
-        List<PaymentRepository.MonitoringSnapshot> snapshots =
-                paymentRepository.findMonitoringSnapshots(
-                        parsed.reservationReferences(), parsed.waitingReferences());
-        Map<String, PaymentRepository.MonitoringSnapshot> latest = snapshots.stream()
-                .filter(snapshot -> caseId(snapshot) != null
-                        && !snapshot.getCreatedAt().isAfter(query.asOf()))
+        List<PaymentMonitoringSnapshotRepository.Snapshot> snapshots = new ArrayList<>();
+        if (!parsed.reservationReferences().isEmpty()) {
+            snapshots.addAll(snapshotRepository.findLatestCases(
+                    RESERVATION_DEPOSIT, String.join(",", parsed.reservationReferences()),
+                    utc(query.asOf())));
+        }
+        if (!parsed.waitingReferences().isEmpty()) {
+            snapshots.addAll(snapshotRepository.findLatestCases(
+                    WAITING_RESERVATION_DEPOSIT, String.join(",", parsed.waitingReferences()),
+                    utc(query.asOf())));
+        }
+        Map<String, PaymentMonitoringSnapshotRepository.Snapshot> latest = snapshots.stream()
                 .collect(Collectors.toMap(
-                        PaymentMonitoringQueryService::caseId,
+                        PaymentMonitoringSnapshotRepository.Snapshot::caseId,
                         Function.identity(),
-                        (left, right) -> left.getUpdatedAt().isAfter(right.getUpdatedAt())
+                        (left, right) -> left.statusChangedAt().isAfter(right.statusChangedAt())
                                 ? left : right,
                         LinkedHashMap::new));
-        List<String> futurePaymentIds = latest.values().stream()
-                .filter(snapshot -> snapshot.getUpdatedAt().isAfter(query.asOf()))
-                .map(PaymentRepository.MonitoringSnapshot::getPaymentId)
-                .toList();
-        Map<String, List<PaymentLedgerEntryRepository.MonitoringEvent>> futureHistory =
-                events(futurePaymentIds);
+        Map<String, PaymentMonitoringSnapshotRepository.Existence> existing = new HashMap<>();
+        if (!parsed.reservationReferences().isEmpty()) {
+            snapshotRepository.findExistingCases(
+                            RESERVATION_DEPOSIT,
+                            String.join(",", parsed.reservationReferences()), utc(query.asOf()))
+                    .forEach(value -> existing.put(caseId(value), value));
+        }
+        if (!parsed.waitingReferences().isEmpty()) {
+            snapshotRepository.findExistingCases(
+                            WAITING_RESERVATION_DEPOSIT,
+                            String.join(",", parsed.waitingReferences()), utc(query.asOf()))
+                    .forEach(value -> existing.put(caseId(value), value));
+        }
 
         List<PaymentMonitoringContracts.SourceCell> cells = new ArrayList<>();
         for (String requested : query.caseIds()) {
-            PaymentRepository.MonitoringSnapshot snapshot = latest.get(requested);
-            if (snapshot == null) continue;
-            cells.add(cell(snapshot,
-                    futureHistory.getOrDefault(snapshot.getPaymentId(), List.of()), query.asOf()));
+            PaymentMonitoringSnapshotRepository.Snapshot snapshot = latest.get(requested);
+            if (snapshot != null) {
+                cells.add(cell(snapshot, query.asOf()));
+            } else if (existing.containsKey(requested)) {
+                cells.add(new PaymentMonitoringContracts.SourceCell(
+                        requested, null, query.asOf(), query.asOf(),
+                        PaymentMonitoringContracts.Completeness.UNAVAILABLE,
+                        PaymentMonitoringContracts.ReconciliationStatus.UNKNOWN,
+                        null));
+            }
         }
         return new PaymentMonitoringContracts.BatchResult(cells, query.asOf(), query.asOf());
     }
@@ -108,63 +131,62 @@ public class PaymentMonitoringQueryService {
     public Optional<PaymentMonitoringContracts.Detail> findCase(
             PaymentMonitoringContracts.DetailQuery query
     ) {
+        return sourceRead(() -> doFindCase(query));
+    }
+
+    private Optional<PaymentMonitoringContracts.Detail> doFindCase(
+            PaymentMonitoringContracts.DetailQuery query
+    ) {
         PaymentMonitoringContracts.BatchResult batch = findCases(
                 new PaymentMonitoringContracts.BatchQuery(query.asOf(), List.of(query.caseId())));
         if (batch.cells().isEmpty()) return Optional.empty();
         PaymentMonitoringContracts.SourceCell cell = batch.cells().getFirst();
+        if (cell.state() == null) {
+            return Optional.of(new PaymentMonitoringContracts.Detail(
+                    cell, List.of(), false, List.of(), false));
+        }
+        List<PaymentLedgerEntryRepository.MonitoringEvent> ledgerRows =
+                ledgerRepository.findMonitoringEvents(
+                        cell.state().paymentId(),
+                        query.asOf(),
+                        Pageable.ofSize(MAX_DETAIL_ROWS + 1));
+        boolean ledgerTruncated = ledgerRows.size() > MAX_DETAIL_ROWS;
         List<PaymentMonitoringContracts.LedgerEvent> ledger =
-                ledgerRepository.findMonitoringEvents(List.of(cell.paymentId())).stream()
-                        .filter(event -> !event.getOccurredAt().isAfter(query.asOf()))
+                ledgerRows.stream().limit(MAX_DETAIL_ROWS)
                         .map(event -> new PaymentMonitoringContracts.LedgerEvent(
                                 event.getType().name(), event.getAmountMinor(), event.getOccurredAt()))
                         .toList();
+        List<PaymentRefundRepository.MonitoringRefund> refundRows =
+                refundRepository.findMonitoringRefunds(
+                        cell.state().paymentId(),
+                        query.asOf(),
+                        Pageable.ofSize(MAX_DETAIL_ROWS + 1));
+        boolean refundsTruncated = refundRows.size() > MAX_DETAIL_ROWS;
         List<PaymentMonitoringContracts.Refund> refunds =
-                refundRepository.findMonitoringRefunds(List.of(cell.paymentId())).stream()
-                        .filter(refund -> !refund.getUpdatedAt().isAfter(query.asOf()))
+                refundRows.stream().limit(MAX_DETAIL_ROWS)
                         .map(refund -> new PaymentMonitoringContracts.Refund(
                                 refund.getStatus().name(), refund.getVersion(),
                                 refund.getAmountMinor(), refund.getRequestedAt(),
                                 refund.getCompletedAt()))
                         .toList();
-        return Optional.of(new PaymentMonitoringContracts.Detail(cell, ledger, refunds));
+        return Optional.of(new PaymentMonitoringContracts.Detail(
+                cell, ledger, ledgerTruncated, refunds, refundsTruncated));
     }
 
     private static PaymentMonitoringContracts.SourceCell cell(
-            PaymentRepository.MonitoringSnapshot snapshot,
-            List<PaymentLedgerEntryRepository.MonitoringEvent> history,
+            PaymentMonitoringSnapshotRepository.Snapshot snapshot,
             Instant asOf
     ) {
-        if (snapshot.getUpdatedAt().isAfter(asOf)) {
-            List<PaymentLedgerEntryRepository.MonitoringEvent> available = history.stream()
-                    .filter(event -> !event.getOccurredAt().isAfter(asOf)).toList();
-            Instant changedAt = available.isEmpty()
-                    ? snapshot.getCreatedAt() : available.getLast().getOccurredAt();
-            Instant historyFrom = available.isEmpty()
-                    ? snapshot.getCreatedAt() : available.getFirst().getOccurredAt();
-            return new PaymentMonitoringContracts.SourceCell(
-                    caseId(snapshot), snapshot.getPaymentId(), "UNAVAILABLE", 0,
-                    changedAt, asOf, asOf,
-                    PaymentMonitoringContracts.Completeness.UNAVAILABLE,
-                    PaymentMonitoringContracts.ReconciliationStatus.UNKNOWN,
-                    historyFrom, snapshot.getAmountMinor(), 0, snapshot.getCurrency());
-        }
         return new PaymentMonitoringContracts.SourceCell(
-                caseId(snapshot), snapshot.getPaymentId(), snapshot.getStatus().name(),
-                snapshot.getVersion(), snapshot.getUpdatedAt(), asOf, asOf,
+                snapshot.caseId(),
+                new PaymentMonitoringContracts.ConfirmedState(
+                        snapshot.paymentId(), snapshot.status().name(),
+                        snapshot.version(), snapshot.statusChangedAt(),
+                        snapshot.amountMinor(), snapshot.refundedAmountMinor(),
+                        snapshot.currency()),
+                asOf, asOf,
                 PaymentMonitoringContracts.Completeness.COMPLETE,
-                reconciliation(snapshot.getStatus()), snapshot.getCreatedAt(),
-                snapshot.getAmountMinor(), snapshot.getRefundedAmountMinor(),
-                snapshot.getCurrency());
-    }
-
-    private Map<String, List<PaymentLedgerEntryRepository.MonitoringEvent>> events(
-            List<String> paymentIds
-    ) {
-        if (paymentIds.isEmpty()) return Map.of();
-        return ledgerRepository.findMonitoringEvents(paymentIds).stream()
-                .collect(Collectors.groupingBy(
-                        PaymentLedgerEntryRepository.MonitoringEvent::getPaymentId,
-                        LinkedHashMap::new, Collectors.toList()));
+                reconciliation(snapshot.status()), snapshot.historyAvailableFrom());
     }
 
     private static PaymentMonitoringContracts.ReconciliationStatus reconciliation(
@@ -175,22 +197,12 @@ public class PaymentMonitoringQueryService {
                 : PaymentMonitoringContracts.ReconciliationStatus.MATCHED;
     }
 
-    private static String caseId(PaymentRepository.MonitoringSnapshot snapshot) {
-        return switch (snapshot.getSourceType()) {
-            case RESERVATION_DEPOSIT -> "reservation-hold:" + snapshot.getSourceReferenceId();
-            case WAITING_RESERVATION_DEPOSIT -> "waiting:" + snapshot.getSourceReferenceId();
-            default -> null;
+    private static String caseId(PaymentMonitoringSnapshotRepository.Existence existence) {
+        return switch (existence.sourceType()) {
+            case RESERVATION_DEPOSIT -> "reservation-hold:" + existence.sourceReferenceId();
+            case WAITING_RESERVATION_DEPOSIT -> "waiting:" + existence.sourceReferenceId();
+            default -> throw new IllegalArgumentException("unsupported payment source type");
         };
-    }
-
-    private static boolean afterSeek(
-            PaymentMonitoringContracts.CaseReference reference,
-            PaymentMonitoringContracts.Seek seek
-    ) {
-        return seek == null
-                || reference.statusChangedAt().isBefore(seek.statusChangedAt())
-                || (reference.statusChangedAt().equals(seek.statusChangedAt())
-                && reference.caseId().compareTo(seek.caseId()) < 0);
     }
 
     private static ParsedCases parse(List<String> caseIds) {
@@ -205,6 +217,22 @@ public class PaymentMonitoringQueryService {
 
     private static String reference(String caseId) {
         return caseId.substring(caseId.indexOf(':') + 1);
+    }
+
+    private static LocalDateTime utc(Instant value) {
+        return LocalDateTime.ofInstant(value, ZoneOffset.UTC);
+    }
+
+    private static <T> T sourceRead(Supplier<T> read) {
+        try {
+            return read.get();
+        } catch (DataAccessException failure) {
+            com.miriyum.global.exception.ServiceException unavailable =
+                    new com.miriyum.global.exception.ServiceException(
+                            PaymentErrorCode.MONITORING_SOURCE_UNAVAILABLE);
+            unavailable.addSuppressed(failure);
+            throw unavailable;
+        }
     }
 
     private record ParsedCases(

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add source-owned, time-bounded public monitoring DTO/services for Reservation, MenuHold, Payment, and Waiting, including a truthful MenuHold status ledger, without introducing an admin snapshot.
+**Goal:** Complete prerequisite #472 with source-owned, time-bounded public monitoring DTO/services for Reservation, MenuHold, Payment, and Waiting, including truthful MenuHold and Payment/Refund ledgers, without introducing an admin snapshot.
 
 **Architecture:** Each source domain owns its repositories and exposes only an immutable monitoring contract plus query service. Every query receives the same caller-supplied `asOf`; results carry `dataThrough`, raw `statusVersion`, completeness, reconciliation, and optional `historyAvailableFrom`. The later platform runtime depends only on these public services/DTOs.
 
@@ -12,13 +12,13 @@
 
 ## Global Constraints
 
-- Do not start until PR #448 is merged into `dev`. Fetch `origin/dev`, rebase this isolated branch, confirm V60 and V61 exist, and confirm V62 remains free.
+- Do not merge until PR #468 is merged into `dev`. Then fetch `origin/dev`, rebase this isolated branch, confirm V62 and V63 exist, and confirm reserved V64 and V65 remain free.
 - Recheck PR #459 before touching Payment or `ReservationDepositProcessRepository`; resolve contract changes against its merged form, never by copying a stale implementation.
 - Do not reference another source domain's Entity or Repository from a public monitoring query service. Cross-source correlation is expressed as string IDs in DTOs.
-- No admin-owned snapshot table, polling projection, or migration. V62 is source-owned MenuHold history only.
+- No admin-owned snapshot table or polling projection. V64 MenuHold and V65 Payment/Refund tables are source-owned history only.
 - Keep `MenuHoldTerminalService` pure. Write transition audits in the transactional runtime services that persist the state change.
 - Existing MenuHold rows receive one `BASELINE` event at migration time. Earlier history is `UNAVAILABLE`; never synthesize transitions.
-- Use the exact issue #280 allowlist. If a necessary path is absent, amend the issue before editing it.
+- Use the exact issue #472 allowlist. If a necessary path is absent, amend the issue before editing it.
 - Run only named unit tests and affected integration classes. Never run local `build`, `check`, full `integrationTest`, or all integration shards.
 
 ## Public Contract Shape
@@ -32,8 +32,10 @@ public record ChangeQuery(Instant asOf, Instant changedFrom, Instant changedTo,
 public record CaseReference(String caseId, long storeId, Instant statusChangedAt) {}
 public record ReferencePage(List<CaseReference> items, Instant asOf, Instant dataThrough) {}
 public record BatchQuery(Instant asOf, List<String> caseIds) {}
-public record SourceCell(String caseId, long storeId, Status status, long statusVersion,
-                         Instant statusChangedAt, Instant asOf, Instant dataThrough,
+public record ConfirmedState(Status status, long statusVersion,
+                             Instant statusChangedAt) {}
+public record SourceCell(String caseId, String storeId, ConfirmedState state,
+                         Instant asOf, Instant dataThrough,
                          Completeness completeness, ReconciliationStatus reconciliationStatus,
                          Instant historyAvailableFrom, Links links) {}
 public record BatchResult(Map<String, SourceCell> cases, Instant asOf, Instant dataThrough) {}
@@ -42,7 +44,7 @@ public record Transition(long resultVersion, Status before, Status after, Instan
 public record Detail(SourceCell cell, List<Transition> history, MaskedSubject subject) {}
 ```
 
-All constructors reject missing `dataThrough`, `dataThrough > asOf`, negative versions, blank IDs, duplicate case IDs, and unsorted history. Public service signatures are:
+All constructors reject missing `dataThrough`, `dataThrough > asOf`, negative confirmed versions, blank IDs, duplicate case IDs, and unsorted history. `UNAVAILABLE` requires `state=null` and cannot expose guessed store/link data from a later baseline. Public service signatures are:
 
 ```java
 ReferencePage findChangedCases(ChangeQuery query);
@@ -62,17 +64,17 @@ Optional<Detail> findCase(DetailQuery query);
 - Modify: `docs/specs/platform-operator-openapi.yaml`
 - Create: `backend/src/test/java/com/miriyum/domain/platformoperator/AdminMonitoringOpenApiContractTest.java`
 
-- [x] Verify #448 is merged, #459 state, V62 availability, clean worktree, and `git merge-base --is-ancestor origin/dev HEAD`; stop and report if any gate fails.
+- [x] Verify completed source prerequisites, reserve V64/V65 in #472, and confirm the isolated worktree; #468 remains the merge-order gate.
 - [x] Write `AdminMonitoringOpenApiContractTest` asserting the aggregate references `/api/v1/platform-operators/admin-monitoring/cases`, the list/detail schemas include `asOf`, `dataThrough`, per-source completeness and failures, and HTTP 200/400/401/403/404/503 contracts.
 - [x] Run `./gradlew test --tests com.miriyum.domain.platformoperator.AdminMonitoringOpenApiContractTest` and confirm RED because the paths/schemas do not exist.
 - [x] Add the approved case model, fixed ordering, 31-day filter bound, opaque cursor, masking, assignment, and partial-failure rules to the spec and OpenAPI; reference it from the platform aggregate.
 - [x] Re-run the named test and confirm GREEN.
 - [x] Commit: `docs(admin-monitoring): activate source contract specification`.
 
-### Task 2: Add the MenuHold V62 status ledger
+### Task 2: Add the MenuHold V64 status ledger
 
 **Files:**
-- Create: `backend/src/main/resources/db/migration/V62__add_menu_hold_monitoring_ledger.sql`
+- Create: `backend/src/main/resources/db/migration/V64__add_menu_hold_monitoring_ledger.sql`
 - Modify: `backend/src/main/java/com/miriyum/domain/menuhold/entity/MenuHold.java`
 - Create: `backend/src/main/java/com/miriyum/domain/menuhold/entity/MenuHoldTransitionAudit.java`
 - Create: `backend/src/main/java/com/miriyum/domain/menuhold/repository/MenuHoldTransitionAuditRepository.java`
@@ -133,15 +135,18 @@ Optional<Detail> findCase(DetailQuery query);
 **Files:**
 - Create: `backend/src/main/java/com/miriyum/domain/payment/dto/PaymentMonitoringContracts.java`
 - Create: `backend/src/main/java/com/miriyum/domain/payment/service/PaymentMonitoringQueryService.java`
+- Create: `backend/src/main/resources/db/migration/V65__add_payment_monitoring_ledgers.sql`
+- Modify: `backend/src/main/java/com/miriyum/domain/payment/dto/PaymentContracts.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/payment/entity/Payment.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/payment/repository/PaymentRepository.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/payment/repository/PaymentLedgerEntryRepository.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/payment/repository/PaymentRefundRepository.java`
 - Create: `backend/src/test/java/com/miriyum/domain/payment/contract/PaymentMonitoringPublicContractTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/payment/service/PaymentMonitoringQueryServiceTest.java`
 
-- [x] Rebase/check #459's current Payment contract and repository changes, then write tests for changed references, batch/detail, raw optimistic version, ledger `occurredAt`, refund reconciliation, and masked payment reference.
+- [x] Write tests for changed references, historical `asOf`, store filter, bounded batch/detail, raw optimistic version, refund reconciliation, and masked payment reference.
 - [x] Run both named tests and confirm RED.
-- [x] Implement the separate contract/query service and source projections; do not extend `PaymentContracts` or expose Payment entities.
+- [x] Add source-owned `storeId` to payment preparation, V65 append-only Payment/Refund snapshots, and the separate public query contract. Do not expose Payment entities.
 - [x] Re-run both tests and confirm GREEN.
 - [x] Commit: `feat(payment): expose public monitoring query contract`.
 
@@ -157,7 +162,7 @@ Optional<Detail> findCase(DetailQuery query);
 
 - [x] Write tests for `waiting:{waitingTeamId}`, raw version, as-of transition reconstruction, conversion correlation, data-through, masked subject, and deterministic seek ordering.
 - [x] Run both named tests and confirm RED.
-- [x] Implement source projections and the public service against the post-#448 schema.
+- [x] Implement source projections and the public service against the current Waiting schema.
 - [x] Re-run both tests and confirm GREEN.
 - [x] Commit: `feat(waiting): expose public monitoring query contract`.
 
@@ -165,7 +170,8 @@ Optional<Detail> findCase(DetailQuery query);
 
 **Files:** No additional files; this task verifies the allowlisted contract and service tests created above.
 
-- [ ] Run all four DTO contract tests, four query service tests, MenuHold ledger tests, and OpenAPI contract test; record exact commands/results. Do not broaden the suite.
+- [x] Run all four DTO contract tests, four query service tests, MenuHold ledger tests, and OpenAPI contract test; all targeted tests passed. Do not broaden the suite.
+- [x] Run the four source monitoring repository integration classes separately/targeted; equal-timestamp 101-row pagination, store filters, historical Payment `asOf`, bounded refund detail, and MenuHold append-only triggers passed on MySQL 8.0.40.
 - [ ] Run `git diff --check`, compare `git diff --name-only origin/dev...HEAD` with issue #280's source allowlist, and amend the issue before any discrepancy is committed.
 - [ ] Commit: `test(admin-monitoring): verify public source boundaries`.
 - [ ] Push only `feature/280-admin-monitoring-contracts` and open a draft PR to `dev`, explicitly marking the runtime PR blocked until merge and CI success.

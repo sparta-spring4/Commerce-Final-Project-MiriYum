@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.waiting.service;
 
 import com.miriyum.domain.reservation.waiting.dto.WaitingMonitoringContracts;
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
@@ -8,21 +9,22 @@ import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditR
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Pageable;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @Transactional(readOnly = true)
 public class WaitingMonitoringQueryService {
-
-    private static final int SOURCE_FETCH_LIMIT = 100;
 
     private final WaitingTeamRepository teamRepository;
     private final WaitingTransitionAuditRepository auditRepository;
@@ -38,16 +40,30 @@ public class WaitingMonitoringQueryService {
     public WaitingMonitoringContracts.ReferencePage findChangedCases(
             WaitingMonitoringContracts.ChangeQuery query
     ) {
+        return sourceRead(() -> doFindChangedCases(query));
+    }
+
+    private WaitingMonitoringContracts.ReferencePage doFindChangedCases(
+            WaitingMonitoringContracts.ChangeQuery query
+    ) {
         Long storeId = query.storeId() == null ? null : Long.parseLong(query.storeId());
+        boolean allStatuses = query.sourceStatuses().isEmpty();
+        java.util.Set<WaitingTeamStatus> statuses = allStatuses
+                ? EnumSet.allOf(WaitingTeamStatus.class)
+                : query.sourceStatuses().stream()
+                        .map(WaitingTeamStatus::valueOf)
+                        .collect(Collectors.toUnmodifiableSet());
         Map<String, WaitingMonitoringContracts.CaseReference> references = new LinkedHashMap<>();
         for (WaitingTransitionAuditRepository.MonitoringTransition transition :
                 auditRepository.findMonitoringChanges(
                         query.changedFrom(), query.changedTo(), storeId,
-                        Pageable.ofSize(SOURCE_FETCH_LIMIT))) {
+                        allStatuses, statuses,
+                        query.after() == null ? null : query.after().statusChangedAt(),
+                        query.after() == null ? null : query.after().caseId(),
+                        Pageable.ofSize(query.limit()))) {
             String caseId = caseId(transition.getWaitingTeamId());
             if ((!query.sourceStatuses().isEmpty()
-                    && !query.sourceStatuses().contains(transition.getAfterStatus().name()))
-                    || !afterSeek(transition.getOccurredAt(), caseId, query.after())) {
+                    && !query.sourceStatuses().contains(transition.getAfterStatus().name()))) {
                 continue;
             }
             references.putIfAbsent(caseId, new WaitingMonitoringContracts.CaseReference(
@@ -65,6 +81,12 @@ public class WaitingMonitoringQueryService {
     }
 
     public WaitingMonitoringContracts.BatchResult findCases(
+            WaitingMonitoringContracts.BatchQuery query
+    ) {
+        return sourceRead(() -> doFindCases(query));
+    }
+
+    private WaitingMonitoringContracts.BatchResult doFindCases(
             WaitingMonitoringContracts.BatchQuery query
     ) {
         List<Long> ids = query.caseIds().stream().map(WaitingMonitoringQueryService::id).toList();
@@ -86,6 +108,12 @@ public class WaitingMonitoringQueryService {
     }
 
     public Optional<WaitingMonitoringContracts.Detail> findCase(
+            WaitingMonitoringContracts.DetailQuery query
+    ) {
+        return sourceRead(() -> doFindCase(query));
+    }
+
+    private Optional<WaitingMonitoringContracts.Detail> doFindCase(
             WaitingMonitoringContracts.DetailQuery query
     ) {
         WaitingMonitoringContracts.BatchResult batch = findCases(
@@ -125,22 +153,22 @@ public class WaitingMonitoringQueryService {
                 .reduce((left, right) -> right).orElse(null);
         if (latest == null) {
             return new WaitingMonitoringContracts.SourceCell(
-                    caseId(team.getId()), team.getStoreId().toString(), "UNAVAILABLE", 0,
-                    team.getCreatedAt(), asOf, asOf,
+                    caseId(team.getId()), null, asOf, asOf,
                     WaitingMonitoringContracts.Completeness.UNAVAILABLE,
                     WaitingMonitoringContracts.ReconciliationStatus.UNKNOWN,
-                    first == null ? null : first.getOccurredAt(),
-                    team.getPartySize(), team.getQueueSequence(),
-                    new WaitingMonitoringContracts.Links(null, null));
+                    first == null ? null : first.getOccurredAt());
         }
         return new WaitingMonitoringContracts.SourceCell(
-                caseId(team.getId()), team.getStoreId().toString(),
-                latest.getAfterStatus().name(), latest.getResultVersion(),
-                latest.getOccurredAt(), asOf, asOf,
+                caseId(team.getId()),
+                new WaitingMonitoringContracts.ConfirmedState(
+                        team.getStoreId().toString(), latest.getAfterStatus().name(),
+                        latest.getResultVersion(), latest.getOccurredAt(),
+                        team.getPartySize(), team.getQueueSequence(),
+                        links(team, latest.getAfterStatus())),
+                asOf, asOf,
                 WaitingMonitoringContracts.Completeness.COMPLETE,
                 WaitingMonitoringContracts.ReconciliationStatus.MATCHED,
-                first == null ? null : first.getOccurredAt(),
-                team.getPartySize(), team.getQueueSequence(), links(team, latest.getAfterStatus()));
+                first == null ? null : first.getOccurredAt());
     }
 
     private static WaitingMonitoringContracts.Links links(
@@ -164,17 +192,6 @@ public class WaitingMonitoringQueryService {
                 source.getAfterStatus().name(), source.getOccurredAt());
     }
 
-    private static boolean afterSeek(
-            Instant occurredAt,
-            String caseId,
-            WaitingMonitoringContracts.Seek seek
-    ) {
-        return seek == null
-                || occurredAt.isBefore(seek.statusChangedAt())
-                || (occurredAt.equals(seek.statusChangedAt())
-                && caseId.compareTo(seek.caseId()) < 0);
-    }
-
     private static String caseId(long waitingTeamId) {
         return "waiting:" + waitingTeamId;
     }
@@ -185,5 +202,17 @@ public class WaitingMonitoringQueryService {
 
     private static String text(Long value) {
         return value == null ? null : value.toString();
+    }
+
+    private static <T> T sourceRead(Supplier<T> read) {
+        try {
+            return read.get();
+        } catch (DataAccessException failure) {
+            com.miriyum.global.exception.ServiceException unavailable =
+                    new com.miriyum.global.exception.ServiceException(
+                            ReservationErrorCode.WAITING_MONITORING_UNAVAILABLE);
+            unavailable.addSuppressed(failure);
+            throw unavailable;
+        }
     }
 }

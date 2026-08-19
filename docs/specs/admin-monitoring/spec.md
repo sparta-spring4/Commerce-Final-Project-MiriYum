@@ -75,8 +75,11 @@ ReservationHold가 최종 Reservation으로 전환돼도 공개 case ID는 바�
 
 - 관리자 snapshot·projection을 만들지 않고 원장 공개 조회 Service를 실시간 조합한다.
 - 플랫폼 운영자 runtime은 원 도메인 공개 Service/DTO만 import하며 Entity·Repository를 직접 참조하지 않는다.
-- MenuHold는 V62에서 source-owned `status_version`과 append-only 전이 원장을 추가한다.
-- V62 기존 행은 migration 시각의 `BASELINE` 하나만 기록한다. 그 이전 `asOf`는 `UNAVAILABLE`이며 과거 전이를 추측하지 않는다.
+- MenuHold는 선행 #472의 V64에서 source-owned `status_version`과 append-only 전이 원장을 추가한다.
+- V64 기존 행은 migration 시각의 `BASELINE` 하나만 기록한다. 그 이전 `asOf`는 `UNAVAILABLE`이며 과거 전이를 추측하지 않는다.
+- Payment·Refund는 선행 #472의 V65에서 source-owned `store_id` snapshot과 append-only monitoring 원장을 추가한다.
+- V65 baseline 이전 `asOf`는 현재 Payment·Refund 행으로 역추정하지 않으며, 확인된 상태가 없는 ledger cell의 `state`는 null이다.
+- Payment detail의 ledger·refund 이력은 각각 최대 100건이며 초과 여부를 truncation metadata로 보존한다.
 
 ## 선행 계약 단계
 

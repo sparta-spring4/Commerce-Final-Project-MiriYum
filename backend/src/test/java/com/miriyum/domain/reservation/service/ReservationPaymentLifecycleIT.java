@@ -855,6 +855,7 @@ class ReservationPaymentLifecycleIT {
                 ? paymentService.prepareReservationDeposit(
                         new PrepareReservationDepositCommand(
                                 String.valueOf(scenario.reservationId()),
+                                scenario.storeId(),
                                 scenario.consumerId(),
                                 AMOUNT_MINOR,
                                 "KRW",
@@ -864,6 +865,7 @@ class ReservationPaymentLifecycleIT {
                 : paymentService.prepareWaitingReservationDeposit(
                         new PrepareWaitingReservationDepositCommand(
                                 String.valueOf(scenario.reservationId()),
+                                scenario.storeId(),
                                 scenario.consumerId(),
                                 AMOUNT_MINOR,
                                 "KRW",
@@ -897,6 +899,7 @@ class ReservationPaymentLifecycleIT {
         PaymentPreparation preparation = paymentService.prepareReservationDeposit(
                 new PrepareReservationDepositCommand(
                         String.valueOf(scenario.reservationId()),
+                        scenario.storeId(),
                         scenario.consumerId(),
                         AMOUNT_MINOR,
                         "KRW",

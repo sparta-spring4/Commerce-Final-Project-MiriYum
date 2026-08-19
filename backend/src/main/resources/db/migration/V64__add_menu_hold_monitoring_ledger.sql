@@ -46,3 +46,23 @@ INSERT INTO menu_hold_transition_audits (
 )
 SELECT menu_hold_id, reservation_id, reservation_hold_id, 'BASELINE', NULL, status, 0, UTC_TIMESTAMP(6)
 FROM menu_holds;
+
+DELIMITER $$
+
+CREATE TRIGGER trg_menu_hold_transition_audits_no_update
+BEFORE UPDATE ON menu_hold_transition_audits
+FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'menu hold transition audits are immutable';
+END$$
+
+CREATE TRIGGER trg_menu_hold_transition_audits_no_delete
+BEFORE DELETE ON menu_hold_transition_audits
+FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'menu hold transition audits are immutable';
+END$$
+
+DELIMITER ;

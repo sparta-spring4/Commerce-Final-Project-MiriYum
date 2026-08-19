@@ -47,24 +47,40 @@ class WaitingMonitoringPublicContractTest {
     void sourceCellPreservesRawVersionDataThroughAndConversionLinks() {
         var links = new WaitingMonitoringContracts.Links("501", "101");
         var cell = new WaitingMonitoringContracts.SourceCell(
-                "waiting:7", "12", "RESERVATION_CONVERTED", 4,
-                AS_OF.minusSeconds(5), AS_OF, AS_OF,
+                "waiting:7",
+                new WaitingMonitoringContracts.ConfirmedState(
+                        "12", "RESERVATION_CONVERTED", 4,
+                        AS_OF.minusSeconds(5), 3, 18, links),
+                AS_OF, AS_OF,
                 WaitingMonitoringContracts.Completeness.COMPLETE,
                 WaitingMonitoringContracts.ReconciliationStatus.MATCHED,
-                AS_OF.minusSeconds(60), 3, 18, links);
+                AS_OF.minusSeconds(60));
 
-        assertThat(cell.statusVersion()).isEqualTo(4);
-        assertThat(cell.links()).isEqualTo(links);
-        assertThat(Arrays.stream(cell.getClass().getRecordComponents())
+        assertThat(cell.state().statusVersion()).isEqualTo(4);
+        assertThat(cell.state().links()).isEqualTo(links);
+        assertThat(Arrays.stream(cell.state().getClass().getRecordComponents())
                 .map(RecordComponent::getName))
                 .doesNotContain("consumerAccountId", "actorId", "reason");
         assertThatThrownBy(() -> new WaitingMonitoringContracts.SourceCell(
-                "waiting:7", "12", "CALLED", 1,
-                AS_OF, AS_OF, AS_OF.plusSeconds(1),
+                "waiting:7",
+                new WaitingMonitoringContracts.ConfirmedState(
+                        "12", "CALLED", 1, AS_OF, 3, 18, links),
+                AS_OF, AS_OF.plusSeconds(1),
                 WaitingMonitoringContracts.Completeness.COMPLETE,
                 WaitingMonitoringContracts.ReconciliationStatus.MATCHED,
-                AS_OF.minusSeconds(60), 3, 18, links))
+                AS_OF.minusSeconds(60)))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void unavailableCellCannotFabricateRawWaitingState() {
+        var cell = new WaitingMonitoringContracts.SourceCell(
+                "waiting:7", null, AS_OF, AS_OF,
+                WaitingMonitoringContracts.Completeness.UNAVAILABLE,
+                WaitingMonitoringContracts.ReconciliationStatus.UNKNOWN,
+                AS_OF.plusSeconds(1));
+
+        assertThat(cell.state()).isNull();
     }
 
     @Test
@@ -84,11 +100,13 @@ class WaitingMonitoringPublicContractTest {
 
     private static WaitingMonitoringContracts.SourceCell cell() {
         return new WaitingMonitoringContracts.SourceCell(
-                "waiting:7", "12", "CALLED", 1,
-                AS_OF.minusSeconds(30), AS_OF, AS_OF,
+                "waiting:7",
+                new WaitingMonitoringContracts.ConfirmedState(
+                        "12", "CALLED", 1, AS_OF.minusSeconds(30),
+                        3, 18, new WaitingMonitoringContracts.Links(null, null)),
+                AS_OF, AS_OF,
                 WaitingMonitoringContracts.Completeness.COMPLETE,
                 WaitingMonitoringContracts.ReconciliationStatus.MATCHED,
-                AS_OF.minusSeconds(60), 3, 18,
-                new WaitingMonitoringContracts.Links(null, null));
+                AS_OF.minusSeconds(60));
     }
 }

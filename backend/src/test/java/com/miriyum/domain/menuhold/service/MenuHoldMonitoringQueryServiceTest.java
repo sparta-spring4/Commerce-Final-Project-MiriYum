@@ -1,6 +1,7 @@
 package com.miriyum.domain.menuhold.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 
 import com.miriyum.domain.menuhold.dto.MenuHoldMonitoringContracts;
@@ -10,9 +11,13 @@ import com.miriyum.domain.menuhold.entity.MenuHoldStatus;
 import com.miriyum.domain.menuhold.entity.MenuHoldTransitionAudit;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
 import com.miriyum.domain.menuhold.repository.MenuHoldTransitionAuditRepository;
+import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -22,6 +27,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
@@ -58,8 +64,9 @@ class MenuHoldMonitoringQueryServiceTest {
 
     @Test
     void changedCasesDeduplicateByStableReservationHoldCaseAndApplySeek() {
-        given(auditRepository.findByOccurredAtBetweenOrderByOccurredAtDescIdDesc(
-                AS_OF.minusSeconds(7200), AS_OF, Pageable.ofSize(16)))
+        given(auditRepository.findMonitoringChanges(
+                AS_OF.minusSeconds(7200), AS_OF, 12L, false,
+                Set.of(MenuHoldStatus.CONFIRMED), null, null, Pageable.ofSize(2)))
                 .willReturn(List.of(confirmed, created));
 
         MenuHoldMonitoringContracts.ReferencePage page = service.findChangedCases(
@@ -88,9 +95,9 @@ class MenuHoldMonitoringQueryServiceTest {
                         beforeConfirmation, List.of("reservation-hold:91")));
 
         assertThat(result.cells()).singleElement().satisfies(cell -> {
-            assertThat(cell.sourceStatus()).isEqualTo("ACTIVE");
-            assertThat(cell.statusVersion()).isZero();
-            assertThat(cell.statusChangedAt()).isEqualTo(CREATED_AT);
+            assertThat(cell.state().sourceStatus()).isEqualTo("ACTIVE");
+            assertThat(cell.state().statusVersion()).isZero();
+            assertThat(cell.state().statusChangedAt()).isEqualTo(CREATED_AT);
             assertThat(cell.links().reservationId()).isNull();
             assertThat(cell.links().reservationHoldId()).isEqualTo("91");
         });
@@ -113,7 +120,9 @@ class MenuHoldMonitoringQueryServiceTest {
 
         assertThat(cell.completeness())
                 .isEqualTo(MenuHoldMonitoringContracts.Completeness.UNAVAILABLE);
-        assertThat(cell.sourceStatus()).isEqualTo("UNAVAILABLE");
+        assertThat(cell.state()).isNull();
+        assertThat(cell.storeId()).isNull();
+        assertThat(cell.links()).isNull();
         assertThat(cell.historyAvailableFrom()).isEqualTo(CREATED_AT);
     }
 
@@ -135,5 +144,57 @@ class MenuHoldMonitoringQueryServiceTest {
                         org.assertj.core.groups.Tuple.tuple(1L, "CONFIRMED"));
         assertThat(detail.items()).containsExactly(
                 new MenuHoldMonitoringContracts.Item("77", "아메리카노", 2));
+    }
+
+    @Test
+    void sourceFailureIsTypedAndCannotMasqueradeAsEmptyPage() {
+        given(auditRepository.findMonitoringChanges(
+                AS_OF.minusSeconds(60), AS_OF, null, true,
+                Set.of(MenuHoldStatus.values()), null, null, Pageable.ofSize(20)))
+                .willThrow(new DataAccessResourceFailureException("menu hold unavailable"));
+
+        assertThatThrownBy(() -> service.findChangedCases(
+                new MenuHoldMonitoringContracts.ChangeQuery(
+                        AS_OF, AS_OF.minusSeconds(60), AS_OF, null, Set.of(), null, 20)))
+                .isInstanceOfSatisfying(ServiceException.class, failure ->
+                        assertThat(failure.getErrorCode()).isEqualTo(
+                                MenuHoldErrorCode.MONITORING_SOURCE_UNAVAILABLE));
+    }
+
+    @Test
+    void postAsOfHoldIsAbsentFromBatchAndDetail() {
+        Instant beforeCreation = CREATED_AT.minusSeconds(1);
+        ReflectionTestUtils.setField(
+                hold, "createdAt", LocalDateTime.ofInstant(CREATED_AT, ZoneOffset.UTC));
+        given(holdRepository.findAllByReservationHoldIdIn(List.of(91L)))
+                .willReturn(List.of(hold));
+        given(holdRepository.findAllByReservationIdInAndReservationHoldIdIsNull(List.of()))
+                .willReturn(List.of());
+        given(holdRepository.findByReservationHoldId(91L)).willReturn(Optional.of(hold));
+
+        assertThat(service.findCases(new MenuHoldMonitoringContracts.BatchQuery(
+                beforeCreation, List.of("reservation-hold:91"))).cells()).isEmpty();
+        assertThat(service.findCase(new MenuHoldMonitoringContracts.DetailQuery(
+                beforeCreation, "reservation-hold:91"))).isEmpty();
+    }
+
+    @Test
+    void preBaselineDetailDoesNotExposeCurrentItemsOrLinks() {
+        Instant beforeBaseline = CREATED_AT.minusSeconds(1);
+        ReflectionTestUtils.setField(
+                hold, "createdAt",
+                LocalDateTime.ofInstant(CREATED_AT.minusSeconds(60), ZoneOffset.UTC));
+        given(holdRepository.findByReservationHoldId(91L)).willReturn(Optional.of(hold));
+        given(auditRepository.findByMenuHold_IdInOrderByMenuHold_IdAscResultVersionAsc(
+                List.of(55L))).willReturn(List.of(created, confirmed));
+
+        MenuHoldMonitoringContracts.Detail detail = service.findCase(
+                new MenuHoldMonitoringContracts.DetailQuery(
+                        beforeBaseline, "reservation-hold:91")).orElseThrow();
+
+        assertThat(detail.cell().completeness())
+                .isEqualTo(MenuHoldMonitoringContracts.Completeness.UNAVAILABLE);
+        assertThat(detail.cell().links()).isNull();
+        assertThat(detail.items()).isEmpty();
     }
 }

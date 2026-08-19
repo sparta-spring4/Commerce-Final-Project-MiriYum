@@ -33,7 +33,7 @@
 
 1. 선행 공개 계약 PR
    - `feature/280-admin-monitoring-contracts`
-   - #414와 #448이 `dev`에 병합돼 V60·V61이 확정된 뒤 최신 `origin/dev`를 반영한다.
+   - 선행 #472는 #468의 V62·V63이 `dev`에 병합된 뒤 최신 `origin/dev`를 반영한다.
    - 활성 spec과 contract-only OpenAPI를 먼저 확정한다.
    - 각 원 도메인이 소유하는 최소 공개 조회 Service, scalar DTO, 오류 의미, contract·service 테스트를 추가한다.
    - 관리자 HTTP runtime과 cross-domain 조합은 추가하지 않는다.
@@ -79,9 +79,9 @@ contract     query      query      contract
 
 실제 스키마 대조 결과 `menu_holds`에는 현재 `status`, `created_at`, `updated_at`만 있고 상태 version과 append-only 전이 이력이 없다. `ACTIVE → RECONCILIATION_REQUIRED → CONFIRMED → FULFILLED`처럼 여러 번 전이할 수 있으므로 현재 행만으로 과거 `asOf` 상태와 당시 version을 재구성할 수 없다. 따라서 관리자 snapshot은 만들지 않되, MenuHold 소유 원장을 보강하는 migration은 필요하다.
 
-2026-08-19 기준 열린 PR #414와 #448이 각각 V60과 V61을 점유한다. 두 PR이 `dev`에 병합된 뒤 선행 공개 계약 PR을 최신 `origin/dev`에 맞추고 `V62__add_menu_hold_monitoring_ledger.sql`을 추가한다. V60·V61이 정리되기 전에는 V62 파일을 만들거나 선행 PR을 병합하지 않는다.
+선행 #472는 #468이 예약한 V62·V63 이후 번호를 사용한다. #468이 `dev`에 병합된 뒤 선행 공개 계약 PR을 최신 `origin/dev`에 맞추고 `V64__add_menu_hold_monitoring_ledger.sql`과 `V65__add_payment_monitoring_ledgers.sql`을 적용한다. #468 전에는 선행 PR을 병합하지 않는다.
 
-V62는 다음만 추가한다.
+V64는 다음만 추가한다.
 
 - `menu_holds.status_version BIGINT NOT NULL DEFAULT 0`과 비음수 제약
 - `menu_hold_transition_audits` append-only 테이블
@@ -90,6 +90,8 @@ V62는 다음만 추가한다.
 - `(menu_hold_id, result_version)` 유일 제약과 `occurred_at` 조회 인덱스
 
 기존 MenuHold 행은 migration 실행 시각에 현재 상태와 version 0인 `BASELINE` 사건 하나만 기록한다. 이전 상태를 추측해 backfill하지 않는다. `asOf`가 첫 baseline보다 이르면 MenuHold cell은 `UNAVAILABLE`이고 `historyAvailableFrom`에 baseline 시각을 제공한다. 신규 생성은 version 0인 `CREATED`, 이후 상태 전이는 성공 version의 `TRANSITION` 사건을 기존 업무 transaction 안에서 기록한다.
+
+V65는 Payment의 source-owned `store_id` snapshot을 backfill하고 Payment·Refund append-only monitoring snapshot을 추가한다. 기존 행은 migration 시각의 `BASELINE`만 기록하며, 그 이전 상태는 현재 행으로 추측하지 않는다.
 
 ## 4. 사건 중심 통합 모델
 
@@ -156,22 +158,21 @@ Reservation 사건의 안정적인 공개 `caseId`는 생성 경로에 따라 �
 | Waiting | `CANCELLED`, `CLOSED_BY_STORE` | `CANCELLED` |
 | Waiting | `NO_SHOW` | `NO_SHOW` |
 
-응답은 공통 상태와 함께 원본 `sourceStatus`를 항상 보존한다. 새 원본 상태가 추가됐는데 명시적 매핑이 없으면 임의 상태로 내리지 않고 해당 원장을 `PARTIAL` 또는 `UNAVAILABLE`로 처리하며 오류 코드를 남긴다.
+확인 가능한 원장은 공통 상태와 함께 원본 `sourceStatus`를 보존한다. 새 원본 상태가 추가됐는데 명시적 매핑이 없으면 임의 상태로 내리지 않고 해당 원장을 `PARTIAL` 또는 `UNAVAILABLE`로 처리하며 오류 코드를 남긴다. 이력이 확인되지 않는 `UNAVAILABLE` cell은 원본 상태를 만들지 않고 `state=null`이다.
 
 ### 4.3 원장 메타데이터
 
 각 원장 cell은 다음 필드를 독립적으로 갖는다.
 
 - `source`: `RESERVATION`, `RESERVATION_HOLD`, `MENU_HOLD`, `PAYMENT`, `WAITING`
-- `sourceStatus`: 공개 계약의 원본 상태 문자열 또는 공개 enum
-- `statusVersion`: 원장 상태의 단조 증가 version
+- `state`: 확인된 경우에만 존재하며 `sourceStatus`, 단조 증가 `statusVersion`, `statusChangedAt`을 포함한다. `UNAVAILABLE`이면 null이다.
 - `asOf`: 통합 요청이 확정한 기준 시각
 - `dataThrough`: 원장이 확정적으로 반영한 마지막 시각
 - `completeness`: `COMPLETE`, `DELAYED`, `PARTIAL`, `UNAVAILABLE`
 - `reconciliationStatus`: `MATCHED`, `REQUIRED`, `UNKNOWN`
 - 실패한 경우 `errorCode`, `retryable`
 
-원장별 `statusVersion`은 원본의 0 기반 또는 1 기반 의미를 바꾸지 않는다. 중앙 사건 배정 계약은 양수 version만 허용하므로 통합 사건의 `caseVersion`은 주 Reservation·ReservationHold·Waiting 원장의 `statusVersion + 1`로 정의한다. 이 값은 원본 version보다 정확히 1 크고 단조 증가하며, 원본 version 0도 유효한 사건 배정 version 1로 변환한다.
+확인된 원장별 `statusVersion`은 원본의 0 기반 또는 1 기반 의미를 바꾸지 않는다. 중앙 사건 배정 계약은 양수 version만 허용하므로 통합 사건의 `caseVersion`은 확인된 주 Reservation·ReservationHold·Waiting 원장의 `statusVersion + 1`로 정의한다. 이 값은 원본 version보다 정확히 1 크고 단조 증가하며, 원본 version 0도 유효한 사건 배정 version 1로 변환한다. 주 원장 상태가 확인되지 않으면 사건을 성공 행으로 만들지 않는다.
 
 ## 5. 공개 원 도메인 계약
 
@@ -353,16 +354,14 @@ JWT claim의 role 또는 permission을 그대로 신뢰하지 않고 `OperatorAu
 
 - #277과 #281은 열려 있으나 대응하는 열린 PR은 없다.
 - #459는 Payment 공개 조회 계약과 관련된 `PaymentContracts`, `PaymentService`, `PaymentRepository`를 변경한다.
-- #414는 Flyway V60을 변경한다.
-- #448은 Flyway V61과 Waiting runtime 파일을 변경한다.
+- #468은 Flyway V62·V63과 Payment recovery 경로를 변경한다.
 
 대응 원칙:
 
 - Admin OpenAPI는 feature 파일이 소유하고 aggregate는 `$ref` 한 줄만 추가한다.
 - Payment 모니터링 DTO와 Service는 별도 파일로 분리한다.
-- Waiting 파일을 수정하기 전 #448의 병합 여부와 최신 `dev`를 다시 확인한다.
-- #414와 #448이 `dev`에 병합된 뒤에만 최신 `origin/dev` 기준 V62 MenuHold migration을 작성한다.
-- 선행 PR push 전과 runtime worktree 생성 전에 열린 PR 파일과 migration 최고 번호를 다시 검사한다. V62가 다른 작업에 점유됐으면 편집 전에 #280 allowlist와 파일명을 다음 가용 번호로 갱신한다.
+- #468이 `dev`에 병합된 뒤에만 선행 #472를 최신 `origin/dev`에 rebase해 병합한다.
+- 선행 PR push 전과 runtime worktree 생성 전에 열린 PR 파일과 migration 최고 번호를 다시 검사한다. V64·V65가 다른 작업에 점유됐으면 편집 전에 #472 allowlist와 파일명을 다음 가용 번호로 갱신한다.
 
 ## 11. TDD와 검증
 
@@ -374,7 +373,7 @@ JWT claim의 role 또는 permission을 그대로 신뢰하지 않고 `OperatorAu
 2. `asOf`, seek, 상태 version, 대사·완전성, not-found와 unavailable 의미의 Service test를 먼저 실패시킨다.
 3. MenuHold migration contract test에서 status version, append-only audit, baseline과 유일 제약을 먼저 실패시킨다.
 4. MenuHold 생성·전이 Service test에서 같은 transaction의 `CREATED`·`TRANSITION` audit과 replay 무기록을 먼저 실패시킨다.
-5. V62와 MenuHold write-path 원장을 구현한다.
+5. V64 MenuHold와 V65 Payment·Refund source-owned 원장을 구현한다.
 6. 최소 공개 DTO와 Service를 구현한다.
 7. 필요한 source-owned Repository 조회만 추가한다.
 8. OpenAPI contract-only schema와 공개 DTO 의미를 대조한다.
@@ -403,7 +402,7 @@ JWT claim의 role 또는 permission을 그대로 신뢰하지 않고 `OperatorAu
 
 - Waiting 호출·입장·취소 같은 상태 변경 명령
 - 결제 복구, 환불, 보상, provider 재조회
-- 관리자 전용 snapshot·projection과 V62 MenuHold 전이 원장 외 migration
+- 관리자 전용 snapshot·projection과 V64 MenuHold·V65 Payment/Refund source-owned 원장 외 migration
 - 민감 원문 조회 또는 마스킹 해제
 - 조회 전용 재인증과 업무 감사 event 쓰기
 - 프론트엔드 모니터링 화면
@@ -411,6 +410,6 @@ JWT claim의 role 또는 permission을 그대로 신뢰하지 않고 `OperatorAu
 
 ## 13. 롤백과 운영 위험
 
-선행 계약 PR은 기존 공개 계약을 깨지 않지만 MenuHold 상태 version과 append-only 전이 원장을 추가한다. runtime PR은 신규 GET endpoint와 조합 Service만 추가한다. 기능 롤백은 플랫폼 운영자 endpoint를 비활성화하고 runtime PR을 revert하는 방식으로 수행한다. V62가 적용된 DB에서는 컬럼과 감사 테이블을 삭제하는 down migration을 실행하지 않고, 사용하지 않는 호환 스키마로 남겨 기존 MenuHold 쓰기 흐름을 유지한다.
+선행 계약 PR은 기존 공개 계약을 깨지 않지만 MenuHold 상태 version과 Payment·Refund source-owned snapshot 원장을 추가한다. runtime PR은 신규 GET endpoint와 조합 Service만 추가한다. 기능 롤백은 플랫폼 운영자 endpoint를 비활성화하고 runtime PR을 revert하는 방식으로 수행한다. V64·V65가 적용된 DB에서는 컬럼과 감사 테이블을 삭제하는 down migration을 실행하지 않고, 사용하지 않는 호환 스키마로 남긴다.
 
-주요 남은 위험은 V62 이전 MenuHold 이력이 존재하지 않는다는 점이다. baseline 이전 요청은 명시적으로 `UNAVAILABLE`이고, baseline 이후부터만 정확한 `asOf`를 지원한다. 다른 원장의 Repository와 append-only 이력도 구현 계획에서 다시 대조하며, 재구성 불가능한 원장을 발견하면 현재 상태로 폴백하지 않는 것이 이 설계의 필수 안전 경계다.
+주요 남은 위험은 V64 이전 MenuHold와 V65 이전 Payment·Refund 이력이 존재하지 않는다는 점이다. baseline 이전 요청은 명시적으로 `UNAVAILABLE`이고, baseline 이후부터만 정확한 `asOf`를 지원한다. 재구성 불가능한 원장을 발견하면 현재 상태로 폴백하지 않는 것이 이 설계의 필수 안전 경계다.

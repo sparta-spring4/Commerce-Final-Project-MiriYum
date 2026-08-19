@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -15,6 +16,8 @@ import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
 import com.miriyum.domain.reservation.entity.ReservationHoldTransitionAudit;
 import com.miriyum.domain.reservation.entity.ReservationNoShowAudit;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import com.miriyum.domain.reservation.repository.ReservationCheckInAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
 import com.miriyum.domain.reservation.repository.ReservationFulfillmentAuditRepository;
@@ -32,6 +35,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 @ExtendWith(MockitoExtension.class)
 class ReservationMonitoringQueryServiceTest {
@@ -127,13 +131,12 @@ class ReservationMonitoringQueryServiceTest {
         given(link.getReservationHoldId()).willReturn(91L);
         given(link.getFinalReservationId()).willReturn(101L);
         given(reservationRepository.findMonitoringChanges(
-                AS_OF.minusSeconds(3600), AS_OF, null, Pageable.ofSize(100)))
+                AS_OF.minusSeconds(3600), AS_OF, null, false, "NO_SHOW",
+                null, null, Pageable.ofSize(20)))
                 .willReturn(List.of(reservation));
-        given(holdAuditRepository.findByOccurredAtBetweenOrderByOccurredAtDescIdDesc(
-                AS_OF.minusSeconds(3600), AS_OF, Pageable.ofSize(100)))
-                .willReturn(List.of());
-        given(checkInAuditRepository.findByOccurredAtBetweenOrderByOccurredAtDescIdDesc(
-                AS_OF.minusSeconds(3600), AS_OF, Pageable.ofSize(100)))
+        given(checkInAuditRepository.findMonitoringChanges(
+                AS_OF.minusSeconds(3600), AS_OF, null, false, "NO_SHOW",
+                null, null, Pageable.ofSize(20)))
                 .willReturn(List.of());
         given(processRepository.findMonitoringLinks(List.of(), List.of(101L)))
                 .willReturn(List.of(link));
@@ -145,6 +148,22 @@ class ReservationMonitoringQueryServiceTest {
 
         assertThat(page.items()).containsExactly(new ReservationMonitoringContracts.CaseReference(
                 "reservation-hold:91", "12", TERMINAL));
+    }
+
+    @Test
+    void sourceFailureIsTypedAndCannotMasqueradeAsEmptyPage() {
+        given(reservationRepository.findMonitoringChanges(
+                AS_OF.minusSeconds(60), AS_OF, null, true,
+                "CANCELLED,CONFIRMED,FULFILLED,NO_SHOW",
+                null, null, Pageable.ofSize(20)))
+                .willThrow(new DataAccessResourceFailureException("reservation unavailable"));
+
+        assertThatThrownBy(() -> service.findChangedCases(
+                new ReservationMonitoringContracts.ChangeQuery(
+                        AS_OF, AS_OF.minusSeconds(60), AS_OF, null, Set.of(), null, 20)))
+                .isInstanceOfSatisfying(ServiceException.class, failure ->
+                        assertThat(failure.getErrorCode()).isEqualTo(
+                                ReservationErrorCode.RESERVATION_MONITORING_UNAVAILABLE));
     }
 
     @Test

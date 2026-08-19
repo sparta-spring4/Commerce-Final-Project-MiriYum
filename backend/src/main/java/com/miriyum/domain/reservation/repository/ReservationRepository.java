@@ -22,27 +22,64 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
     List<Reservation> findAllByIdIn(List<Long> reservationIds);
 
     @Query(value = """
-            SELECT r.*
-              FROM reservations r
-             WHERE (:storeId IS NULL OR r.store_id = :storeId)
-               AND r.created_at <= :changedTo
-               AND (
-                    r.created_at BETWEEN :changedFrom AND :changedTo
-                    OR r.cancelled_at BETWEEN :changedFrom AND :changedTo
-                    OR r.fulfilled_at BETWEEN :changedFrom AND :changedTo
-                    OR r.no_show_at BETWEEN :changedFrom AND :changedTo
+            WITH candidates AS (
+                SELECT r.*,
+                       COALESCE(
+                           CONCAT('reservation-hold:', p.reservation_hold_id),
+                           CONCAT('reservation:', r.reservation_id)
+                       ) AS monitoring_case_id,
+                       GREATEST(
+                           IF(r.created_at BETWEEN :changedFrom AND :changedTo,
+                              r.created_at, TIMESTAMP('1000-01-01 00:00:00')),
+                           IF(r.cancelled_at BETWEEN :changedFrom AND :changedTo,
+                              r.cancelled_at, TIMESTAMP('1000-01-01 00:00:00')),
+                           IF(r.fulfilled_at BETWEEN :changedFrom AND :changedTo,
+                              r.fulfilled_at, TIMESTAMP('1000-01-01 00:00:00')),
+                           IF(r.no_show_at BETWEEN :changedFrom AND :changedTo,
+                              r.no_show_at, TIMESTAMP('1000-01-01 00:00:00'))
+                       ) AS monitoring_changed_at
+                  FROM reservations r
+                  LEFT JOIN reservation_deposit_processes p
+                    ON p.final_reservation_id = r.reservation_id
+                 WHERE (:storeId IS NULL OR r.store_id = :storeId)
+                   AND r.created_at <= :changedTo
+                   AND (
+                        r.created_at BETWEEN :changedFrom AND :changedTo
+                        OR r.cancelled_at BETWEEN :changedFrom AND :changedTo
+                        OR r.fulfilled_at BETWEEN :changedFrom AND :changedTo
+                        OR r.no_show_at BETWEEN :changedFrom AND :changedTo
+                   )
+            )
+            SELECT candidates.*
+              FROM candidates
+             WHERE (
+                    :allStatuses = TRUE
+                    OR FIND_IN_SET(
+                        CASE
+                            WHEN no_show_at = monitoring_changed_at THEN 'NO_SHOW'
+                            WHEN fulfilled_at = monitoring_changed_at THEN 'FULFILLED'
+                            WHEN cancelled_at = monitoring_changed_at THEN 'CANCELLED'
+                            ELSE 'CONFIRMED'
+                        END,
+                        :statusesCsv
+                    ) > 0
                )
-             ORDER BY GREATEST(
-                    r.created_at,
-                    COALESCE(r.cancelled_at, r.created_at),
-                    COALESCE(r.fulfilled_at, r.created_at),
-                    COALESCE(r.no_show_at, r.created_at)) DESC,
-                    r.reservation_id DESC
+               AND (
+                    :afterChangedAt IS NULL
+                    OR monitoring_changed_at < :afterChangedAt
+                    OR (monitoring_changed_at = :afterChangedAt
+                        AND monitoring_case_id < :afterCaseId)
+               )
+             ORDER BY monitoring_changed_at DESC, monitoring_case_id DESC
             """, nativeQuery = true)
     List<Reservation> findMonitoringChanges(
             @Param("changedFrom") Instant changedFrom,
             @Param("changedTo") Instant changedTo,
             @Param("storeId") Long storeId,
+            @Param("allStatuses") boolean allStatuses,
+            @Param("statusesCsv") String statusesCsv,
+            @Param("afterChangedAt") Instant afterChangedAt,
+            @Param("afterCaseId") String afterCaseId,
             Pageable pageable);
 
     @Query("""

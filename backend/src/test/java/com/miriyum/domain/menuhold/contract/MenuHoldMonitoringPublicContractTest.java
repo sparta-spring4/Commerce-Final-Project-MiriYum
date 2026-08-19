@@ -51,21 +51,46 @@ class MenuHoldMonitoringPublicContractTest {
         Instant baseline = AS_OF.minusSeconds(120);
         MenuHoldMonitoringContracts.SourceCell cell =
                 new MenuHoldMonitoringContracts.SourceCell(
-                        "reservation-hold:91", "12", "ACTIVE", 0,
-                        baseline, AS_OF, baseline,
+                        "reservation-hold:91", "12",
+                        new MenuHoldMonitoringContracts.ConfirmedState("ACTIVE", 0, baseline),
+                        AS_OF, baseline,
                         MenuHoldMonitoringContracts.Completeness.DELAYED,
                         MenuHoldMonitoringContracts.ReconciliationStatus.MATCHED,
                         baseline,
                         new MenuHoldMonitoringContracts.Links("101", "91"));
 
-        assertThat(cell.statusVersion()).isZero();
+        assertThat(cell.state().statusVersion()).isZero();
         assertThat(cell.historyAvailableFrom()).isEqualTo(baseline);
         assertThatThrownBy(() -> new MenuHoldMonitoringContracts.SourceCell(
-                "reservation-hold:91", "12", "ACTIVE", 0,
-                baseline, AS_OF, AS_OF.plusSeconds(1),
+                "reservation-hold:91", "12",
+                new MenuHoldMonitoringContracts.ConfirmedState("ACTIVE", 0, baseline),
+                AS_OF, AS_OF.plusSeconds(1),
                 MenuHoldMonitoringContracts.Completeness.COMPLETE,
                 MenuHoldMonitoringContracts.ReconciliationStatus.MATCHED,
                 baseline, cell.links()))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void unavailableCellCannotFabricateRawStateOrExposeFutureCorrelation() {
+        MenuHoldMonitoringContracts.SourceCell unavailable =
+                new MenuHoldMonitoringContracts.SourceCell(
+                        "reservation-hold:91", null, null,
+                        AS_OF, AS_OF,
+                        MenuHoldMonitoringContracts.Completeness.UNAVAILABLE,
+                        MenuHoldMonitoringContracts.ReconciliationStatus.UNKNOWN,
+                        AS_OF.plusSeconds(1), null);
+
+        assertThat(unavailable.state()).isNull();
+        assertThat(unavailable.storeId()).isNull();
+        assertThat(unavailable.links()).isNull();
+        assertThatThrownBy(() -> new MenuHoldMonitoringContracts.SourceCell(
+                "reservation-hold:91", "12",
+                new MenuHoldMonitoringContracts.ConfirmedState("ACTIVE", 0, AS_OF),
+                AS_OF, AS_OF,
+                MenuHoldMonitoringContracts.Completeness.UNAVAILABLE,
+                MenuHoldMonitoringContracts.ReconciliationStatus.UNKNOWN,
+                AS_OF, new MenuHoldMonitoringContracts.Links(null, "91")))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -93,8 +118,10 @@ class MenuHoldMonitoringPublicContractTest {
 
     private static MenuHoldMonitoringContracts.SourceCell cell() {
         return new MenuHoldMonitoringContracts.SourceCell(
-                "reservation-hold:91", "12", "CONFIRMED", 1,
-                AS_OF.minusSeconds(5), AS_OF, AS_OF,
+                "reservation-hold:91", "12",
+                new MenuHoldMonitoringContracts.ConfirmedState(
+                        "CONFIRMED", 1, AS_OF.minusSeconds(5)),
+                AS_OF, AS_OF,
                 MenuHoldMonitoringContracts.Completeness.COMPLETE,
                 MenuHoldMonitoringContracts.ReconciliationStatus.MATCHED,
                 AS_OF.minusSeconds(10),

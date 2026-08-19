@@ -191,21 +191,14 @@ components:
     AdminMonitoringReconciliationStatus:
       type: string
       enum: [MATCHED, REQUIRED, UNKNOWN]
-    AdminMonitoringLedgerCell:
+    AdminMonitoringLedgerState:
       type: object
       additionalProperties: false
       required:
-        - source
         - sourceStatus
         - statusVersion
         - statusChangedAt
-        - asOf
-        - dataThrough
-        - completeness
-        - reconciliationStatus
       properties:
-        source:
-          $ref: "#/components/schemas/AdminMonitoringSource"
         sourceStatus:
           type: string
         statusVersion:
@@ -215,6 +208,24 @@ components:
         statusChangedAt:
           type: string
           format: date-time
+    AdminMonitoringLedgerCell:
+      type: object
+      additionalProperties: false
+      required:
+        - source
+        - state
+        - asOf
+        - dataThrough
+        - completeness
+        - reconciliationStatus
+      properties:
+        source:
+          $ref: "#/components/schemas/AdminMonitoringSource"
+        state:
+          oneOf:
+            - $ref: "#/components/schemas/AdminMonitoringLedgerState"
+            - type: "null"
+          description: UNAVAILABLE이면 null이며 원본 상태·version·시각을 추측하지 않는다.
         asOf:
           type: string
           format: date-time

@@ -93,35 +93,52 @@ public final class WaitingMonitoringContracts {
         }
     }
 
-    public record SourceCell(
-            String caseId,
+    public record ConfirmedState(
             String storeId,
             String sourceStatus,
             long statusVersion,
             Instant statusChangedAt,
-            Instant asOf,
-            Instant dataThrough,
-            Completeness completeness,
-            ReconciliationStatus reconciliationStatus,
-            Instant historyAvailableFrom,
             int partySize,
             long queueSequence,
             Links links
     ) {
-        public SourceCell {
-            requireCaseId(caseId);
+        public ConfirmedState {
             requirePositiveId(storeId, "storeId");
             requireText(sourceStatus, "sourceStatus");
             if (statusVersion < 0 || partySize < 1 || queueSequence < 1) {
                 throw new IllegalArgumentException("invalid version, party size, or queue sequence");
             }
             requireInstant(statusChangedAt, "statusChangedAt");
+            if (links == null) {
+                throw new IllegalArgumentException("links are required");
+            }
+        }
+    }
+
+    public record SourceCell(
+            String caseId,
+            ConfirmedState state,
+            Instant asOf,
+            Instant dataThrough,
+            Completeness completeness,
+            ReconciliationStatus reconciliationStatus,
+            Instant historyAvailableFrom
+    ) {
+        public SourceCell {
+            requireCaseId(caseId);
             validateBoundary(asOf, dataThrough);
-            if (statusChangedAt.isAfter(dataThrough)) {
+            if (state != null && state.statusChangedAt().isAfter(dataThrough)) {
                 throw new IllegalArgumentException("statusChangedAt must not exceed dataThrough");
             }
-            if (completeness == null || reconciliationStatus == null || links == null) {
+            if (completeness == null || reconciliationStatus == null) {
                 throw new IllegalArgumentException("source metadata is required");
+            }
+            if (completeness == Completeness.UNAVAILABLE && state != null) {
+                throw new IllegalArgumentException(
+                        "unavailable cells must not expose unconfirmed waiting state");
+            }
+            if (completeness != Completeness.UNAVAILABLE && state == null) {
+                throw new IllegalArgumentException("available cells require confirmed state");
             }
             if (completeness == Completeness.COMPLETE && !asOf.equals(dataThrough)) {
                 throw new IllegalArgumentException("complete data must reach asOf");

@@ -9,6 +9,7 @@ import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
 import com.miriyum.domain.reservation.entity.ReservationHoldTransitionAudit;
 import com.miriyum.domain.reservation.entity.ReservationNoShowAudit;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationCheckInAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
 import com.miriyum.domain.reservation.repository.ReservationFulfillmentAuditRepository;
@@ -19,22 +20,23 @@ import com.miriyum.domain.reservation.repository.ReservationRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Pageable;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @Transactional(readOnly = true)
 public class ReservationMonitoringQueryService {
-
-    private static final int SOURCE_FETCH_LIMIT = 100;
 
     private final ReservationRepository reservationRepository;
     private final ReservationHoldRepository holdRepository;
@@ -65,16 +67,45 @@ public class ReservationMonitoringQueryService {
     public ReservationMonitoringContracts.ReferencePage findChangedCases(
             ReservationMonitoringContracts.ChangeQuery query
     ) {
-        Pageable page = Pageable.ofSize(SOURCE_FETCH_LIMIT);
+        return sourceRead(() -> doFindChangedCases(query));
+    }
+
+    private ReservationMonitoringContracts.ReferencePage doFindChangedCases(
+            ReservationMonitoringContracts.ChangeQuery query
+    ) {
+        Pageable page = Pageable.ofSize(query.limit());
         Long storeId = query.storeId() == null ? null : Long.parseLong(query.storeId());
-        List<Reservation> reservations = reservationRepository.findMonitoringChanges(
-                query.changedFrom(), query.changedTo(), storeId, page);
+        boolean allStatuses = query.sourceStatuses().isEmpty();
+        java.util.Set<ReservationStatus> reservationStatuses = statuses(
+                query.sourceStatuses(), ReservationStatus.class);
+        java.util.Set<ReservationHoldStatus> holdStatuses = statuses(
+                query.sourceStatuses(), ReservationHoldStatus.class);
+        Instant afterChangedAt = query.after() == null
+                ? null : query.after().statusChangedAt();
+        String afterCaseId = query.after() == null ? null : query.after().caseId();
+        List<Reservation> reservations = !allStatuses && reservationStatuses.isEmpty()
+                ? List.of()
+                : reservationRepository.findMonitoringChanges(
+                        query.changedFrom(), query.changedTo(), storeId, allStatuses,
+                        reservationStatuses.stream().map(Enum::name).sorted()
+                                .collect(Collectors.joining(",")),
+                        afterChangedAt, afterCaseId, page);
         List<ReservationHoldTransitionAudit> holdAudits =
-                holdAuditRepository.findByOccurredAtBetweenOrderByOccurredAtDescIdDesc(
-                        query.changedFrom(), query.changedTo(), page);
+                !allStatuses && holdStatuses.isEmpty()
+                        ? List.of()
+                        : holdAuditRepository.findMonitoringChanges(
+                                query.changedFrom(), query.changedTo(), storeId, allStatuses,
+                                allStatuses ? EnumSet.allOf(ReservationHoldStatus.class)
+                                        : holdStatuses,
+                                afterChangedAt, afterCaseId, page);
         List<ReservationCheckInAudit> checkIns =
-                checkInAuditRepository.findByOccurredAtBetweenOrderByOccurredAtDescIdDesc(
-                        query.changedFrom(), query.changedTo(), page);
+                !allStatuses && reservationStatuses.isEmpty()
+                        ? List.of()
+                        : checkInAuditRepository.findMonitoringChanges(
+                                query.changedFrom(), query.changedTo(), storeId, allStatuses,
+                                reservationStatuses.stream().map(Enum::name).sorted()
+                                        .collect(Collectors.joining(",")),
+                                afterChangedAt, afterCaseId, page);
 
         List<Long> finalIds = new ArrayList<>(reservations.stream().map(Reservation::getId).toList());
         checkIns.stream().map(ReservationCheckInAudit::getReservationId).forEach(finalIds::add);
@@ -87,14 +118,14 @@ public class ReservationMonitoringQueryService {
 
         Map<String, ReservationMonitoringContracts.CaseReference> candidates = new HashMap<>();
         for (Reservation reservation : reservations) {
-            ReservationState state = reservationState(reservation, query.asOf());
-            if (state == null || !matches(query.sourceStatuses(), state.status())) continue;
+            ReservationState state = reservationChange(
+                    reservation, query.changedFrom(), query.changedTo());
+            if (state == null) continue;
             putLatest(candidates, new ReservationMonitoringContracts.CaseReference(
                     caseId(holdByFinal.get(reservation.getId()), reservation.getId()),
                     reservation.getStoreId().toString(), state.changedAt()));
         }
         for (ReservationHoldTransitionAudit audit : holdAudits) {
-            if (!matches(query.sourceStatuses(), audit.getAfterStatus().name())) continue;
             ReservationHold hold = holdRepository.findById(audit.getReservationHoldId()).orElse(null);
             if (hold == null || (storeId != null && !hold.getStoreId().equals(storeId))) continue;
             putLatest(candidates, new ReservationMonitoringContracts.CaseReference(
@@ -102,14 +133,12 @@ public class ReservationMonitoringQueryService {
                     hold.getStoreId().toString(), audit.getOccurredAt()));
         }
         for (ReservationCheckInAudit audit : checkIns) {
-            if (!matches(query.sourceStatuses(), audit.getAfterStatus().name())) continue;
             putLatest(candidates, new ReservationMonitoringContracts.CaseReference(
                     caseId(holdByFinal.get(audit.getReservationId()), audit.getReservationId()),
                     audit.getStoreId().toString(), audit.getOccurredAt()));
         }
 
         List<ReservationMonitoringContracts.CaseReference> result = candidates.values().stream()
-                .filter(reference -> afterSeek(reference, query.after()))
                 .sorted(Comparator.comparing(
                                 ReservationMonitoringContracts.CaseReference::statusChangedAt)
                         .reversed()
@@ -122,6 +151,12 @@ public class ReservationMonitoringQueryService {
     }
 
     public ReservationMonitoringContracts.BatchResult findCases(
+            ReservationMonitoringContracts.BatchQuery query
+    ) {
+        return sourceRead(() -> doFindCases(query));
+    }
+
+    private ReservationMonitoringContracts.BatchResult doFindCases(
             ReservationMonitoringContracts.BatchQuery query
     ) {
         ParsedIds ids = parse(query.caseIds());
@@ -161,6 +196,12 @@ public class ReservationMonitoringQueryService {
     }
 
     public Optional<ReservationMonitoringContracts.Detail> findCase(
+            ReservationMonitoringContracts.DetailQuery query
+    ) {
+        return sourceRead(() -> doFindCase(query));
+    }
+
+    private Optional<ReservationMonitoringContracts.Detail> doFindCase(
             ReservationMonitoringContracts.DetailQuery query
     ) {
         if (query.caseId().startsWith("reservation-hold:")) {
@@ -342,6 +383,54 @@ public class ReservationMonitoringQueryService {
         return new ReservationState("CONFIRMED", 0L, reservation.getCreatedAt());
     }
 
+    private static ReservationState reservationChange(
+            Reservation reservation,
+            Instant changedFrom,
+            Instant changedTo
+    ) {
+        List<ReservationState> changes = new ArrayList<>();
+        addChange(changes, "CONFIRMED", 0L, reservation.getCreatedAt(), changedFrom, changedTo);
+        addChange(changes, "CANCELLED", 1L, reservation.getCancelledAt(), changedFrom, changedTo);
+        addChange(changes, "FULFILLED", 1L, reservation.getFulfilledAt(), changedFrom, changedTo);
+        addChange(changes, "NO_SHOW", 1L, reservation.getNoShowAt(), changedFrom, changedTo);
+        return changes.stream().max(Comparator
+                .comparing(ReservationState::changedAt)
+                .thenComparingInt(state -> statusPriority(state.status())))
+                .orElse(null);
+    }
+
+    private static void addChange(
+            List<ReservationState> changes,
+            String status,
+            long version,
+            Instant changedAt,
+            Instant changedFrom,
+            Instant changedTo
+    ) {
+        if (changedAt != null && !changedAt.isBefore(changedFrom) && !changedAt.isAfter(changedTo)) {
+            changes.add(new ReservationState(status, version, changedAt));
+        }
+    }
+
+    private static int statusPriority(String status) {
+        return switch (status) {
+            case "NO_SHOW" -> 3;
+            case "FULFILLED" -> 2;
+            case "CANCELLED" -> 1;
+            default -> 0;
+        };
+    }
+
+    private static <E extends Enum<E>> java.util.Set<E> statuses(
+            java.util.Set<String> requested,
+            Class<E> type
+    ) {
+        if (requested.isEmpty()) return EnumSet.allOf(type);
+        return java.util.Arrays.stream(type.getEnumConstants())
+                .filter(value -> requested.contains(value.name()))
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
     private static void putLatest(
             Map<String, ReservationMonitoringContracts.CaseReference> target,
             ReservationMonitoringContracts.CaseReference candidate) {
@@ -354,21 +443,24 @@ public class ReservationMonitoringQueryService {
         return expected.isEmpty() || expected.contains(status);
     }
 
-    private static boolean afterSeek(
-            ReservationMonitoringContracts.CaseReference reference,
-            ReservationMonitoringContracts.Seek seek) {
-        return seek == null
-                || reference.statusChangedAt().isBefore(seek.statusChangedAt())
-                || (reference.statusChangedAt().equals(seek.statusChangedAt())
-                && reference.caseId().compareTo(seek.caseId()) < 0);
-    }
-
     private static String caseId(Long holdId, Long reservationId) {
         return holdId != null ? "reservation-hold:" + holdId : "reservation:" + reservationId;
     }
 
     private static long id(String caseId) {
         return Long.parseLong(caseId.substring(caseId.indexOf(':') + 1));
+    }
+
+    private static <T> T sourceRead(Supplier<T> read) {
+        try {
+            return read.get();
+        } catch (DataAccessException failure) {
+            com.miriyum.global.exception.ServiceException unavailable =
+                    new com.miriyum.global.exception.ServiceException(
+                            ReservationErrorCode.RESERVATION_MONITORING_UNAVAILABLE);
+            unavailable.addSuppressed(failure);
+            throw unavailable;
+        }
     }
 
     private static ParsedIds parse(List<String> caseIds) {

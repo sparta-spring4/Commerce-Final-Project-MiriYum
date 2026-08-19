@@ -4,26 +4,29 @@ import com.miriyum.domain.menuhold.dto.MenuHoldMonitoringContracts;
 import com.miriyum.domain.menuhold.entity.MenuHold;
 import com.miriyum.domain.menuhold.entity.MenuHoldStatus;
 import com.miriyum.domain.menuhold.entity.MenuHoldTransitionAudit;
+import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
 import com.miriyum.domain.menuhold.repository.MenuHoldTransitionAuditRepository;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Pageable;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @Transactional(readOnly = true)
 public class MenuHoldMonitoringQueryService {
-
-    private static final int MAX_TRANSITIONS_PER_CASE = 8;
 
     private final MenuHoldRepository holdRepository;
     private final MenuHoldTransitionAuditRepository auditRepository;
@@ -39,18 +42,33 @@ public class MenuHoldMonitoringQueryService {
     public MenuHoldMonitoringContracts.ReferencePage findChangedCases(
             MenuHoldMonitoringContracts.ChangeQuery query
     ) {
-        int fetchSize = Math.multiplyExact(query.limit(), MAX_TRANSITIONS_PER_CASE);
+        return sourceRead(() -> doFindChangedCases(query));
+    }
+
+    private MenuHoldMonitoringContracts.ReferencePage doFindChangedCases(
+            MenuHoldMonitoringContracts.ChangeQuery query
+    ) {
+        boolean allStatuses = query.sourceStatuses().isEmpty();
+        java.util.Set<MenuHoldStatus> statuses = allStatuses
+                ? EnumSet.allOf(MenuHoldStatus.class)
+                : query.sourceStatuses().stream()
+                        .map(MenuHoldStatus::valueOf)
+                        .collect(Collectors.toUnmodifiableSet());
         List<MenuHoldTransitionAudit> changes =
-                auditRepository.findByOccurredAtBetweenOrderByOccurredAtDescIdDesc(
-                        query.changedFrom(), query.changedTo(), Pageable.ofSize(fetchSize));
+                auditRepository.findMonitoringChanges(
+                        query.changedFrom(), query.changedTo(),
+                        query.storeId() == null ? null : Long.parseLong(query.storeId()),
+                        allStatuses, statuses,
+                        query.after() == null ? null : query.after().statusChangedAt(),
+                        query.after() == null ? null : query.after().caseId(),
+                        Pageable.ofSize(query.limit()));
         LinkedHashMap<String, MenuHoldMonitoringContracts.CaseReference> references =
                 new LinkedHashMap<>();
         for (MenuHoldTransitionAudit audit : changes) {
             String caseId = caseId(audit.getReservationHoldId(), audit.getReservationId());
             if (caseId == null
                     || !matchesStore(query.storeId(), audit.getMenuHold().getStoreId())
-                    || !matchesStatus(query.sourceStatuses(), audit.getAfterStatus())
-                    || !isAfterSeek(audit.getOccurredAt(), caseId, query.after())) {
+                    || !matchesStatus(query.sourceStatuses(), audit.getAfterStatus())) {
                 continue;
             }
             references.putIfAbsent(caseId, new MenuHoldMonitoringContracts.CaseReference(
@@ -68,6 +86,12 @@ public class MenuHoldMonitoringQueryService {
     public MenuHoldMonitoringContracts.BatchResult findCases(
             MenuHoldMonitoringContracts.BatchQuery query
     ) {
+        return sourceRead(() -> doFindCases(query));
+    }
+
+    private MenuHoldMonitoringContracts.BatchResult doFindCases(
+            MenuHoldMonitoringContracts.BatchQuery query
+    ) {
         ParsedCaseIds parsed = parse(query.caseIds());
         List<MenuHold> holds = new ArrayList<>();
         holds.addAll(holdRepository.findAllByReservationHoldIdIn(parsed.reservationHoldIds()));
@@ -82,6 +106,7 @@ public class MenuHoldMonitoringQueryService {
         List<MenuHoldMonitoringContracts.SourceCell> cells = query.caseIds().stream()
                 .map(byCaseId::get)
                 .filter(java.util.Objects::nonNull)
+                .filter(hold -> !createdAfter(hold, query.asOf()))
                 .map(hold -> cell(hold, histories.getOrDefault(hold.getId(), List.of()), query.asOf()))
                 .toList();
         return new MenuHoldMonitoringContracts.BatchResult(cells, query.asOf(), query.asOf());
@@ -90,11 +115,20 @@ public class MenuHoldMonitoringQueryService {
     public Optional<MenuHoldMonitoringContracts.Detail> findCase(
             MenuHoldMonitoringContracts.DetailQuery query
     ) {
+        return sourceRead(() -> doFindCase(query));
+    }
+
+    private Optional<MenuHoldMonitoringContracts.Detail> doFindCase(
+            MenuHoldMonitoringContracts.DetailQuery query
+    ) {
         Optional<MenuHold> found = findHold(query.caseId());
         if (found.isEmpty()) {
             return Optional.empty();
         }
         MenuHold hold = found.orElseThrow();
+        if (createdAfter(hold, query.asOf())) {
+            return Optional.empty();
+        }
         List<MenuHoldTransitionAudit> all = auditRepository
                 .findByMenuHold_IdInOrderByMenuHold_IdAscResultVersionAsc(List.of(hold.getId()));
         MenuHoldMonitoringContracts.SourceCell cell = cell(hold, all, query.asOf());
@@ -102,12 +136,15 @@ public class MenuHoldMonitoringQueryService {
                 .filter(audit -> !audit.getOccurredAt().isAfter(query.asOf()))
                 .map(MenuHoldMonitoringQueryService::transition)
                 .toList();
-        List<MenuHoldMonitoringContracts.Item> items = hold.getItems().stream()
-                .map(item -> new MenuHoldMonitoringContracts.Item(
-                        Long.toString(item.getMenuId()),
-                        item.getMenuNameSnapshot(),
-                        item.getQuantity()))
-                .toList();
+        List<MenuHoldMonitoringContracts.Item> items =
+                cell.completeness() == MenuHoldMonitoringContracts.Completeness.UNAVAILABLE
+                        ? List.of()
+                        : hold.getItems().stream()
+                                .map(item -> new MenuHoldMonitoringContracts.Item(
+                                        Long.toString(item.getMenuId()),
+                                        item.getMenuNameSnapshot(),
+                                        item.getQuantity()))
+                                .toList();
         return Optional.of(new MenuHoldMonitoringContracts.Detail(cell, history, items));
     }
 
@@ -140,23 +177,22 @@ public class MenuHoldMonitoringQueryService {
         if (latest == null) {
             return new MenuHoldMonitoringContracts.SourceCell(
                     caseId(hold),
-                    Long.toString(hold.getStoreId()),
-                    "UNAVAILABLE",
-                    0L,
-                    asOf,
+                    null,
+                    null,
                     asOf,
                     asOf,
                     MenuHoldMonitoringContracts.Completeness.UNAVAILABLE,
                     MenuHoldMonitoringContracts.ReconciliationStatus.UNKNOWN,
                     first == null ? null : first.getOccurredAt(),
-                    links(first, hold));
+                    null);
         }
         return new MenuHoldMonitoringContracts.SourceCell(
                 caseId(latest.getReservationHoldId(), latest.getReservationId()),
                 Long.toString(hold.getStoreId()),
-                latest.getAfterStatus().name(),
-                latest.getResultVersion(),
-                latest.getOccurredAt(),
+                new MenuHoldMonitoringContracts.ConfirmedState(
+                        latest.getAfterStatus().name(),
+                        latest.getResultVersion(),
+                        latest.getOccurredAt()),
                 asOf,
                 asOf,
                 MenuHoldMonitoringContracts.Completeness.COMPLETE,
@@ -216,17 +252,6 @@ public class MenuHoldMonitoringQueryService {
         return expected.isEmpty() || expected.contains(actual.name());
     }
 
-    private static boolean isAfterSeek(
-            Instant occurredAt,
-            String caseId,
-            MenuHoldMonitoringContracts.Seek seek
-    ) {
-        return seek == null
-                || occurredAt.isBefore(seek.statusChangedAt())
-                || (occurredAt.equals(seek.statusChangedAt())
-                && caseId.compareTo(seek.caseId()) < 0);
-    }
-
     private static String caseId(MenuHold hold) {
         return caseId(hold.getReservationHoldId(), hold.getReservationId());
     }
@@ -244,6 +269,23 @@ public class MenuHoldMonitoringQueryService {
 
     private static long id(String caseId) {
         return Long.parseLong(caseId.substring(caseId.indexOf(':') + 1));
+    }
+
+    private static boolean createdAfter(MenuHold hold, Instant asOf) {
+        return hold.getCreatedAt() != null
+                && hold.getCreatedAt().toInstant(ZoneOffset.UTC).isAfter(asOf);
+    }
+
+    private static <T> T sourceRead(Supplier<T> read) {
+        try {
+            return read.get();
+        } catch (DataAccessException failure) {
+            com.miriyum.global.exception.ServiceException unavailable =
+                    new com.miriyum.global.exception.ServiceException(
+                            MenuHoldErrorCode.MONITORING_SOURCE_UNAVAILABLE);
+            unavailable.addSuppressed(failure);
+            throw unavailable;
+        }
     }
 
     private static ParsedCaseIds parse(List<String> caseIds) {

@@ -630,7 +630,7 @@ class ReservationServiceTest {
         then(paymentService).should().prepareReservationDeposit(paymentCommand.capture());
         assertThat(paymentCommand.getValue()).isEqualTo(
                 new PrepareReservationDepositCommand(
-                        "77", 11L, 8_000L, "KRW", expiresAt, 1L, key.value()));
+                        "77", 22L, 11L, 8_000L, "KRW", expiresAt, 1L, key.value()));
         ArgumentCaptor<ReservationDepositProcess> processCaptor =
                 ArgumentCaptor.forClass(ReservationDepositProcess.class);
         then(depositProcessRepository).should().saveAndFlush(processCaptor.capture());

@@ -246,6 +246,7 @@ public class PaymentTransactionService {
         return prepare(
                 RESERVATION_DEPOSIT,
                 command.sourceReferenceId(),
+                command.storeId(),
                 command.consumerAccountId(),
                 command.amountMinor(),
                 command.currency(),
@@ -266,6 +267,7 @@ public class PaymentTransactionService {
         return prepare(
                 WAITING_RESERVATION_DEPOSIT,
                 command.sourceReferenceId(),
+                command.storeId(),
                 command.consumerAccountId(),
                 command.amountMinor(),
                 command.currency(),
@@ -280,6 +282,7 @@ public class PaymentTransactionService {
     private PaymentPreparation prepare(
             String sourceType,
             String sourceReferenceId,
+            long storeId,
             long consumerAccountId,
             long amountMinor,
             String currency,
@@ -315,6 +318,7 @@ public class PaymentTransactionService {
                 paymentId,
                 sourceType,
                 sourceReferenceId,
+                storeId,
                 sourcePolicyVersion,
                 sourceExpiresAt,
                 idempotencyKey,
@@ -1603,6 +1607,7 @@ public class PaymentTransactionService {
     private static String preparationFingerprint(PrepareReservationDepositCommand command) {
         return preparationFingerprint(
                 command.sourceReferenceId(),
+                command.storeId(),
                 command.consumerAccountId(),
                 command.amountMinor(),
                 command.currency(),
@@ -1614,6 +1619,7 @@ public class PaymentTransactionService {
     private static String preparationFingerprint(PrepareWaitingReservationDepositCommand command) {
         return preparationFingerprint(
                 command.sourceReferenceId(),
+                command.storeId(),
                 command.consumerAccountId(),
                 command.amountMinor(),
                 command.currency(),
@@ -1624,13 +1630,14 @@ public class PaymentTransactionService {
 
     private static String preparationFingerprint(
             String sourceReferenceId,
+            long storeId,
             long consumerAccountId,
             long amountMinor,
             String currency,
             Instant sourceExpiresAt,
             long sourcePolicyVersion
     ) {
-        return sha256(sourceReferenceId + "\n" + consumerAccountId
+        return sha256(sourceReferenceId + "\n" + storeId + "\n" + consumerAccountId
                 + "\n" + amountMinor + "\n" + currency
                 + "\n" + sourceExpiresAt.truncatedTo(ChronoUnit.MICROS)
                 + "\n" + sourcePolicyVersion);

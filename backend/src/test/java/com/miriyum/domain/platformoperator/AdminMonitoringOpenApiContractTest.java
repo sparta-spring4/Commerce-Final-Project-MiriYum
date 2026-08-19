@@ -72,8 +72,14 @@ class AdminMonitoringOpenApiContractTest {
         Map<String, Object> schemas = schemas(document("admin-monitoring/openapi.yaml"));
         Map<String, Object> ledger = map(schemas.get("AdminMonitoringLedgerCell"));
         assertThat(list(ledger.get("required"))).containsExactlyInAnyOrder(
-                "source", "sourceStatus", "statusVersion", "statusChangedAt", "asOf",
+                "source", "state", "asOf",
                 "dataThrough", "completeness", "reconciliationStatus");
+        Map<String, Object> ledgerState = map(schemas.get("AdminMonitoringLedgerState"));
+        assertThat(list(ledgerState.get("required"))).containsExactlyInAnyOrder(
+                "sourceStatus", "statusVersion", "statusChangedAt");
+        assertThat(list(map(map(ledger.get("properties")).get("state")).get("oneOf")))
+                .anySatisfy(candidate -> assertThat(map(candidate))
+                        .containsEntry("type", "null"));
 
         Map<String, Object> failure = map(schemas.get("AdminMonitoringDependencyFailure"));
         assertThat(list(failure.get("required")))

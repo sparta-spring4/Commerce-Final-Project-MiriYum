@@ -85,23 +85,16 @@ public final class PaymentMonitoringContracts {
         }
     }
 
-    public record SourceCell(
-            String caseId,
+    public record ConfirmedState(
             String paymentId,
             String sourceStatus,
             long statusVersion,
             Instant statusChangedAt,
-            Instant asOf,
-            Instant dataThrough,
-            Completeness completeness,
-            ReconciliationStatus reconciliationStatus,
-            Instant historyAvailableFrom,
             long amountMinor,
             long refundedAmountMinor,
             String currency
     ) {
-        public SourceCell {
-            requireCaseId(caseId);
+        public ConfirmedState {
             requirePositiveId(paymentId, "paymentId");
             requireText(sourceStatus, "sourceStatus");
             if (statusVersion < 0 || amountMinor < 0 || refundedAmountMinor < 0
@@ -109,12 +102,36 @@ public final class PaymentMonitoringContracts {
                 throw new IllegalArgumentException("invalid version or amount");
             }
             requireInstant(statusChangedAt, "statusChangedAt");
+            if (currency == null || !currency.matches("[A-Z]{3}")) {
+                throw new IllegalArgumentException("currency must be an ISO 4217 code");
+            }
+        }
+    }
+
+    public record SourceCell(
+            String caseId,
+            ConfirmedState state,
+            Instant asOf,
+            Instant dataThrough,
+            Completeness completeness,
+            ReconciliationStatus reconciliationStatus,
+            Instant historyAvailableFrom
+    ) {
+        public SourceCell {
+            requireCaseId(caseId);
             validateBoundary(asOf, dataThrough);
-            if (statusChangedAt.isAfter(dataThrough)) {
+            if (state != null && state.statusChangedAt().isAfter(dataThrough)) {
                 throw new IllegalArgumentException("statusChangedAt must not exceed dataThrough");
             }
             if (completeness == null || reconciliationStatus == null) {
                 throw new IllegalArgumentException("source metadata is required");
+            }
+            if (completeness == Completeness.UNAVAILABLE && state != null) {
+                throw new IllegalArgumentException(
+                        "unavailable cells must not expose unconfirmed payment state");
+            }
+            if (completeness != Completeness.UNAVAILABLE && state == null) {
+                throw new IllegalArgumentException("available cells require confirmed state");
             }
             if (completeness == Completeness.COMPLETE && !asOf.equals(dataThrough)) {
                 throw new IllegalArgumentException("complete data must reach asOf");
@@ -122,11 +139,10 @@ public final class PaymentMonitoringContracts {
             if (completeness == Completeness.DELAYED && !dataThrough.isBefore(asOf)) {
                 throw new IllegalArgumentException("delayed data must precede asOf");
             }
-            if (historyAvailableFrom != null && historyAvailableFrom.isAfter(dataThrough)) {
+            if (completeness != Completeness.UNAVAILABLE
+                    && historyAvailableFrom != null
+                    && historyAvailableFrom.isAfter(dataThrough)) {
                 throw new IllegalArgumentException("history boundary must not exceed dataThrough");
-            }
-            if (currency == null || !currency.matches("[A-Z]{3}")) {
-                throw new IllegalArgumentException("currency must be an ISO 4217 code");
             }
         }
     }
@@ -175,7 +191,13 @@ public final class PaymentMonitoringContracts {
         }
     }
 
-    public record Detail(SourceCell cell, List<LedgerEvent> ledger, List<Refund> refunds) {
+    public record Detail(
+            SourceCell cell,
+            List<LedgerEvent> ledger,
+            boolean ledgerTruncated,
+            List<Refund> refunds,
+            boolean refundsTruncated
+    ) {
         public Detail {
             if (cell == null) throw new IllegalArgumentException("cell is required");
             ledger = ledger == null ? List.of() : List.copyOf(ledger);

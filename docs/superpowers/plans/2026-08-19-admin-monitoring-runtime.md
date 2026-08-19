@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Start only after the source-contract PR is merged and CI-green. Fetch latest `origin/dev`, then create a new isolated worktree and branch `feature/280-admin-monitoring` from that exact commit.
-- No migration and no admin snapshot. Reconfirm V62 and all open migrations only to document non-conflict.
+- No migration and no admin snapshot. Reconfirm prerequisite V64/V65 and all open migrations only to document non-conflict.
 - Import only the four public monitoring Service/DTO contracts. No source Entity/Repository references, including tests that accidentally make the runtime depend on internals.
 - A failed ledger cannot overwrite another ledger's state. Delayed/unavailable cells cannot be mapped as current/confirmed.
 - List requires `OPERATIONS_MONITOR_READ`; detail additionally verifies active `OPERATIONS_MONITORING` assignment. JWT/current authority is authoritative; no password reauthentication.
@@ -24,7 +24,7 @@
 
 ## Runtime Types and Signatures
 
-`AdminMonitoringResponses` owns API enums `CaseType`, `LifecycleStatus`, `Completeness`, `ReconciliationStatus`, and records `SourceMetadata`, `LedgerCell`, `DependencyFailure`, `CaseSummary`, `CasePage`, and `CaseDetail`. A `CaseSummary` has positive `caseVersion`, while each `LedgerCell.statusVersion` preserves the source's raw non-negative version.
+`AdminMonitoringResponses` owns API enums `CaseType`, `LifecycleStatus`, `Completeness`, `ReconciliationStatus`, and records `SourceMetadata`, `ConfirmedSourceState`, `LedgerCell`, `DependencyFailure`, `CaseSummary`, `CasePage`, and `CaseDetail`. A `CaseSummary` has positive `caseVersion`. 확인 가능한 ledger만 `ConfirmedSourceState`에 원본 status/version/time을 보존하며 `UNAVAILABLE` ledger의 state는 null이다.
 
 ```java
 CasePage list(AdminMonitoringRequests.ListRequest request, OperatorContext operator);

@@ -13,8 +13,8 @@ class MenuHoldMigrationContractTest {
             "src/main/resources/db/migration/V38__add_temporary_menu_holds.sql");
     private static final Path V48 = Path.of(
             "src/main/resources/db/migration/V48__add_menu_hold_forfeited_status.sql");
-    private static final Path V62 = Path.of(
-            "src/main/resources/db/migration/V62__add_menu_hold_monitoring_ledger.sql");
+    private static final Path V64 = Path.of(
+            "src/main/resources/db/migration/V64__add_menu_hold_monitoring_ledger.sql");
 
     @Test
     void migrationDefinesReservationHoldAndItemIntegrity() throws IOException {
@@ -135,8 +135,8 @@ class MenuHoldMigrationContractTest {
     }
 
     @Test
-    void v62AddsVersionedAppendOnlyMonitoringLedgerWithTruthfulBaseline() throws IOException {
-        String sql = Files.readString(V62).replaceAll("\\s+", " ").trim();
+    void v64AddsVersionedAppendOnlyMonitoringLedgerWithTruthfulBaseline() throws IOException {
+        String sql = Files.readString(V64).replaceAll("\\s+", " ").trim();
 
         assertThat(sql)
                 .contains("ADD status_version BIGINT NOT NULL DEFAULT 0")
@@ -150,6 +150,10 @@ class MenuHoldMigrationContractTest {
                 .contains("CONSTRAINT uk_menu_hold_transition_version UNIQUE (menu_hold_id, result_version)")
                 .contains("CREATE INDEX idx_menu_hold_transition_occurred")
                 .contains("SELECT menu_hold_id, reservation_id, reservation_hold_id, 'BASELINE', NULL, status, 0, UTC_TIMESTAMP(6)")
+                .contains("BEFORE UPDATE ON menu_hold_transition_audits")
+                .contains("BEFORE DELETE ON menu_hold_transition_audits")
+                .contains("SIGNAL SQLSTATE '45000'")
+                .contains("menu hold transition audits are immutable")
                 .doesNotContain("'TRANSITION', NULL, status, 0")
                 .doesNotContain("created_at AS occurred_at")
                 .doesNotContain("updated_at AS occurred_at");

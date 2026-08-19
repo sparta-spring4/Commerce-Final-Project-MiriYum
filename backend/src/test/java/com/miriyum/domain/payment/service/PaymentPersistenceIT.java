@@ -125,6 +125,8 @@ class PaymentPersistenceIT {
         jdbcTemplate.execute("DELETE FROM payment_webhook_receipts");
         jdbcTemplate.execute("DELETE FROM payment_ledger_entries");
         jdbcTemplate.execute("DELETE FROM reservation_deposit_dispositions");
+        jdbcTemplate.execute("TRUNCATE TABLE payment_refund_monitoring_snapshots");
+        jdbcTemplate.execute("TRUNCATE TABLE payment_monitoring_snapshots");
         jdbcTemplate.execute("DELETE FROM payment_refunds");
         jdbcTemplate.execute("DELETE FROM payment_attempts");
         jdbcTemplate.execute("DELETE FROM payments");
@@ -1547,6 +1549,7 @@ class PaymentPersistenceIT {
         PrepareWaitingReservationDepositCommand waitingCommand =
                 new PrepareWaitingReservationDepositCommand(
                         reservationCommand.sourceReferenceId(),
+                        reservationCommand.storeId(),
                         reservationCommand.consumerAccountId(),
                         reservationCommand.amountMinor(),
                         reservationCommand.currency(),
@@ -1577,7 +1580,7 @@ class PaymentPersistenceIT {
         Instant expiresAt = Instant.now().plusSeconds(3_600);
         PrepareWaitingReservationDepositCommand waitingCommand =
                 new PrepareWaitingReservationDepositCommand(
-                        "41", 11L, 12_000L, "KRW", expiresAt, 3L,
+                        "41", 12L, 11L, 12_000L, "KRW", expiresAt, 3L,
                         UUID.nameUUIDFromBytes("waiting:41".getBytes(StandardCharsets.UTF_8))
                                 .toString());
         PaymentPreparation waiting = paymentService.prepareWaitingReservationDeposit(waitingCommand);
@@ -1602,7 +1605,7 @@ class PaymentPersistenceIT {
 
         PaymentPreparation ordinary = paymentService.prepareReservationDeposit(
                 new PrepareReservationDepositCommand(
-                        "41", 11L, 12_000L, "KRW", expiresAt, 3L,
+                        "41", 12L, 11L, 12_000L, "KRW", expiresAt, 3L,
                         UUID.nameUUIDFromBytes("reservation:41".getBytes(StandardCharsets.UTF_8))
                                 .toString()));
         assertThatThrownBy(() -> paymentService.getVerifiedWaitingReservationDeposit(
@@ -1626,14 +1629,14 @@ class PaymentPersistenceIT {
                 .isEqualTo(1L);
         assertThatThrownBy(() -> paymentService.prepareReservationDeposit(
                 new PrepareReservationDepositCommand(
-                        "130", 11L, 31_000L, "KRW", Instant.now().plusSeconds(3_600), 7L,
+                        "130", 12L, 11L, 31_000L, "KRW", Instant.now().plusSeconds(3_600), 7L,
                         command.idempotencyKey())))
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
         assertThatThrownBy(() -> paymentService.prepareReservationDeposit(
                 new PrepareReservationDepositCommand(
-                        "131", 11L, 30_000L, "KRW", Instant.now().minusSeconds(1), 7L,
+                        "131", 12L, 11L, 30_000L, "KRW", Instant.now().minusSeconds(1), 7L,
                         UUID.nameUUIDFromBytes("prepare:expired".getBytes(StandardCharsets.UTF_8))
                                 .toString())))
                 .isInstanceOf(ServiceException.class)
@@ -2878,6 +2881,7 @@ class PaymentPersistenceIT {
     ) {
         return new PrepareReservationDepositCommand(
                 sourceReferenceId,
+                12L,
                 11L,
                 amountMinor,
                 "KRW",

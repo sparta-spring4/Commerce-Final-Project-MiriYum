@@ -50,34 +50,62 @@ class PaymentMonitoringPublicContractTest {
     @Test
     void cellPreservesRawVersionAndNeverExposesPaymentSecrets() {
         var cell = new PaymentMonitoringContracts.SourceCell(
-                "reservation-hold:91", "501", "PAID", 4,
-                AS_OF.minusSeconds(5), AS_OF, AS_OF,
+                "reservation-hold:91",
+                new PaymentMonitoringContracts.ConfirmedState(
+                        "501", "PAID", 4, AS_OF.minusSeconds(5),
+                        10000, 0, "KRW"),
+                AS_OF, AS_OF,
                 PaymentMonitoringContracts.Completeness.COMPLETE,
                 PaymentMonitoringContracts.ReconciliationStatus.MATCHED,
-                AS_OF.minusSeconds(30), 10000, 0, "KRW");
+                AS_OF.minusSeconds(30));
 
-        assertThat(cell.statusVersion()).isEqualTo(4);
-        assertThat(Arrays.stream(cell.getClass().getRecordComponents())
+        assertThat(cell.state().statusVersion()).isEqualTo(4);
+        assertThat(Arrays.stream(cell.state().getClass().getRecordComponents())
                 .map(RecordComponent::getName))
                 .doesNotContain("portOnePaymentId", "providerTransactionId",
                         "paymentKey", "approvalToken", "paymentMethod");
         assertThatThrownBy(() -> new PaymentMonitoringContracts.SourceCell(
-                "reservation-hold:91", "501", "PAID", 4,
-                AS_OF, AS_OF, AS_OF.minusSeconds(1),
+                "reservation-hold:91",
+                new PaymentMonitoringContracts.ConfirmedState(
+                        "501", "PAID", 4, AS_OF, 10000, 0, "KRW"),
+                AS_OF, AS_OF.minusSeconds(1),
                 PaymentMonitoringContracts.Completeness.COMPLETE,
                 PaymentMonitoringContracts.ReconciliationStatus.MATCHED,
-                AS_OF.minusSeconds(30), 10000, 0, "KRW"))
+                AS_OF.minusSeconds(30)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void unavailableCellCannotFabricatePaymentState() {
+        var cell = new PaymentMonitoringContracts.SourceCell(
+                "reservation-hold:91", null, AS_OF, AS_OF,
+                PaymentMonitoringContracts.Completeness.UNAVAILABLE,
+                PaymentMonitoringContracts.ReconciliationStatus.UNKNOWN,
+                AS_OF.plusSeconds(1));
+
+        assertThat(cell.state()).isNull();
+        assertThatThrownBy(() -> new PaymentMonitoringContracts.SourceCell(
+                "reservation-hold:91",
+                new PaymentMonitoringContracts.ConfirmedState(
+                        "501", "PAID", 0, AS_OF, 10000, 0, "KRW"),
+                AS_OF, AS_OF,
+                PaymentMonitoringContracts.Completeness.UNAVAILABLE,
+                PaymentMonitoringContracts.ReconciliationStatus.UNKNOWN,
+                AS_OF))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void detailRequiresChronologicalLedgerAndCopiesRefunds() {
         var cell = new PaymentMonitoringContracts.SourceCell(
-                "waiting:7", "501", "REFUNDED", 6,
-                AS_OF.minusSeconds(2), AS_OF, AS_OF,
+                "waiting:7",
+                new PaymentMonitoringContracts.ConfirmedState(
+                        "501", "REFUNDED", 6, AS_OF.minusSeconds(2),
+                        10000, 10000, "KRW"),
+                AS_OF, AS_OF,
                 PaymentMonitoringContracts.Completeness.COMPLETE,
                 PaymentMonitoringContracts.ReconciliationStatus.MATCHED,
-                AS_OF.minusSeconds(30), 10000, 10000, "KRW");
+                AS_OF.minusSeconds(30));
         var prepared = new PaymentMonitoringContracts.LedgerEvent(
                 "PAYMENT_PREPARED", 0, AS_OF.minusSeconds(30));
         var refunded = new PaymentMonitoringContracts.LedgerEvent(
@@ -86,11 +114,11 @@ class PaymentMonitoringPublicContractTest {
                 "COMPLETED", 0, 10000, AS_OF.minusSeconds(20), AS_OF.minusSeconds(2));
 
         var detail = new PaymentMonitoringContracts.Detail(
-                cell, List.of(prepared, refunded), List.of(refund));
+                cell, List.of(prepared, refunded), false, List.of(refund), false);
 
         assertThat(detail.refunds()).containsExactly(refund);
         assertThatThrownBy(() -> new PaymentMonitoringContracts.Detail(
-                cell, List.of(refunded, prepared), List.of(refund)))
+                cell, List.of(refunded, prepared), false, List.of(refund), false))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

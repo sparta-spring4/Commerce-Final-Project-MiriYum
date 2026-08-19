@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.waiting.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -10,6 +11,8 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -19,6 +22,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 @ExtendWith(MockitoExtension.class)
 class WaitingMonitoringQueryServiceTest {
@@ -43,7 +47,8 @@ class WaitingMonitoringQueryServiceTest {
         var earlier = audit(7, 12, null,
                 WaitingTeamStatus.WAITING, 0, AS_OF.minusSeconds(20));
         given(auditRepository.findMonitoringChanges(
-                AS_OF.minusSeconds(60), AS_OF, 12L, Pageable.ofSize(100)))
+                AS_OF.minusSeconds(60), AS_OF, 12L, true,
+                Set.of(WaitingTeamStatus.values()), null, null, Pageable.ofSize(20)))
                 .willReturn(List.of(later, earlier));
 
         var page = service.findChangedCases(new WaitingMonitoringContracts.ChangeQuery(
@@ -51,6 +56,21 @@ class WaitingMonitoringQueryServiceTest {
 
         assertThat(page.items()).extracting(WaitingMonitoringContracts.CaseReference::caseId)
                 .containsExactly("waiting:8", "waiting:7");
+    }
+
+    @Test
+    void sourceFailureIsTypedAndCannotMasqueradeAsEmptyPage() {
+        given(auditRepository.findMonitoringChanges(
+                AS_OF.minusSeconds(60), AS_OF, null, true,
+                Set.of(WaitingTeamStatus.values()), null, null, Pageable.ofSize(20)))
+                .willThrow(new DataAccessResourceFailureException("waiting unavailable"));
+
+        assertThatThrownBy(() -> service.findChangedCases(
+                new WaitingMonitoringContracts.ChangeQuery(
+                        AS_OF, AS_OF.minusSeconds(60), AS_OF, null, Set.of(), null, 20)))
+                .isInstanceOfSatisfying(ServiceException.class, failure ->
+                        assertThat(failure.getErrorCode()).isEqualTo(
+                                ReservationErrorCode.WAITING_MONITORING_UNAVAILABLE));
     }
 
     @Test
@@ -69,9 +89,9 @@ class WaitingMonitoringQueryServiceTest {
         var cell = service.findCases(new WaitingMonitoringContracts.BatchQuery(
                 AS_OF, List.of("waiting:7"))).cells().getFirst();
 
-        assertThat(cell.sourceStatus()).isEqualTo("CALLED");
-        assertThat(cell.statusVersion()).isEqualTo(1);
-        assertThat(cell.statusChangedAt()).isEqualTo(AS_OF.minusSeconds(10));
+        assertThat(cell.state().sourceStatus()).isEqualTo("CALLED");
+        assertThat(cell.state().statusVersion()).isEqualTo(1);
+        assertThat(cell.state().statusChangedAt()).isEqualTo(AS_OF.minusSeconds(10));
     }
 
     @Test
@@ -85,7 +105,7 @@ class WaitingMonitoringQueryServiceTest {
         var cell = service.findCases(new WaitingMonitoringContracts.BatchQuery(
                 CREATED.plusSeconds(10), List.of("waiting:7"))).cells().getFirst();
 
-        assertThat(cell.sourceStatus()).isEqualTo("UNAVAILABLE");
+        assertThat(cell.state()).isNull();
         assertThat(cell.completeness())
                 .isEqualTo(WaitingMonitoringContracts.Completeness.UNAVAILABLE);
         assertThat(cell.historyAvailableFrom()).isEqualTo(CREATED.plusSeconds(30));
@@ -105,7 +125,7 @@ class WaitingMonitoringQueryServiceTest {
         var detail = service.findCase(new WaitingMonitoringContracts.DetailQuery(
                 AS_OF, "waiting:7")).orElseThrow();
 
-        assertThat(detail.cell().links())
+        assertThat(detail.cell().state().links())
                 .isEqualTo(new WaitingMonitoringContracts.Links("501", "101"));
         assertThat(detail.history()).extracting(
                         WaitingMonitoringContracts.Transition::afterStatus,

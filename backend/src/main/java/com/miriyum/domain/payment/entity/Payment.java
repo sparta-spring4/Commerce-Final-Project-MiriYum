@@ -57,6 +57,9 @@ public class Payment {
     @Column(name = "source_reference_id", nullable = false, length = 19)
     private String sourceReferenceId;
 
+    @Column(name = "store_id", nullable = false)
+    private long storeId;
+
     @Column(name = "source_policy_version", nullable = false)
     private long sourcePolicyVersion;
 
@@ -118,6 +121,7 @@ public class Payment {
             String paymentId,
             String sourceType,
             String sourceReferenceId,
+            long storeId,
             long sourcePolicyVersion,
             Instant sourceExpiresAt,
             String preparationIdempotencyKey,
@@ -132,6 +136,7 @@ public class Payment {
         this.paymentId = requirePublicId(paymentId, "paymentId");
         this.sourceType = requireText(sourceType, 40, "sourceType");
         this.sourceReferenceId = requirePublicId(sourceReferenceId, "sourceReferenceId");
+        this.storeId = requirePositive(storeId, "storeId");
         this.sourcePolicyVersion = requirePositive(sourcePolicyVersion, "sourcePolicyVersion");
         this.sourceExpiresAt = Objects.requireNonNull(
                 sourceExpiresAt, "sourceExpiresAt must not be null").truncatedTo(ChronoUnit.MICROS);
@@ -162,6 +167,7 @@ public class Payment {
             String paymentId,
             String sourceType,
             String sourceReferenceId,
+            long storeId,
             long sourcePolicyVersion,
             Instant sourceExpiresAt,
             String preparationIdempotencyKey,
@@ -177,6 +183,7 @@ public class Payment {
                 paymentId,
                 sourceType,
                 sourceReferenceId,
+                storeId,
                 sourcePolicyVersion,
                 sourceExpiresAt,
                 preparationIdempotencyKey,
@@ -347,6 +354,10 @@ public class Payment {
 
     public String getSourceReferenceId() {
         return sourceReferenceId;
+    }
+
+    public long getStoreId() {
+        return storeId;
     }
 
     public long getSourcePolicyVersion() {

@@ -105,12 +105,24 @@ public final class MenuHoldMonitoringContracts {
         }
     }
 
+    public record ConfirmedState(
+            String sourceStatus,
+            long statusVersion,
+            Instant statusChangedAt
+    ) {
+        public ConfirmedState {
+            requireText(sourceStatus, "sourceStatus");
+            if (statusVersion < 0) {
+                throw new IllegalArgumentException("statusVersion must not be negative");
+            }
+            requireInstant(statusChangedAt, "statusChangedAt");
+        }
+    }
+
     public record SourceCell(
             String caseId,
             String storeId,
-            String sourceStatus,
-            long statusVersion,
-            Instant statusChangedAt,
+            ConfirmedState state,
             Instant asOf,
             Instant dataThrough,
             Completeness completeness,
@@ -120,18 +132,23 @@ public final class MenuHoldMonitoringContracts {
     ) {
         public SourceCell {
             requireReservationCaseId(caseId);
-            requirePositiveId(storeId, "storeId");
-            requireText(sourceStatus, "sourceStatus");
-            if (statusVersion < 0) {
-                throw new IllegalArgumentException("statusVersion must not be negative");
+            if (storeId != null) {
+                requirePositiveId(storeId, "storeId");
             }
-            requireInstant(statusChangedAt, "statusChangedAt");
             validateTimeBoundary(asOf, dataThrough);
-            if (statusChangedAt.isAfter(dataThrough)) {
+            if (state != null && state.statusChangedAt().isAfter(dataThrough)) {
                 throw new IllegalArgumentException("statusChangedAt must not exceed dataThrough");
             }
-            if (completeness == null || reconciliationStatus == null || links == null) {
+            if (completeness == null || reconciliationStatus == null) {
                 throw new IllegalArgumentException("source metadata is required");
+            }
+            if (completeness == Completeness.UNAVAILABLE) {
+                if (state != null || storeId != null || links != null) {
+                    throw new IllegalArgumentException(
+                            "unavailable cells must not expose unconfirmed source data");
+                }
+            } else if (state == null || storeId == null || links == null) {
+                throw new IllegalArgumentException("available cells require confirmed source data");
             }
             if (completeness == Completeness.COMPLETE && !dataThrough.equals(asOf)) {
                 throw new IllegalArgumentException("complete data must reach asOf");
