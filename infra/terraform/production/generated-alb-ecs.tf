@@ -6,7 +6,7 @@ resource "aws_lb_listener" "http" {
   count                                = var.production_infrastructure_enabled ? 1 : 0
   alpn_policy                          = null
   certificate_arn                      = null
-  load_balancer_arn                    = "arn:aws:elasticloadbalancing:ap-northeast-2:579750808837:loadbalancer/app/miriyum-prod-alb/7c09b22da0213b9c"
+  load_balancer_arn                    = aws_lb.production[0].arn
   port                                 = 80
   protocol                             = "HTTP"
   region                               = "ap-northeast-2"
@@ -151,7 +151,7 @@ resource "aws_lb_listener" "https" {
   count                                = var.production_infrastructure_enabled ? 1 : 0
   alpn_policy                          = null
   certificate_arn                      = "arn:aws:acm:ap-northeast-2:579750808837:certificate/4cfcbc97-1570-4319-9950-2243ab32be86"
-  load_balancer_arn                    = "arn:aws:elasticloadbalancing:ap-northeast-2:579750808837:loadbalancer/app/miriyum-prod-alb/7c09b22da0213b9c"
+  load_balancer_arn                    = aws_lb.production[0].arn
   port                                 = 443
   protocol                             = "HTTPS"
   region                               = "ap-northeast-2"
@@ -169,11 +169,11 @@ resource "aws_lb_listener" "https" {
         enabled  = false
       }
       target_group {
-        arn    = "arn:aws:elasticloadbalancing:ap-northeast-2:579750808837:targetgroup/miriyum-prod-backend-green-tg/77960523d4c07477"
+        arn    = aws_lb_target_group.backend_green[0].arn
         weight = 100
       }
       target_group {
-        arn    = "arn:aws:elasticloadbalancing:ap-northeast-2:579750808837:targetgroup/miriyum-prod-backend-tg/ada02b5468fc8e3f"
+        arn    = aws_lb_target_group.backend_blue[0].arn
         weight = 0
       }
     }

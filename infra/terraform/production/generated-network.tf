@@ -225,7 +225,6 @@ resource "aws_eip" "production_nat" {
   customer_owned_ipv4_pool  = null
   domain                    = "vpc"
   network_border_group      = "ap-northeast-2"
-  network_interface         = "eni-0b0fcb0a50697d020"
   public_ipv4_pool          = "amazon"
   region                    = "ap-northeast-2"
   tags                      = {}
