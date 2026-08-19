@@ -40,6 +40,8 @@ paths:
     $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1members~1{accountType}~1{accountId}~1sanctions"
   /api/v1/platform-operators/member-sanctions/{sanctionId}/additional-approvals:
     $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1member-sanctions~1{sanctionId}~1additional-approvals"
+  /api/v1/platform-operators/member-sanctions/pending-additional-approvals:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1member-sanctions~1pending-additional-approvals"
   /api/v1/platform-operators/accounts:
     $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1accounts"
   /api/v1/platform-operators/accounts/{operatorId}:

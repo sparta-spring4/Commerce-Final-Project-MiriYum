@@ -380,6 +380,29 @@ paths:
           $ref: "#/components/responses/StateConflict"
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/platform-operators/member-sanctions/pending-additional-approvals:
+    get:
+      tags: [Platform Operator Member Sanctions]
+      summary: 추가 승인 대기 영구 정지 목록 조회
+      operationId: listPendingPermanentMemberSanctionApprovals
+      security:
+        - platformOperatorBearerAuth: []
+      parameters:
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Page"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Size"
+      responses:
+        "200":
+          description: 현재 permission과 SUPER_ADMIN role을 모두 보유하며 자기 제안을 제외한 대기 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingSanctionApprovalPageSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/OperatorUnauthorized"
+        "403":
+          $ref: "#/components/responses/AuthorizationDenied"
   /api/v1/platform-operators/member-sanctions/{sanctionId}/additional-approvals:
     post:
       tags: [Platform Operator Member Sanctions]
@@ -784,6 +807,55 @@ components:
           minLength: 1
           maxLength: 100
           pattern: "^[A-Z0-9_]+$"
+    PendingSanctionApproval:
+      type: object
+      additionalProperties: false
+      required: [sanctionId, version, accountType, accountId, reasonCode, policyVersion, proposedAt]
+      properties:
+        sanctionId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 추가 승인 If-Match에 사용할 현재 member-support case version
+        accountType:
+          $ref: "#/components/schemas/AccountType"
+        accountId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        reasonCode:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: "^[A-Z0-9_]+$"
+        policyVersion:
+          type: string
+          minLength: 1
+          maxLength: 50
+        proposedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+    PendingSanctionApprovalPageData:
+      type: object
+      additionalProperties: false
+      required: [content, page]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/PendingSanctionApproval"
+        page:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PageMetadata"
+    PendingSanctionApprovalPageSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/PendingSanctionApprovalPageData"
     Sanction:
       type: object
       additionalProperties: false
