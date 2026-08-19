@@ -45,22 +45,18 @@ class WaitingMonitoringRepositoryIT {
 
     @Test
     void appliesStoreStatusAndPublicSeekBeforeLimitWithEqualTimestamps() {
-        jdbcTemplate.execute("SET FOREIGN_KEY_CHECKS = 0");
-        try {
-            List<Object[]> teams = new ArrayList<>();
-            List<Object[]> audits = new ArrayList<>();
-            for (int index = 0; index < 101; index++) {
-                long teamId = 800_000L + index;
-                teams.add(team(teamId, 12L, index + 1L));
-                audits.add(audit(teamId, "WAITING"));
-            }
-            teams.add(team(899_999L, 13L, 200L));
-            audits.add(audit(899_999L, "WAITING"));
-            jdbcTemplate.batchUpdate(insertTeamSql(), teams);
-            jdbcTemplate.batchUpdate(insertAuditSql(), audits);
-        } finally {
-            jdbcTemplate.execute("SET FOREIGN_KEY_CHECKS = 1");
+        insertParents();
+        List<Object[]> teams = new ArrayList<>();
+        List<Object[]> audits = new ArrayList<>();
+        for (int index = 0; index < 101; index++) {
+            long teamId = 800_000L + index;
+            teams.add(team(teamId, 12L, index + 1L));
+            audits.add(audit(teamId, "WAITING"));
         }
+        teams.add(team(899_999L, 13L, 200L));
+        audits.add(audit(899_999L, "WAITING"));
+        jdbcTemplate.batchUpdate(insertTeamSql(), teams);
+        jdbcTemplate.batchUpdate(insertAuditSql(), audits);
 
         WaitingMonitoringContracts.ChangeQuery query =
                 new WaitingMonitoringContracts.ChangeQuery(
@@ -80,6 +76,40 @@ class WaitingMonitoringRepositoryIT {
                 .doesNotContain("waiting:899999");
         assertThat(second.items()).extracting(WaitingMonitoringContracts.CaseReference::caseId)
                 .doesNotContain("waiting:899999");
+    }
+
+    private void insertParents() {
+        jdbcTemplate.update("""
+                INSERT INTO consumer_accounts (
+                    consumer_account_id, email, password_hash, name, status,
+                    created_at, updated_at
+                ) VALUES (1, 'monitoring-waiting-consumer@example.com', 'hash',
+                    'Monitoring Consumer', 'ACTIVE', NOW(6), NOW(6))
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO store_operator_accounts (
+                    store_operator_account_id, email, password_hash, display_name, status,
+                    created_at, updated_at
+                ) VALUES (4721, 'monitoring-waiting-owner@example.com', 'hash',
+                    'Monitoring Owner', 'ACTIVE', NOW(6), NOW(6))
+                """);
+        insertStore(12L, "2700000472", "Monitoring Store 12");
+        insertStore(13L, "2700000473", "Monitoring Store 13");
+    }
+
+    private void insertStore(long storeId, String registrationNumber, String name) {
+        jdbcTemplate.update("""
+                INSERT INTO stores (
+                    store_id, store_operator_account_id, business_registration_number,
+                    business_type, name, description, region, address, time_zone_id,
+                    applicant_self_attested_at, required_terms_agreed_at,
+                    required_terms_version, store_category_code, verification_status,
+                    operation_status, reservation_enabled, menu_hold_enabled, pickup_enabled,
+                    created_at, updated_at
+                ) VALUES (?, 4721, ?, 'CAFE', ?, '', 'SEOUL', 'Monitoring Address',
+                    'Asia/Seoul', NOW(6), NOW(6), 'STORE_ONBOARDING_REQUIRED_TERMS_V1',
+                    'CAFE_BAKERY', 'APPROVED', 'OPEN', TRUE, TRUE, TRUE, NOW(6), NOW(6))
+                """, storeId, registrationNumber, name);
     }
 
     private static String insertTeamSql() {
