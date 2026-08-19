@@ -422,38 +422,33 @@ components:
     AdminMonitoringCasePageSuccessResponse:
       type: object
       additionalProperties: false
-      required: [success, message, data]
+      required: [code, message, data]
       properties:
-        success:
-          type: boolean
-          const: true
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
         message:
-          type: string
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
         data:
           $ref: "#/components/schemas/AdminMonitoringCasePage"
     AdminMonitoringCaseDetailSuccessResponse:
       type: object
       additionalProperties: false
-      required: [success, message, data]
+      required: [code, message, data]
       properties:
-        success:
-          type: boolean
-          const: true
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
         message:
-          type: string
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
         data:
           $ref: "#/components/schemas/AdminMonitoringCaseDetail"
     ErrorResponse:
       type: object
-      additionalProperties: true
-      required: [success, message, code]
+      additionalProperties: false
+      required: [code, message]
       properties:
-        success:
-          type: boolean
-          const: false
-        message:
-          type: string
         code:
+          type: string
+        message:
           type: string
   responses:
     InvalidRequest:
@@ -464,11 +459,11 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
           examples:
             InvalidFilter:
-              value: {success: false, message: 잘못된 모니터링 필터입니다., code: INVALID_MONITORING_FILTER}
+              value: {code: INVALID_MONITORING_FILTER, message: 잘못된 모니터링 필터입니다.}
             InvalidCursor:
-              value: {success: false, message: 잘못된 cursor입니다., code: INVALID_CURSOR}
+              value: {code: INVALID_CURSOR, message: 잘못된 cursor입니다.}
             ExpiredCursor:
-              value: {success: false, message: 만료된 cursor입니다., code: EXPIRED_CURSOR}
+              value: {code: EXPIRED_CURSOR, message: 만료된 cursor입니다.}
     Unauthorized:
       description: 유효한 플랫폼 운영자 세션 없음
       content:

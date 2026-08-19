@@ -95,6 +95,40 @@ class AdminMonitoringOpenApiContractTest {
                 .doesNotContain("rawName", "rawPhone", "rawEmail", "paymentKey", "providerTransactionId");
     }
 
+    @Test
+    void responsesUseCommonSuccessAndErrorEnvelopes() throws Exception {
+        Map<String, Object> document = document("admin-monitoring/openapi.yaml");
+        Map<String, Object> schemas = schemas(document);
+
+        for (String schemaName : List.of(
+                "AdminMonitoringCasePageSuccessResponse",
+                "AdminMonitoringCaseDetailSuccessResponse")) {
+            Map<String, Object> success = map(schemas.get(schemaName));
+            assertThat(list(success.get("required")))
+                    .containsExactlyInAnyOrder("code", "message", "data");
+            Map<String, Object> properties = map(success.get("properties"));
+            assertThat(properties.keySet()).containsExactlyInAnyOrder("code", "message", "data");
+            assertThat(map(properties.get("code")))
+                    .containsEntry("$ref", "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode");
+            assertThat(map(properties.get("message")))
+                    .containsEntry("$ref", "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage");
+        }
+
+        Map<String, Object> error = map(schemas.get("ErrorResponse"));
+        assertThat(error).containsEntry("additionalProperties", false);
+        assertThat(list(error.get("required"))).containsExactlyInAnyOrder("code", "message");
+        assertThat(map(error.get("properties")).keySet())
+                .containsExactlyInAnyOrder("code", "message");
+
+        Map<String, Object> invalidRequest = map(map(document.get("components")).get("responses"));
+        Map<String, Object> examples = map(map(map(map(invalidRequest.get("InvalidRequest"))
+                .get("content")).get("application/json")).get("examples"));
+        for (Object example : examples.values()) {
+            assertThat(map(map(example).get("value")).keySet())
+                    .containsExactlyInAnyOrder("code", "message");
+        }
+    }
+
     private static String reference(Map<String, Object> paths, String path) {
         return (String) map(paths.get(path)).get("$ref");
     }
