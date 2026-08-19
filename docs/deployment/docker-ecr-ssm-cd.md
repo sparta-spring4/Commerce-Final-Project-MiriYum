@@ -48,6 +48,48 @@ These are staging Environment variables, not application secrets. Application an
 4. Confirm the instance role has `AmazonEC2ContainerRegistryReadOnly` and Systems Manager access.
 5. Confirm the security group allows TCP `80` only as required for the API. Do not expose MySQL `3306`, backend `8080`, or Valkey `6379`.
 
+### S3 runtime activation gate (#223)
+
+S3 runtime activation is a separate deployment step. Do not set
+`MIRIYUM_STORAGE_S3_ENABLED=true` merely because the application image is
+deployed. Keep both `MIRIYUM_STORAGE_S3_ENABLED` and
+`MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED` set to `false` until the following
+checks pass in the same staging environment.
+
+**Preflight**
+
+- The bucket name and region are present in the server-local `.env`. The
+  bucket is private, public access is blocked, and versioning is disabled.
+- The instance role has only the required access to this bucket and cannot
+  access unrelated buckets. Do not copy bucket names, ARNs, secrets, or object
+  keys into Issues, PRs, or workflow logs.
+- The deployed image contains the matching Flyway schema and the reconciliation
+  migration completed successfully.
+- The current deployment is healthy with both flags disabled. Record the exact
+  full SHA before changing the flags so the activation can be rolled back to
+  that same image.
+
+**Activation and smoke**
+
+1. Set both flags to `true` in the server-local `.env` and redeploy the same
+   approved full SHA. Do not enable the worker while the S3 runtime is disabled.
+2. Confirm loopback health is `UP`, the reconciliation scheduler is registered,
+   and startup logs contain no missing bucket, region, or permission error.
+3. As an authorized staging store operator, upload one supported image, replace
+   it, and delete it. Confirm the public image changes only after metadata is
+   `CONFIRMED`, and that an unauthorized request is rejected.
+4. Confirm reconciliation success, retryable failure, and long-stay observations
+   contain aggregate counts only. Do not capture tokens, cookies, source
+   filenames, object keys, user IDs, or raw provider errors.
+
+**Rollback**
+
+If any smoke, permission, health, or reconciliation check fails, set both flags
+back to `false` and redeploy the same approved SHA. Confirm the service is
+healthy and that new image requests fail closed without deleting the last
+confirmed public image. Preserve only the run URL, full SHA, health result, and
+aggregate observation outcome; never use ad hoc bucket deletion as rollback.
+
 ### Store geocoding secret migration
 
 The staging Compose file forwards `MIRIYUM_STORE_GEOCODING_REST_API_KEY` only to the backend container. An empty value keeps the existing fail-closed `503 COMMON_012` behavior for store registration, so a configured value is a prerequisite for staging store-registration smoke and k6 fixture preparation.
