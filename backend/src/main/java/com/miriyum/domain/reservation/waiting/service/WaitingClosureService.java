@@ -194,7 +194,7 @@ public class WaitingClosureService {
             WaitingTeamStatus before = team.getStatus();
             long expected = team.getVersion();
             team.closeByStore(expected, now);
-            if (membershipRepository.deleteByWaitingTeamId(team.getId()) != 1L) {
+            if (membershipRepository.deleteByWaitingTeamId(team.getId()) < 1L) {
                 throw new ServiceException(ReservationErrorCode.WAITING_ACTIVE_MEMBERSHIP_CONFLICT);
             }
             String commandId = "waiting-closure:" + job.getId() + ':' + item.getId();

@@ -268,7 +268,7 @@ public class WaitingLedgerService {
     }
 
     private void removeMembership(WaitingTeam team) {
-        if (membershipRepository.deleteByWaitingTeamId(team.getId()) != 1L) {
+        if (membershipRepository.deleteByWaitingTeamId(team.getId()) < 1L) {
             throw new ServiceException(
                     ReservationErrorCode.WAITING_ACTIVE_MEMBERSHIP_CONFLICT);
         }
