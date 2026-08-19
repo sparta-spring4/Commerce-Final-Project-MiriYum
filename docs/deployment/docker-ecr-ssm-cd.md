@@ -94,20 +94,25 @@ checks pass in the same staging environment.
    pre-approved staging-only fault that denies `DeleteObject` only for that
    generated test object's prefix. Do not broaden the denial to production
    prefixes, the whole bucket, or unrelated actions.
-3. Delete the synthetic image through the normal authorized API. Confirm the
-   response reaches the documented retryable cleanup state without exposing an
+3. Delete the synthetic image through the normal authorized API. Separately
+   confirm the external `503 COMMON_012` response and the internal `DELETED`
+   retry target with its aggregate counter; neither observation may expose an
    object key, file ID, user ID, token, or provider error.
-4. Remove the fault before the next reconciliation interval. Confirm one later
-   worker execution converges the synthetic metadata and object cleanup, while
-   the aggregate retryable-failure count stops increasing. If it does not
+4. Keep the fault in place and run the reconciliation worker at least once.
+   Confirm the aggregate `failed` count increases and the synthetic target is
+   scheduled for retry. Do not remove the fault before this failed worker path
+   is observed.
+5. Remove the fault, wait until `nextAttemptAt`, and confirm the first eligible
+   worker execution converges the synthetic metadata and object cleanup. Confirm
+   the aggregate `failed` count does not increase again. If it does not
    converge within the approved observation window, stop the smoke and follow
    rollback.
-5. For a separately approved long-stay fixture, keep the same narrowly scoped
+6. For a separately approved long-stay fixture, keep the same narrowly scoped
    fault only until the configured long-stay threshold is crossed. Confirm the
    long-stay observation is an aggregate count, then remove the fault and wait
    for convergence. Record only the run URL, full SHA, aggregate counters, and
    success/failure result.
-6. Remove the synthetic store and verify no temporary deny rule remains. Stop
+7. Remove the synthetic store and verify no temporary deny rule remains. Stop
    immediately and roll back if the fault affects any non-synthetic object or
    the cleanup worker reports an unexpected error.
 
