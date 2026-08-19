@@ -194,7 +194,7 @@ verify_nginx() {
 }
 
 verify_frontend() {
-  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local compose=(compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
   local frontend_domain
 
   if ! "${compose[@]}" ps --status running --services frontend | grep -qx frontend; then
@@ -438,8 +438,8 @@ main() {
 
   if ! verify_frontend; then
     publish_deployment_health 0
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 frontend || true
+    compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 frontend || true
     return 1
   fi
 
