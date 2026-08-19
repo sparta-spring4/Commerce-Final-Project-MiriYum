@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.LongFunction;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -17,12 +18,15 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @Service
 public class SseStreamService {
 
+    private static final int SCOPE_LOCK_STRIPES = 64;
+
     private final SseRuntimeProperties properties;
     private final SseCursorCodec cursorCodec;
     private final SseConnectionRegistry registry;
     private final List<SseHighWatermarkSource> sources;
     private final Clock clock;
     private final LongFunction<SseEmitter> emitterFactory;
+    private final ReentrantLock[] scopeLocks = createScopeLocks();
 
     @Autowired
     public SseStreamService(
@@ -65,35 +69,41 @@ public class SseStreamService {
             cursorCodec.decode(scope, lastEventId);
         }
         SseHighWatermarkSource source = source(scope.audience());
-        SseSignalState current = source.read(scope);
         long timeoutMillis = Math.min(
                 policy.timeout().toMillis(),
                 Duration.between(now, accessTokenExpiresAt).toMillis());
         if (timeoutMillis <= 0) {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
-        SseEmitter emitter = emitterFactory.apply(timeoutMillis);
-        UUID id = UUID.randomUUID();
-        Set<String> routingKeys = routingKeys(current);
-        SseConnection connection = new SseConnection(
-                id, scope, emitter, accessTokenExpiresAt, routingKeys,
-                () -> registry.remove(id));
-        registry.register(connection, policy);
-        emitter.onCompletion(connection::complete);
-        emitter.onTimeout(connection::complete);
-        emitter.onError(error -> connection.complete());
-        if (!connection.sendInitial(cursorCodec, current)) {
-            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        ReentrantLock scopeLock = scopeLock(scope);
+        scopeLock.lock();
+        try {
+            SseSignalState current = source.read(scope);
+            SseEmitter emitter = emitterFactory.apply(timeoutMillis);
+            UUID id = UUID.randomUUID();
+            Set<String> routingKeys = routingKeys(current);
+            SseConnection connection = new SseConnection(
+                    id, scope, emitter, accessTokenExpiresAt, routingKeys,
+                    () -> registry.remove(id));
+            registry.register(connection, policy);
+            emitter.onCompletion(connection::complete);
+            emitter.onTimeout(connection::complete);
+            emitter.onError(error -> connection.complete());
+            if (!connection.sendInitial(cursorCodec, current)) {
+                throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+            }
+            return emitter;
+        } finally {
+            scopeLock.unlock();
         }
-        return emitter;
     }
 
     public void refreshRoutingKey(String routingKey) {
-        registry.findByRoutingKey(routingKey).forEach(this::refresh);
+        registry.findScopesByRoutingKey(routingKey).forEach(this::refresh);
     }
 
     public void correctBatch(int limit) {
-        registry.nextCorrectionBatch(limit).forEach(this::refresh);
+        registry.nextCorrectionScopeBatch(limit).forEach(this::refresh);
     }
 
     public void sendKeepalives() {
@@ -105,15 +115,34 @@ public class SseStreamService {
                 .forEach(SseConnection::complete);
     }
 
-    private void refresh(SseConnection connection) {
+    private void refresh(SseStreamScope scope) {
+        ReentrantLock scopeLock = scopeLock(scope);
+        scopeLock.lock();
         try {
-            SseSignalState current = source(connection.scope().audience())
-                    .read(connection.scope());
-            registry.updateRoutingKeys(connection.id(), routingKeys(current));
-            connection.sendChanged(cursorCodec, current);
+            SseSignalState current = source(scope.audience()).read(scope);
+            if (current.watermark() < registry.maxLastSentWatermark(scope)) {
+                return;
+            }
+            registry.updateRoutingKeys(scope, routingKeys(current));
+            registry.findByScope(scope).forEach(connection ->
+                    connection.sendChanged(cursorCodec, current));
         } catch (RuntimeException unavailable) {
             // MySQL/권한의 일시 실패는 연결을 성공 처리하지 않고 다음 wake-up·보정에서 재시도한다.
+        } finally {
+            scopeLock.unlock();
         }
+    }
+
+    private ReentrantLock scopeLock(SseStreamScope scope) {
+        return scopeLocks[Math.floorMod(scope.hashCode(), scopeLocks.length)];
+    }
+
+    private static ReentrantLock[] createScopeLocks() {
+        ReentrantLock[] locks = new ReentrantLock[SCOPE_LOCK_STRIPES];
+        for (int index = 0; index < locks.length; index++) {
+            locks[index] = new ReentrantLock();
+        }
+        return locks;
     }
 
     private SseHighWatermarkSource source(SseAudience audience) {

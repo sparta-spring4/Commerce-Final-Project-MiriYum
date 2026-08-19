@@ -10,13 +10,17 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongFunction;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -81,18 +85,77 @@ class SseStreamServiceTest {
     }
 
     @Test
+    void oneWakeUpReadsMysqlOnceAndFansOutToEveryConnectionInTheSameScope() {
+        MutableSource source = new MutableSource(new SseSignalState(
+                11L, Set.of(SseWakeUpTarget.notificationAccount(41L))));
+        RecordingEmitter first = new RecordingEmitter(60_000L);
+        RecordingEmitter second = new RecordingEmitter(60_000L);
+        AtomicInteger emitterIndex = new AtomicInteger();
+        Fixture fixture = fixture(
+                source,
+                timeout -> emitterIndex.getAndIncrement() == 0 ? first : second,
+                100,
+                5);
+        SseStreamScope scope = SseStreamScope.notificationConsumer(41L);
+        fixture.service.open(scope, null, NOW.plusSeconds(30));
+        fixture.service.open(scope, null, NOW.plusSeconds(30));
+        int readsBeforeWakeUp = source.readCount;
+        source.state = new SseSignalState(
+                12L, Set.of(SseWakeUpTarget.notificationAccount(41L)));
+
+        fixture.service.refreshRoutingKey(
+                fixture.codec.routingKey(SseWakeUpTarget.notificationAccount(41L)));
+
+        assertThat(source.readCount - readsBeforeWakeUp).isOne();
+        assertThat(first.frames).hasSize(2);
+        assertThat(second.frames).hasSize(2);
+    }
+
+    @Test
+    void staleRefreshCannotReplaceRoutingKeysAfterANewerRefresh() throws Exception {
+        InterleavingSource source = new InterleavingSource();
+        RecordingFactory emitters = new RecordingFactory();
+        Fixture fixture = fixture(source, emitters, 100, 5);
+        SseStreamScope scope = SseStreamScope.notificationConsumer(41L);
+        fixture.service.open(scope, null, NOW.plusSeconds(30));
+        String oldRoute = fixture.codec.routingKey(
+                SseWakeUpTarget.notificationAccount(41L));
+        String newRoute = fixture.codec.routingKey(
+                SseWakeUpTarget.notificationAccount(99L));
+        source.startInterleaving();
+
+        Thread stale = new Thread(() -> fixture.service.refreshRoutingKey(oldRoute));
+        Thread fresh = new Thread(() -> fixture.service.refreshRoutingKey(oldRoute));
+        stale.start();
+        assertThat(source.staleReadEntered.await(2, TimeUnit.SECONDS)).isTrue();
+        fresh.start();
+        source.freshReadEntered.await(200, TimeUnit.MILLISECONDS);
+        source.releaseStaleRead.countDown();
+        stale.join(2_000);
+        fresh.join(2_000);
+
+        assertThat(stale.isAlive()).isFalse();
+        assertThat(fresh.isAlive()).isFalse();
+        assertThat(fixture.registry.findByRoutingKey(oldRoute)).isEmpty();
+        assertThat(fixture.registry.findByRoutingKey(newRoute))
+                .extracting(SseConnection::scope)
+                .containsExactly(scope);
+    }
+
+    @Test
     void concurrentSendsAreSerializedPerConnection() throws Exception {
         BlockingEmitter emitter = new BlockingEmitter();
+        MutableSource source = new MutableSource(new SseSignalState(
+                1L, Set.of(SseWakeUpTarget.notificationAccount(41L))));
         Fixture fixture = fixture(
-                new MutableSource(new SseSignalState(
-                        1L, Set.of(SseWakeUpTarget.notificationAccount(41L)))),
+                source,
                 timeout -> emitter,
                 100,
                 5);
         fixture.service.open(
                 SseStreamScope.notificationConsumer(41L), null, NOW.plusSeconds(30));
         String route = fixture.codec.routingKey(SseWakeUpTarget.notificationAccount(41L));
-        fixture.source.state = new SseSignalState(
+        source.state = new SseSignalState(
                 2L, Set.of(SseWakeUpTarget.notificationAccount(41L)));
 
         Thread first = new Thread(() -> fixture.service.refreshRoutingKey(route));
@@ -107,8 +170,54 @@ class SseStreamServiceTest {
         assertThat(emitter.maximumConcurrentSends.get()).isOne();
     }
 
+    @Test
+    void completionTimeoutErrorAndJwtExpiryEachRemoveOnlyTheirConnection() {
+        MutableSource source = new MutableSource(new SseSignalState(
+                1L, Set.of(SseWakeUpTarget.notificationAccount(41L))));
+        CallbackEmitter completed = new CallbackEmitter();
+        CallbackEmitter timedOut = new CallbackEmitter();
+        CallbackEmitter errored = new CallbackEmitter();
+        CallbackEmitter jwtExpired = new CallbackEmitter();
+        Queue<CallbackEmitter> emitters = new ArrayDeque<>(
+                List.of(completed, timedOut, errored, jwtExpired));
+        Fixture fixture = fixture(source, timeout -> emitters.remove(), 10, 10);
+
+        for (int index = 0; index < 4; index++) {
+            fixture.service.open(
+                    SseStreamScope.notificationConsumer(41L),
+                    null,
+                    NOW.plusSeconds(30));
+        }
+
+        completed.triggerCompletion();
+        timedOut.triggerTimeout();
+        errored.triggerError();
+        assertThat(fixture.registry.count()).isOne();
+
+        fixture.service.expireJwtConnections(NOW.plusSeconds(30));
+
+        assertThat(fixture.registry.count()).isZero();
+    }
+
+    @Test
+    void sendErrorCompletesAndRemovesTheFailedConnection() {
+        MutableSource source = new MutableSource(new SseSignalState(
+                1L, Set.of(SseWakeUpTarget.notificationAccount(41L))));
+        FailingAfterInitialEmitter emitter = new FailingAfterInitialEmitter();
+        Fixture fixture = fixture(source, timeout -> emitter, 10, 10);
+        fixture.service.open(
+                SseStreamScope.notificationConsumer(41L), null, NOW.plusSeconds(30));
+        source.state = new SseSignalState(
+                2L, Set.of(SseWakeUpTarget.notificationAccount(41L)));
+
+        fixture.service.refreshRoutingKey(
+                fixture.codec.routingKey(SseWakeUpTarget.notificationAccount(41L)));
+
+        assertThat(fixture.registry.count()).isZero();
+    }
+
     private static Fixture fixture(
-            MutableSource source,
+            SseHighWatermarkSource source,
             LongFunction<SseEmitter> emitterFactory,
             int total,
             int perAccount
@@ -133,8 +242,47 @@ class SseStreamServiceTest {
             SseStreamService service,
             SseCursorCodec codec,
             SseConnectionRegistry registry,
-            MutableSource source
+            SseHighWatermarkSource source
     ) {
+    }
+
+    private static final class InterleavingSource implements SseHighWatermarkSource {
+        private final AtomicInteger refreshReads = new AtomicInteger();
+        private final AtomicReference<Boolean> interleaving = new AtomicReference<>(false);
+        private final CountDownLatch staleReadEntered = new CountDownLatch(1);
+        private final CountDownLatch freshReadEntered = new CountDownLatch(1);
+        private final CountDownLatch releaseStaleRead = new CountDownLatch(1);
+
+        private void startInterleaving() {
+            interleaving.set(true);
+        }
+
+        @Override
+        public boolean supports(SseAudience audience) {
+            return audience == SseAudience.NOTIFICATION_CONSUMER;
+        }
+
+        @Override
+        public SseSignalState read(SseStreamScope scope) {
+            if (!interleaving.get()) {
+                return new SseSignalState(
+                        1L, Set.of(SseWakeUpTarget.notificationAccount(41L)));
+            }
+            if (refreshReads.getAndIncrement() == 0) {
+                staleReadEntered.countDown();
+                try {
+                    releaseStaleRead.await(2, TimeUnit.SECONDS);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                }
+                return new SseSignalState(
+                        2L, Set.of(SseWakeUpTarget.notificationAccount(41L)));
+            }
+            freshReadEntered.countDown();
+            return new SseSignalState(
+                    3L, Set.of(SseWakeUpTarget.notificationAccount(99L)));
+        }
     }
 
     private static final class MutableSource implements SseHighWatermarkSource {
@@ -181,6 +329,59 @@ class SseStreamServiceTest {
             StringBuilder frame = new StringBuilder();
             builder.build().forEach(part -> frame.append(part.getData()));
             frames.add(frame.toString());
+        }
+    }
+
+    private static final class CallbackEmitter extends RecordingEmitter {
+        private Runnable completionCallback;
+        private Runnable timeoutCallback;
+        private Consumer<Throwable> errorCallback;
+
+        private CallbackEmitter() {
+            super(60_000L);
+        }
+
+        @Override
+        public void onCompletion(Runnable callback) {
+            completionCallback = callback;
+        }
+
+        @Override
+        public void onTimeout(Runnable callback) {
+            timeoutCallback = callback;
+        }
+
+        @Override
+        public void onError(Consumer<Throwable> callback) {
+            errorCallback = callback;
+        }
+
+        private void triggerCompletion() {
+            completionCallback.run();
+        }
+
+        private void triggerTimeout() {
+            timeoutCallback.run();
+        }
+
+        private void triggerError() {
+            errorCallback.accept(new IOException("client disconnected"));
+        }
+    }
+
+    private static final class FailingAfterInitialEmitter extends RecordingEmitter {
+        private int sendCount;
+
+        private FailingAfterInitialEmitter() {
+            super(60_000L);
+        }
+
+        @Override
+        public synchronized void send(SseEventBuilder builder) throws IOException {
+            if (sendCount++ > 0) {
+                throw new IOException("client disconnected");
+            }
+            super.send(builder);
         }
     }
 

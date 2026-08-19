@@ -20,7 +20,7 @@ final class SseConnection {
     private final ReentrantLock sendLock = new ReentrantLock();
     private final AtomicBoolean completed = new AtomicBoolean();
     private volatile Set<String> routingKeys;
-    private long lastSentWatermark = -1L;
+    private volatile long lastSentWatermark = -1L;
 
     SseConnection(
             UUID id,
@@ -56,6 +56,10 @@ final class SseConnection {
 
     Set<String> routingKeys() {
         return routingKeys;
+    }
+
+    long lastSentWatermark() {
+        return lastSentWatermark;
     }
 
     void replaceRoutingKeys(Set<String> next) {

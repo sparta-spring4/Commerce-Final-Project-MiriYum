@@ -36,12 +36,25 @@ class SseConnectionRegistryTest {
         SseConnection first = register(registry, policy, 41L, "old-route");
         SseConnection second = register(registry, policy, 41L, "old-route");
 
-        registry.updateRoutingKeys(first.id(), Set.of("new-route"));
+        registry.updateRoutingKeys(first.scope(), Set.of("new-route"));
         first.complete();
 
-        assertThat(registry.findByRoutingKey("new-route")).isEmpty();
-        assertThat(registry.findByRoutingKey("old-route")).containsExactly(second);
+        assertThat(registry.findByRoutingKey("new-route")).containsExactly(second);
+        assertThat(registry.findByRoutingKey("old-route")).isEmpty();
         assertThat(registry.count()).isOne();
+    }
+
+    @Test
+    void correctionBatchContainsEachConnectedScopeOnlyOnce() {
+        SseConnectionRegistry registry = new SseConnectionRegistry();
+        SseRuntimeProperties.RuntimePolicy policy = policy(5, 3);
+        register(registry, policy, 41L, "route-a");
+        register(registry, policy, 41L, "route-a");
+        register(registry, policy, 42L, "route-b");
+
+        assertThat(registry.nextCorrectionScopeBatch(10)).containsExactly(
+                SseStreamScope.notificationConsumer(41L),
+                SseStreamScope.notificationConsumer(42L));
     }
 
     private static SseConnection register(

@@ -4,6 +4,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -13,6 +14,8 @@ import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.ratelimit.RateLimiter;
 import com.miriyum.domain.reservation.waiting.controller.consumer.WaitingConsumerEventController;
 import com.miriyum.domain.reservation.waiting.controller.storeoperator.WaitingStoreOperatorEventController;
+import com.miriyum.domain.store.error.StoreErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.security.SecurityConfig;
 import com.miriyum.global.sse.SseStreamScope;
 import com.miriyum.global.sse.SseStreamService;
@@ -84,6 +87,34 @@ class WaitingEventControllerTest {
                 .andExpect(status().isUnauthorized());
 
         then(streams).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void unauthorizedStoreFailsAsJsonBeforeTheStreamStarts() throws Exception {
+        authenticate("store-token", TokenNamespace.STORE_OPERATOR, 33L);
+        given(streams.open(
+                SseStreamScope.waitingStoreOperator(33L, 22L), null, EXPIRES_AT))
+                .willThrow(new ServiceException(StoreErrorCode.ACCESS_DENIED));
+
+        mockMvc.perform(get("/api/v1/store-operators/stores/22/waiting-events")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value("STORE_003"));
+    }
+
+    @Test
+    void missingStoreFailsAsJsonBeforeTheStreamStarts() throws Exception {
+        authenticate("store-token", TokenNamespace.STORE_OPERATOR, 33L);
+        given(streams.open(
+                SseStreamScope.waitingStoreOperator(33L, 22L), null, EXPIRES_AT))
+                .willThrow(new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+
+        mockMvc.perform(get("/api/v1/store-operators/stores/22/waiting-events")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value("STORE_001"));
     }
 
     private void authenticate(String token, TokenNamespace namespace, long accountId) {

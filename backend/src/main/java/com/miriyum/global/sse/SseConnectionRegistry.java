@@ -52,14 +52,14 @@ public class SseConnectionRegistry {
         }
     }
 
-    synchronized void updateRoutingKeys(UUID connectionId, Set<String> nextKeys) {
-        SseConnection connection = connections.get(connectionId);
-        if (connection == null) {
-            return;
-        }
-        removeRoutingKeys(connectionId, connection.routingKeys());
-        connection.replaceRoutingKeys(nextKeys);
-        addRoutingKeys(connectionId, nextKeys);
+    synchronized void updateRoutingKeys(SseStreamScope scope, Set<String> nextKeys) {
+        connections.values().stream()
+                .filter(connection -> connection.scope().equals(scope))
+                .forEach(connection -> {
+                    removeRoutingKeys(connection.id(), connection.routingKeys());
+                    connection.replaceRoutingKeys(nextKeys);
+                    addRoutingKeys(connection.id(), nextKeys);
+                });
     }
 
     synchronized List<SseConnection> findByRoutingKey(String routingKey) {
@@ -67,17 +67,41 @@ public class SseConnectionRegistry {
         return ids.stream().map(connections::get).filter(java.util.Objects::nonNull).toList();
     }
 
+    synchronized List<SseStreamScope> findScopesByRoutingKey(String routingKey) {
+        return findByRoutingKey(routingKey).stream()
+                .map(SseConnection::scope)
+                .distinct()
+                .toList();
+    }
+
+    synchronized List<SseConnection> findByScope(SseStreamScope scope) {
+        return connections.values().stream()
+                .filter(connection -> connection.scope().equals(scope))
+                .toList();
+    }
+
+    synchronized long maxLastSentWatermark(SseStreamScope scope) {
+        return connections.values().stream()
+                .filter(connection -> connection.scope().equals(scope))
+                .mapToLong(SseConnection::lastSentWatermark)
+                .max()
+                .orElse(-1L);
+    }
+
     synchronized List<SseConnection> all() {
         return List.copyOf(connections.values());
     }
 
-    synchronized List<SseConnection> nextCorrectionBatch(int limit) {
+    synchronized List<SseStreamScope> nextCorrectionScopeBatch(int limit) {
         if (limit <= 0 || connections.isEmpty()) {
             return List.of();
         }
-        List<SseConnection> ordered = new ArrayList<>(connections.values());
+        List<SseStreamScope> ordered = connections.values().stream()
+                .map(SseConnection::scope)
+                .distinct()
+                .toList();
         int count = Math.min(limit, ordered.size());
-        List<SseConnection> batch = new ArrayList<>(count);
+        List<SseStreamScope> batch = new ArrayList<>(count);
         for (int index = 0; index < count; index++) {
             batch.add(ordered.get((correctionOffset + index) % ordered.size()));
         }

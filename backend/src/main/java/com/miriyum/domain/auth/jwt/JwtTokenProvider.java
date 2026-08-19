@@ -197,6 +197,9 @@ public class JwtTokenProvider {
     }
 
     private ParsedToken toParsedToken(Claims claims, ErrorCode invalidCode) {
+        if (claims.getExpiration() == null) {
+            throw new ServiceException(invalidCode);
+        }
         String namespaceValue = claims.get(CLAIM_NAMESPACE, String.class);
         TokenNamespace namespace;
         try {
