@@ -85,7 +85,7 @@ fields @timestamp, @message
 | stats count(*) as count by failure_class
 ```
 
-Micrometer 지표는 `miriyum.waiting.auto_open.execution`의 `outcome` 태그와 `miriyum.waiting.auto_open.failure`의 `failure_class` 태그를 기준으로 집계한다. 증적에는 시간 범위, 건수, 오류 유무만 남긴다.
+현재 CloudWatch metrics export는 Waiting Micrometer meter를 게시하지 않는다. 따라서 이 단계의 운영 증적 정본은 위 CloudWatch Logs Insights 집계이며, 증적에는 시간 범위, 건수, 오류 유무만 남긴다. Waiting meter export가 필요하면 별도 승인 범위에서 제한된 export 계약을 추가한다.
 
 ## 중단 조건
 
@@ -102,9 +102,10 @@ Micrometer 지표는 `miriyum.waiting.auto_open.execution`의 `outcome` 태그�
 
 1. 대상 환경에서 `MIRIYUM_WAITING_AUTO_OPEN_ENABLED=false`로 변경한다.
 2. 새 환경 변수 집합으로 backend를 재배포한다.
-3. health check를 통과한 새 task가 worker를 만들지 않는지 확인한다.
-4. 원장에서 processing, retry, `RECONCILIATION_REQUIRED` 잔여 건수를 확인한다.
-5. 원인 분석과 staging 재현 검증이 끝날 때까지 `true`로 되돌리지 않는다.
+3. 새 `false` revision task가 health check를 통과했더라도, 기존 `true` revision task가 모두 `STOPPED` 또는 대상 그룹에서 `Draining` 종료됐는지 ECS 서비스의 배포·task 목록에서 확인한다. 기존 `true` task 수가 `0`이 되기 전에는 새 claim 중단을 완료로 기록하지 않는다.
+4. 기존 `true` task가 모두 종료된 뒤 worker가 새 claim을 만들지 않는지 확인한다.
+5. 원장에서 processing, retry, `RECONCILIATION_REQUIRED` 잔여 건수를 확인한다.
+6. 원인 분석과 staging 재현 검증이 끝날 때까지 `true`로 되돌리지 않는다.
 
 ## 운영 전환 게이트
 
