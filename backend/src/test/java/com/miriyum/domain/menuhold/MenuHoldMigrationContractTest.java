@@ -13,6 +13,8 @@ class MenuHoldMigrationContractTest {
             "src/main/resources/db/migration/V38__add_temporary_menu_holds.sql");
     private static final Path V48 = Path.of(
             "src/main/resources/db/migration/V48__add_menu_hold_forfeited_status.sql");
+    private static final Path V62 = Path.of(
+            "src/main/resources/db/migration/V62__add_menu_hold_monitoring_ledger.sql");
 
     @Test
     void migrationDefinesReservationHoldAndItemIntegrity() throws IOException {
@@ -130,6 +132,27 @@ class MenuHoldMigrationContractTest {
                 .doesNotContain("reservation_id IS NULL AND status IN "
                         + "('ACTIVE', 'RECONCILIATION_REQUIRED', 'RELEASED', 'EXPIRED', "
                         + "'FORFEITED')");
+    }
+
+    @Test
+    void v62AddsVersionedAppendOnlyMonitoringLedgerWithTruthfulBaseline() throws IOException {
+        String sql = Files.readString(V62).replaceAll("\\s+", " ").trim();
+
+        assertThat(sql)
+                .contains("ADD status_version BIGINT NOT NULL DEFAULT 0")
+                .contains("CONSTRAINT ck_menu_holds_status_version CHECK (status_version >= 0)")
+                .contains("CREATE TABLE menu_hold_transition_audits")
+                .contains("event_type VARCHAR(16) NOT NULL")
+                .contains("before_status VARCHAR(32) NULL")
+                .contains("after_status VARCHAR(32) NOT NULL")
+                .contains("result_version BIGINT NOT NULL")
+                .contains("occurred_at DATETIME(6) NOT NULL")
+                .contains("CONSTRAINT uk_menu_hold_transition_version UNIQUE (menu_hold_id, result_version)")
+                .contains("CREATE INDEX idx_menu_hold_transition_occurred")
+                .contains("SELECT menu_hold_id, reservation_id, reservation_hold_id, 'BASELINE', NULL, status, 0, UTC_TIMESTAMP(6)")
+                .doesNotContain("'TRANSITION', NULL, status, 0")
+                .doesNotContain("created_at AS occurred_at")
+                .doesNotContain("updated_at AS occurred_at");
     }
 
     private static String normalizedV38() throws IOException {
