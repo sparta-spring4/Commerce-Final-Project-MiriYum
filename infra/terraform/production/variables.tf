@@ -4,9 +4,9 @@ variable "aws_region" {
 }
 
 variable "production_backend_desired_count" {
-  description = "운영 ECS backend 태스크 수. 비용 절감 중에는 0, 운영 검증 시에는 1로 설정한다."
+  description = "운영 ECS backend 태스크 수. 정상 운영은 1이며, 비용 절감 중지는 production-down.ps1이 명시적으로 0을 전달한다."
   type        = number
-  default     = 0
+  default     = 1
 }
 
 variable "production_infrastructure_enabled" {
