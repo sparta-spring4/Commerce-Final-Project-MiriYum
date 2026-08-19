@@ -1,11 +1,14 @@
 package com.miriyum.global.sse;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -22,6 +25,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
+import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.listener.ChannelTopic;
@@ -139,6 +143,21 @@ class SseWakeUpBrokerIT {
         assertThat(registry.count()).isOne();
     }
 
+    @Test
+    void wrongVersionAndMalformedRoutingKeysDoNotRefreshStreams() {
+        SseStreamService streams = mock(SseStreamService.class);
+        SseWakeUpBroker broker = new SseWakeUpBroker(
+                mock(StringRedisTemplate.class),
+                new SseCursorCodec(settings()),
+                streams);
+
+        broker.onMessage(message("v2\n" + "a".repeat(64)), null);
+        broker.onMessage(message("v1\nconsumer:41"), null);
+        broker.onMessage(message("v1\n" + "a".repeat(64) + "\nextra"), null);
+
+        verifyNoInteractions(streams);
+    }
+
     private LettuceConnectionFactory connectionFactory() {
         RedisStandaloneConfiguration configuration = new RedisStandaloneConfiguration(
                 VALKEY.getHost(), VALKEY.getMappedPort(6379));
@@ -171,6 +190,12 @@ class SseWakeUpBrokerIT {
                 true, "0123456789abcdef0123456789abcdef",
                 Duration.ofMinutes(1), Duration.ofSeconds(15), Duration.ofSeconds(5),
                 20, 100, 5);
+    }
+
+    private static Message message(String payload) {
+        Message message = mock(Message.class);
+        given(message.getBody()).willReturn(payload.getBytes(StandardCharsets.UTF_8));
+        return message;
     }
 
     private static final class TrackingSource implements SseHighWatermarkSource {

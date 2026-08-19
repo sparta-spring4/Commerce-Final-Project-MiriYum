@@ -129,7 +129,7 @@ class SseStreamServiceTest {
         stale.start();
         assertThat(source.staleReadEntered.await(2, TimeUnit.SECONDS)).isTrue();
         fresh.start();
-        source.freshReadEntered.await(200, TimeUnit.MILLISECONDS);
+        assertThat(source.freshReadEntered.await(200, TimeUnit.MILLISECONDS)).isFalse();
         source.releaseStaleRead.countDown();
         stale.join(2_000);
         fresh.join(2_000);
