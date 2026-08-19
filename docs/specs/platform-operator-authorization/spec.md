@@ -26,7 +26,7 @@
 | `SUPER_ADMIN` | `OPERATOR_CREATE`, `OPERATOR_AUTHORITY_MANAGE`, `OPERATOR_SUSPEND`, `ACCOUNT_PERMANENT_SANCTION_APPROVE`, `PAYMENT_RECOVERY_HIGH_VALUE_APPROVE`, `BREAK_GLASS_APPROVE` |
 | `ONBOARDING_REVIEWER` | `ONBOARDING_REVIEW`, `ONBOARDING_EVIDENCE_READ` |
 | `MEMBER_SUPPORT_OPERATOR` | `MEMBER_READ_MINIMAL`, `MEMBER_RECOVERY`, `ACCOUNT_APPEAL_REVIEW` |
-| `ENFORCEMENT_OPERATOR` | `ACCOUNT_SANCTION`, `STORE_READ_MINIMAL`, `STORE_SANCTION` |
+| `ENFORCEMENT_OPERATOR` | `MEMBER_READ_MINIMAL`, `ACCOUNT_SANCTION`, `STORE_READ_MINIMAL`, `STORE_SANCTION` |
 | `PAYMENT_RECOVERY_OPERATOR` | `PAYMENT_RECOVERY_EXECUTE` |
 | `OPERATIONS_MONITOR` | `OPERATIONS_MONITOR_READ` |
 | `AUDIT_READER` | `AUDIT_READ` |
@@ -40,6 +40,7 @@
 
 - `platform_operator_role_grants`와 `platform_operator_permission_grants`가 계정별 역할·직접 권한 grant의 원본이다.
 - 역할·권한 변경은 플랫폼 운영자 계정 행을 잠그고 grant 변경, `authority_version`과 `session_version` 증가를 같은 MySQL 트랜잭션에서 확정한다.
+- 고정 역할의 권한 묶음을 확장하는 배포는 새 애플리케이션이 시작되기 전에 대상 역할 계정의 `authority_version`, `session_version`, `row_version`을 Flyway migration으로 함께 증가시킨다. 배포 전 세션은 기존 인증 guard에서 거부·회수되고 재로그인한 세션만 새 역할 권한을 사용한다. 전환 대상과 목적은 migration 이름과 Flyway schema history에 남긴다.
 - 모든 보호 요청은 #275처럼 현재 계정 version과 중앙 세션을 다시 검증한다. 구 version principal은 `401 AUTH_015`로 거부한다.
 - 고위험 명령 guard도 계정 행을 잠그므로 권한 회수와 명령은 같은 계정에 대해 직렬화된다. 회수가 먼저 확정되면 어느 인스턴스도 구 version 요청을 허용하지 않는다.
 

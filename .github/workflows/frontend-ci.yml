@@ -67,6 +67,53 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      # 고도화 flag가 꺼진 기본 빌드에 플랫폼 운영자 콘솔이 남지 않는지 확인한다.
+      #
+      # 라우트 접근 제어가 아니라 tree-shaking 문제다. 콘솔은 flag가 켜졌을 때만
+      # 동적 import되지만, 조건을 다른 모듈 상수로 빼면 상수 접기가 chunk 분할
+      # 뒤에 일어나 chunk가 그대로 산출된다. 실제로 그 상태로 빌드된 적이 있어
+      # 산출물을 직접 검사한다.
+      #
+      # 위 Build step이 flag 없이 실행되므로 그 결과를 그대로 검사한다.
+      - name: Verify platform operator console is absent from default build
+        run: |
+          set -euo pipefail
+          fail=0
+
+          if ls dist/assets | grep -qi 'platformoperator'; then
+            echo "::error::flag가 꺼진 빌드에 운영자 chunk가 남아 있습니다."
+            ls dist/assets | grep -i 'platformoperator'
+            fail=1
+          fi
+
+          # grep은 매치가 0건이면 exit 1이다. pipefail 아래에서 그대로 두면
+          # "누출 없음"이라는 정상 결과가 스크립트를 죽인다. 실패를 삼켜야 한다.
+          leaked=$({ grep -rho 'platform-operators' dist/assets || true; } | wc -l)
+          if [ "$leaked" -ne 0 ]; then
+            echo "::error::flag가 꺼진 빌드에 platform-operators 문자열이 ${leaked}건 남아 있습니다."
+            fail=1
+          fi
+
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
+          echo "운영자 chunk 0개, platform-operators 문자열 0건"
+
+      # flag를 켠 빌드는 반대로 chunk가 나와야 한다. 검사가 항상 통과하는
+      # 무의미한 검사로 굳는 것을 막는다.
+      - name: Verify platform operator console builds when enabled
+        env:
+          VITE_PLATFORM_OPERATOR_ENABLED: 'true'
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          pnpm run build
+          if ! ls dist/assets | grep -qi 'platformoperator'; then
+            echo "::error::flag를 켰는데 운영자 chunk가 생성되지 않았습니다."
+            exit 1
+          fi
+          ls dist/assets | grep -i 'platformoperator'
+
   frontend-ci:
     name: frontend-ci
     needs: [verify]

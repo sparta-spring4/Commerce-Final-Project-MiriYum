@@ -5,8 +5,12 @@
  * 1차 MVP에 없는 기능의 경로·네비게이션 항목·자리표시자는 만들지 않는다.
  */
 
-/** 계정 shell. 두 shell은 인증 상태와 권한을 공유하지 않는다. */
-export type Shell = 'public' | 'consumer' | 'storeOperator'
+/** 계정 shell. 각 shell은 인증 상태와 권한을 공유하지 않는다. */
+export type Shell =
+  | 'public'
+  | 'consumer'
+  | 'storeOperator'
+  | 'platformOperator'
 
 export const ROUTES = {
   home: '/',
@@ -50,6 +54,27 @@ export const ROUTES = {
   storeOperatorWaitingTeams: '/store-operator/stores/:storeId/waiting-teams',
   storeOperatorWaitingTeam:
     '/store-operator/stores/:storeId/waiting-teams/:waitingTeamId',
+  /**
+   * 플랫폼 운영자 운영 콘솔. 고도화 전용이며 공개 가입이 없다.
+   *
+   * 계약과 구현 화면이 모두 있는 경로만 등록한다.
+   */
+  platformOperatorSignIn: '/admin/login',
+  platformOperatorInitialPassword: '/admin/first-password-change',
+  platformOperatorMembers: '/admin/members',
+  platformOperatorMemberDetail: '/admin/members/:accountType/:accountId',
+  platformOperatorSupportCases: '/admin/member-support-cases',
+  platformOperatorSupportCaseDetail: '/admin/member-support-cases/:caseId',
+  platformOperatorOperators: '/admin/operators',
+  platformOperatorCreate: '/admin/operators/new',
+  platformOperatorDetail: '/admin/operators/:operatorId',
+  platformOperatorStores: '/admin/stores',
+  platformOperatorStoreDetail: '/admin/stores/:storeId',
+  platformOperatorStoreSanctionCase:
+    '/admin/stores/:storeId/sanction-cases/:caseId',
+  platformOperatorMemberSanctionApproval: '/admin/member-sanctions/approvals',
+  platformOperatorAudit: '/admin/audit',
+  platformOperatorAuditDetail: '/admin/audit/:eventKey',
   forbidden: '/forbidden',
 } as const
 
@@ -74,6 +99,7 @@ export function fillPath(
 export const SIGN_IN_PATH: Record<Exclude<Shell, 'public'>, string> = {
   consumer: ROUTES.consumerSignIn,
   storeOperator: ROUTES.storeOperatorSignIn,
+  platformOperator: ROUTES.platformOperatorSignIn,
 }
 
 export interface NavigationItem {
@@ -97,6 +123,13 @@ export const NAVIGATION: Record<Shell, NavigationItem[]> = {
    * `storeOperatorNavigation`이 소유한다.
    */
   storeOperator: [],
+  /**
+   * 운영 콘솔은 독립 셸이라 앱 상단 네비게이션에 항목을 올리지 않는다.
+   * 일반 사용자·대표자 화면에서 `/admin`으로 가는 링크를 만들지 않는다는 뜻이다.
+   * 콘솔 자체의 좌측 내비는 권한 판정이 필요해
+   * `features/platform-operator-console/model/navigation.ts`가 소유한다.
+   */
+  platformOperator: [],
 }
 
 /**
