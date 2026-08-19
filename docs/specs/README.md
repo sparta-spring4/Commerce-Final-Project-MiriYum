@@ -13,6 +13,7 @@
 
 ## 고도화 활성 기능 명세
 
+- [입점 신청 사업자등록증 비공개 증빙](store-onboarding/spec.md): #344가 소유하는 불투명 증빙 식별자, 교체 이력과 Store 공개 Service/DTO 경계
 - [매장 운영자 예약별 결제·환불 상태 조회](store-payment-status/spec.md): #273이 소유하는 Store 은닉 권한, Reservation 조합과 Payment 최소 공개 snapshot 계약
 - [플랫폼 운영자 인증·세션·최초 비밀번호 변경](platform-operator-auth/spec.md): #275가 소유하는 독립 인증 namespace와 중앙 세션 계약
 - [플랫폼 운영자 권한·재인증·고위험 명령 공통 기반](platform-operator-authorization/spec.md): #276이 소유하는 RBAC·사건 배정·일회 승인·guard 계약
