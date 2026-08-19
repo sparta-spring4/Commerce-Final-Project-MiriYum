@@ -1,4 +1,4 @@
--- Issue #409: GPS-bound one-time registration proofs and consumer party runtime.
+-- V61 / Issue #409: GPS-bound one-time registration proofs and consumer party runtime.
 
 ALTER TABLE waiting_active_memberships
     ADD INDEX idx_waiting_active_memberships_team (waiting_team_id),

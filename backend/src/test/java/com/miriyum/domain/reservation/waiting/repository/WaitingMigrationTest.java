@@ -98,8 +98,8 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("Flyway V60이 위치 증명과 일행 runtime 스키마를 적용한다")
-    void appliesLocationProofAndPartyRuntimeAsFlywayV60() {
+    @DisplayName("Flyway V61이 위치 증명과 일행 runtime 스키마를 적용한다")
+    void appliesLocationProofAndPartyRuntimeAsFlywayV61() {
         Flyway flyway = Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .load();
@@ -108,13 +108,13 @@ class WaitingMigrationTest {
 
         assertThat(flyway.info().applied())
                 .anyMatch(migration ->
-                        "60".equals(String.valueOf(migration.getVersion()))
-                                && "V60__create_waiting_location_party_runtime.sql"
+                        "61".equals(String.valueOf(migration.getVersion()))
+                                && "V61__create_waiting_location_party_runtime.sql"
                                 .equals(migration.getScript()));
     }
 
     @Test
-    @DisplayName("V60 위치 증명 원장은 판정 최소 정보만 저장하고 위치 원문 열을 만들지 않는다")
+    @DisplayName("V61 위치 증명 원장은 판정 최소 정보만 저장하고 위치 원문 열을 만들지 않는다")
     void locationProofLedgerDoesNotPersistRawLocation() throws SQLException {
         migrate();
 
@@ -148,7 +148,7 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("V60은 한 팀의 여러 계정을 허용하되 계정 전체 활성 membership은 한 건만 허용한다")
+    @DisplayName("V61은 한 팀의 여러 계정을 허용하되 계정 전체 활성 membership은 한 건만 허용한다")
     void allowsMultipleTeamMembersButKeepsAccountWideUniqueness() throws SQLException {
         migrate();
 
@@ -192,7 +192,7 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("V60까지 적용하면 Waiting 소유 위치·일행 원장을 포함한 열일곱 개 테이블만 존재한다")
+    @DisplayName("V61까지 적용하면 Waiting 소유 위치·일행 원장을 포함한 열일곱 개 테이블만 존재한다")
     void createsExactWaitingLedgerTableSet() throws SQLException {
         migrate();
 
