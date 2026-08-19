@@ -25,6 +25,13 @@ Set `MIRIYUM_ALLOWED_ORIGIN=https://staging.miriyum.click` in the same server-lo
 the first hosted-login smoke. The backend accepts one configured browser Origin; keep the local
 Vite proxy only for local development, not as evidence for the hosted staging flow.
 
+Set the public JavaScript map key as the `STAGING_KAKAO_MAP_APP_KEY` variable in the GitHub
+`staging-backend` Environment. The CD frontend build passes it as `VITE_KAKAO_MAP_APP_KEY`; the
+value is a browser key, but it must not be printed in workflow logs or committed. Before deploying
+a new frontend image, register `https://staging.miriyum.click` as an allowed web domain in Kakao
+Developers. If the variable is intentionally absent, map screens fall back to their existing
+unavailable state and this must be recorded in the staging smoke result.
+
 For Kakao login, add `https://staging.miriyum.click/auth/kakao/callback` to the Kakao Developer
 Console redirect URIs and append the exact same value to the comma-separated
 `MIRIYUM_KAKAO_REDIRECT_URIS` value in the server-local `.env`. Do not remove the existing local

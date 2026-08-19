@@ -139,9 +139,51 @@ verify_nginx() {
 
 verify_frontend() {
   local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local frontend_domain
 
   if ! "${compose[@]}" ps --status running --services frontend | grep -qx frontend; then
     echo "Frontend is not running after deployment." >&2
+    return 1
+  fi
+
+  if ! "${compose[@]}" exec -T frontend wget -q -O /dev/null http://127.0.0.1/; then
+    echo "Frontend container root did not return HTTP 200." >&2
+    return 1
+  fi
+
+  if ! "${compose[@]}" exec -T frontend wget -q -O /dev/null http://127.0.0.1/sign-in; then
+    echo "Frontend SPA fallback did not return HTTP 200." >&2
+    return 1
+  fi
+
+  frontend_domain="$("${compose[@]}" exec -T nginx sh -ec 'printf %s "$STAGING_FRONTEND_DOMAIN"')"
+  if [[ -z "${frontend_domain}" ]]; then
+    echo "Staging frontend domain is empty." >&2
+    return 1
+  fi
+
+  if "${compose[@]}" exec -T nginx grep -Fqx "    listen 443 ssl;" /etc/nginx/conf.d/default.conf; then
+    if ! curl --fail --silent --show-error \
+      --resolve "${frontend_domain}:443:127.0.0.1" \
+      "https://${frontend_domain}/" >/dev/null; then
+      echo "Gateway frontend root did not return HTTP 200 over HTTPS." >&2
+      return 1
+    fi
+    if ! curl --fail --silent --show-error \
+      --resolve "${frontend_domain}:443:127.0.0.1" \
+      "https://${frontend_domain}/sign-in" >/dev/null; then
+      echo "Gateway frontend SPA fallback did not return HTTP 200 over HTTPS." >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if ! curl --fail --silent --show-error -H "Host: ${frontend_domain}" http://127.0.0.1/ >/dev/null; then
+    echo "Gateway frontend root did not return HTTP 200." >&2
+    return 1
+  fi
+  if ! curl --fail --silent --show-error -H "Host: ${frontend_domain}" http://127.0.0.1/sign-in >/dev/null; then
+    echo "Gateway frontend SPA fallback did not return HTTP 200." >&2
     return 1
   fi
 }

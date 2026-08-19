@@ -281,6 +281,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.tag }}-frontend
+          build-args: |
+            VITE_KAKAO_MAP_APP_KEY=${{ vars.STAGING_KAKAO_MAP_APP_KEY }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

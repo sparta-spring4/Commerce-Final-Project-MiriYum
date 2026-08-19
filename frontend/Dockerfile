@@ -6,6 +6,8 @@ COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile --ignore-scripts
 
 COPY frontend/ ./
+ARG VITE_KAKAO_MAP_APP_KEY
+ENV VITE_KAKAO_MAP_APP_KEY=${VITE_KAKAO_MAP_APP_KEY}
 RUN pnpm run build
 
 FROM nginx:1.27-alpine

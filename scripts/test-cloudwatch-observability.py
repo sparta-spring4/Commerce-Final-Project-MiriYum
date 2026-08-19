@@ -185,6 +185,23 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             self.assertIn("proxy_pass http://frontend:80;", template)
             self.assertIn("proxy_pass http://backend:8080;", template)
 
+    def test_deploy_verifies_frontend_container_gateway_and_spa_responses_before_success(self):
+        for expected_text in (
+            'exec -T frontend wget -q -O /dev/null http://127.0.0.1/',
+            'exec -T frontend wget -q -O /dev/null http://127.0.0.1/sign-in',
+            'Gateway frontend root did not return HTTP 200',
+            'Gateway frontend SPA fallback did not return HTTP 200',
+            'Gateway frontend root did not return HTTP 200 over HTTPS',
+            'Gateway frontend SPA fallback did not return HTTP 200 over HTTPS',
+        ):
+            self.assertIn(expected_text, self.deploy_script)
+
+    def test_frontend_image_receives_the_staging_kakao_map_public_key(self):
+        dockerfile = (ROOT / "frontend" / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("ARG VITE_KAKAO_MAP_APP_KEY", dockerfile)
+        self.assertIn("ENV VITE_KAKAO_MAP_APP_KEY=${VITE_KAKAO_MAP_APP_KEY}", dockerfile)
+        self.assertIn("VITE_KAKAO_MAP_APP_KEY=${{ vars.STAGING_KAKAO_MAP_APP_KEY }}", self.workflow)
+
     def test_mysql_allows_trigger_migrations_when_binary_logging_is_enabled(self):
         mysql_command = self.compose_config["services"]["mysql"]["command"]
 
