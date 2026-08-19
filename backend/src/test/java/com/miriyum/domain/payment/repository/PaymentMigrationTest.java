@@ -160,6 +160,14 @@ class PaymentMigrationTest {
                         .isEqualTo(1L);
                 assertThat(tableCount(connection, "reservation_payment_recovery_outbox"))
                         .isEqualTo(1L);
+                assertThat(singleString(connection, """
+                        SELECT CHECK_CLAUSE
+                          FROM information_schema.check_constraints
+                         WHERE constraint_schema = DATABASE()
+                           AND constraint_name =
+                               'ck_reservation_deposit_refund_operation'
+                        """))
+                        .contains("operation", "reconciliation_attempt_count", "attempt_count");
             }
         }
     }
@@ -191,6 +199,14 @@ class PaymentMigrationTest {
              ResultSet resultSet = statement.executeQuery(sql)) {
             resultSet.next();
             return resultSet.getLong(1);
+        }
+    }
+
+    private static String singleString(Connection connection, String sql) throws Exception {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(sql)) {
+            resultSet.next();
+            return resultSet.getString(1);
         }
     }
 

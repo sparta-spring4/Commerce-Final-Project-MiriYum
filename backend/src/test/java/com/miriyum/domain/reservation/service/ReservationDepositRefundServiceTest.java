@@ -247,6 +247,9 @@ class ReservationDepositRefundServiceTest {
         obligation.claim("worker-2", NOW.minusSeconds(60), NOW.minusSeconds(50));
         obligation.scheduleReconciliation("worker-2", obligation.getClaimToken(),
                 NOW.minusSeconds(59), Duration.ZERO);
+        obligation.claim("worker-3", NOW.minusSeconds(30), NOW.minusSeconds(20));
+        obligation.scheduleReconciliation("worker-3", obligation.getClaimToken(),
+                NOW.minusSeconds(29), Duration.ZERO);
         obligation.claim("worker-a", NOW.minusSeconds(10), NOW.plusSeconds(20));
         ReservationDepositProcess process = compensationRequiredProcess();
         process.beginCompensation(NOW.minusSeconds(10));
@@ -257,7 +260,8 @@ class ReservationDepositRefundServiceTest {
                         "123e4567-e89b-12d3-a456-426614174099",
                         "FULL_DEPOSIT_COMPENSATION", "worker-a",
                         obligation.getClaimToken(),
-                        ReservationDepositRefundService.Operation.QUERY, 3);
+                        ReservationDepositRefundObligation.Operation.QUERY,
+                        obligation.getReconciliationAttemptCount());
         RefundResult unknown = new RefundResult(
                 "7001", "9001", 4_000L, 0L, 0L, 4_000L, "KRW",
                 RefundStatus.RECONCILIATION_REQUIRED, NOW.minusSeconds(1), null);

@@ -280,13 +280,48 @@ class ReservationDepositRefundRuntimeIT {
 
         clock.advance(Duration.ofSeconds(30));
         assertThat(refundJob.runOnce("refund-worker-c", 10)).isZero();
+        assertThat(outboxCount(fixture.obligationId())).isZero();
+
+        clock.advance(Duration.ofSeconds(30));
+        assertThat(refundJob.runOnce("refund-worker-d", 10)).isZero();
         assertThat(statusOf("reservation_deposit_processes",
                 "reservation_deposit_process_id",
                 fixture.processId())).isEqualTo("RECOVERY_REQUIRED");
         assertThat(outboxCount(fixture.obligationId())).isEqualTo(1);
 
         clock.advance(Duration.ofSeconds(30));
-        assertThat(refundJob.runOnce("refund-worker-d", 10)).isZero();
+        assertThat(refundJob.runOnce("refund-worker-e", 10)).isZero();
+        assertThat(outboxCount(fixture.obligationId())).isEqualTo(1);
+        verify(paymentService, times(1)).requestRefund(any(RequestRefundCommand.class));
+        verify(paymentService, times(3))
+                .reconcileRefundResult(any(ReconcileRefundResultQuery.class));
+    }
+
+    @Test
+    void expiredQueryLeaseNeverReclaimsAsARefundRequestAfterProviderFailure() {
+        Fixture fixture = createRefundRequiredFixture();
+        when(paymentService.requestRefund(any(RequestRefundCommand.class)))
+                .thenReturn(unknownRefund());
+        when(paymentService.reconcileRefundResult(any(ReconcileRefundResultQuery.class)))
+                .thenReturn(failedRefund());
+
+        assertThat(refundJob.runOnce("refund-worker-a", 10)).isZero();
+        clock.advance(Duration.ofSeconds(30));
+
+        ReservationDepositRefundService.Claim crashed =
+                refundService.claimDue("crashed-query-worker", 10).getFirst();
+        assertThat(crashed.operation())
+                .isEqualTo(ReservationDepositRefundObligation.Operation.QUERY);
+        paymentService.reconcileRefundResult(new ReconcileRefundResultQuery(
+                crashed.paymentId(), crashed.sourceEventId(),
+                crashed.refundAmountMinor(), crashed.currency()));
+
+        clock.advance(Duration.ofSeconds(30));
+        assertThat(refundJob.runOnce("refund-worker-b", 10)).isZero();
+
+        assertThat(statusOf("reservation_deposit_processes",
+                "reservation_deposit_process_id",
+                fixture.processId())).isEqualTo("RECOVERY_REQUIRED");
         assertThat(outboxCount(fixture.obligationId())).isEqualTo(1);
         verify(paymentService, times(1)).requestRefund(any(RequestRefundCommand.class));
         verify(paymentService, times(2))

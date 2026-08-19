@@ -37,6 +37,11 @@ public class ReservationDepositRefundObligation {
         RECONCILIATION_REQUIRED
     }
 
+    public enum Operation {
+        REQUEST,
+        QUERY
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "reservation_deposit_refund_obligation_id")
@@ -60,8 +65,13 @@ public class ReservationDepositRefundObligation {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 32)
     private Status status;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "operation", nullable = false, length = 16)
+    private Operation operation;
     @Column(name = "attempt_count", nullable = false)
     private int attemptCount;
+    @Column(name = "reconciliation_attempt_count", nullable = false)
+    private int reconciliationAttemptCount;
     @Column(name = "next_attempt_at")
     private Instant nextAttemptAt;
     @Column(name = "lease_owner", length = 64)
@@ -108,6 +118,7 @@ public class ReservationDepositRefundObligation {
                 idempotencyKey, IDEMPOTENCY_KEY, "idempotencyKey");
         obligation.reasonCode = requireText(reasonCode, 40, "reasonCode");
         obligation.status = Status.REQUIRED;
+        obligation.operation = Operation.REQUEST;
         obligation.nextAttemptAt = Objects.requireNonNull(now, "now must not be null");
         obligation.createdAt = now;
         return obligation;
@@ -147,6 +158,9 @@ public class ReservationDepositRefundObligation {
         }
         status = Status.PROCESSING;
         attemptCount++;
+        if (operation == Operation.QUERY) {
+            reconciliationAttemptCount++;
+        }
         claimToken++;
         leaseOwner = owner;
         leaseUntil = until;
@@ -199,6 +213,7 @@ public class ReservationDepositRefundObligation {
             throw new IllegalArgumentException("delay must not be negative");
         }
         status = Status.RECONCILIATION_REQUIRED;
+        operation = Operation.QUERY;
         nextAttemptAt = now.plus(delay);
         completedAt = null;
         clearLease();
@@ -253,7 +268,9 @@ public class ReservationDepositRefundObligation {
     public String getIdempotencyKey() { return idempotencyKey; }
     public String getReasonCode() { return reasonCode; }
     public Status getStatus() { return status; }
+    public Operation getOperation() { return operation; }
     public int getAttemptCount() { return attemptCount; }
+    public int getReconciliationAttemptCount() { return reconciliationAttemptCount; }
     public Instant getNextAttemptAt() { return nextAttemptAt; }
     public String getLeaseOwner() { return leaseOwner; }
     public Instant getLeaseUntil() { return leaseUntil; }

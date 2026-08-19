@@ -5,6 +5,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileRefundResultQuery;
 import com.miriyum.domain.payment.service.PaymentService;
+import com.miriyum.domain.reservation.entity.ReservationDepositRefundObligation.Operation;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Duration;
@@ -71,7 +72,7 @@ public class ReservationDepositRefundJob {
                 : refundService.claimDue(owner, limit)) {
             RefundResult refund;
             try {
-                refund = claim.operation() == ReservationDepositRefundService.Operation.QUERY
+                refund = claim.operation() == Operation.QUERY
                         ? paymentService.reconcileRefundResult(
                                 new ReconcileRefundResultQuery(
                                         claim.paymentId(), claim.sourceEventId(),
@@ -85,7 +86,7 @@ public class ReservationDepositRefundJob {
                                         claim.refundPolicyVersion(),
                                         claim.idempotencyKey()));
             } catch (ServiceException failure) {
-                if (claim.operation() == ReservationDepositRefundService.Operation.QUERY) {
+                if (claim.operation() == Operation.QUERY) {
                     refundService.recordQueryFailure(
                             claim, RETRY_DELAY, MAX_ATTEMPTS);
                 } else if (isRetryable(failure)) {
@@ -95,7 +96,7 @@ public class ReservationDepositRefundJob {
                 }
                 continue;
             } catch (RuntimeException failure) {
-                if (claim.operation() == ReservationDepositRefundService.Operation.QUERY) {
+                if (claim.operation() == Operation.QUERY) {
                     refundService.recordQueryFailure(
                             claim, RETRY_DELAY, MAX_ATTEMPTS);
                 } else {

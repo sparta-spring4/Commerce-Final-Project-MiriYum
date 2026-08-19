@@ -77,11 +77,20 @@ class ReservationDepositRefundObligationTest {
                 .isEqualTo(ReservationDepositRefundObligation.Status.RECONCILIATION_REQUIRED);
         assertThat(obligation.getNextAttemptAt()).isEqualTo(NOW.plusSeconds(31));
         assertThat(obligation.getCompletedAt()).isNull();
+        assertThat(obligation.getOperation())
+                .isEqualTo(ReservationDepositRefundObligation.Operation.QUERY);
 
         obligation.claim("worker-b", NOW.plusSeconds(31), NOW.plusSeconds(61));
 
         assertThat(obligation.getAttemptCount()).isEqualTo(2);
+        assertThat(obligation.getReconciliationAttemptCount()).isEqualTo(1);
         assertThat(obligation.getStatus())
                 .isEqualTo(ReservationDepositRefundObligation.Status.PROCESSING);
+
+        obligation.claim("worker-c", NOW.plusSeconds(61), NOW.plusSeconds(91));
+
+        assertThat(obligation.getOperation())
+                .isEqualTo(ReservationDepositRefundObligation.Operation.QUERY);
+        assertThat(obligation.getReconciliationAttemptCount()).isEqualTo(2);
     }
 }

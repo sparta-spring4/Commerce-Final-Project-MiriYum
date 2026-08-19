@@ -13,6 +13,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileRefundResultQuery;
 import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.config.ReservationDepositProcessConfig;
+import com.miriyum.domain.reservation.entity.ReservationDepositRefundObligation.Operation;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.time.Instant;
@@ -285,7 +286,7 @@ class ReservationDepositRefundJobTest {
                         "reservation-deposit-compensation:99",
                         "123e4567-e89b-12d3-a456-426614174099",
                         "FULL_DEPOSIT_COMPENSATION", "worker-a", 2L,
-                        ReservationDepositRefundService.Operation.QUERY, 2);
+                        Operation.QUERY, 2);
         ReconcileRefundResultQuery query = new ReconcileRefundResultQuery(
                 "9001", "reservation-deposit-compensation:99", 4_000L, "KRW");
         RefundResult unknown = new RefundResult(
@@ -316,7 +317,7 @@ class ReservationDepositRefundJobTest {
                         "reservation-deposit-compensation:99",
                         "123e4567-e89b-12d3-a456-426614174099",
                         "FULL_DEPOSIT_COMPENSATION", "worker-a", 2L,
-                        ReservationDepositRefundService.Operation.QUERY, 2);
+                        Operation.QUERY, 2);
         ReconcileRefundResultQuery query = new ReconcileRefundResultQuery(
                 "9001", "reservation-deposit-compensation:99", 4_000L, "KRW");
         given(refundService.claimDue("worker-a", 10)).willReturn(List.of(claim));
