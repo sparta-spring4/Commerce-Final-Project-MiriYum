@@ -7,6 +7,10 @@ import com.miriyum.domain.platformoperator.dto.authorization.HighRiskCommandRequ
 import com.miriyum.domain.platformoperator.dto.authorization.OperatorAuthority;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAccountStatus;
+import com.miriyum.domain.platformoperator.enums.AdminCaseType;
+import com.miriyum.domain.platformoperator.enums.AdminCommandPurpose;
+import com.miriyum.domain.platformoperator.enums.AdminTargetType;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
 import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorReauthenticationApprovalRepository;
@@ -52,13 +56,34 @@ public class HighRiskCommandGuard {
             throw new IllegalStateException("high-risk authorization requires an active command transaction");
         }
         try {
-            return authorizeAgainstStores(request);
+            return authorizeAgainstStores(request, true);
         } catch (DataAccessException exception) {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
     }
 
-    private AdminAuditContext authorizeAgainstStores(HighRiskCommandRequest request) {
+    @Transactional(propagation = Propagation.MANDATORY)
+    public AdminAuditContext authorizeInitialPaymentRecoveryAssignment(
+            HighRiskCommandRequest request) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("high-risk authorization requires an active command transaction");
+        }
+        if (request.caseType() != AdminCaseType.PAYMENT_RECOVERY
+                || request.purpose() != AdminCommandPurpose.PAYMENT_RECOVERY
+                || request.targetType() != AdminTargetType.PAYMENT_RECOVERY_CASE
+                || request.requiredPermission() != PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE
+                || !request.caseId().equals(request.targetId())) {
+            deny();
+        }
+        try {
+            return authorizeAgainstStores(request, false);
+        } catch (DataAccessException exception) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
+    }
+
+    private AdminAuditContext authorizeAgainstStores(
+            HighRiskCommandRequest request, boolean verifyAssignment) {
         PlatformOperatorAccount account = accounts.findByIdForUpdate(request.principal().accountId())
                 .filter(candidate -> candidate.getStatus() == PlatformOperatorAccountStatus.ACTIVE)
                 .filter(candidate -> candidate.getAuthorityVersion() == request.principal().authorityVersion())
@@ -68,8 +93,10 @@ public class HighRiskCommandGuard {
                 account.getId(), request.principal().authorityVersion());
         if (!authority.permissions().contains(request.requiredPermission())) deny();
 
-        assignmentVerifier.verify(new AdminCaseAssignmentRequest(
-                request.caseType(), request.caseId(), request.caseVersion(), account.getId()));
+        if (verifyAssignment) {
+            assignmentVerifier.verify(new AdminCaseAssignmentRequest(
+                    request.caseType(), request.caseId(), request.caseVersion(), account.getId()));
+        }
 
         String digest = ReauthenticationService.sha256(request.approval());
         int consumed = approvals.consumeBoundApproval(

@@ -11,6 +11,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.miriyum.domain.platformoperator.dto.authorization.AdminAuditContext;
 import com.miriyum.domain.platformoperator.dto.authorization.HighRiskCommandRequest;
@@ -80,6 +81,25 @@ class HighRiskCommandGuardTest {
             assertThat(context.permissions()).contains(PAYMENT_RECOVERY_EXECUTE);
             assertThat(context.approvalFingerprint()).hasSize(64).doesNotContain("approval-raw");
             assertThat(context.toString()).doesNotContain("approval-raw", "session-raw");
+        }
+    }
+
+    @Test
+    void initialPaymentRecoverySelfAssignmentConsumesReauthenticationWithoutCircularAssignmentCheck() {
+        when(authorities.requireCurrentAuthority(7L, 3L)).thenReturn(new OperatorAuthority(
+                7L, 3L, Set.of(PAYMENT_RECOVERY_OPERATOR), Set.of(PAYMENT_RECOVERY_EXECUTE)));
+        when(approvals.consumeBoundApproval(any(), any(Long.class), any(), any(), any(), any(), any(Long.class), any()))
+                .thenReturn(1);
+        HighRiskCommandRequest assignmentRequest = new HighRiskCommandRequest(
+                request.principal(), request.requiredPermission(), request.caseType(),
+                request.caseId(), request.caseVersion(), request.purpose(), request.targetType(),
+                request.caseId(), "approval-raw", request.correlationId());
+
+        try (MockedStatic<TransactionSynchronizationManager> tx = mockStatic(TransactionSynchronizationManager.class)) {
+            tx.when(TransactionSynchronizationManager::isActualTransactionActive).thenReturn(true);
+            AdminAuditContext context = guard.authorizeInitialPaymentRecoveryAssignment(assignmentRequest);
+            assertThat(context.operatorId()).isEqualTo(7L);
+            verifyNoInteractions(assignments);
         }
     }
 
