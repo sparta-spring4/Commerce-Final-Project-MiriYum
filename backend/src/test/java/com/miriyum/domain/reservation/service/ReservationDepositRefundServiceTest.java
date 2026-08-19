@@ -6,6 +6,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoverySourceType.RESERVATION_DEPOSIT_REFUND;
 
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
@@ -48,6 +49,7 @@ class ReservationDepositRefundServiceTest {
         ReservationDepositRefundService service = new ReservationDepositRefundService(
                 refundRepository,
                 processRepository,
+                mock(ReservationPaymentRecoveryOutboxService.class),
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 Duration.ofSeconds(30));
 
@@ -94,6 +96,7 @@ class ReservationDepositRefundServiceTest {
         ReservationDepositRefundService service = new ReservationDepositRefundService(
                 refundRepository,
                 processRepository,
+                mock(ReservationPaymentRecoveryOutboxService.class),
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 Duration.ofSeconds(30));
         ReservationDepositRefundService.Claim stale =
@@ -155,6 +158,7 @@ class ReservationDepositRefundServiceTest {
         ReservationDepositRefundService service = new ReservationDepositRefundService(
                 refundRepository,
                 processRepository,
+                mock(ReservationPaymentRecoveryOutboxService.class),
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 Duration.ofSeconds(30));
 
@@ -211,9 +215,12 @@ class ReservationDepositRefundServiceTest {
         given(refundRepository.findByIdForUpdate(501L))
                 .willReturn(Optional.of(obligation));
         given(processRepository.findByIdForUpdate(99L)).willReturn(Optional.of(process));
+        ReservationPaymentRecoveryOutboxService outbox =
+                mock(ReservationPaymentRecoveryOutboxService.class);
         ReservationDepositRefundService service = new ReservationDepositRefundService(
                 refundRepository,
                 processRepository,
+                outbox,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 Duration.ofSeconds(30));
 
@@ -231,6 +238,12 @@ class ReservationDepositRefundServiceTest {
         order.verify(processRepository).findByIdForUpdate(99L);
         order.verify(refundRepository).save(obligation);
         order.verify(processRepository).saveAndFlush(process);
+        verify(outbox).enqueue(
+                RESERVATION_DEPOSIT_REFUND,
+                "501",
+                "9001",
+                "reservation-deposit-compensation:99",
+                "123e4567-e89b-12d3-a456-426614174099");
     }
 
     private static ReservationDepositRefundObligation obligation() {

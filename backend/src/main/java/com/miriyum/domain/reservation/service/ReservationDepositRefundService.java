@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.service;
 
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
+import static com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoverySourceType.RESERVATION_DEPOSIT_REFUND;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
 import com.miriyum.domain.reservation.entity.ReservationDepositRefundObligation;
 import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
@@ -23,12 +24,14 @@ public class ReservationDepositRefundService {
 
     private final ReservationDepositRefundObligationRepository refundRepository;
     private final ReservationDepositProcessRepository processRepository;
+    private final ReservationPaymentRecoveryOutboxService recoveryOutbox;
     private final Clock clock;
     private final Duration leaseDuration;
 
     public ReservationDepositRefundService(
             ReservationDepositRefundObligationRepository refundRepository,
             ReservationDepositProcessRepository processRepository,
+            ReservationPaymentRecoveryOutboxService recoveryOutbox,
             Clock clock,
             @Qualifier("reservationDepositRefundLeaseDuration")
             Duration leaseDuration
@@ -38,6 +41,7 @@ public class ReservationDepositRefundService {
         }
         this.refundRepository = refundRepository;
         this.processRepository = processRepository;
+        this.recoveryOutbox = recoveryOutbox;
         this.clock = clock;
         this.leaseDuration = leaseDuration;
     }
@@ -197,6 +201,12 @@ public class ReservationDepositRefundService {
         obligation.requireReconciliation(claim.owner(), claim.token(), now);
         process.requireRecovery(now);
         process.suspendReconciliation();
+        recoveryOutbox.enqueue(
+                RESERVATION_DEPOSIT_REFUND,
+                Long.toString(claim.obligationId()),
+                claim.paymentId(),
+                claim.sourceEventId(),
+                claim.idempotencyKey());
         refundRepository.save(obligation);
         processRepository.saveAndFlush(process);
         return true;
