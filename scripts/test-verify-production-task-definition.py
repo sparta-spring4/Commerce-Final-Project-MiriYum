@@ -301,6 +301,45 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
 
             self.assertEqual([], validate(contract, task_definition))
 
+    def test_allows_llm_disabled_task_without_openai_secret(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                    directory,
+                    "contract.json",
+                    {
+                        "requiredSecrets": [],
+                        "parameterSecrets": [],
+                        "conditionalSecrets": {
+                            "MIRIYUM_STORE_SEARCH_LLM_ENABLED": ["OPENAI_API_KEY"]
+                        },
+                        "parameterReferencePaths": {
+                            "OPENAI_API_KEY": "miriyum/shared/openai-api-key"
+                        },
+                    },
+            )
+            task_definition = self.write_json(
+                    directory,
+                    "task-definition.json",
+                    {
+                        "requiresCompatibilities": ["FARGATE"],
+                        "networkMode": "awsvpc",
+                        "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                        "containerDefinitions": [
+                            {
+                                "name": "backend",
+                                "environment": [
+                                    {"name": "MIRIYUM_STORE_SEARCH_LLM_ENABLED", "value": "false"}
+                                ],
+                                "secrets": [],
+                            }
+                        ],
+                    },
+            )
+
+            self.assertEqual([], validate(contract, task_definition))
+
     def test_rejects_parameter_reference_that_uses_a_different_path(self):
         validate = load_validator()
 
