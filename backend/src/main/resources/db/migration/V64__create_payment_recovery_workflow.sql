@@ -218,7 +218,7 @@ CREATE TABLE payment_recovery_executions (
         OR (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL AND lease_token >= 1)
     ),
     CONSTRAINT ck_payment_recovery_executions_proposal CHECK (
-        (operation = 'REQUERY_PROVIDER_RESULT' AND proposal_version IS NULL)
+        operation = 'REQUERY_PROVIDER_RESULT'
         OR (operation = 'RETRY_REFUND' AND proposal_version IS NOT NULL)
     ),
     INDEX ix_payment_recovery_executions_due
