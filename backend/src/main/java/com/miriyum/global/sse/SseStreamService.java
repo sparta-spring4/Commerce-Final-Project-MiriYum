@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.LongFunction;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -23,6 +24,7 @@ public class SseStreamService {
     private final Clock clock;
     private final LongFunction<SseEmitter> emitterFactory;
 
+    @Autowired
     public SseStreamService(
             SseRuntimeProperties properties,
             SseCursorCodec cursorCodec,
