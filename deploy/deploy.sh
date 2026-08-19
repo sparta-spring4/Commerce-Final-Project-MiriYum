@@ -5,6 +5,7 @@ set -Eeuo pipefail
 APP_DIR="${APP_DIR:-/opt/miriyum}"
 COMPOSE_FILE="${COMPOSE_FILE:-${APP_DIR}/docker-compose.prod.yml}"
 ENV_FILE="${ENV_FILE:-${APP_DIR}/.env}"
+RUNTIME_CONFIG_PARAMETER_NAME="${RUNTIME_CONFIG_PARAMETER_NAME:-/miriyum/staging/backend-runtime-config}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/actuator/health}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-90}"
 MYSQL_HEALTH_TIMEOUT_SECONDS="${MYSQL_HEALTH_TIMEOUT_SECONDS:-210}"
@@ -28,6 +29,25 @@ validate_runtime_environment() {
     echo "Runtime environment validation failed. Check required keys in ${ENV_FILE}; values are not printed." >&2
     return 1
   fi
+}
+
+load_runtime_config() {
+  local runtime_config
+
+  runtime_config=$(aws ssm get-parameter \
+    --region "${AWS_REGION}" \
+    --name "${RUNTIME_CONFIG_PARAMETER_NAME}" \
+    --with-decryption \
+    --query 'Parameter.Value' \
+    --output text)
+
+  if [[ -z "${runtime_config}" || "${runtime_config}" == "None" ]]; then
+    echo "Runtime config parameter is empty: ${RUNTIME_CONFIG_PARAMETER_NAME}" >&2
+    return 1
+  fi
+
+  export MIRIYUM_SPRING_APPLICATION_JSON="${runtime_config}"
+  unset runtime_config
 }
 
 wait_for_mysql_health() {
@@ -268,6 +288,7 @@ main() {
     return 1
   fi
 
+  load_runtime_config
   validate_runtime_environment
 
   for command in aws curl docker; do

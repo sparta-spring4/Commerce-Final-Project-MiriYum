@@ -70,6 +70,12 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("updated_image", self.workflow)
         self.assertIn('The next task definition does not contain the selected backend image.', self.workflow)
 
+    def test_task_definition_always_injects_the_single_runtime_config_secret(self):
+        self.assertIn("RUNTIME_CONFIG_SECRET_NAME: miriyum/production/backend-runtime-config", self.workflow)
+        self.assertIn("aws secretsmanager describe-secret", self.workflow)
+        self.assertIn("SPRING_APPLICATION_JSON", self.workflow)
+        self.assertIn("runtime_config_secret_arn", self.workflow)
+
     def test_backend_ci_runs_the_workflow_contract_test(self):
         self.assertIn("Verify production ECS CD workflow contract", self.backend_ci)
         self.assertIn("python3 scripts/test-production-ecs-cd-workflow.py", self.backend_ci)

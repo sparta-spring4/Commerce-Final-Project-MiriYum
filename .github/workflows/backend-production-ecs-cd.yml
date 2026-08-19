@@ -27,6 +27,7 @@ env:
   ECS_CLUSTER: ${{ vars.AWS_ECS_CLUSTER }}
   ECS_SERVICE: ${{ vars.AWS_ECS_SERVICE }}
   ECS_CONTAINER_NAME: backend
+  RUNTIME_CONFIG_SECRET_NAME: miriyum/production/backend-runtime-config
 
 jobs:
   verify-source:
@@ -247,9 +248,24 @@ jobs:
             exit 1
           fi
 
-          jq --arg image "$IMAGE_URI" --arg container "$ECS_CONTAINER_NAME" '
+          runtime_config_secret_arn=$(aws secretsmanager describe-secret \
+            --secret-id "$RUNTIME_CONFIG_SECRET_NAME" \
+            --query 'ARN' \
+            --output text)
+          if [ -z "$runtime_config_secret_arn" ] || [ "$runtime_config_secret_arn" = "None" ]; then
+            echo "::error::Production runtime config secret was not found."
+            exit 1
+          fi
+
+          jq --arg image "$IMAGE_URI" --arg container "$ECS_CONTAINER_NAME" \
+            --arg runtime_config_secret_arn "$runtime_config_secret_arn" '
             .containerDefinitions |= map(
-              if .name == $container then .image = $image else . end
+              if .name == $container then
+                .image = $image
+                | .secrets = ((.secrets // [] | map(select(.name != "SPRING_APPLICATION_JSON"))) + [
+                    {name: "SPRING_APPLICATION_JSON", valueFrom: $runtime_config_secret_arn}
+                  ])
+              else . end
             )
             | del(
                 .taskDefinitionArn,
