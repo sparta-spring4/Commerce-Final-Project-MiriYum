@@ -13,6 +13,7 @@ import static org.mockito.Mockito.never;
 import com.miriyum.domain.store.dto.contract.StoreDashboardAuthority;
 import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
 import com.miriyum.domain.store.dto.contract.StoreWaitingReceptionProfile;
+import com.miriyum.domain.store.dto.contract.StoreWaitingLocationProfile;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
@@ -49,6 +50,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -273,6 +275,45 @@ class StoreServiceTest {
                 new StoreWaitingReceptionProfile(8L, "Asia/Seoul", false),
                 9L,
                 new StoreWaitingReceptionProfile(9L, "Asia/Seoul", false)));
+    }
+
+    @Test
+    void returnsVerifiedWaitingLocationThroughPublicProjection() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        ReflectionTestUtils.setField(store, "latitude", new BigDecimal("37.566826000000000"));
+        ReflectionTestUtils.setField(store, "longitude", new BigDecimal("126.978656700000000"));
+        ReflectionTestUtils.setField(store, "geocodingAddressVersion", 2L);
+        ReflectionTestUtils.setField(store, "geocodingStatus", GeocodingStatus.VERIFIED);
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+
+        StoreWaitingLocationProfile profile =
+                storeService.getWaitingLocationProfile(STORE_ID);
+
+        assertThat(profile).isEqualTo(new StoreWaitingLocationProfile(
+                STORE_ID,
+                new BigDecimal("37.566826000000000"),
+                new BigDecimal("126.978656700000000"),
+                2L,
+                true));
+    }
+
+    @Test
+    void waitingLocationFailsClosedWithoutVerifiedCoordinates() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        ReflectionTestUtils.setField(store, "latitude", new BigDecimal("37.566826000000000"));
+        ReflectionTestUtils.setField(store, "longitude", null);
+        ReflectionTestUtils.setField(store, "geocodingAddressVersion", 2L);
+        ReflectionTestUtils.setField(store, "geocodingStatus", GeocodingStatus.UNVERIFIED);
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+
+        StoreWaitingLocationProfile profile =
+                storeService.getWaitingLocationProfile(STORE_ID);
+
+        assertThat(profile.locationProofEligible()).isFalse();
+        assertThat(profile.latitude()).isNull();
+        assertThat(profile.longitude()).isNull();
     }
 
     @Test
