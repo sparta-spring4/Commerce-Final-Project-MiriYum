@@ -13,4 +13,4 @@ else
 fi
 
 # Restrict envsubst to the Compose variable so Nginx variables such as $host remain intact.
-envsubst '${STAGING_DOMAIN}' < "${template}" > /etc/nginx/conf.d/default.conf
+envsubst '${STAGING_DOMAIN} ${STAGING_FRONTEND_DOMAIN}' < "${template}" > /etc/nginx/conf.d/default.conf
