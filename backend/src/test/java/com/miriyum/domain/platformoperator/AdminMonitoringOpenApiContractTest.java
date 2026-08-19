@@ -13,9 +13,9 @@ import org.yaml.snakeyaml.Yaml;
 
 class AdminMonitoringOpenApiContractTest {
     private static final Path SPECS = Path.of("..", "docs", "specs");
-    private static final String LIST = "/api/v1/platform-operators/admin-monitoring/cases";
+    private static final String LIST = "/api/v1/platform-operators/monitoring-cases";
     private static final String DETAIL =
-            "/api/v1/platform-operators/admin-monitoring/cases/{caseType}/{caseId}";
+            "/api/v1/platform-operators/monitoring-cases/{caseType}/{caseId}";
 
     @Test
     void monitoringPathsAreContractOnlyPlatformOperatorRoutes() throws Exception {
@@ -26,15 +26,16 @@ class AdminMonitoringOpenApiContractTest {
         assertThat(audiencePaths).containsKeys(LIST, DETAIL);
         assertThat(reference(audiencePaths, LIST))
                 .isEqualTo("./admin-monitoring/openapi.yaml#/paths/"
-                        + "~1api~1v1~1platform-operators~1admin-monitoring~1cases");
+                        + "~1api~1v1~1platform-operators~1monitoring-cases");
         assertThat(reference(audiencePaths, DETAIL))
                 .isEqualTo("./admin-monitoring/openapi.yaml#/paths/"
-                        + "~1api~1v1~1platform-operators~1admin-monitoring~1cases~1{caseType}~1{caseId}");
+                        + "~1api~1v1~1platform-operators~1monitoring-cases~1{caseType}~1{caseId}");
 
         for (String path : List.of(LIST, DETAIL)) {
-            Map<String, Object> get = map(map(featurePaths.get(path)).get("get"));
-            assertThat(get).containsEntry("x-miriyum-runtime-status", "contract-only")
+            Map<String, Object> pathItem = map(featurePaths.get(path));
+            assertThat(pathItem).containsEntry("x-miriyum-runtime-status", "contract-only")
                     .containsEntry("x-miriyum-owner-issue", 280);
+            Map<String, Object> get = map(pathItem.get("get"));
             assertThat(map(get.get("responses")).keySet())
                     .contains("200", "400", "401", "403", "404", "503");
         }

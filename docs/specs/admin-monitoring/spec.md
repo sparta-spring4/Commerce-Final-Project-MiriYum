@@ -4,7 +4,7 @@
 - 단계: 고도화
 - audience: Platform Operator
 - 활성 OpenAPI: [openapi.yaml](openapi.yaml)
-- 설계 기록: [2026-08-19-admin-monitoring-design.md](../../superpowers/specs/2026-08-19-admin-monitoring-design.md)
+- 공개 조회 계약·설계 기록: [#472](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/472)
 
 ## 목적
 
@@ -22,7 +22,7 @@ ReservationHold가 최종 Reservation으로 전환돼도 공개 case ID는 바�
 
 ### 목록
 
-`GET /api/v1/platform-operators/admin-monitoring/cases`
+`GET /api/v1/platform-operators/monitoring-cases`
 
 - 필수 기간: `changedFrom`, `changedTo`; 최대 31일
 - 선택 필터: `storeId`, `caseTypes`, `lifecycleStatuses`, 원장-qualified `sourceStatuses`, `reconciliationStatuses`
@@ -32,7 +32,7 @@ ReservationHold가 최종 Reservation으로 전환돼도 공개 case ID는 바�
 
 ### 상세
 
-`GET /api/v1/platform-operators/admin-monitoring/cases/{caseType}/{caseId}`
+`GET /api/v1/platform-operators/monitoring-cases/{caseType}/{caseId}`
 
 주 사건과 연결 원장별 상태 및 상태 이력을 반환한다. 상세 조회는 목록 권한 외에 대상 case ID와 현재 case version에 대한 활성 `OPERATIONS_MONITORING` 배정이 필요하다.
 
@@ -83,7 +83,7 @@ ReservationHold가 최종 Reservation으로 전환돼도 공개 case ID는 바�
 
 ## 선행 계약 단계
 
-현재 OpenAPI의 두 GET operation은 `x-miriyum-runtime-status: contract-only`다. 네 원 도메인의 공개 조회 계약 PR이 `dev`에 병합된 후 runtime PR에서 Controller·권한·부분 실패 테스트를 구현하고 이 표식을 제거한다.
+현재 OpenAPI의 두 path item은 `x-miriyum-runtime-status: contract-only`다. 네 원 도메인의 공개 조회 계약 PR이 `dev`에 병합된 후 runtime PR에서 Controller·권한·부분 실패 테스트를 구현하고 이 표식을 제거한다.
 
 ## 인수 조건
 
