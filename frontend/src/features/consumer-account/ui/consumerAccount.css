@@ -153,6 +153,75 @@
   margin-top: var(--space-3);
 }
 
+/* ── 결제·현재 웨이팅 ─────────────────────────────────────────────────── */
+
+.mypage__activity {
+  margin-top: var(--space-4);
+}
+
+.mypage__section-head h2,
+.mypage__activity-card h3 {
+  margin: 0;
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+}
+
+.mypage__section-head p {
+  margin: 0.375rem 0 0;
+  color: var(--color-on-surface-variant);
+}
+
+.mypage__activity-grid {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+@media (min-width: 48rem) {
+  .mypage__activity-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.mypage__activity-card .mi-card__body {
+  min-height: 14rem;
+}
+
+.mypage__activity-list,
+.mypage__waiting-summary {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+}
+
+.mypage__activity-item,
+.mypage__waiting-summary > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--color-surface-variant);
+}
+
+.mypage__activity-item span:first-child {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.mypage__activity-item small,
+.mypage__waiting-summary dt {
+  color: var(--color-on-surface-variant);
+}
+
+.mypage__activity-amount,
+.mypage__waiting-summary dd {
+  margin: 0;
+  font-weight: 700;
+  text-align: right;
+}
+
 @media (min-width: 48rem) {
   .mypage__links {
     grid-template-columns: repeat(2, minmax(0, 1fr));

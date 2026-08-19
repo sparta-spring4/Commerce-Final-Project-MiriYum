@@ -254,5 +254,8 @@ jobs:
       - name: Verify production ECS CD workflow contract
         run: python3 scripts/test-production-ecs-cd-workflow.py
 
+      - name: Verify staging LLM deploy script contract
+        run: python3 scripts/test-deploy-llm-runtime-contract.py
+
       - name: Verify CloudWatch observability contract
         run: python3 scripts/test-cloudwatch-observability.py

@@ -205,6 +205,7 @@ class ReservationDepositDispositionJobTest {
         ReservationDepositDispositionService service =
                 new ReservationDepositDispositionService(
                         repository,
+                        mock(ReservationPaymentRecoveryOutboxService.class),
                         Clock.fixed(NOW, ZoneOffset.UTC),
                         Duration.ofSeconds(30));
         PaymentService paymentService = mock(PaymentService.class);
@@ -238,7 +239,10 @@ class ReservationDepositDispositionJobTest {
                 .willReturn(Optional.of(obligation));
         ReservationDepositDispositionService service =
                 new ReservationDepositDispositionService(
-                        repository, clock, Duration.ofSeconds(30));
+                        repository,
+                        mock(ReservationPaymentRecoveryOutboxService.class),
+                        clock,
+                        Duration.ofSeconds(30));
         PaymentService paymentService = mock(PaymentService.class);
         GetReservationDepositDispositionQuery query =
                 new GetReservationDepositDispositionQuery(
