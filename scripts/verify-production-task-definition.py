@@ -62,7 +62,6 @@ def validate(contract_path, task_definition_path, application_config_path=None):
             if name not in secrets:
                 errors.append(f"Missing secret reference: {name}")
 
-    conditional_parameter_secrets = set()
     for feature_flag, required_secrets in contract.get("conditionalParameterSecrets", {}).items():
         if environment.get(feature_flag, "false").lower() != "true":
             for name in required_secrets:
@@ -71,7 +70,6 @@ def validate(contract_path, task_definition_path, application_config_path=None):
                         f"Conditional parameter secret must be absent when disabled: {name}"
                     )
             continue
-        conditional_parameter_secrets.update(required_secrets)
         for name in required_secrets:
             if name not in secrets:
                 errors.append(f"Missing parameter secret reference: {name}")
