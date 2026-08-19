@@ -238,6 +238,27 @@ public class WaitingTeam {
         version++;
     }
 
+    /** 일행 구성 명령의 버전과 WAITING 상태를 검증한다. */
+    public void requirePartyMutable(long expectedVersion) {
+        requireVersion(expectedVersion);
+        if (status != WaitingTeamStatus.WAITING) {
+            throw new ServiceException(ReservationErrorCode.PARTY_MUTATION_NOT_ALLOWED);
+        }
+    }
+
+    /** 성공한 일행 구성 변경을 팀 버전에 한 번 반영한다. */
+    public void partyChanged(long expectedVersion) {
+        requirePartyMutable(expectedVersion);
+        version++;
+    }
+
+    public void transferRepresentative(long expectedVersion, long nextRepresentativeAccountId) {
+        requirePartyMutable(expectedVersion);
+        consumerAccountId = requirePositive(
+                nextRepresentativeAccountId, "nextRepresentativeAccountId");
+        version++;
+    }
+
     /** 도착 제한 시각이 지난 호출 팀을 미응답으로 종결한다. */
     public void markNoShow(long expectedVersion, Instant occurredAt) {
         requireVersion(expectedVersion);
