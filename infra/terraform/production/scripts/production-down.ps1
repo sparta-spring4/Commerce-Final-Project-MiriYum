@@ -44,6 +44,14 @@ if ((Read-Host "Type DOWN to continue") -cne "DOWN") {
 
 Assert-AwsContext
 Assert-BackendServiceFamily
+$rdsStatus = aws rds describe-db-instances --db-instance-identifier $Database --region $Region --query "DBInstances[0].DBInstanceStatus" --output text
+if ($LASTEXITCODE -ne 0) { throw "RDS status check failed." }
+if ($rdsStatus -eq "starting") {
+  Wait-ForRdsStatus "available"
+}
+elseif ($rdsStatus -notin @("available", "stopped", "stopping")) {
+  throw "RDS cannot be stopped from state: $rdsStatus"
+}
 aws ecs update-service --cluster $Cluster --service $Service --desired-count 0 --region $Region | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "ECS desired count update failed." }
 aws ecs wait services-stable --cluster $Cluster --services $Service --region $Region

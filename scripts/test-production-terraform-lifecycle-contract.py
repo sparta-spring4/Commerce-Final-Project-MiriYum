@@ -33,6 +33,27 @@ class ProductionTerraformLifecycleContractTest(unittest.TestCase):
         self.assertNotIn("delete-", source.lower())
         self.assertNotIn("blue/green", source.lower())
 
+    def test_up_preflight_runs_before_any_rds_or_ecs_mutation(self) -> None:
+        source = UP_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertLess(
+            source.index("Assert-BackendServiceFamily\n$rdsStatus"),
+            source.index("start-db-instance"),
+        )
+        self.assertLess(
+            source.index("Assert-BackendServiceFamily\n$rdsStatus"),
+            source.index("update-service"),
+        )
+
+    def test_scripts_converge_rds_transitional_states_before_mutation(self) -> None:
+        up_source = UP_SCRIPT.read_text(encoding="utf-8")
+        down_source = DOWN_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn('$rdsStatus -eq "stopping"', up_source)
+        self.assertIn('Wait-ForRdsStatus "stopped"', up_source)
+        self.assertIn('$rdsStatus -eq "starting"', down_source)
+        self.assertIn('Wait-ForRdsStatus "available"', down_source)
+
 
 if __name__ == "__main__":
     unittest.main()

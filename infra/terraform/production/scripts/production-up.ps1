@@ -37,8 +37,14 @@ function Wait-ForRdsStatus([string]$ExpectedStatus) {
 }
 
 Assert-AwsContext
+Assert-BackendServiceFamily
 $rdsStatus = aws rds describe-db-instances --db-instance-identifier $Database --region $Region --query "DBInstances[0].DBInstanceStatus" --output text
 if ($rdsStatus -eq "stopped") {
+  aws rds start-db-instance --db-instance-identifier $Database --region $Region | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "RDS start request failed." }
+}
+elseif ($rdsStatus -eq "stopping") {
+  Wait-ForRdsStatus "stopped"
   aws rds start-db-instance --db-instance-identifier $Database --region $Region | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "RDS start request failed." }
 }
@@ -47,7 +53,6 @@ elseif ($rdsStatus -notin @("available", "starting")) {
 }
 Wait-ForRdsStatus "available"
 
-Assert-BackendServiceFamily
 aws ecs update-service --cluster $Cluster --service $Service --desired-count 2 --region $Region | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "ECS desired count update failed." }
 aws ecs wait services-stable --cluster $Cluster --services $Service --region $Region
