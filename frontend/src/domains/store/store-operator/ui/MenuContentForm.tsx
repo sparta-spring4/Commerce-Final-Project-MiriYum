@@ -3,7 +3,7 @@ import { Button } from '../../../../shared/ui/Button'
 import { TextField } from '../../../../shared/ui/Field'
 import type { MenuDraftForm } from '../model/menuDraft'
 import type { CatalogItem } from '../model/types'
-import { SectionCard } from './PageHeader'
+import { SectionCard } from '../../../../app/shells/store-operator/OperatorPage'
 import {
   AllergenDisclosureFields,
   OriginDisclosureFields,

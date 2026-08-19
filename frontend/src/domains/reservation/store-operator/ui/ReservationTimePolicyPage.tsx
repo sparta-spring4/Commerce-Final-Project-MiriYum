@@ -7,13 +7,13 @@ import { TextField } from '../../../../shared/ui/Field'
 import { Alert, ErrorState, Loading } from '../../../../shared/ui/Feedback'
 import {
   PageHeader,
-  PublicationControls,
   SectionCard,
   SummaryList,
-  useAdoptStoreFromRoute,
-  useManagedStore,
-  storeErrorMessage,
-} from '../../../store/store-operator'
+} from '../../../../app/shells/store-operator/OperatorPage'
+import { PublicationControls } from '../../../../app/shells/store-operator/PublicationControls'
+import { useAdoptStoreFromRoute } from '../../../../app/shells/store-operator/CurrentStoreProvider'
+import { useManagedStore } from '../../../store/store-operator/api/queries'
+import { storeErrorMessage } from '../../../store/store-operator/model/storeErrors'
 import {
   useCancelTimePolicyPublication,
   usePublishTimePolicy,

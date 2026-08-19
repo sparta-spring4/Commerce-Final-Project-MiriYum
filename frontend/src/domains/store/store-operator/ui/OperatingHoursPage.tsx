@@ -24,8 +24,8 @@ import {
   validateScheduleDraft,
   type DayScheduleDraft,
 } from '../model/weeklySchedule'
-import { PageHeader, SectionCard, SummaryList } from './PageHeader'
-import { PublicationControls } from './PublicationControls'
+import { PageHeader, SectionCard, SummaryList } from '../../../../app/shells/store-operator/OperatorPage'
+import { PublicationControls } from '../../../../app/shells/store-operator/PublicationControls'
 import { RangeListEditor } from './RangeListEditor'
 import { DayToggleRow, dayCardClass } from './DayToggleRow'
 

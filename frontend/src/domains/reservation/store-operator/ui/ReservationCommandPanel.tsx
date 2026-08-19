@@ -3,7 +3,7 @@ import { createIdempotencyKeyCache } from '../../../../shared/api/idempotencyKey
 import { Button } from '../../../../shared/ui/Button'
 import { TextField } from '../../../../shared/ui/Field'
 import { Alert } from '../../../../shared/ui/Feedback'
-import { SectionCard } from '../../../store/store-operator'
+import { SectionCard } from '../../../../app/shells/store-operator/OperatorPage'
 import {
   useCancelStoreReservation,
   useFulfillStoreReservation,

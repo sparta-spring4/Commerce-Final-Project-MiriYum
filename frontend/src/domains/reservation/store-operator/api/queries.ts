@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
-import { storeOperatorKeys, useStoreOperatorAuth } from '../../../store/store-operator'
+import { storeOperatorKeys } from '../../../../app/shells/store-operator/queryKeys'
+import { useStoreOperatorAuth } from '../../../../app/shells/store-operator/StoreOperatorAuthProvider'
 import type {
   CapacityBucketRequest,
   ReservationCapacitiesData,

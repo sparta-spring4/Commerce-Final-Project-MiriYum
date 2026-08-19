@@ -7,8 +7,8 @@ import { Alert } from '../../../../shared/ui/Feedback'
 import {
   PageHeader,
   SectionCard,
-  useAdoptStoreFromRoute,
-} from '../../../store/store-operator'
+} from '../../../../app/shells/store-operator/OperatorPage'
+import { useAdoptStoreFromRoute } from '../../../../app/shells/store-operator/CurrentStoreProvider'
 import { useReplaceReservationCapacities } from '../api/queries'
 import {
   bucketErrorKey,

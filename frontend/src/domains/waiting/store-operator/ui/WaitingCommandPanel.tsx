@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { createIdempotencyKeyCache } from '../../../../shared/api/idempotencyKey'
 import { Button } from '../../../../shared/ui/Button'
 import { Alert } from '../../../../shared/ui/Feedback'
-import { SectionCard } from '../../../store/store-operator'
+import { SectionCard } from '../../../../app/shells/store-operator/OperatorPage'
 import { useWaitingTeamCommand } from '../api/queries'
 import { waitingErrorMessage } from '../model/errors'
 import {

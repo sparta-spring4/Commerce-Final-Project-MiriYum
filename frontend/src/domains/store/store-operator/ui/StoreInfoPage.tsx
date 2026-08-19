@@ -24,7 +24,7 @@ import {
   type StoreUpdateRequest,
 } from '../model/types'
 import { OperatorIcon } from '../../../../app/shells/store-operator/OperatorIcon'
-import { PageHeader, SectionCard } from './PageHeader'
+import { PageHeader, SectionCard } from '../../../../app/shells/store-operator/OperatorPage'
 import {
   CatalogSelectField,
   CatalogTagPicker,

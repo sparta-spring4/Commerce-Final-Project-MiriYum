@@ -28,7 +28,7 @@ import {
   type Region,
   type StoreModes,
 } from '../model/types'
-import { PageHeader, SectionCard } from './PageHeader'
+import { PageHeader, SectionCard } from '../../../../app/shells/store-operator/OperatorPage'
 import {
   CatalogSelectField,
   CatalogTagPicker,

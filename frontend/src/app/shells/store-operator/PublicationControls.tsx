@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { Button } from '../../../../shared/ui/Button'
-import { TextField } from '../../../../shared/ui/Field'
-import { Alert } from '../../../../shared/ui/Feedback'
-import { toStoreInstant } from '../model/storeTime'
-import { validateChangeReason } from '../model/storeValidation'
-import type { PublicationMode } from '../model/types'
+import { Button } from '../../../shared/ui/Button'
+import { TextField } from '../../../shared/ui/Field'
+import { Alert } from '../../../shared/ui/Feedback'
+import { toStoreInstant } from '../../../domains/store/store-operator/model/storeTime'
+import { validateChangeReason } from '../../../domains/store/store-operator/model/storeValidation'
+import type { PublicationMode } from '../../../domains/store/store-operator/model/types'
 
 export interface PublicationSubmission {
   publicationMode: PublicationMode

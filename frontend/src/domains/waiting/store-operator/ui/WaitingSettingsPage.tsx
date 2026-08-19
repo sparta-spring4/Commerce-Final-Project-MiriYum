@@ -9,8 +9,8 @@ import {
   PageHeader,
   SectionCard,
   SummaryList,
-  useAdoptStoreFromRoute,
-} from '../../../store/store-operator'
+} from '../../../../app/shells/store-operator/OperatorPage'
+import { useAdoptStoreFromRoute } from '../../../../app/shells/store-operator/CurrentStoreProvider'
 import {
   useUpdateWaitingSettings,
   useWaitingClosureJob,

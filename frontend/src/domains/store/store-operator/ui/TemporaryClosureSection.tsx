@@ -17,7 +17,7 @@ import {
   type TemporaryClosureData,
   type TemporaryClosureReason,
 } from '../model/types'
-import { SectionCard, SummaryList } from './PageHeader'
+import { SectionCard, SummaryList } from '../../../../app/shells/store-operator/OperatorPage'
 
 const REASONS: readonly TemporaryClosureReason[] = [
   'MAINTENANCE',

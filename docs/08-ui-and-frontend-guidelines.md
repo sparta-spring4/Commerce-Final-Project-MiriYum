@@ -29,6 +29,7 @@ src/
 - Provider, Guard, 인증된 API client 인스턴스, 세션 종료 query 정리는 `app/shells/<user>`가 소유한다. 계정 생성·로그인 endpoint adapter와 화면은 `domains/account/<user>/auth`가 소유하고, 도메인은 다른 사용자 shell을 참조하지 않는다.
 - 도메인 코드는 `account`, `notification`, `payment`, `pickup`, `platform-operation`, `reservation`, `store`, `waiting` 아래의 사용자 폴더가 소유한다. 한 사용자에게만 필요한 UI·API·모델·테스트는 `shared`로 올리지 않는다. 마이페이지는 payment·reservation·waiting API를 조합하지만 그 query와 key를 소유하지 않는다.
 - store-operator의 query key 뿌리는 store·reservation·waiting 도메인을 함께 정리해야 하므로 `app/shells/store-operator/queryKeys.ts`가 소유한다. consumer와 platform-operator의 보호 query root도 각 shell의 `querySession.ts`가 소유한다. 기존 key 값과 무효화 범위는 호환성 계약이다.
+- store·reservation·waiting의 운영 화면이 함께 쓰는 페이지 머리말·섹션 카드·요약 목록과 게시 컨트롤은 `app/shells/store-operator`가 소유한다. 각 도메인은 이 shell 계약을 직접 import하며, 한 도메인의 barrel이 shell이나 다른 도메인이 쓰는 UI를 대신 re-export하지 않는다.
 - `shared/api`에는 사용자 중립 API 기반 코드, 둘 이상의 사용자 목록에서 쓰는 query 비교 규칙과 서버 필드 오류 변환, OpenAPI generated type을 둔다. `shared/auth`에는 여러 사용자 계정 화면이 실제로 함께 쓰는 오류 코드·입력 검증과 정확 일치 쿠키 파서만 둔다. namespace별 쿠키 이름은 각 사용자 소유자에 남긴다. generated type은 여러 사용자·도메인의 typed client 계약을 함께 제공하므로 예외적으로 shared에 유지하며 생성 결과를 손으로 수정하지 않는다.
 - 플랫폼 운영자 route와 shell의 동적 import는 `VITE_PLATFORM_OPERATOR_ENABLED`가 명시적으로 켜졌을 때만 빌드에 포함한다. 기본 비활성 빌드와 lazy-loading 경계를 없애지 않는다.
 

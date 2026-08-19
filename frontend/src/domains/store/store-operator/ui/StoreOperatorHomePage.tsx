@@ -13,7 +13,7 @@ import {
   OperatorIcon,
   type OperatorIconName,
 } from '../../../../app/shells/store-operator/OperatorIcon'
-import { PageHeader, SectionCard, SummaryList } from './PageHeader'
+import { PageHeader, SectionCard, SummaryList } from '../../../../app/shells/store-operator/OperatorPage'
 
 /**
  * 매장 운영 홈.

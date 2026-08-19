@@ -22,8 +22,8 @@ import {
   type MenuSellingStatus,
   type MenuVisibility,
 } from '../model/types'
-import { SectionCard, SummaryList } from './PageHeader'
-import { PublicationControls } from './PublicationControls'
+import { SectionCard, SummaryList } from '../../../../app/shells/store-operator/OperatorPage'
+import { PublicationControls } from '../../../../app/shells/store-operator/PublicationControls'
 
 const VISIBILITIES: readonly MenuVisibility[] = ['VISIBLE', 'HIDDEN']
 const SELLING_STATUSES: readonly MenuSellingStatus[] = [

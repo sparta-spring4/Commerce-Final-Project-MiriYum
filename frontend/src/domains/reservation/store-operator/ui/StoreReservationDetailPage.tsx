@@ -7,8 +7,8 @@ import {
   PageHeader,
   SectionCard,
   SummaryList,
-  useAdoptStoreFromRoute,
-} from '../../../store/store-operator'
+} from '../../../../app/shells/store-operator/OperatorPage'
+import { useAdoptStoreFromRoute } from '../../../../app/shells/store-operator/CurrentStoreProvider'
 import { useStoreReservation } from '../api/queries'
 import { reservationOpsErrorMessage } from '../model/errors'
 import { ReservationCommandPanel } from './ReservationCommandPanel'

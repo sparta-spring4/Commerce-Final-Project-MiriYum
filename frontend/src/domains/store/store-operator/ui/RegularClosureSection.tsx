@@ -18,8 +18,8 @@ import {
   type DayOfWeek,
   type RegularClosureData,
 } from '../model/types'
-import { PageHeader, SectionCard, SummaryList } from './PageHeader'
-import { PublicationControls } from './PublicationControls'
+import { PageHeader, SectionCard, SummaryList } from '../../../../app/shells/store-operator/OperatorPage'
+import { PublicationControls } from '../../../../app/shells/store-operator/PublicationControls'
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 const MAX_DATES = 366

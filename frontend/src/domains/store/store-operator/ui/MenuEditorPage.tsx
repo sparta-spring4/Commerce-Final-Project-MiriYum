@@ -21,7 +21,7 @@ import type { ManagedMenu } from '../model/types'
 import { MenuCommandPanel } from './MenuCommandPanel'
 import { MenuContentForm } from './MenuContentForm'
 import { MenuImagePanel } from './MenuImagePanel'
-import { PageHeader } from './PageHeader'
+import { PageHeader } from '../../../../app/shells/store-operator/OperatorPage'
 
 /**
  * 메뉴 등록·수정.

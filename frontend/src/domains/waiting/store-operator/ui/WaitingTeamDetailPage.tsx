@@ -7,8 +7,8 @@ import {
   PageHeader,
   SectionCard,
   SummaryList,
-  useAdoptStoreFromRoute,
-} from '../../../store/store-operator'
+} from '../../../../app/shells/store-operator/OperatorPage'
+import { useAdoptStoreFromRoute } from '../../../../app/shells/store-operator/CurrentStoreProvider'
 import { useWaitingTeam, useWaitingTeams } from '../api/queries'
 import { waitingErrorMessage } from '../model/errors'
 import { TEAM_STATUS_LABEL, type WaitingTeamDetail } from '../model/types'

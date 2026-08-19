@@ -4,7 +4,7 @@ import { Button } from '../../../../shared/ui/Button'
 import { Alert } from '../../../../shared/ui/Feedback'
 import { useDeleteMenuImage, usePutMenuImage } from '../api/menuQueries'
 import { storeErrorMessage } from '../model/storeErrors'
-import { SectionCard } from './PageHeader'
+import { SectionCard } from '../../../../app/shells/store-operator/OperatorPage'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])

@@ -23,7 +23,7 @@ import {
   type ManagedMenu,
 } from '../model/types'
 import { OperatorIcon } from '../../../../app/shells/store-operator/OperatorIcon'
-import { PageHeader } from './PageHeader'
+import { PageHeader } from '../../../../app/shells/store-operator/OperatorPage'
 
 /**
  * 메뉴 목록.

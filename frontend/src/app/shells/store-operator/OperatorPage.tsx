@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { OperatorIcon, type OperatorIconName } from '../../../../app/shells/store-operator/OperatorIcon'
+import { OperatorIcon, type OperatorIconName } from './OperatorIcon'
 
 /**
  * 운영자 화면 머리말.
