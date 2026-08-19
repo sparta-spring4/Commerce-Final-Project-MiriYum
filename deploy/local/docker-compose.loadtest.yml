@@ -111,8 +111,20 @@ services:
       - ../../performance/k6:/scripts:ro
       - ../../performance/k6/results:/results
     working_dir: /scripts
-    environment:
-      K6_DEPENDENCY_MANIFEST: '{"k6":"v2.1.0","k6/x/sse":"v0.1.12"}'
+    depends_on:
+      loadtest-proxy:
+        condition: service_healthy
+
+  sse-loadtest:
+    image: miriyum/k6-sse:1.2.2-xk6-sse0.1.12
+    build:
+      context: ../../performance/k6/sse
+      dockerfile: Dockerfile
+    profiles: [loadtest]
+    volumes:
+      - ../../performance/k6:/scripts:ro
+      - ../../performance/k6/results:/results
+    working_dir: /scripts
     depends_on:
       loadtest-proxy:
         condition: service_healthy

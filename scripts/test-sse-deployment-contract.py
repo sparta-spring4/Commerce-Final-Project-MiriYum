@@ -16,6 +16,7 @@ LOCAL_COMPOSE = ROOT / "deploy" / "local" / "docker-compose.dev.yml"
 LOADTEST_COMPOSE = ROOT / "deploy" / "local" / "docker-compose.loadtest.yml"
 LOCAL_NGINX = ROOT / "deploy" / "local" / "nginx.sse.conf"
 SSE_SNIPPET = ROOT / "deploy" / "nginx" / "templates" / "snippets" / "sse-location.conf"
+SSE_K6_DOCKERFILE = ROOT / "performance" / "k6" / "sse" / "Dockerfile"
 
 
 def run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -161,10 +162,21 @@ class SseDeploymentContractTest(unittest.TestCase):
         self.assertEqual(expected, {name: str(backend_environment[name]) for name in expected})
         self.assertEqual(["backend"], exposed_services(config, "MIRIYUM_SSE_CURSOR_SECRET"))
         self.assertIn("sse-proxy", config["services"])
+        self.assertEqual("grafana/k6:2.1.0", config["services"]["loadtest"]["image"])
+        self.assertNotIn("K6_DEPENDENCIES_MANIFEST", config["services"]["loadtest"].get("environment", {}))
+        sse_loadtest = config["services"]["sse-loadtest"]
         self.assertEqual(
-            '{"k6":"v2.1.0","k6/x/sse":"v0.1.12"}',
-            config["services"]["loadtest"]["environment"]["K6_DEPENDENCY_MANIFEST"],
+            str(SSE_K6_DOCKERFILE.parent),
+            sse_loadtest["build"]["context"],
         )
+        self.assertEqual("Dockerfile", sse_loadtest["build"]["dockerfile"])
+        self.assertNotIn("environment", sse_loadtest)
+
+        dockerfile = SSE_K6_DOCKERFILE.read_text(encoding="utf-8")
+        self.assertIn("FROM grafana/xk6:1.4.11 AS builder", dockerfile)
+        self.assertIn("xk6 build v1.2.2", dockerfile)
+        self.assertIn("github.com/phymbert/xk6-sse@v0.1.12", dockerfile)
+        self.assertIn("FROM grafana/k6:1.2.2", dockerfile)
 
     def test_nginx_flushes_first_sse_frame_before_upstream_close(self) -> None:
         frame, elapsed, status, content_type = first_sse_frame()
