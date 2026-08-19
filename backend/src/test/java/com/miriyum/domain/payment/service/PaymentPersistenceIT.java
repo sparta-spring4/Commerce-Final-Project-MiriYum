@@ -1104,7 +1104,8 @@ class PaymentPersistenceIT {
         when(providerClient.getPayment(preparation.portOnePaymentId())).thenAnswer(invocation -> {
             jdbcTemplate.update("""
                     UPDATE payment_refunds
-                       SET status = 'FAILED', updated_at = NOW(6)
+                       SET status = 'FAILED', updated_at = NOW(6),
+                           version = version + 1
                      WHERE refund_id = ?
                     """, unknown.refundId());
             return new ProviderPayment(
@@ -2132,7 +2133,8 @@ class PaymentPersistenceIT {
                 prepareCommand("132", 30_000L));
         jdbcTemplate.update("""
                 UPDATE payments
-                   SET status = 'CONFIRMING', last_attempt_status = 'PENDING'
+                   SET status = 'CONFIRMING', last_attempt_status = 'PENDING',
+                       version = version + 1
                  WHERE payment_id = ?
                 """, preparation.paymentId());
         jdbcTemplate.update("""

@@ -154,6 +154,8 @@ class MenuHoldMigrationContractTest {
                 .contains("BEFORE DELETE ON menu_hold_transition_audits")
                 .contains("SIGNAL SQLSTATE '45000'")
                 .contains("menu hold transition audits are immutable")
+                .doesNotContain("FOREIGN KEY (menu_hold_id) REFERENCES menu_holds")
+                .doesNotContain("ON DELETE CASCADE")
                 .doesNotContain("'TRANSITION', NULL, status, 0")
                 .doesNotContain("created_at AS occurred_at")
                 .doesNotContain("updated_at AS occurred_at");

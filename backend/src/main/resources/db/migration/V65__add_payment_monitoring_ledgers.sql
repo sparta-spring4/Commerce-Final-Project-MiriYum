@@ -134,15 +134,18 @@ CREATE TRIGGER trg_payments_monitoring_after_update
 AFTER UPDATE ON payments
 FOR EACH ROW
 BEGIN
-    INSERT INTO payment_monitoring_snapshots (
-        payment_pk, payment_id, source_type, source_reference_id, store_id,
-        event_type, source_status, status_version, status_changed_at,
-        amount_minor, refunded_amount_minor, currency, captured_at
-    ) VALUES (
-        NEW.payment_pk, NEW.payment_id, NEW.source_type, NEW.source_reference_id, NEW.store_id,
-        'TRANSITION', NEW.status, NEW.version, NEW.updated_at,
-        NEW.amount_minor, NEW.refunded_amount_minor, NEW.currency, UTC_TIMESTAMP(6)
-    );
+    IF NOT (NEW.status <=> OLD.status)
+            OR NOT (NEW.refunded_amount_minor <=> OLD.refunded_amount_minor) THEN
+        INSERT INTO payment_monitoring_snapshots (
+            payment_pk, payment_id, source_type, source_reference_id, store_id,
+            event_type, source_status, status_version, status_changed_at,
+            amount_minor, refunded_amount_minor, currency, captured_at
+        ) VALUES (
+            NEW.payment_pk, NEW.payment_id, NEW.source_type, NEW.source_reference_id, NEW.store_id,
+            'TRANSITION', NEW.status, NEW.version, NEW.updated_at,
+            NEW.amount_minor, NEW.refunded_amount_minor, NEW.currency, UTC_TIMESTAMP(6)
+        );
+    END IF;
 END$$
 
 CREATE TRIGGER trg_payment_refunds_monitoring_after_insert
@@ -164,15 +167,18 @@ CREATE TRIGGER trg_payment_refunds_monitoring_after_update
 AFTER UPDATE ON payment_refunds
 FOR EACH ROW
 BEGIN
-    INSERT INTO payment_refund_monitoring_snapshots (
-        payment_refund_pk, payment_pk, refund_id, store_id,
-        event_type, source_status, status_version, status_changed_at,
-        amount_minor, currency, requested_at, completed_at, captured_at
-    ) SELECT NEW.payment_refund_pk, NEW.payment_pk, NEW.refund_id, p.store_id,
-             'TRANSITION', NEW.status, NEW.version, NEW.updated_at,
-             NEW.amount_minor, NEW.currency, NEW.requested_at, NEW.completed_at,
-             UTC_TIMESTAMP(6)
-        FROM payments p WHERE p.payment_pk = NEW.payment_pk;
+    IF NOT (NEW.status <=> OLD.status)
+            OR NOT (NEW.completed_at <=> OLD.completed_at) THEN
+        INSERT INTO payment_refund_monitoring_snapshots (
+            payment_refund_pk, payment_pk, refund_id, store_id,
+            event_type, source_status, status_version, status_changed_at,
+            amount_minor, currency, requested_at, completed_at, captured_at
+        ) SELECT NEW.payment_refund_pk, NEW.payment_pk, NEW.refund_id, p.store_id,
+                 'TRANSITION', NEW.status, NEW.version, NEW.updated_at,
+                 NEW.amount_minor, NEW.currency, NEW.requested_at, NEW.completed_at,
+                 UTC_TIMESTAMP(6)
+            FROM payments p WHERE p.payment_pk = NEW.payment_pk;
+    END IF;
 END$$
 
 CREATE TRIGGER trg_payment_monitoring_snapshots_no_update

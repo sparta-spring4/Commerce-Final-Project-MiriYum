@@ -20,9 +20,7 @@ CREATE TABLE menu_hold_transition_audits (
     CONSTRAINT ck_menu_hold_transition_shape CHECK (
         (event_type IN ('BASELINE', 'CREATED') AND before_status IS NULL AND result_version = 0)
         OR (event_type = 'TRANSITION' AND before_status IS NOT NULL AND result_version > 0)
-    ),
-    CONSTRAINT fk_menu_hold_transition_hold
-        FOREIGN KEY (menu_hold_id) REFERENCES menu_holds (menu_hold_id) ON DELETE RESTRICT
+    )
 );
 
 CREATE INDEX idx_menu_hold_transition_occurred

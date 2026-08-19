@@ -42,6 +42,10 @@ class PaymentMigrationTest {
                 .contains("CREATE TRIGGER trg_payments_monitoring_after_update")
                 .contains("CREATE TRIGGER trg_payment_refunds_monitoring_after_insert")
                 .contains("CREATE TRIGGER trg_payment_refunds_monitoring_after_update")
+                .contains("IF NOT (NEW.status <=> OLD.status) "
+                        + "OR NOT (NEW.refunded_amount_minor <=> OLD.refunded_amount_minor) THEN")
+                .contains("IF NOT (NEW.status <=> OLD.status) "
+                        + "OR NOT (NEW.completed_at <=> OLD.completed_at) THEN")
                 .contains("SIGNAL SQLSTATE '45000'");
     }
 
