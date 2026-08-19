@@ -551,6 +551,146 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
         self.assertNotIn(legacy_key, secrets)
         self.assertTrue(secrets[canonical_key].endswith(f":{canonical_key}::"))
 
+    def test_accepts_a_whole_runtime_config_secret_with_parameter_secrets(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                    directory,
+                    "contract.json",
+                    {
+                        "conditionalWholeSecrets": {
+                            "MIRIYUM_RUNTIME_CONFIG_ENABLED": ["SPRING_APPLICATION_JSON"]
+                        },
+                        "wholeSecretReferences": {
+                            "SPRING_APPLICATION_JSON": {
+                                "secretName": "miriyum/production/backend-runtime-config",
+                                "templatePlaceholder": "REPLACE_WITH_RUNTIME_CONFIG_SECRET_ARN",
+                            }
+                        },
+                        "parameterSecrets": ["OPENAI_API_KEY"],
+                        "parameterReferencePaths": {
+                            "OPENAI_API_KEY": "miriyum/shared/openai-api-key"
+                        },
+                    },
+            )
+            task_definition = self.write_json(
+                    directory,
+                    "task-definition.json",
+                    {
+                        "requiresCompatibilities": ["FARGATE"],
+                        "networkMode": "awsvpc",
+                        "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                        "containerDefinitions": [{
+                            "name": "backend",
+                            "environment": [
+                                {"name": "MIRIYUM_RUNTIME_CONFIG_ENABLED", "value": "true"}
+                            ],
+                            "secrets": [
+                                {
+                                    "name": "SPRING_APPLICATION_JSON",
+                                    "valueFrom": (
+                                        "arn:aws:secretsmanager:ap-northeast-2:123456789012:"
+                                        "secret:miriyum/production/backend-runtime-config-abcdef"
+                                    ),
+                                },
+                                {
+                                    "name": "OPENAI_API_KEY",
+                                    "valueFrom": (
+                                        "arn:aws:ssm:ap-northeast-2:123456789012:"
+                                        "parameter/miriyum/shared/openai-api-key"
+                                    ),
+                                },
+                            ],
+                        }],
+                    },
+            )
+
+            self.assertEqual([], validate(contract, task_definition))
+
+    def test_rejects_a_whole_runtime_config_secret_that_selects_a_json_key(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                    directory,
+                    "contract.json",
+                    {
+                        "wholeSecrets": ["SPRING_APPLICATION_JSON"],
+                        "wholeSecretReferences": {
+                            "SPRING_APPLICATION_JSON": {
+                                "secretName": "miriyum/production/backend-runtime-config",
+                                "templatePlaceholder": "REPLACE_WITH_RUNTIME_CONFIG_SECRET_ARN",
+                            }
+                        },
+                    },
+            )
+            task_definition = self.write_json(
+                    directory,
+                    "task-definition.json",
+                    {
+                        "requiresCompatibilities": ["FARGATE"],
+                        "networkMode": "awsvpc",
+                        "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                        "containerDefinitions": [{
+                            "name": "backend",
+                            "secrets": [{
+                                "name": "SPRING_APPLICATION_JSON",
+                                "valueFrom": "APPLICATION:SPRING_APPLICATION_JSON::",
+                            }],
+                        }],
+                    },
+            )
+
+            self.assertEqual(
+                    ["Whole secret reference must not select a JSON key: SPRING_APPLICATION_JSON"],
+                    validate(contract, task_definition),
+            )
+
+    def test_rejects_runtime_config_secret_when_the_flag_is_disabled(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                    directory,
+                    "contract.json",
+                    {
+                        "conditionalWholeSecrets": {
+                            "MIRIYUM_RUNTIME_CONFIG_ENABLED": ["SPRING_APPLICATION_JSON"]
+                        },
+                        "wholeSecretReferences": {
+                            "SPRING_APPLICATION_JSON": {
+                                "secretName": "miriyum/production/backend-runtime-config",
+                                "templatePlaceholder": "REPLACE_WITH_RUNTIME_CONFIG_SECRET_ARN",
+                            }
+                        },
+                    },
+            )
+            task_definition = self.write_json(
+                    directory,
+                    "task-definition.json",
+                    {
+                        "requiresCompatibilities": ["FARGATE"],
+                        "networkMode": "awsvpc",
+                        "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                        "containerDefinitions": [{
+                            "name": "backend",
+                            "environment": [
+                                {"name": "MIRIYUM_RUNTIME_CONFIG_ENABLED", "value": "false"}
+                            ],
+                            "secrets": [{
+                                "name": "SPRING_APPLICATION_JSON",
+                                "valueFrom": "REPLACE_WITH_RUNTIME_CONFIG_SECRET_ARN",
+                            }],
+                        }],
+                    },
+            )
+
+            self.assertEqual(
+                    ["Conditional whole secret must be absent when disabled: SPRING_APPLICATION_JSON"],
+                    validate(contract, task_definition),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -73,10 +73,38 @@ Before registering the task definition, replace these placeholders through the a
 - ECR image URI
 - HTTPS origin, Valkey endpoint, and CloudWatch log group
 - application Secret ARN
+- runtime config Secret ARN (`miriyum/production/backend-runtime-config`)
 
 `MIRIYUM_VALKEY_SSL_ENABLED=true` is a reviewed non-secret task environment value, not a JSON secret key. It is required because the production ElastiCache Valkey connection uses TLS; the local and staging default remains `false` for the Docker Compose Valkey container.
 
-The execution role needs `secretsmanager:GetSecretValue` only for the application secret ARN. The task role receives only the runtime permissions the application needs; it must not receive broad Secrets Manager access.
+The execution role needs `secretsmanager:GetSecretValue` for the application secret ARN. Add the separate runtime config secret ARN only after the runtime config flag is explicitly enabled. The task role receives only the runtime permissions the application needs; it must not receive broad Secrets Manager access.
+
+## Central runtime config
+
+Store optional runtime settings in one JSON Secrets Manager secret named
+`miriyum/production/backend-runtime-config`. `MIRIYUM_RUNTIME_CONFIG_ENABLED` defaults to
+`false`; production CD resolves that secret ARN and injects the entire JSON value once as
+`SPRING_APPLICATION_JSON` only when the current task definition explicitly sets the flag to
+`true`. Spring Boot then applies its JSON properties with higher precedence than ordinary OS
+environment variables. Adding a new optional setting requires changing only this secret JSON and
+restarting tasks, not adding another ECS secret entry.
+
+Use Spring property names, not environment-variable names. For example:
+
+```json
+{
+  "miriyum.storage.s3.enabled": true,
+  "miriyum.storage.s3.bucket": "private-store-images",
+  "miriyum.storage.s3.region": "ap-northeast-2",
+  "miriyum.storage.s3.reconciliation.enabled": true
+}
+```
+
+The staging equivalent is the SSM SecureString `/miriyum/staging/backend-runtime-config`.
+`deploy.sh` loads it as `SPRING_APPLICATION_JSON` only when the server-side
+`MIRIYUM_RUNTIME_CONFIG_ENABLED=true`; a missing or `false` flag skips the SSM call and keeps the
+existing deployment path. Never put JSON values in GitHub variables, task definition
+`environment`, workflow output, logs, issues, or PRs.
 
 ## OpenAI search key
 
