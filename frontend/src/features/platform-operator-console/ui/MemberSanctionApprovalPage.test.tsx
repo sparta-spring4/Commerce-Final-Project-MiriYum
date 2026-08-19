@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { QueryClient } from '@tanstack/react-query'
 import { delay, http } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { errorResponse, successResponse } from '../../../test/msw/envelope'
@@ -18,9 +19,9 @@ const PENDING_APPROVALS_PATH =
 const APPROVAL_PATH =
   '/api/v1/platform-operators/member-sanctions/sanction-1/additional-approvals'
 
-function renderPage() {
+function renderPage(onQueryClientReady?: (queryClient: QueryClient) => void) {
   render(
-    <TestQueryProvider>
+    <TestQueryProvider onReady={onQueryClientReady}>
       <PlatformOperatorAuthProvider>
         <MemberSanctionApprovalPage />
       </PlatformOperatorAuthProvider>
@@ -290,6 +291,52 @@ describe('영구 정지 추가 승인', () => {
       await screen.findByText('승인 대기 제재가 없습니다.'),
     ).toBeInTheDocument()
     expect(attempts).toBe(2)
+  })
+
+  it('목록 재조회가 403이면 stale 목록과 진행 중인 승인 상태를 폐기한다', async () => {
+    let pendingRequests = 0
+    let queryClient: QueryClient | undefined
+    server.use(
+      http.get(PENDING_APPROVALS_PATH, () => {
+        pendingRequests += 1
+        return pendingRequests === 2
+          ? errorResponse(403, 'AUTH_011', '권한이 회수됐습니다.')
+          : pendingPage()
+      }),
+    )
+    renderPage((client) => {
+      queryClient = client
+    })
+    await selectAndSubmit()
+    expect(
+      await screen.findByRole('dialog', { name: '재인증이 필요합니다' }),
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      await queryClient!.refetchQueries({ type: 'active' })
+    })
+
+    expect(
+      await screen.findByText('이 업무를 수행할 권한이 없습니다.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    expect(screen.queryByText('선택한 제재')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '영구 정지 승인' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('dialog', { name: '재인증이 필요합니다' }),
+    ).not.toBeInTheDocument()
+
+    await act(async () => {
+      await queryClient!.refetchQueries({ type: 'active' })
+    })
+
+    expect(await screen.findByRole('table')).toBeInTheDocument()
+    expect(screen.queryByText('선택한 제재')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('dialog', { name: '재인증이 필요합니다' }),
+    ).not.toBeInTheDocument()
   })
 
   it('승인 권한이 없으면 목록 query와 폼을 열지 않는다', async () => {

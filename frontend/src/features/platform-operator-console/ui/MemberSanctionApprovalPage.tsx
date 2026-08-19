@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { isApiError, isNetworkError } from '../../../shared/api/apiError'
 import { CommonErrorCode } from '../../../shared/api/envelope'
@@ -65,6 +65,10 @@ export function MemberSanctionApprovalPage() {
       fetchPendingSanctionApprovals(apiClient, page, PAGE_SIZE, signal),
     enabled: decision === 'allowed' && isSuperAdmin,
   })
+  const deniedByServer =
+    pendingQuery.isError &&
+    isApiError(pendingQuery.error) &&
+    pendingQuery.error.status === 403
 
   const { attempt, beginAttempt, clearAttempt, isAttemptCurrent } =
     useLogicalCommandAttempt(
@@ -78,12 +82,34 @@ export function MemberSanctionApprovalPage() {
       }),
     )
 
+  useEffect(() => {
+    if (!deniedByServer) {
+      return
+    }
+
+    // 권한 회수는 이전 성공 query의 cache와 진행 중인 명령 상태를 모두 폐기하는
+    // 경계다. 화면을 다시 조회할 수 있게 되더라도 이 선택을 복원하지 않는다.
+    clearAttempt()
+    setSelected(null)
+    setReasonCode('')
+    setErrors({})
+    setFormError(null)
+    setResult(null)
+    setAwaitingReauthentication(false)
+  }, [deniedByServer])
+
   if (decision === 'denied' || (decision === 'allowed' && !isSuperAdmin)) {
     return (
       <Alert tone="warning" title="이 업무를 수행할 권한이 없습니다.">
         영구 정지 추가 승인에는 <code>SUPER_ADMIN</code> 역할과{' '}
         <code>ACCOUNT_PERMANENT_SANCTION_APPROVE</code> 권한이 모두 필요합니다.
       </Alert>
+    )
+  }
+
+  if (deniedByServer) {
+    return (
+      <OperatorAccessDenied requiredPermission="ACCOUNT_PERMANENT_SANCTION_APPROVE" />
     )
   }
 
@@ -156,11 +182,6 @@ export function MemberSanctionApprovalPage() {
     }
   }
 
-  const deniedByServer =
-    pendingQuery.isError &&
-    isApiError(pendingQuery.error) &&
-    pendingQuery.error.status === 403
-
   return (
     <section aria-labelledby="member-approval-heading">
       <header className="po-page__header">
@@ -181,9 +202,7 @@ export function MemberSanctionApprovalPage() {
         <Loading label="승인 대기 제재를 불러오는 중입니다." />
       )}
 
-      {deniedByServer && <OperatorAccessDenied />}
-
-      {pendingQuery.isError && !deniedByServer && (
+      {pendingQuery.isError && (
         <ErrorState
           error={pendingQuery.error}
           onRetry={() => void pendingQuery.refetch()}
