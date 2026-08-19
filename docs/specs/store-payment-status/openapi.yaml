@@ -1,0 +1,198 @@
+openapi: 3.1.0
+info:
+  title: MiriYum Store Operator Reservation Payment Status API
+  version: 1.0.0
+  description: Issue #273의 예약별 저장 결제·환불·대사 상태 읽기 계약
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+servers:
+  - url: /
+security: []
+paths:
+  /api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/payment-status:
+    get:
+      tags: [Store Reservation Payment Status]
+      operationId: getStoreReservationPaymentStatus
+      summary: 자기 매장의 예약별 결제·환불 상태 조회
+      description: 저장된 원장만 조회하며 provider 호출·대사·상태 변경을 하지 않는다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: storeId
+          in: path
+          required: true
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        - name: reservationId
+          in: path
+          required: true
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+      responses:
+        "200":
+          $ref: "#/components/responses/PaymentStatusSuccess"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/StoreOrReservationNotFound"
+        "503":
+          $ref: "#/components/responses/PaymentSourceUnavailable"
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: "../mvp1-common/openapi.yaml#/components/securitySchemes/bearerAuth"
+  schemas:
+    StorePaymentResult:
+      type: string
+      enum:
+        - NOT_APPLICABLE
+        - AWAITING_PAYMENT
+        - PROCESSING
+        - FAILED
+        - COMPLETED
+        - UNKNOWN
+    PaymentStatus:
+      type: string
+      enum: [READY, CONFIRMING, PAID, PARTIALLY_REFUNDED, REFUNDED, RECONCILIATION_REQUIRED]
+    PaymentAttemptStatus:
+      type: string
+      enum: [NOT_STARTED, PENDING, PAID, FAILED, CANCELLED, UNKNOWN]
+    RefundStatus:
+      type: string
+      enum: [REQUESTED, VALIDATING, PROCESSING, COMPLETED, FAILED, RECONCILIATION_REQUIRED]
+    MoneyMinor:
+      type: integer
+      format: int64
+      minimum: 0
+      description: 통화 최소단위의 정확한 정수 금액
+    Currency:
+      type: string
+      pattern: "^[A-Z]{3}$"
+      example: KRW
+    StoreReservationRefund:
+      type: object
+      additionalProperties: false
+      required: [refundId, amountMinor, status, requestedAt, completedAt]
+      properties:
+        refundId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        amountMinor:
+          $ref: "#/components/schemas/MoneyMinor"
+        status:
+          $ref: "#/components/schemas/RefundStatus"
+        requestedAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        completedAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+    StoreReservationPayment:
+      type: object
+      additionalProperties: false
+      required:
+        - paymentId
+        - amountMinor
+        - refundedAmountMinor
+        - refundableAmountMinor
+        - currency
+        - status
+        - lastAttemptStatus
+        - createdAt
+        - paidAt
+        - updatedAt
+        - refunds
+      properties:
+        paymentId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        amountMinor:
+          allOf:
+            - $ref: "#/components/schemas/MoneyMinor"
+            - minimum: 1
+        refundedAmountMinor:
+          $ref: "#/components/schemas/MoneyMinor"
+        refundableAmountMinor:
+          $ref: "#/components/schemas/MoneyMinor"
+        currency:
+          $ref: "#/components/schemas/Currency"
+        status:
+          $ref: "#/components/schemas/PaymentStatus"
+        lastAttemptStatus:
+          $ref: "#/components/schemas/PaymentAttemptStatus"
+        createdAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        paidAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+        updatedAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        refunds:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoreReservationRefund"
+    NullableStoreReservationPayment:
+      oneOf:
+        - $ref: "#/components/schemas/StoreReservationPayment"
+        - type: "null"
+    StoreReservationPaymentStatus:
+      type: object
+      additionalProperties: false
+      required: [reservationId, result, reconciliationRequired, observedAt, payment]
+      properties:
+        reservationId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        result:
+          $ref: "#/components/schemas/StorePaymentResult"
+        reconciliationRequired:
+          type: boolean
+        observedAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        payment:
+          $ref: "#/components/schemas/NullableStoreReservationPayment"
+    PaymentStatusSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/StoreReservationPaymentStatus"
+  responses:
+    PaymentStatusSuccess:
+      description: 저장된 예약 결제·환불 상태 snapshot
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PaymentStatusSuccessResponse"
+    StoreOrReservationNotFound:
+      description: 매장 부재·비소유 또는 권한이 확인된 매장 범위의 예약 부재
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            storeNotFound:
+              value:
+                code: STORE_001
+                message: 매장을 찾을 수 없습니다.
+            reservationNotFound:
+              value:
+                code: RESERVATION_001
+                message: 예약을 찾을 수 없습니다.
+    PaymentSourceUnavailable:
+      description: V2 예약의 내부 Payment 연결 또는 저장 상태가 계약과 일치하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: COMMON_012
+            message: 서비스를 일시적으로 사용할 수 없습니다.

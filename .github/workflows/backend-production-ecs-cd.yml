@@ -257,14 +257,42 @@ jobs:
             exit 1
           fi
 
+          llm_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .environment[]?
+              | select(.name == "MIRIYUM_STORE_SEARCH_LLM_ENABLED") | .value][0] // "false"
+          ' current-task-definition.json)
+          if [ "$llm_enabled" != "true" ] && [ "$llm_enabled" != "false" ]; then
+            echo "::error::Current task definition has an invalid MIRIYUM_STORE_SEARCH_LLM_ENABLED value."
+            exit 1
+          fi
+
+          account_id=$(aws sts get-caller-identity --query Account --output text)
+          openai_parameter_arn="arn:aws:ssm:${AWS_REGION}:${account_id}:parameter/miriyum/shared/openai-api-key"
+
           jq --arg image "$IMAGE_URI" --arg container "$ECS_CONTAINER_NAME" \
-            --arg runtime_config_secret_arn "$runtime_config_secret_arn" '
+            --arg runtime_config_secret_arn "$runtime_config_secret_arn" \
+            --arg openai_parameter_arn "$openai_parameter_arn" --arg llm_enabled "$llm_enabled" '
             .containerDefinitions |= map(
               if .name == $container then
                 .image = $image
-                | .secrets = ((.secrets // [] | map(select(.name != "SPRING_APPLICATION_JSON"))) + [
-                    {name: "SPRING_APPLICATION_JSON", valueFrom: $runtime_config_secret_arn}
+                | .environment = ((.environment // [] | map(select(
+                    .name != "MIRIYUM_STORE_SEARCH_LLM_ENABLED"
+                    and .name != "MIRIYUM_STORE_SEARCH_LLM_MODEL"
+                    and .name != "MIRIYUM_CLOUDWATCH_METRICS_ENABLED"
+                    and .name != "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE"
+                  ))) + [
+                    {name: "MIRIYUM_STORE_SEARCH_LLM_ENABLED", value: $llm_enabled},
+                    {name: "MIRIYUM_STORE_SEARCH_LLM_MODEL", value: "gpt-4o-mini"},
+                    {name: "MIRIYUM_CLOUDWATCH_METRICS_ENABLED", value: "true"},
+                    {name: "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE", value: "MiriYum/Production"}
                   ])
+                | .secrets = ((.secrets // [] | map(select(
+                    .name != "SPRING_APPLICATION_JSON" and .name != "OPENAI_API_KEY"
+                  ))) + [
+                    {name: "SPRING_APPLICATION_JSON", valueFrom: $runtime_config_secret_arn}
+                  ] + (if $llm_enabled == "true" then
+                    [{name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}]
+                  else [] end))
               else . end
             )
             | del(

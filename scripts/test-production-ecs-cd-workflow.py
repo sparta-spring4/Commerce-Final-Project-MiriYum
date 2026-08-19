@@ -70,6 +70,18 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("updated_image", self.workflow)
         self.assertIn('The next task definition does not contain the selected backend image.', self.workflow)
 
+    def test_llm_runtime_flag_is_preserved_from_current_task_definition(self):
+        self.assertIn('llm_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME"', self.workflow)
+        self.assertIn('value: $llm_enabled', self.workflow)
+        self.assertIn('| .value][0] // "false"', self.workflow)
+        self.assertNotIn('| .value][0] // "true"', self.workflow)
+        self.assertNotIn('{name: "MIRIYUM_STORE_SEARCH_LLM_ENABLED", value: "true"}', self.workflow)
+
+    def test_openai_secret_is_added_only_when_llm_is_enabled(self):
+        self.assertIn('if $llm_enabled == "true" then', self.workflow)
+        self.assertIn('{name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}', self.workflow)
+        self.assertIn('else [] end', self.workflow)
+
     def test_task_definition_always_injects_the_single_runtime_config_secret(self):
         self.assertIn("RUNTIME_CONFIG_SECRET_NAME: miriyum/production/backend-runtime-config", self.workflow)
         self.assertIn("aws secretsmanager describe-secret", self.workflow)

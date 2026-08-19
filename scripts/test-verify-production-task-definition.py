@@ -259,7 +259,7 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
                     validate(contract, task_definition),
             )
 
-    def test_accepts_a_whole_runtime_config_secret(self):
+    def test_accepts_a_secure_parameter_reference_separate_from_json_secrets(self):
         validate = load_validator()
 
         with tempfile.TemporaryDirectory() as directory:
@@ -267,13 +267,10 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
                     directory,
                     "contract.json",
                     {
-                        "requiredSecrets": [],
-                        "wholeSecrets": ["SPRING_APPLICATION_JSON"],
-                        "wholeSecretReferences": {
-                            "SPRING_APPLICATION_JSON": {
-                                "secretName": "miriyum/production/backend-runtime-config",
-                                "templatePlaceholder": "REPLACE_WITH_RUNTIME_CONFIG_SECRET_ARN",
-                            }
+                        "requiredSecrets": ["MIRIYUM_DB_PASSWORD"],
+                        "parameterSecrets": ["OPENAI_API_KEY"],
+                        "parameterReferencePaths": {
+                            "OPENAI_API_KEY": "miriyum/shared/openai-api-key"
                         },
                     },
             )
@@ -284,16 +281,27 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
                         "requiresCompatibilities": ["FARGATE"],
                         "networkMode": "awsvpc",
                         "runtimePlatform": {"cpuArchitecture": "ARM64"},
-                        "containerDefinitions": [{"name": "backend", "secrets": [{
-                            "name": "SPRING_APPLICATION_JSON",
-                            "valueFrom": "arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:miriyum/production/backend-runtime-config-abcdef",
-                        }]}],
+                        "containerDefinitions": [
+                            {
+                                "name": "backend",
+                                "secrets": [
+                                    {
+                                        "name": "MIRIYUM_DB_PASSWORD",
+                                        "valueFrom": "APPLICATION:MIRIYUM_DB_PASSWORD::",
+                                    },
+                                    {
+                                        "name": "OPENAI_API_KEY",
+                                        "valueFrom": "arn:aws:ssm:ap-northeast-2:123456789012:parameter/miriyum/shared/openai-api-key",
+                                    },
+                                ],
+                            }
+                        ],
                     },
             )
 
             self.assertEqual([], validate(contract, task_definition))
 
-    def test_rejects_an_unexpected_whole_runtime_config_secret(self):
+    def test_allows_llm_disabled_task_without_openai_secret(self):
         validate = load_validator()
 
         with tempfile.TemporaryDirectory() as directory:
@@ -302,12 +310,12 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
                     "contract.json",
                     {
                         "requiredSecrets": [],
-                        "wholeSecrets": ["SPRING_APPLICATION_JSON"],
-                        "wholeSecretReferences": {
-                            "SPRING_APPLICATION_JSON": {
-                                "secretName": "miriyum/production/backend-runtime-config",
-                                "templatePlaceholder": "REPLACE_WITH_RUNTIME_CONFIG_SECRET_ARN",
-                            }
+                        "parameterSecrets": [],
+                        "conditionalParameterSecrets": {
+                            "MIRIYUM_STORE_SEARCH_LLM_ENABLED": ["OPENAI_API_KEY"]
+                        },
+                        "parameterReferencePaths": {
+                            "OPENAI_API_KEY": "miriyum/shared/openai-api-key"
                         },
                     },
             )
@@ -318,17 +326,194 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
                         "requiresCompatibilities": ["FARGATE"],
                         "networkMode": "awsvpc",
                         "runtimePlatform": {"cpuArchitecture": "ARM64"},
-                        "containerDefinitions": [{"name": "backend", "secrets": [{
-                            "name": "SPRING_APPLICATION_JSON",
-                            "valueFrom": "arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:miriyum/production/other-runtime-config-abcdef",
-                        }]}],
+                        "containerDefinitions": [
+                            {
+                                "name": "backend",
+                                "environment": [
+                                    {"name": "MIRIYUM_STORE_SEARCH_LLM_ENABLED", "value": "false"}
+                                ],
+                                "secrets": [],
+                            }
+                        ],
+                    },
+            )
+
+            self.assertEqual([], validate(contract, task_definition))
+
+    def test_requires_openai_parameter_secret_when_llm_is_enabled(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                directory,
+                "contract.json",
+                {
+                    "conditionalParameterSecrets": {
+                        "MIRIYUM_STORE_SEARCH_LLM_ENABLED": ["OPENAI_API_KEY"]
+                    },
+                    "parameterReferencePaths": {
+                        "OPENAI_API_KEY": "miriyum/shared/openai-api-key"
+                    },
+                },
+            )
+            task_definition = self.write_json(
+                directory,
+                "task-definition.json",
+                {
+                    "requiresCompatibilities": ["FARGATE"],
+                    "networkMode": "awsvpc",
+                    "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                    "containerDefinitions": [
+                        {
+                            "name": "backend",
+                            "environment": [
+                                {"name": "MIRIYUM_STORE_SEARCH_LLM_ENABLED", "value": "true"}
+                            ],
+                            "secrets": [
+                                {
+                                    "name": "OPENAI_API_KEY",
+                                    "valueFrom": (
+                                        "arn:aws:ssm:ap-northeast-2:123456789012:"
+                                        "parameter/miriyum/shared/openai-api-key"
+                                    ),
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            self.assertEqual([], validate(contract, task_definition))
+
+    def test_rejects_invalid_openai_parameter_placeholder(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                directory,
+                "contract.json",
+                {
+                    "parameterReferencePaths": {
+                        "OPENAI_API_KEY": "miriyum/shared/openai-api-key"
+                    }
+                },
+            )
+            task_definition = self.write_json(
+                directory,
+                "task-definition.json",
+                {
+                    "requiresCompatibilities": ["FARGATE"],
+                    "networkMode": "awsvpc",
+                    "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                    "containerDefinitions": [
+                        {
+                            "name": "backend",
+                            "secrets": [
+                                {
+                                    "name": "OPENAI_API_KEY",
+                                    "valueFrom": "REPLACE_WITH_WRONG_PARAMETER_ARN",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            self.assertEqual(
+                ["Parameter reference does not match contract path: OPENAI_API_KEY"],
+                validate(contract, task_definition),
+            )
+
+    def test_rejects_openai_parameter_secret_when_llm_is_disabled(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                directory,
+                "contract.json",
+                {
+                    "conditionalParameterSecrets": {
+                        "MIRIYUM_STORE_SEARCH_LLM_ENABLED": ["OPENAI_API_KEY"]
+                    },
+                    "parameterReferencePaths": {
+                        "OPENAI_API_KEY": "miriyum/shared/openai-api-key"
+                    },
+                },
+            )
+            task_definition = self.write_json(
+                directory,
+                "task-definition.json",
+                {
+                    "requiresCompatibilities": ["FARGATE"],
+                    "networkMode": "awsvpc",
+                    "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                    "containerDefinitions": [
+                        {
+                            "name": "backend",
+                            "environment": [
+                                {"name": "MIRIYUM_STORE_SEARCH_LLM_ENABLED", "value": "false"}
+                            ],
+                            "secrets": [
+                                {
+                                    "name": "OPENAI_API_KEY",
+                                    "valueFrom": "REPLACE_WITH_OPENAI_API_KEY_PARAMETER_ARN",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            self.assertEqual(
+                [
+                    "Conditional parameter secret must be absent when disabled: "
+                    "OPENAI_API_KEY"
+                ],
+                validate(contract, task_definition),
+            )
+
+    def test_rejects_parameter_reference_that_uses_a_different_path(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                    directory,
+                    "contract.json",
+                    {
+                        "parameterSecrets": ["OPENAI_API_KEY"],
+                        "parameterReferencePaths": {
+                            "OPENAI_API_KEY": "miriyum/shared/openai-api-key"
+                        },
+                    },
+            )
+            task_definition = self.write_json(
+                    directory,
+                    "task-definition.json",
+                    {
+                        "requiresCompatibilities": ["FARGATE"],
+                        "networkMode": "awsvpc",
+                        "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                        "containerDefinitions": [
+                            {
+                                "name": "backend",
+                                "secrets": [
+                                    {
+                                        "name": "OPENAI_API_KEY",
+                                        "valueFrom": (
+                                            "arn:aws:ssm:ap-northeast-2:"
+                                            "123456789012:parameter/miriyum/other-key"
+                                        ),
+                                    }
+                                ],
+                            }
+                        ],
                     },
             )
 
             self.assertEqual(
                     [
-                        "Whole secret reference must use its expected Secrets Manager secret: "
-                        "SPRING_APPLICATION_JSON"
+                        "Parameter reference does not match contract path: "
+                        "OPENAI_API_KEY"
                     ],
                     validate(contract, task_definition),
             )
@@ -365,6 +550,97 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
         self.assertIn(canonical_key, secrets)
         self.assertNotIn(legacy_key, secrets)
         self.assertTrue(secrets[canonical_key].endswith(f":{canonical_key}::"))
+
+    def test_accepts_a_whole_runtime_config_secret_with_parameter_secrets(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                    directory,
+                    "contract.json",
+                    {
+                        "wholeSecrets": ["SPRING_APPLICATION_JSON"],
+                        "wholeSecretReferences": {
+                            "SPRING_APPLICATION_JSON": {
+                                "secretName": "miriyum/production/backend-runtime-config",
+                                "templatePlaceholder": "REPLACE_WITH_RUNTIME_CONFIG_SECRET_ARN",
+                            }
+                        },
+                        "parameterSecrets": ["OPENAI_API_KEY"],
+                        "parameterReferencePaths": {
+                            "OPENAI_API_KEY": "miriyum/shared/openai-api-key"
+                        },
+                    },
+            )
+            task_definition = self.write_json(
+                    directory,
+                    "task-definition.json",
+                    {
+                        "requiresCompatibilities": ["FARGATE"],
+                        "networkMode": "awsvpc",
+                        "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                        "containerDefinitions": [{
+                            "name": "backend",
+                            "secrets": [
+                                {
+                                    "name": "SPRING_APPLICATION_JSON",
+                                    "valueFrom": (
+                                        "arn:aws:secretsmanager:ap-northeast-2:123456789012:"
+                                        "secret:miriyum/production/backend-runtime-config-abcdef"
+                                    ),
+                                },
+                                {
+                                    "name": "OPENAI_API_KEY",
+                                    "valueFrom": (
+                                        "arn:aws:ssm:ap-northeast-2:123456789012:"
+                                        "parameter/miriyum/shared/openai-api-key"
+                                    ),
+                                },
+                            ],
+                        }],
+                    },
+            )
+
+            self.assertEqual([], validate(contract, task_definition))
+
+    def test_rejects_a_whole_runtime_config_secret_that_selects_a_json_key(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                    directory,
+                    "contract.json",
+                    {
+                        "wholeSecrets": ["SPRING_APPLICATION_JSON"],
+                        "wholeSecretReferences": {
+                            "SPRING_APPLICATION_JSON": {
+                                "secretName": "miriyum/production/backend-runtime-config",
+                                "templatePlaceholder": "REPLACE_WITH_RUNTIME_CONFIG_SECRET_ARN",
+                            }
+                        },
+                    },
+            )
+            task_definition = self.write_json(
+                    directory,
+                    "task-definition.json",
+                    {
+                        "requiresCompatibilities": ["FARGATE"],
+                        "networkMode": "awsvpc",
+                        "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                        "containerDefinitions": [{
+                            "name": "backend",
+                            "secrets": [{
+                                "name": "SPRING_APPLICATION_JSON",
+                                "valueFrom": "APPLICATION:SPRING_APPLICATION_JSON::",
+                            }],
+                        }],
+                    },
+            )
+
+            self.assertEqual(
+                    ["Whole secret reference must not select a JSON key: SPRING_APPLICATION_JSON"],
+                    validate(contract, task_definition),
+            )
 
 
 if __name__ == "__main__":

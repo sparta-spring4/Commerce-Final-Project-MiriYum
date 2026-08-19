@@ -300,7 +300,7 @@ class WaitingLedgerServiceTest {
         given(authorityPort.requireMutation(OPERATOR_ID, STORE_ID))
                 .willReturn(new WaitingStoreAuthority(STORE_ID, ZoneId.of("Asia/Seoul")));
         given(teamRepository.findByIdForUpdate(TEAM_ID)).willReturn(Optional.of(target));
-        given(membershipRepository.deleteByWaitingTeamId(TEAM_ID)).willReturn(1L);
+        given(membershipRepository.deleteByWaitingTeamId(TEAM_ID)).willReturn(2L);
         executeBusinessWork();
 
         WaitingCommandResult result = service.checkIn(
