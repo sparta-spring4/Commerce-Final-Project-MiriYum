@@ -22,6 +22,7 @@ import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryRef
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryRegistration;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.PreviewManualRecoveryRefundQuery;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileManualRecoveryCommand;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileRefundResultQuery;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RegisterManualRecoveryHandoffCommand;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RequestManualRecoveryRefundCommand;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
@@ -299,6 +300,37 @@ public class PaymentService {
         }
         return recoveryTransactions.inspect(
                 new InspectManualRecoveryQuery(claim.handoffId()));
+    }
+
+    /** Requeries an unknown refund result without ever resending the cancellation command. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public RefundResult reconcileRefundResult(ReconcileRefundResultQuery query) {
+        PaymentRecoveryTransactionService.AutomaticRefundReconciliationClaim claim =
+                recoveryTransactions.claimAutomaticRefundReconciliation(query);
+        if (!claim.requiresProviderLookup()) {
+            return claim.completedResult();
+        }
+        PaymentTransactionService.RefundClaim refundClaim = claim.refundClaim();
+        try {
+            ProviderPayment providerPayment = providerClient.getPayment(
+                    refundClaim.portOnePaymentId());
+            String expectedReason = PaymentProviderClient.cancellationReason(
+                    refundClaim.reasonCode(), refundClaim.refundId());
+            List<ProviderCancellation> matching = providerPayment.cancellations().stream()
+                    .filter(cancellation -> expectedReason.equals(cancellation.reason()))
+                    .toList();
+            if (refundClaim.portOnePaymentId().equals(providerPayment.portOnePaymentId())
+                    && claim.paymentAmountMinor() == providerPayment.amountMinor()
+                    && refundClaim.currency().equals(providerPayment.currency())
+                    && matching.size() == 1
+                    && matching.getFirst().amountMinor() == refundClaim.amountMinor()
+                    && refundClaim.currency().equals(matching.getFirst().currency())) {
+                return transactions.finalizeRefund(refundClaim, matching.getFirst(), now());
+            }
+        } catch (PaymentProviderClient.ProviderUnavailableException ignored) {
+            // Preserve UNKNOWN. Automatic reconciliation is GET-only.
+        }
+        return claim.completedResult();
     }
 
     public ManualRecoveryRefundPreview previewManualRecoveryRefund(

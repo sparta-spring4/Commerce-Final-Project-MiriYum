@@ -3,6 +3,7 @@ package com.miriyum.domain.reservation.service;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileRefundResultQuery;
 import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Component;
 public class ReservationDepositRefundJob {
 
     private static final Duration RETRY_DELAY = Duration.ofSeconds(30);
+    private static final int MAX_ATTEMPTS = 3;
 
     private final ReservationDepositRefundService refundService;
     private final PaymentService paymentService;
@@ -69,30 +71,44 @@ public class ReservationDepositRefundJob {
                 : refundService.claimDue(owner, limit)) {
             RefundResult refund;
             try {
-                refund = paymentService.requestRefund(
-                        new RequestRefundCommand(
-                                claim.paymentId(),
-                                claim.sourceEventId(),
-                                claim.refundAmountMinor(),
-                                claim.reasonCode(),
-                                claim.refundPolicyVersion(),
-                                claim.idempotencyKey()));
+                refund = claim.operation() == ReservationDepositRefundService.Operation.QUERY
+                        ? paymentService.reconcileRefundResult(
+                                new ReconcileRefundResultQuery(
+                                        claim.paymentId(), claim.sourceEventId(),
+                                        claim.refundAmountMinor(), claim.currency()))
+                        : paymentService.requestRefund(
+                                new RequestRefundCommand(
+                                        claim.paymentId(),
+                                        claim.sourceEventId(),
+                                        claim.refundAmountMinor(),
+                                        claim.reasonCode(),
+                                        claim.refundPolicyVersion(),
+                                        claim.idempotencyKey()));
             } catch (ServiceException failure) {
-                if (isRetryable(failure)) {
+                if (claim.operation() == ReservationDepositRefundService.Operation.QUERY) {
+                    refundService.recordQueryFailure(
+                            claim, RETRY_DELAY, MAX_ATTEMPTS);
+                } else if (isRetryable(failure)) {
                     refundService.recordRetryableFailure(claim, RETRY_DELAY);
                 } else {
                     refundService.recordRecoveryRequired(claim);
                 }
                 continue;
             } catch (RuntimeException failure) {
-                refundService.recordRetryableFailure(claim, RETRY_DELAY);
+                if (claim.operation() == ReservationDepositRefundService.Operation.QUERY) {
+                    refundService.recordQueryFailure(
+                            claim, RETRY_DELAY, MAX_ATTEMPTS);
+                } else {
+                    refundService.recordRetryableFailure(claim, RETRY_DELAY);
+                }
                 continue;
             }
             switch (refund.status()) {
                 case REQUESTED, VALIDATING, PROCESSING ->
                         refundService.recordRetryableFailure(claim, RETRY_DELAY);
                 case FAILED, RECONCILIATION_REQUIRED ->
-                        refundService.recordReconciliationRequired(claim, refund);
+                        refundService.recordReconciliationRequired(
+                                claim, refund, RETRY_DELAY, MAX_ATTEMPTS);
                 case COMPLETED -> {
                     if (refundService.recordCompleted(claim, refund)) {
                         completed++;

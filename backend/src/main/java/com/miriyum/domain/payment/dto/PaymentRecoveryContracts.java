@@ -140,6 +140,21 @@ public final class PaymentRecoveryContracts {
         }
     }
 
+    /** Automatic refund-result lookup. It never authorizes a new provider cancellation. */
+    public record ReconcileRefundResultQuery(
+            String paymentId,
+            String sourceEventId,
+            long requestedAmountMinor,
+            String currency
+    ) {
+        public ReconcileRefundResultQuery {
+            requirePublicId(paymentId, "paymentId");
+            requireText(sourceEventId, 100, "sourceEventId");
+            requirePositive(requestedAmountMinor, "requestedAmountMinor");
+            requireCurrency(currency);
+        }
+    }
+
     public record PreviewManualRecoveryRefundQuery(String handoffId) {
         public PreviewManualRecoveryRefundQuery {
             requirePublicId(handoffId, "handoffId");

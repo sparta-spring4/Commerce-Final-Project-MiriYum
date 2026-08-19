@@ -61,6 +61,9 @@ public class ReservationDepositRefundService {
         List<ReservationDepositRefundObligation> obligations = refundRepository
                 .findClaimableForUpdate(now, PageRequest.of(0, limit));
         return obligations.stream().map(obligation -> {
+            Operation operation = obligation.getStatus()
+                    == ReservationDepositRefundObligation.Status.RECONCILIATION_REQUIRED
+                    ? Operation.QUERY : Operation.REQUEST;
             obligation.claim(owner, now, now.plus(leaseDuration));
             ReservationDepositProcess process = processRepository
                     .findByIdForUpdate(obligation.getReservationDepositProcessId())
@@ -69,7 +72,7 @@ public class ReservationDepositRefundService {
             process.beginCompensation(now);
             refundRepository.save(obligation);
             processRepository.saveAndFlush(process);
-            return Claim.from(obligation, owner);
+            return Claim.from(obligation, owner, operation);
         }).toList();
     }
 
@@ -161,9 +164,17 @@ public class ReservationDepositRefundService {
             propagation = Propagation.REQUIRES_NEW,
             isolation = Isolation.READ_COMMITTED,
             timeout = 5)
-    public boolean recordReconciliationRequired(Claim claim, RefundResult refund) {
+    public boolean recordReconciliationRequired(
+            Claim claim,
+            RefundResult refund,
+            Duration queryDelay,
+            int maxAttempts
+    ) {
         if (claim == null || refund == null) {
             throw new IllegalArgumentException("claim and refund are required");
+        }
+        if (queryDelay == null || queryDelay.isNegative() || maxAttempts < 1) {
+            throw new IllegalArgumentException("query policy is invalid");
         }
         if ((refund.status() != RefundStatus.FAILED
                 && refund.status() != RefundStatus.RECONCILIATION_REQUIRED)
@@ -173,7 +184,48 @@ public class ReservationDepositRefundService {
             throw new IllegalStateException(
                     "recovery-required refund does not match obligation");
         }
-        return isolateForRecovery(claim);
+        if (refund.status() == RefundStatus.FAILED || claim.attemptCount() >= maxAttempts) {
+            return isolateForRecovery(claim);
+        }
+        return scheduleReconciliation(claim, queryDelay);
+    }
+
+    @Transactional(
+            propagation = Propagation.REQUIRES_NEW,
+            isolation = Isolation.READ_COMMITTED,
+            timeout = 5)
+    public boolean recordQueryFailure(
+            Claim claim,
+            Duration queryDelay,
+            int maxAttempts
+    ) {
+        if (claim == null || claim.operation() != Operation.QUERY
+                || queryDelay == null || queryDelay.isNegative() || maxAttempts < 1) {
+            throw new IllegalArgumentException("query claim and policy are required");
+        }
+        if (claim.attemptCount() >= maxAttempts) {
+            return isolateForRecovery(claim);
+        }
+        return scheduleReconciliation(claim, queryDelay);
+    }
+
+    private boolean scheduleReconciliation(Claim claim, Duration queryDelay) {
+        Instant now = clock.instant();
+        ReservationDepositRefundObligation obligation = refundRepository
+                .findByIdForUpdate(claim.obligationId())
+                .orElse(null);
+        if (obligation == null
+                || !obligation.matchesRequired(
+                        claim.processId(), claim.paymentId(), claim.refundAmountMinor(),
+                        claim.currency(), claim.refundPolicyVersion(), claim.sourceEventId(),
+                        claim.idempotencyKey(), claim.reasonCode())
+                || !obligation.isOwnedBy(claim.owner(), claim.token(), now)) {
+            return false;
+        }
+        obligation.scheduleReconciliation(
+                claim.owner(), claim.token(), now, queryDelay);
+        refundRepository.save(obligation);
+        return true;
     }
 
     private boolean isolateForRecovery(Claim claim) {
@@ -212,6 +264,8 @@ public class ReservationDepositRefundService {
         return true;
     }
 
+    public enum Operation { REQUEST, QUERY }
+
     public record Claim(
             long obligationId,
             long processId,
@@ -223,11 +277,25 @@ public class ReservationDepositRefundService {
             String idempotencyKey,
             String reasonCode,
             String owner,
-            long token
+            long token,
+            Operation operation,
+            int attemptCount
     ) {
+        public Claim(
+                long obligationId, long processId, String paymentId,
+                long refundAmountMinor, String currency, long refundPolicyVersion,
+                String sourceEventId, String idempotencyKey, String reasonCode,
+                String owner, long token
+        ) {
+            this(obligationId, processId, paymentId, refundAmountMinor, currency,
+                    refundPolicyVersion, sourceEventId, idempotencyKey, reasonCode,
+                    owner, token, Operation.REQUEST, 1);
+        }
+
         private static Claim from(
                 ReservationDepositRefundObligation obligation,
-                String owner
+                String owner,
+                Operation operation
         ) {
             if (obligation.getId() == null || obligation.getId() <= 0) {
                 throw new IllegalStateException("persisted refund obligation id is required");
@@ -243,7 +311,7 @@ public class ReservationDepositRefundService {
                     obligation.getIdempotencyKey(),
                     obligation.getReasonCode(),
                     owner,
-                    obligation.getClaimToken());
+                    obligation.getClaimToken(), operation, obligation.getAttemptCount());
         }
     }
 }

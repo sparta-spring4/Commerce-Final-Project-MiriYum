@@ -25,6 +25,7 @@ import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryRef
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.PreviewManualRecoveryRefundQuery;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RegisterManualRecoveryHandoffCommand;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileManualRecoveryCommand;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileRefundResultQuery;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RequestManualRecoveryRefundCommand;
 import com.miriyum.domain.payment.entity.Payment;
 import com.miriyum.domain.payment.entity.PaymentRecoveryHandoff;
@@ -99,6 +100,29 @@ public class PaymentRecoveryTransactionService {
                 String dispositionId
         ) {
             return new ManualRefundExecutionClaim(null, result, dispositionId);
+        }
+    }
+
+    record AutomaticRefundReconciliationClaim(
+            PaymentTransactionService.RefundClaim refundClaim,
+            RefundResult completedResult,
+            long paymentAmountMinor
+    ) {
+        static AutomaticRefundReconciliationClaim lookup(
+                PaymentTransactionService.RefundClaim refundClaim,
+                RefundResult currentResult,
+                long paymentAmountMinor
+        ) {
+            return new AutomaticRefundReconciliationClaim(
+                    refundClaim, currentResult, paymentAmountMinor);
+        }
+
+        static AutomaticRefundReconciliationClaim replay(RefundResult result) {
+            return new AutomaticRefundReconciliationClaim(null, result, 0L);
+        }
+
+        boolean requiresProviderLookup() {
+            return refundClaim != null;
         }
     }
 
@@ -240,6 +264,32 @@ public class PaymentRecoveryTransactionService {
             case DISPOSITION_FAILED -> throw new ServiceException(
                     PaymentErrorCode.PAYMENT_RECOVERY_NOT_REQUIRED);
         };
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public AutomaticRefundReconciliationClaim claimAutomaticRefundReconciliation(
+            ReconcileRefundResultQuery query
+    ) {
+        Payment payment = payments.findByPaymentIdForUpdate(query.paymentId())
+                .orElseThrow(() -> new ServiceException(PaymentErrorCode.PAYMENT_NOT_FOUND));
+        PaymentRefund refund = refunds.findByPayment_IdAndSourceEventIdForUpdate(
+                        payment.getId(), query.sourceEventId())
+                .orElseThrow(() -> new ServiceException(
+                        PaymentErrorCode.PAYMENT_RECOVERY_NOT_FOUND));
+        if (refund.getAmountMinor() != query.requestedAmountMinor()
+                || !refund.getCurrency().equals(query.currency())) {
+            throw new ServiceException(PaymentErrorCode.PAYMENT_RECOVERY_STALE);
+        }
+        if (refund.getStatus() != RefundStatus.RECONCILIATION_REQUIRED) {
+            return AutomaticRefundReconciliationClaim.replay(toRefundResult(payment, refund));
+        }
+        return AutomaticRefundReconciliationClaim.lookup(
+                PaymentTransactionService.RefundClaim.requiresCall(
+                        refund.getRefundId(), payment.getPaymentId(),
+                        payment.getPortOnePaymentId(), refund.getAmountMinor(),
+                        refund.getCurrency(), refund.getReasonCode()),
+                toRefundResult(payment, refund),
+                payment.getAmountMinor());
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)

@@ -19,6 +19,7 @@ import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.InspectManualReco
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.PreviewManualRecoveryRefundQuery;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RequestManualRecoveryRefundCommand;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileManualRecoveryCommand;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileRefundResultQuery;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RegisterManualRecoveryHandoffCommand;
 import com.miriyum.domain.payment.entity.Payment;
 import com.miriyum.domain.payment.entity.PaymentRecoveryHandoff;
@@ -83,6 +84,28 @@ class PaymentRecoveryTransactionServiceTest {
 
         assertThat(result.status()).isEqualTo(REGISTERED);
         assertThat(result.handoffId()).isEqualTo("21");
+    }
+
+    @Test
+    @DisplayName("자동 환불 대사는 handoff 없이 canonical UNKNOWN 환불만 조회 대상으로 claim한다")
+    void claimsAutomaticUnknownRefundWithoutHandoff() {
+        Payment payment = paidPayment();
+        PaymentRefund refund = refund(payment);
+        refund.requireReconciliation(NOW.minusSeconds(5));
+        ReconcileRefundResultQuery query = new ReconcileRefundResultQuery(
+                "900000000000000001", "reservation:1:cancelled", 100_000L, "KRW");
+        when(payments.findByPaymentIdForUpdate("900000000000000001"))
+                .thenReturn(Optional.of(payment));
+        when(refunds.findByPayment_IdAndSourceEventIdForUpdate(
+                11L, "reservation:1:cancelled")).thenReturn(Optional.of(refund));
+
+        var claim = service.claimAutomaticRefundReconciliation(query);
+
+        assertThat(claim.requiresProviderLookup()).isTrue();
+        assertThat(claim.refundClaim().refundId()).isEqualTo(refund.getRefundId());
+        assertThat(claim.completedResult().status())
+                .isEqualTo(com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus
+                        .RECONCILIATION_REQUIRED);
     }
 
     @Test

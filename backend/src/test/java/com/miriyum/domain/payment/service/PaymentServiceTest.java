@@ -28,6 +28,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservatio
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.InspectManualRecoveryQuery;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryInspection;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileManualRecoveryCommand;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileRefundResultQuery;
 import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RequestManualRecoveryRefundCommand;
 import com.miriyum.domain.payment.entity.Payment;
 import com.miriyum.domain.payment.exception.PaymentErrorCode;
@@ -115,6 +116,74 @@ class PaymentServiceTest {
         verify(providerClient, never()).cancelPayment(
                 PORTONE_PAYMENT_ID, "910000000000000001", 100_000L,
                 "KRW", "RESERVATION_CANCELLED");
+    }
+
+    @Test
+    @DisplayName("자동 환불 대사는 provider GET만 호출하고 일치한 취소를 원장에 반영한다")
+    void reconcilesAutomaticRefundByLookupWithoutResendingCancellation() {
+        ReconcileRefundResultQuery query = new ReconcileRefundResultQuery(
+                PAYMENT_ID, "reservation:1:cancelled", 100_000L, "KRW");
+        PaymentTransactionService.RefundClaim refundClaim =
+                PaymentTransactionService.RefundClaim.requiresCall(
+                        "910000000000000001", PAYMENT_ID, PORTONE_PAYMENT_ID,
+                        100_000L, "KRW", "RESERVATION_CANCELLED");
+        RefundResult unknown = new RefundResult(
+                "910000000000000001", PAYMENT_ID, 100_000L, 0L,
+                0L, 300_000L, "KRW", RefundStatus.RECONCILIATION_REQUIRED,
+                NOW.minusSeconds(10), null);
+        var claim = PaymentRecoveryTransactionService.AutomaticRefundReconciliationClaim
+                .lookup(refundClaim, unknown, 300_000L);
+        var cancellation = new ProviderCancellation(
+                "cancel-1", ProviderStatus.PARTIALLY_CANCELLED,
+                100_000L, "KRW",
+                PaymentProviderClient.cancellationReason(
+                        "RESERVATION_CANCELLED", "910000000000000001"));
+        var providerPayment = new ProviderPayment(
+                PORTONE_PAYMENT_ID, "transaction-1", ProviderStatus.PARTIALLY_CANCELLED,
+                300_000L, "KRW", List.of(cancellation));
+        RefundResult completed = new RefundResult(
+                "910000000000000001", PAYMENT_ID, 100_000L, 100_000L,
+                100_000L, 200_000L, "KRW", RefundStatus.COMPLETED,
+                NOW.minusSeconds(10), NOW);
+        when(recoveryTransactions.claimAutomaticRefundReconciliation(query))
+                .thenReturn(claim);
+        when(providerClient.getPayment(PORTONE_PAYMENT_ID)).thenReturn(providerPayment);
+        when(transactions.finalizeRefund(refundClaim, cancellation, NOW))
+                .thenReturn(completed);
+
+        assertThat(paymentService.reconcileRefundResult(query)).isEqualTo(completed);
+
+        verify(providerClient, never()).cancelPayment(
+                PORTONE_PAYMENT_ID, "910000000000000001", 100_000L,
+                "KRW", "RESERVATION_CANCELLED");
+    }
+
+    @Test
+    @DisplayName("자동 환불 대사 timeout은 UNKNOWN을 유지하고 취소를 재전송하지 않는다")
+    void keepsAutomaticRefundUnknownOnProviderTimeout() {
+        ReconcileRefundResultQuery query = new ReconcileRefundResultQuery(
+                PAYMENT_ID, "reservation:1:cancelled", 100_000L, "KRW");
+        PaymentTransactionService.RefundClaim refundClaim =
+                PaymentTransactionService.RefundClaim.requiresCall(
+                        "910000000000000001", PAYMENT_ID, PORTONE_PAYMENT_ID,
+                        100_000L, "KRW", "RESERVATION_CANCELLED");
+        RefundResult unknown = new RefundResult(
+                "910000000000000001", PAYMENT_ID, 100_000L, 0L,
+                0L, 300_000L, "KRW", RefundStatus.RECONCILIATION_REQUIRED,
+                NOW.minusSeconds(10), null);
+        when(recoveryTransactions.claimAutomaticRefundReconciliation(query))
+                .thenReturn(PaymentRecoveryTransactionService
+                        .AutomaticRefundReconciliationClaim
+                        .lookup(refundClaim, unknown, 300_000L));
+        when(providerClient.getPayment(PORTONE_PAYMENT_ID)).thenThrow(
+                new PaymentProviderClient.ProviderUnavailableException("timeout"));
+
+        assertThat(paymentService.reconcileRefundResult(query)).isEqualTo(unknown);
+
+        verify(transactions, never()).finalizeRefund(
+                any(), any(), any());
+        verify(providerClient, never()).cancelPayment(
+                any(), any(), org.mockito.ArgumentMatchers.anyLong(), any(), any());
     }
 
     @Test

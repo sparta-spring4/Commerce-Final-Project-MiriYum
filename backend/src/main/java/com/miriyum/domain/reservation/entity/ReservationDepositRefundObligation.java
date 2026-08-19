@@ -135,7 +135,8 @@ public class ReservationDepositRefundObligation {
 
     public void claim(String owner, Instant now, Instant until) {
         requireLease(owner, now, until);
-        boolean claimable = status == Status.REQUIRED
+        boolean claimable = (status == Status.REQUIRED
+                || status == Status.RECONCILIATION_REQUIRED)
                 && nextAttemptAt != null
                 && !nextAttemptAt.isAfter(now);
         boolean reclaimable = status == Status.PROCESSING
@@ -184,6 +185,22 @@ public class ReservationDepositRefundObligation {
         requireFence(owner, token, now);
         status = Status.RECONCILIATION_REQUIRED;
         completedAt = now;
+        clearLease();
+    }
+
+    public void scheduleReconciliation(
+            String owner,
+            long token,
+            Instant now,
+            Duration delay
+    ) {
+        requireFence(owner, token, now);
+        if (delay == null || delay.isNegative()) {
+            throw new IllegalArgumentException("delay must not be negative");
+        }
+        status = Status.RECONCILIATION_REQUIRED;
+        nextAttemptAt = now.plus(delay);
+        completedAt = null;
         clearLease();
     }
 

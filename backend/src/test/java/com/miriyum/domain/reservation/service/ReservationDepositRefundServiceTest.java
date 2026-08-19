@@ -26,8 +26,6 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -173,13 +171,8 @@ class ReservationDepositRefundServiceTest {
         verify(processRepository, never()).findByIdForUpdate(99L);
     }
 
-    @ParameterizedTest
-    @EnumSource(
-            value = RefundStatus.class,
-            names = {"FAILED", "RECONCILIATION_REQUIRED"})
-    void recoveryRequiredRefundResultIsolatesObligationAndProcess(
-            RefundStatus recoveryStatus
-    ) {
+    @Test
+    void firstUnknownRefundSchedulesAutomaticReconciliationWithoutOutbox() {
         ReservationDepositRefundObligationRepository refundRepository =
                 mock(ReservationDepositRefundObligationRepository.class);
         ReservationDepositProcessRepository processRepository =
@@ -209,7 +202,7 @@ class ReservationDepositRefundServiceTest {
                 0L,
                 4_000L,
                 "KRW",
-                recoveryStatus,
+                RefundStatus.RECONCILIATION_REQUIRED,
                 NOW.minusSeconds(1),
                 null);
         given(refundRepository.findByIdForUpdate(501L))
@@ -224,20 +217,64 @@ class ReservationDepositRefundServiceTest {
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 Duration.ofSeconds(30));
 
-        assertThat(service.recordReconciliationRequired(claim, unknown)).isTrue();
+        assertThat(service.recordReconciliationRequired(
+                claim, unknown, Duration.ofSeconds(30), 3)).isTrue();
 
         assertThat(obligation.getStatus())
                 .isEqualTo(ReservationDepositRefundObligation.Status.RECONCILIATION_REQUIRED);
         assertThat(process.getStatus())
+                .isEqualTo(ReservationDepositProcessStatus.COMPENSATING);
+        assertThat(obligation.getNextAttemptAt()).isEqualTo(NOW.plusSeconds(30));
+        verify(outbox, never()).enqueue(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+        verify(processRepository, never()).findByIdForUpdate(99L);
+    }
+
+    @Test
+    void exhaustedUnknownRefundCreatesExactlyOneRecoveryHandoff() {
+        ReservationDepositRefundObligationRepository refundRepository =
+                mock(ReservationDepositRefundObligationRepository.class);
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        ReservationDepositRefundObligation obligation = obligation(NOW.minusSeconds(90));
+        obligation.claim("worker-1", NOW.minusSeconds(90), NOW.minusSeconds(80));
+        obligation.scheduleReconciliation("worker-1", obligation.getClaimToken(),
+                NOW.minusSeconds(89), Duration.ZERO);
+        obligation.claim("worker-2", NOW.minusSeconds(60), NOW.minusSeconds(50));
+        obligation.scheduleReconciliation("worker-2", obligation.getClaimToken(),
+                NOW.minusSeconds(59), Duration.ZERO);
+        obligation.claim("worker-a", NOW.minusSeconds(10), NOW.plusSeconds(20));
+        ReservationDepositProcess process = compensationRequiredProcess();
+        process.beginCompensation(NOW.minusSeconds(10));
+        ReservationDepositRefundService.Claim claim =
+                new ReservationDepositRefundService.Claim(
+                        501L, 99L, "9001", 4_000L, "KRW", 1L,
+                        "reservation-deposit-compensation:99",
+                        "123e4567-e89b-12d3-a456-426614174099",
+                        "FULL_DEPOSIT_COMPENSATION", "worker-a",
+                        obligation.getClaimToken(),
+                        ReservationDepositRefundService.Operation.QUERY, 3);
+        RefundResult unknown = new RefundResult(
+                "7001", "9001", 4_000L, 0L, 0L, 4_000L, "KRW",
+                RefundStatus.RECONCILIATION_REQUIRED, NOW.minusSeconds(1), null);
+        given(refundRepository.findByIdForUpdate(501L))
+                .willReturn(Optional.of(obligation));
+        given(processRepository.findByIdForUpdate(99L)).willReturn(Optional.of(process));
+        ReservationPaymentRecoveryOutboxService outbox =
+                mock(ReservationPaymentRecoveryOutboxService.class);
+        ReservationDepositRefundService service = new ReservationDepositRefundService(
+                refundRepository, processRepository, outbox,
+                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofSeconds(30));
+
+        assertThat(service.recordReconciliationRequired(
+                claim, unknown, Duration.ofSeconds(30), 3)).isTrue();
+
+        assertThat(process.getStatus())
                 .isEqualTo(ReservationDepositProcessStatus.RECOVERY_REQUIRED);
-        assertThat(process.getReconciliationNextAttemptAt()).isNull();
-        assertThat(process.getReconciliationLeaseOwner()).isNull();
-        assertThat(process.getReconciliationLeaseUntil()).isNull();
-        var order = inOrder(refundRepository, processRepository);
-        order.verify(refundRepository).findByIdForUpdate(501L);
-        order.verify(processRepository).findByIdForUpdate(99L);
-        order.verify(refundRepository).save(obligation);
-        order.verify(processRepository).saveAndFlush(process);
         verify(outbox).enqueue(
                 RESERVATION_DEPOSIT_REFUND,
                 "501",

@@ -58,4 +58,30 @@ class ReservationDepositRefundObligationTest {
         assertThat(obligation.getCompletedAt()).isEqualTo(NOW.plusSeconds(31));
         assertThat(obligation.getLeaseOwner()).isNull();
     }
+
+    @Test
+    void unknownResultSchedulesAQueryClaimInsteadOfCompletingTheObligation() {
+        ReservationDepositRefundObligation obligation =
+                ReservationDepositRefundObligation.required(
+                        99L, "9001", 4_000L, "KRW", 1L,
+                        "reservation-deposit-compensation:99",
+                        "123e4567-e89b-12d3-a456-426614174099",
+                        "FULL_DEPOSIT_COMPENSATION", NOW);
+        obligation.claim("worker-a", NOW, NOW.plusSeconds(30));
+
+        obligation.scheduleReconciliation(
+                "worker-a", obligation.getClaimToken(), NOW.plusSeconds(1),
+                Duration.ofSeconds(30));
+
+        assertThat(obligation.getStatus())
+                .isEqualTo(ReservationDepositRefundObligation.Status.RECONCILIATION_REQUIRED);
+        assertThat(obligation.getNextAttemptAt()).isEqualTo(NOW.plusSeconds(31));
+        assertThat(obligation.getCompletedAt()).isNull();
+
+        obligation.claim("worker-b", NOW.plusSeconds(31), NOW.plusSeconds(61));
+
+        assertThat(obligation.getAttemptCount()).isEqualTo(2);
+        assertThat(obligation.getStatus())
+                .isEqualTo(ReservationDepositRefundObligation.Status.PROCESSING);
+    }
 }
