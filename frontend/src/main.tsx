@@ -5,7 +5,7 @@ import App from './app/App'
 import './shared/ui/theme.css'
 import './shared/ui/primitives.css'
 import './shared/ui/completion.css'
-import './app/appLayout.css'
+import './app/shells/shared/appLayout.css'
 
 const root = document.getElementById('root')
 

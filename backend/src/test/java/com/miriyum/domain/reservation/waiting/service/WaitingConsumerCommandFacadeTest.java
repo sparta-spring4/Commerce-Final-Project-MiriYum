@@ -19,6 +19,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -32,27 +33,28 @@ class WaitingConsumerCommandFacadeTest {
         WaitingLedgerService ledger = mock(WaitingLedgerService.class);
         IdempotencyKey key = IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440200");
         LocalDate businessDate = LocalDate.of(2026, 8, 17);
+        UUID proofId = UUID.fromString("d276a024-71f5-4f98-9682-89f16df4fbd0");
         WaitingConsumerCommandResult expected = new WaitingConsumerCommandResult(
                 200, mock(WaitingConsumerSnapshot.class));
         when(creation.createForConsumer(
-                100L, 200L, businessDate, 2, WaitingSource.REMOTE, key, true))
+                100L, 200L, businessDate, 2, WaitingSource.REMOTE, key, proofId))
                 .thenReturn(expected);
         WaitingConsumerCommandFacade facade = new WaitingConsumerCommandFacade(
                 accounts,
                 creation,
                 ledger,
                 Clock.fixed(Instant.parse("2026-08-17T03:00:00Z"), ZoneOffset.UTC),
-                true,
                 attempt -> 0L,
                 millis -> { });
 
-        WaitingConsumerCommandResult result = facade.create(100L, 200L, businessDate, 2, key);
+        WaitingConsumerCommandResult result = facade.create(
+                100L, 200L, businessDate, 2, proofId, key);
 
         assertThat(result).isSameAs(expected);
         InOrder order = inOrder(accounts, creation);
         order.verify(accounts).requireActiveAccount(200L);
         order.verify(creation).createForConsumer(
-                100L, 200L, businessDate, 2, WaitingSource.REMOTE, key, true);
+                100L, 200L, businessDate, 2, WaitingSource.REMOTE, key, proofId);
     }
 
     @Test
@@ -71,7 +73,6 @@ class WaitingConsumerCommandFacadeTest {
                 creation,
                 ledger,
                 Clock.fixed(now, ZoneOffset.UTC),
-                false,
                 attempt -> 0L,
                 millis -> { });
 

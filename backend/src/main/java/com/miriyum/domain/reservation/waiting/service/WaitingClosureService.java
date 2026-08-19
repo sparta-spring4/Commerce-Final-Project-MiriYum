@@ -9,7 +9,6 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingClosureItemStatus;
 import com.miriyum.domain.reservation.waiting.entity.WaitingClosureJob;
 import com.miriyum.domain.reservation.waiting.entity.WaitingClosureJobItem;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSetting;
-import com.miriyum.domain.reservation.waiting.entity.WaitingStatusEvent;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTransitionAudit;
@@ -17,7 +16,6 @@ import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembership
 import com.miriyum.domain.reservation.waiting.repository.WaitingClosureJobItemRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingClosureJobRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingSettingRepository;
-import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
 import com.miriyum.global.exception.ServiceException;
@@ -64,7 +62,7 @@ public class WaitingClosureService {
     private final Clock clock;
     private WaitingActiveMembershipRepository membershipRepository;
     private WaitingTransitionAuditRepository auditRepository;
-    private WaitingStatusEventRepository eventRepository;
+    private WaitingStatusEventAppender eventAppender;
 
     @Autowired
     public WaitingClosureService(WaitingStoreAuthorityPort authorityPort, WaitingTeamRepository teamRepository,
@@ -72,7 +70,7 @@ public class WaitingClosureService {
             WaitingSettingRepository settingRepository,
             IdempotencyExecutor idempotencyExecutor, ObjectMapper objectMapper, Clock clock,
             WaitingActiveMembershipRepository membershipRepository,
-            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository) {
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventAppender eventAppender) {
         this.authorityPort = Objects.requireNonNull(authorityPort);
         this.teamRepository = Objects.requireNonNull(teamRepository);
         this.jobRepository = Objects.requireNonNull(jobRepository);
@@ -83,7 +81,7 @@ public class WaitingClosureService {
         this.clock = Objects.requireNonNull(clock);
         this.membershipRepository = Objects.requireNonNull(membershipRepository);
         this.auditRepository = Objects.requireNonNull(auditRepository);
-        this.eventRepository = Objects.requireNonNull(eventRepository);
+        this.eventAppender = Objects.requireNonNull(eventAppender);
     }
 
     /**
@@ -194,14 +192,13 @@ public class WaitingClosureService {
             WaitingTeamStatus before = team.getStatus();
             long expected = team.getVersion();
             team.closeByStore(expected, now);
-            if (membershipRepository.deleteByWaitingTeamId(team.getId()) != 1L) {
+            if (membershipRepository.deleteByWaitingTeamId(team.getId()) < 1L) {
                 throw new ServiceException(ReservationErrorCode.WAITING_ACTIVE_MEMBERSHIP_CONFLICT);
             }
             String commandId = "waiting-closure:" + job.getId() + ':' + item.getId();
             auditRepository.save(WaitingTransitionAudit.record(team.getId(), WaitingActorType.SYSTEM, null,
                     before, team.getStatus(), expected, "CLOSED_BY_STORE", commandId, now, now));
-            eventRepository.save(WaitingStatusEvent.pending(
-                    team.getId(), team.getVersion() + 1L, team.getStatus(), now));
+            eventAppender.append(team, now);
         }
         item.complete(claim.owner(), claim.token(), now);
         reconcile(job, now);

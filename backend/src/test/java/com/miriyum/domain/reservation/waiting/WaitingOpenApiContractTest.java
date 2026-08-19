@@ -26,6 +26,8 @@ class WaitingOpenApiContractTest {
             "/api/v1/consumers/me/stores/{storeId}/waiting-availabilities";
     private static final String CONSUMER_CREATE_PATH =
             "/api/v1/consumers/me/stores/{storeId}/waiting-teams";
+    private static final String CONSUMER_LOCATION_PROOF_PATH =
+            "/api/v1/consumers/me/stores/{storeId}/waiting-location-proofs";
     private static final String CONSUMER_CURRENT_PATH =
             "/api/v1/consumers/me/waiting-teams/current";
     private static final String CONSUMER_CANCEL_PATH =
@@ -89,9 +91,19 @@ class WaitingOpenApiContractTest {
                         "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations",
                         "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}",
                         CONSUMER_AVAILABILITY_PATH,
+                        CONSUMER_LOCATION_PROOF_PATH,
                         CONSUMER_CREATE_PATH,
                         CONSUMER_CURRENT_PATH,
                         CONSUMER_CANCEL_PATH,
+                        "/api/v1/consumers/me/waiting-invitation-acceptances",
+                        "/api/v1/consumers/me/waiting-teams/{teamId}/invitations",
+                        "/api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations",
+                        "/api/v1/consumers/me/waiting-teams/{teamId}/membership-departures",
+                        "/api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals",
+                        "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers",
+                        "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/acceptances",
+                        "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/rejections",
+                        "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations",
                         CONSUMER_EVENTS_PATH,
                         OPERATOR_EVENTS_PATH);
 
@@ -233,8 +245,7 @@ class WaitingOpenApiContractTest {
             boolean storeScoped
     ) {
         assertThat(path)
-                .containsEntry("x-miriyum-runtime-status", "contract-only")
-                .containsEntry("x-miriyum-owner-issue", 250);
+                .doesNotContainKeys("x-miriyum-runtime-status", "x-miriyum-owner-issue");
         Map<String, Object> operation = map(path.get("get"));
         assertThat(list(operation.get("security")))
                 .containsExactly(Map.of("bearerAuth", List.of()));
@@ -285,9 +296,8 @@ class WaitingOpenApiContractTest {
 
         Map<String, Object> create = map(map(paths.get(CONSUMER_CREATE_PATH)).get("post"));
         assertThat(create)
-                .containsEntry("x-runtime-default", "disabled")
-                .containsEntry("x-activation-owner-issue", 409)
                 .containsEntry("x-location-proof-required", true);
+        assertThat(create).doesNotContainKeys("x-runtime-default", "x-activation-owner-issue");
         assertThat(map(create.get("responses")).keySet())
                 .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "409", "429");
         assertThat(list(create.get("parameters"))).anySatisfy(parameter ->
@@ -313,15 +323,15 @@ class WaitingOpenApiContractTest {
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
         Map<String, Object> createRequest = map(schemas.get("WaitingConsumerCreateRequest"));
         assertThat(list(createRequest.get("required")))
-                .containsExactly("businessDate", "partySize");
+                .containsExactly("businessDate", "partySize", "locationProofSessionId");
         assertThat(map(createRequest.get("properties")))
-                .containsOnlyKeys("businessDate", "partySize");
+                .containsOnlyKeys("businessDate", "partySize", "locationProofSessionId");
 
         Map<String, Object> snapshot = map(schemas.get("WaitingConsumerSnapshot"));
         assertThat(map(snapshot.get("properties"))).containsOnlyKeys(
                 "waitingTeamId", "storeId", "businessDate", "status", "queueSequence",
                 "teamsAhead", "partySize", "createdAt", "calledAt", "arrivalDeadline",
-                "arrivedAt", "cancelledAt", "version");
+                "arrivedAt", "cancelledAt", "version", "memberships");
         assertThat(snapshot.toString()).doesNotContain(
                 "consumerAccountId", "phone", "contact", "audit", "failure");
 
@@ -363,6 +373,68 @@ class WaitingOpenApiContractTest {
                 .containsExactlyInAnyOrder(
                         "WAITING_005", "WAITING_006", "WAITING_008",
                         "COMMON_007", "COMMON_008");
+    }
+
+    @Test
+    void consumerLocationProofContractHasNoIdempotencyOrRawLocationResponse() throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> operation = map(map(map(document.get("paths"))
+                .get(CONSUMER_LOCATION_PROOF_PATH)).get("post"));
+
+        assertThat(operation).containsEntry("x-location-raw-retention", "none");
+        assertThat(list(operation.get("security")))
+                .containsExactly(Map.of("bearerAuth", List.of()));
+        assertThat(list(operation.get("parameters")))
+                .extracting(parameter -> map(parameter).get("$ref"))
+                .doesNotContain(IDEMPOTENCY_KEY);
+        assertThat(map(operation.get("responses")).keySet())
+                .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "429");
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> requestProperties = map(map(
+                schemas.get("WaitingLocationProofRequest")).get("properties"));
+        assertThat(requestProperties).containsOnlyKeys(
+                "measurementStatus", "latitude", "longitude", "accuracyMeters",
+                "measuredAt", "integrityStatus");
+        Map<String, Object> snapshotProperties = map(map(
+                schemas.get("WaitingLocationProofSnapshot")).get("properties"));
+        assertThat(snapshotProperties).containsOnlyKeys(
+                "proofSessionId", "resultCategory", "accuracyCategory", "policyVersion",
+                "storeCoordinateVersion", "issuedAt", "judgedAt", "expiresAt");
+        assertThat(snapshotProperties).doesNotContainKeys(
+                "latitude", "longitude", "distanceMeters", "accuracyMeters", "measuredAt");
+    }
+
+    @Test
+    void partyInvitationAndMembershipContractsAreIdempotentAndPrivacyBounded()
+            throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> paths = map(document.get("paths"));
+        for (String path : List.of(
+                "/api/v1/consumers/me/waiting-invitation-acceptances",
+                "/api/v1/consumers/me/waiting-teams/{teamId}/invitations",
+                "/api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations",
+                "/api/v1/consumers/me/waiting-teams/{teamId}/membership-departures",
+                "/api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals",
+                "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers",
+                "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/acceptances",
+                "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/rejections",
+                "/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations")) {
+            Map<String, Object> operation = map(map(paths.get(path)).get("post"));
+            assertThat(list(operation.get("security")))
+                    .containsExactly(Map.of("bearerAuth", List.of()));
+            assertThat(list(operation.get("parameters")))
+                    .extracting(parameter -> map(parameter).get("$ref"))
+                    .contains(IDEMPOTENCY_KEY);
+        }
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> acceptance = map(map(
+                schemas.get("WaitingInvitationAcceptanceRequest")).get("properties"));
+        assertThat(acceptance).containsOnlyKeys("invitationCode");
+        Map<String, Object> member = map(map(schemas.get("WaitingPartyMember")).get("properties"));
+        assertThat(member).containsOnlyKeys("membershipId", "role", "joinedAt", "self");
+        assertThat(member.toString()).doesNotContain(
+                "consumerAccountId", "name", "email", "phone", "token", "latitude", "longitude");
     }
 
     @Test

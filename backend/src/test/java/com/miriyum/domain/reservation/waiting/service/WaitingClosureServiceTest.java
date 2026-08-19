@@ -21,7 +21,6 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.repository.WaitingClosureJobItemRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingClosureJobRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
-import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingSettingRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
@@ -62,7 +61,7 @@ class WaitingClosureServiceTest {
     @Mock IdempotencyExecutor idempotencyExecutor;
     @Mock WaitingActiveMembershipRepository membershipRepository;
     @Mock WaitingTransitionAuditRepository auditRepository;
-    @Mock WaitingStatusEventRepository eventRepository;
+    @Mock WaitingStatusEventAppender eventAppender;
 
     WaitingClosureService service;
     ObjectMapper objectMapper;
@@ -73,7 +72,7 @@ class WaitingClosureServiceTest {
         service = new WaitingClosureService(authorityPort, teamRepository, jobRepository,
                 itemRepository, settingRepository, idempotencyExecutor, objectMapper,
                 Clock.fixed(NOW, ZoneOffset.UTC), membershipRepository,
-                auditRepository, eventRepository);
+                auditRepository, eventAppender);
     }
 
     @Test
@@ -161,7 +160,7 @@ class WaitingClosureServiceTest {
         given(settingRepository.findByStoreIdForUpdate(22L)).willReturn(java.util.Optional.of(
                 WaitingSetting.create(22L, false, WaitingReceptionMode.PAUSED, 60, NOW)));
         given(teamRepository.findByIdForUpdate(41L)).willReturn(java.util.Optional.of(team));
-        given(membershipRepository.deleteByWaitingTeamId(41L)).willReturn(1L);
+        given(membershipRepository.deleteByWaitingTeamId(41L)).willReturn(3L);
         given(itemRepository.countByWaitingClosureJobIdAndStatus(91L,
                 com.miriyum.domain.reservation.waiting.entity.WaitingClosureItemStatus.COMPLETED)).willReturn(1L);
 
@@ -173,7 +172,7 @@ class WaitingClosureServiceTest {
         assertThat(job.getStatus()).isEqualTo(WaitingClosureJobStatus.COMPLETED);
         then(membershipRepository).should().deleteByWaitingTeamId(41L);
         then(auditRepository).should().save(any());
-        then(eventRepository).should().save(any());
+        then(eventAppender).should().append(any(), any());
     }
 
     @Test
@@ -195,7 +194,7 @@ class WaitingClosureServiceTest {
 
         then(membershipRepository).shouldHaveNoInteractions();
         then(auditRepository).shouldHaveNoInteractions();
-        then(eventRepository).shouldHaveNoInteractions();
+        then(eventAppender).shouldHaveNoInteractions();
         assertThat(item.getStatus()).isEqualTo(
                 com.miriyum.domain.reservation.waiting.entity.WaitingClosureItemStatus.COMPLETED);
     }

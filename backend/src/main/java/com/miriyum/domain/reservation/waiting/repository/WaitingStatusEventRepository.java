@@ -16,6 +16,57 @@ import org.springframework.data.repository.query.Param;
 /** 공개 웨이팅 상태 사건의 팀 순서와 미발행 조회를 소유한다. */
 public interface WaitingStatusEventRepository extends JpaRepository<WaitingStatusEvent, Long> {
 
+    @Query(value = """
+            SELECT COALESCE(MAX(event.waiting_status_event_id), 0) AS watermark,
+                   own.store_id AS storeId,
+                   own.business_date AS businessDate
+              FROM waiting_active_memberships membership
+              JOIN waiting_teams own
+                ON own.waiting_team_id = membership.waiting_team_id
+              LEFT JOIN waiting_teams candidate
+                ON candidate.store_id = own.store_id
+               AND candidate.business_date = own.business_date
+               AND (candidate.waiting_team_id = own.waiting_team_id
+                    OR candidate.queue_sequence < own.queue_sequence)
+              LEFT JOIN waiting_status_events event
+                ON event.waiting_team_id = candidate.waiting_team_id
+             WHERE membership.consumer_account_id = :consumerAccountId
+             GROUP BY own.store_id, own.business_date
+            """, nativeQuery = true)
+    Optional<ActiveConsumerSseHighWatermark> findActiveConsumerSseHighWatermark(
+            @Param("consumerAccountId") long consumerAccountId
+    );
+
+    @Query(value = """
+            SELECT COALESCE(MAX(event.waiting_status_event_id), 0)
+              FROM waiting_teams latest
+              LEFT JOIN waiting_status_events event
+                ON event.waiting_team_id = latest.waiting_team_id
+             WHERE latest.waiting_team_id = (
+                   SELECT MAX(owned.waiting_team_id)
+                     FROM waiting_teams owned
+                    WHERE owned.consumer_account_id = :consumerAccountId
+             )
+            """, nativeQuery = true)
+    long findLatestOwnedConsumerSseHighWatermark(
+            @Param("consumerAccountId") long consumerAccountId
+    );
+
+    @Query(value = """
+            SELECT COALESCE(MAX(event.waiting_status_event_id), 0)
+              FROM waiting_teams team
+              LEFT JOIN waiting_status_events event
+                ON event.waiting_team_id = team.waiting_team_id
+             WHERE team.store_id = :storeId
+            """, nativeQuery = true)
+    long findStoreSseHighWatermark(@Param("storeId") long storeId);
+
+    interface ActiveConsumerSseHighWatermark {
+        Long getWatermark();
+        Long getStoreId();
+        LocalDate getBusinessDate();
+    }
+
     List<WaitingStatusEvent> findByPublicationStateOrderByIdAsc(
             WaitingStatusEventPublicationState publicationState,
             Pageable pageable

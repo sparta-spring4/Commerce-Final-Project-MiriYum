@@ -1,0 +1,18 @@
+/**
+ * 일반 사용자 인증 shell의 공개 진입점.
+ *
+ * 매장 운영자 shell은 별도 provider·가드·화면을 갖는다. 여기서 함께 내보내지 않는다.
+ */
+import './ui/auth.css'
+
+export {
+  ConsumerAuthProvider,
+  useConsumerAuth,
+  type ConsumerAuthStatus,
+} from '../../../../app/shells/consumer/ConsumerAuthProvider'
+export { RequireConsumerAuth } from '../../../../app/shells/consumer/RequireConsumerAuth'
+export { ConsumerSignInPage } from './ui/ConsumerSignInPage'
+export { ConsumerKakaoCallbackPage } from './ui/ConsumerKakaoCallbackPage'
+export { ConsumerKakaoSignUpPage } from './ui/ConsumerKakaoSignUpPage'
+export { ConsumerSignUpPage } from './ui/ConsumerSignUpPage'
+export { ConsumerAccountMenu } from '../../../../app/shells/consumer/ConsumerAccountMenu'

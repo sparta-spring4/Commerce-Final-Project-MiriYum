@@ -3,6 +3,7 @@ package com.miriyum.domain.store.service;
 import com.miriyum.domain.store.dto.contract.StoreDashboardAuthority;
 import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
 import com.miriyum.domain.store.dto.contract.StoreWaitingReceptionProfile;
+import com.miriyum.domain.store.dto.contract.StoreWaitingLocationProfile;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
@@ -256,6 +257,20 @@ public class StoreService {
     }
 
     /**
+     * 조회 대상 매장의 부재와 비소유를 같은 not-found 결과로 숨긴다.
+     */
+    @Transactional(readOnly = true)
+    public void requireConcealedReadOwnership(
+            long operatorAccountId,
+            long storeId
+    ) {
+        operatorAccountService.getMe(operatorAccountId);
+        if (!storeRepository.existsByIdAndStoreOperatorAccountId(storeId, operatorAccountId)) {
+            throw new ServiceException(StoreErrorCode.STORE_NOT_FOUND);
+        }
+    }
+
+    /**
      * 대시보드 통계 조회에 필요한 소유권과 시간 경계를 공개 DTO로 반환한다.
      */
     @Transactional(readOnly = true)
@@ -296,6 +311,26 @@ public class StoreService {
             return Optional.empty();
         }
         return storeRepository.findById(storeId).map(Store::getName);
+    }
+
+    /** 웨이팅 위치 판정에 필요한 승인 기준점만 공개 DTO로 반환한다. */
+    @Transactional(readOnly = true)
+    public StoreWaitingLocationProfile getWaitingLocationProfile(long storeId) {
+        Store store = storeRepository.findById(storeId)
+                .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+        boolean eligible = store.getVerificationStatus() == VerificationStatus.APPROVED
+                && store.getOperationStatus() == OperationStatus.OPEN
+                && store.getGeocodingStatus()
+                == com.miriyum.domain.store.enums.GeocodingStatus.VERIFIED
+                && store.getLatitude() != null
+                && store.getLongitude() != null
+                && store.getGeocodingAddressVersion() != null;
+        return new StoreWaitingLocationProfile(
+                store.getId(),
+                eligible ? store.getLatitude() : null,
+                eligible ? store.getLongitude() : null,
+                eligible ? store.getGeocodingAddressVersion() : 0L,
+                eligible);
     }
 
     /**

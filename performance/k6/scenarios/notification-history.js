@@ -25,6 +25,8 @@ const PURPOSES = new Set([
   'RESERVATION_EXPIRED',
   'RESERVATION_VISIT_REMINDER',
   'RESERVATION_COORDINATION_REQUIRED',
+  'RESERVATION_VISIT_COMPLETED',
+  'RESERVATION_NO_SHOW',
   'PICKUP_RESERVATION_CONFIRMED',
   'PICKUP_RESERVATION_CANCELLED',
   'MENU_HOLD_FULFILLMENT_AT_RISK',
@@ -32,12 +34,23 @@ const PURPOSES = new Set([
   'MENU_SUBSTITUTION_ACCEPTED',
   'MENU_SUBSTITUTION_REJECTED',
   'MENU_SUBSTITUTION_EXPIRED',
+  'WAITING_ENTRY_IMMINENT',
+  'WAITING_CALLED',
+  'WAITING_CANCELLED',
+  'WAITING_NO_SHOW',
+  'WAITING_CHECKED_IN',
+  'WAITING_CLOSED_BY_STORE',
+])
+const RESERVATION_TERMINAL_PURPOSES = new Set([
+  'RESERVATION_VISIT_COMPLETED',
+  'RESERVATION_NO_SHOW',
 ])
 const RESOURCE_TYPES = new Set([
   'RESERVATION',
   'MENU_HOLD',
   'PICKUP_RESERVATION',
   'MENU_SUBSTITUTION_PROPOSAL',
+  'WAITING_TEAM',
 ])
 const ACTION_RESOURCE_TYPES = Object.freeze({
   RESERVATION_DETAIL: 'RESERVATION',
@@ -100,6 +113,9 @@ function validateItem(item) {
   requireOffsetDateTime(item.occurredAt, 'notification history occurredAt')
   requireOffsetDateTime(item.createdAt, 'notification history createdAt')
   requireOffsetDateTime(item.deliveredAt, 'notification history deliveredAt')
+  if (RESERVATION_TERMINAL_PURPOSES.has(item.purpose) && item.action !== null) {
+    throw new Error('reservation terminal notification action must be null')
+  }
   validateAction(item.action)
 }
 

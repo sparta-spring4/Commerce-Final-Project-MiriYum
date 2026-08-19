@@ -8,17 +8,18 @@ import com.miriyum.domain.reservation.waiting.dto.WaitingTeamSnapshot;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActiveMembership;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActorType;
 import com.miriyum.domain.reservation.waiting.entity.WaitingQueueSequence;
+import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession;
+import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession.Purpose;
 import com.miriyum.domain.reservation.waiting.entity.WaitingReceptionMode;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSetting;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
-import com.miriyum.domain.reservation.waiting.entity.WaitingStatusEvent;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTransitionAudit;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingQueueSequenceRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingLocationProofSessionRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingSettingRepository;
-import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
 import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
@@ -33,6 +34,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.function.Function;
 import java.util.function.IntToLongFunction;
@@ -53,7 +55,8 @@ public class WaitingCreationService {
     private final WaitingTeamRepository teamRepository;
     private final WaitingActiveMembershipRepository membershipRepository;
     private final WaitingTransitionAuditRepository auditRepository;
-    private final WaitingStatusEventRepository eventRepository;
+    private final WaitingStatusEventAppender eventAppender;
+    private final WaitingLocationProofSessionRepository proofRepository;
     private final ReceptionCheck receptionCheck;
     private final IdempotencyExecutor idempotencyExecutor;
     private final WaitingCreationTransactionExecutor transactionExecutor;
@@ -74,7 +77,8 @@ public class WaitingCreationService {
             WaitingTeamRepository teamRepository,
             WaitingActiveMembershipRepository membershipRepository,
             WaitingTransitionAuditRepository auditRepository,
-            WaitingStatusEventRepository eventRepository,
+            WaitingStatusEventAppender eventAppender,
+            WaitingLocationProofSessionRepository proofRepository,
             WaitingReceptionGate receptionGate,
             IdempotencyExecutor idempotencyExecutor,
             WaitingCreationTransactionExecutor transactionExecutor,
@@ -83,7 +87,8 @@ public class WaitingCreationService {
             Clock clock
     ) {
         this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
-                eventRepository, receptionGate::requireOpen, idempotencyExecutor, transactionExecutor,
+                eventAppender, proofRepository, receptionGate::requireOpen,
+                idempotencyExecutor, transactionExecutor,
                 storeEligibility,
                 objectMapper, clock,
                 WaitingCreationService::defaultDelayMillis, Thread::sleep);
@@ -91,34 +96,49 @@ public class WaitingCreationService {
 
     WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
             WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
-            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventAppender eventAppender,
+            WaitingLocationProofSessionRepository proofRepository,
             WaitingReceptionGate receptionGate,
             IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
             StoreTransactionEligibilityService storeEligibility,
             ObjectMapper objectMapper, Clock clock, IntToLongFunction retryDelayMillis,
             RetrySleeper retrySleeper) {
         this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
-                eventRepository, receptionGate::requireOpen, idempotencyExecutor,
+                eventAppender, proofRepository, receptionGate::requireOpen, idempotencyExecutor,
+                transactionExecutor, storeEligibility, objectMapper, clock, retryDelayMillis, retrySleeper);
+    }
+
+    WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
+            WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventAppender eventAppender,
+            WaitingReceptionGate receptionGate,
+            IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
+            StoreTransactionEligibilityService storeEligibility,
+            ObjectMapper objectMapper, Clock clock, IntToLongFunction retryDelayMillis,
+            RetrySleeper retrySleeper) {
+        this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
+                eventAppender, null, receptionGate::requireOpen, idempotencyExecutor,
                 transactionExecutor, storeEligibility, objectMapper, clock, retryDelayMillis, retrySleeper);
     }
 
     /** 기존 failure-classifier 단위 테스트의 생성자 호환 전용 경로다. */
     WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
             WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
-            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventAppender eventAppender,
             WaitingSettingRepository settingRepository,
             IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
             StoreTransactionEligibilityService storeEligibility, ObjectMapper objectMapper,
             Clock clock, IntToLongFunction retryDelayMillis,
             RetrySleeper retrySleeper) {
         this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
-                eventRepository, legacyReceptionCheck(settingRepository), idempotencyExecutor,
+                eventAppender, null, legacyReceptionCheck(settingRepository), idempotencyExecutor,
                 transactionExecutor, storeEligibility, objectMapper, clock, retryDelayMillis, retrySleeper);
     }
 
     private WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
             WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
-            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventAppender eventAppender,
+            WaitingLocationProofSessionRepository proofRepository,
             ReceptionCheck receptionCheck,
             IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
             StoreTransactionEligibilityService storeEligibility,
@@ -128,7 +148,8 @@ public class WaitingCreationService {
         this.teamRepository = Objects.requireNonNull(teamRepository);
         this.membershipRepository = Objects.requireNonNull(membershipRepository);
         this.auditRepository = Objects.requireNonNull(auditRepository);
-        this.eventRepository = Objects.requireNonNull(eventRepository);
+        this.eventAppender = Objects.requireNonNull(eventAppender);
+        this.proofRepository = proofRepository;
         this.receptionCheck = Objects.requireNonNull(receptionCheck);
         this.idempotencyExecutor = Objects.requireNonNull(idempotencyExecutor);
         this.transactionExecutor = Objects.requireNonNull(transactionExecutor);
@@ -169,7 +190,7 @@ public class WaitingCreationService {
         Instant occurredAt = clock.instant();
         IdempotentOutcome outcome = executeWithRetry(() -> createInTransaction(
                 storeId, consumerAccountId, businessDate, partySize, source, command, occurredAt,
-                WaitingTeamSnapshot::from, () -> { }));
+                WaitingTeamSnapshot::from, null));
         return new WaitingCommandResult(outcome.httpStatus(),
                 objectMapper.treeToValue(outcome.data(), WaitingTeamSnapshot.class));
     }
@@ -182,18 +203,20 @@ public class WaitingCreationService {
             int partySize,
             WaitingSource source,
             IdempotencyKey key,
-            boolean locationProofConnected
+            UUID locationProofSessionId
     ) {
         Objects.requireNonNull(businessDate, "businessDate must not be null");
         Objects.requireNonNull(source, "source must not be null");
         Objects.requireNonNull(key, "key must not be null");
+        Objects.requireNonNull(locationProofSessionId, "locationProofSessionId must not be null");
         IdempotencyCommand command = createCommand(
-                storeId, consumerAccountId, businessDate, partySize, source, key);
+                storeId, consumerAccountId, businessDate, partySize, source, key,
+                locationProofSessionId);
         Instant occurredAt = clock.instant();
         IdempotentOutcome outcome = executeWithRetry(() -> createInTransaction(
                 storeId, consumerAccountId, businessDate, partySize, source, command, occurredAt,
-                this::consumerSnapshot,
-                () -> requireLocationProofConnected(locationProofConnected)));
+                team -> consumerSnapshot(team, consumerAccountId),
+                locationProofSessionId));
         return new WaitingConsumerCommandResult(outcome.httpStatus(),
                 objectMapper.treeToValue(outcome.data(), WaitingConsumerSnapshot.class));
     }
@@ -207,14 +230,17 @@ public class WaitingCreationService {
             IdempotencyCommand command,
             Instant occurredAt,
             Function<WaitingTeam, T> snapshotFactory,
-            Runnable firstExecutionGuard
+            UUID locationProofSessionId
     ) {
         return transactionExecutor.execute(() -> {
             return idempotencyExecutor.execute(command, () -> {
-                    firstExecutionGuard.run();
+                    Instant attemptAt = clock.instant();
+                    WaitingLocationProofSession proof = locationProofSessionId == null
+                            ? null
+                            : lockLocationProof(
+                                    locationProofSessionId, consumerAccountId, storeId, attemptAt);
                     storeEligibility.requireWaitingTransactionEligibility(storeId);
-                    Instant eligibilityAt = clock.instant();
-                    receptionCheck.requireOpen(storeId, businessDate, eligibilityAt);
+                    receptionCheck.requireOpen(storeId, businessDate, attemptAt);
                     if (membershipRepository.findByConsumerAccountId(consumerAccountId).isPresent()) {
                         throw membershipConflict();
                     }
@@ -224,24 +250,29 @@ public class WaitingCreationService {
                             sequence.allocate(), occurredAt));
                     membershipRepository.saveAndFlush(WaitingActiveMembership.create(
                             storeId, consumerAccountId, team.getId(), occurredAt));
+                    if (proof != null) {
+                        proof.consume(consumerAccountId, storeId, Purpose.WAITING_REGISTRATION,
+                                team.getId(), attemptAt);
+                    }
                     String commandId = "consumer:" + consumerAccountId
                             + ":WAITING_TEAM_CREATE:" + command.idempotencyKey();
                     auditRepository.save(WaitingTransitionAudit.record(
                             team.getId(), WaitingActorType.CONSUMER, consumerAccountId,
                             null, WaitingTeamStatus.WAITING, -1L, "WAITING_CREATED",
                             commandId, occurredAt, clock.instant()));
-                    eventRepository.save(WaitingStatusEvent.pending(
-                            team.getId(), 1L, WaitingTeamStatus.WAITING, occurredAt));
+                    eventAppender.append(team, occurredAt);
                     return new BusinessResult<>(HttpStatus.OK.value(), "SUCCESS",
                             "WAITING_TEAM", Long.toString(team.getId()), snapshotFactory.apply(team));
             });
         });
     }
 
-    private WaitingConsumerSnapshot consumerSnapshot(WaitingTeam team) {
+    private WaitingConsumerSnapshot consumerSnapshot(WaitingTeam team, long viewerAccountId) {
         long teamsAhead = teamRepository.countActiveAhead(
                 team.getStoreId(), team.getBusinessDate(), team.getQueueSequence());
-        return WaitingConsumerSnapshot.from(team, teamsAhead);
+        return WaitingConsumerSnapshot.from(team, teamsAhead,
+                membershipRepository.findAllByWaitingTeamIdOrderById(team.getId()),
+                viewerAccountId);
     }
 
     private static IdempotencyCommand createCommand(
@@ -252,6 +283,18 @@ public class WaitingCreationService {
             WaitingSource source,
             IdempotencyKey key
     ) {
+        return createCommand(storeId, consumerAccountId, businessDate, partySize, source, key, null);
+    }
+
+    private static IdempotencyCommand createCommand(
+            long storeId,
+            long consumerAccountId,
+            LocalDate businessDate,
+            int partySize,
+            WaitingSource source,
+            IdempotencyKey key,
+            UUID locationProofSessionId
+    ) {
         return new IdempotencyCommand(
                 "consumer",
                 consumerAccountId,
@@ -261,7 +304,25 @@ public class WaitingCreationService {
                         + "|consumerAccountId=" + consumerAccountId
                         + "|businessDate=" + businessDate
                         + "|partySize=" + partySize
-                        + "|source=" + source));
+                        + "|source=" + source
+                        + (locationProofSessionId == null
+                                ? ""
+                                : "|locationProofSessionId=" + locationProofSessionId)));
+    }
+
+    private WaitingLocationProofSession lockLocationProof(
+            UUID proofId, long accountId, long storeId, Instant now) {
+        if (proofRepository == null) {
+            throw new IllegalStateException("location proof repository is required");
+        }
+        WaitingLocationProofSession proof = proofRepository.findByIdForUpdate(proofId)
+                .orElseThrow(WaitingCreationService::locationProofInvalid);
+        try {
+            proof.requireConsumable(accountId, storeId, Purpose.WAITING_REGISTRATION, now);
+            return proof;
+        } catch (IllegalStateException invalid) {
+            throw locationProofInvalid();
+        }
     }
 
     private WaitingQueueSequence lockSequence(long storeId, LocalDate businessDate) {
@@ -325,10 +386,8 @@ public class WaitingCreationService {
         return new ServiceException(ReservationErrorCode.ACCOUNT_ACTIVE_WAITING_EXISTS);
     }
 
-    private static void requireLocationProofConnected(boolean locationProofConnected) {
-        if (!locationProofConnected) {
-            throw new ServiceException(ReservationErrorCode.WAITING_RECEPTION_CLOSED);
-        }
+    private static ServiceException locationProofInvalid() {
+        return new ServiceException(ReservationErrorCode.LOCATION_PROOF_INVALID);
     }
 
     private static ServiceException receptionClosed() {

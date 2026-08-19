@@ -13,12 +13,10 @@ import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActorType;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
-import com.miriyum.domain.reservation.waiting.entity.WaitingStatusEvent;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTransitionAudit;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
-import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
 import com.miriyum.global.exception.ServiceException;
@@ -49,7 +47,7 @@ class WaitingReservationConversionServiceTest {
     @Mock WaitingTeamRepository teams;
     @Mock WaitingActiveMembershipRepository memberships;
     @Mock WaitingTransitionAuditRepository audits;
-    @Mock WaitingStatusEventRepository events;
+    @Mock WaitingStatusEventAppender eventAppender;
     @Mock PaymentService payments;
     @Mock WaitingConversionCompensationService compensations;
 
@@ -80,7 +78,7 @@ class WaitingReservationConversionServiceTest {
                 teams,
                 memberships,
                 audits,
-                events,
+                eventAppender,
                 payments,
                 compensations,
                 Clock.fixed(NOW, ZoneOffset.UTC),
@@ -108,11 +106,7 @@ class WaitingReservationConversionServiceTest {
                 .isEqualTo(WaitingActorType.SYSTEM);
         assertThat(ReflectionTestUtils.getField(audit.getValue(), "afterStatus"))
                 .isEqualTo(WaitingTeamStatus.RESERVATION_CONVERTING);
-        ArgumentCaptor<WaitingStatusEvent> event =
-                ArgumentCaptor.forClass(WaitingStatusEvent.class);
-        then(events).should().save(event.capture());
-        assertThat(ReflectionTestUtils.getField(event.getValue(), "publicStatus"))
-                .isEqualTo(WaitingTeamStatus.RESERVATION_CONVERTING);
+        then(eventAppender).should().append(team, NOW);
     }
 
     @Test
@@ -156,7 +150,7 @@ class WaitingReservationConversionServiceTest {
                 teams,
                 memberships,
                 audits,
-                events,
+                eventAppender,
                 payments,
                 compensations,
                 Clock.fixed(NOW, ZoneOffset.UTC),
@@ -178,11 +172,7 @@ class WaitingReservationConversionServiceTest {
                 .isEqualTo(WaitingTeamStatus.RESERVATION_CONVERTING);
         assertThat(ReflectionTestUtils.getField(audit.getValue(), "afterStatus"))
                 .isEqualTo(WaitingTeamStatus.WAITING);
-        ArgumentCaptor<WaitingStatusEvent> event =
-                ArgumentCaptor.forClass(WaitingStatusEvent.class);
-        then(events).should().save(event.capture());
-        assertThat(ReflectionTestUtils.getField(event.getValue(), "publicStatus"))
-                .isEqualTo(WaitingTeamStatus.WAITING);
+        then(eventAppender).should().append(team, NOW);
     }
 
     @Test
@@ -194,7 +184,7 @@ class WaitingReservationConversionServiceTest {
                     assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
                     return verified(PaymentStatus.PAID);
                 });
-        given(memberships.deleteByWaitingTeamId(TEAM_ID)).willReturn(1L);
+        given(memberships.deleteByWaitingTeamId(TEAM_ID)).willReturn(2L);
 
         assertThat(newService().completeVerified(
                 new WaitingReservationConversionService.CompletionCommand(
@@ -210,7 +200,8 @@ class WaitingReservationConversionServiceTest {
                 .isEqualTo(WaitingActorType.SYSTEM);
         assertThat(ReflectionTestUtils.getField(audit.getValue(), "afterStatus"))
                 .isEqualTo(WaitingTeamStatus.RESERVATION_CONVERTED);
-        then(events).should().save(org.mockito.ArgumentMatchers.any());
+        then(eventAppender).should().append(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
         then(compensations).shouldHaveNoInteractions();
     }
 
@@ -228,7 +219,7 @@ class WaitingReservationConversionServiceTest {
         then(payments).shouldHaveNoInteractions();
         then(memberships).shouldHaveNoInteractions();
         then(audits).shouldHaveNoInteractions();
-        then(events).shouldHaveNoInteractions();
+        then(eventAppender).shouldHaveNoInteractions();
         then(compensations).shouldHaveNoInteractions();
     }
 
@@ -279,7 +270,7 @@ class WaitingReservationConversionServiceTest {
                 .matches("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
         then(memberships).shouldHaveNoInteractions();
         then(audits).shouldHaveNoInteractions();
-        then(events).shouldHaveNoInteractions();
+        then(eventAppender).shouldHaveNoInteractions();
     }
 
     @Test
@@ -309,7 +300,7 @@ class WaitingReservationConversionServiceTest {
                 org.mockito.ArgumentMatchers.eq("WAITING_CLOSED_BY_STORE"));
         then(memberships).shouldHaveNoInteractions();
         then(audits).shouldHaveNoInteractions();
-        then(events).shouldHaveNoInteractions();
+        then(eventAppender).shouldHaveNoInteractions();
     }
 
     @Test
@@ -329,7 +320,7 @@ class WaitingReservationConversionServiceTest {
         assertThat(team.getVersion()).isEqualTo(1L);
         then(memberships).shouldHaveNoInteractions();
         then(audits).shouldHaveNoInteractions();
-        then(events).shouldHaveNoInteractions();
+        then(eventAppender).shouldHaveNoInteractions();
         then(compensations).shouldHaveNoInteractions();
     }
 
@@ -347,7 +338,7 @@ class WaitingReservationConversionServiceTest {
                 teams,
                 memberships,
                 audits,
-                events,
+                eventAppender,
                 payments,
                 compensations,
                 Clock.fixed(NOW, ZoneOffset.UTC),

@@ -26,6 +26,8 @@ public interface ReservationDepositRefundObligationRepository
             select obligation from ReservationDepositRefundObligation obligation
             where (obligation.status = com.miriyum.domain.reservation.entity.ReservationDepositRefundObligation.Status.REQUIRED
                    and obligation.nextAttemptAt <= :now)
+               or (obligation.status = com.miriyum.domain.reservation.entity.ReservationDepositRefundObligation.Status.RECONCILIATION_REQUIRED
+                   and obligation.nextAttemptAt <= :now)
                or (obligation.status = com.miriyum.domain.reservation.entity.ReservationDepositRefundObligation.Status.PROCESSING
                    and obligation.leaseUntil <= :now)
             order by obligation.id asc

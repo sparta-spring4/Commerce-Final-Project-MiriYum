@@ -27,6 +27,7 @@ env:
   ECS_CLUSTER: ${{ vars.AWS_ECS_CLUSTER }}
   ECS_SERVICE: ${{ vars.AWS_ECS_SERVICE }}
   ECS_CONTAINER_NAME: backend
+  RUNTIME_CONFIG_SECRET_NAME: miriyum/production/backend-runtime-config
 
 jobs:
   verify-source:
@@ -247,9 +248,67 @@ jobs:
             exit 1
           fi
 
-          jq --arg image "$IMAGE_URI" --arg container "$ECS_CONTAINER_NAME" '
+          llm_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .environment[]?
+              | select(.name == "MIRIYUM_STORE_SEARCH_LLM_ENABLED") | .value][0] // "false"
+          ' current-task-definition.json)
+          if [ "$llm_enabled" != "true" ] && [ "$llm_enabled" != "false" ]; then
+            echo "::error::Current task definition has an invalid MIRIYUM_STORE_SEARCH_LLM_ENABLED value."
+            exit 1
+          fi
+
+          runtime_config_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .environment[]?
+              | select(.name == "MIRIYUM_RUNTIME_CONFIG_ENABLED") | .value][0] // "false"
+          ' current-task-definition.json)
+          if [ "$runtime_config_enabled" != "true" ] && [ "$runtime_config_enabled" != "false" ]; then
+            echo "::error::Current task definition has an invalid MIRIYUM_RUNTIME_CONFIG_ENABLED value."
+            exit 1
+          fi
+
+          runtime_config_secret_arn=""
+          if [ "$runtime_config_enabled" = "true" ]; then
+            runtime_config_secret_arn=$(aws secretsmanager describe-secret \
+              --secret-id "$RUNTIME_CONFIG_SECRET_NAME" \
+              --query 'ARN' \
+              --output text)
+            if [ -z "$runtime_config_secret_arn" ] || [ "$runtime_config_secret_arn" = "None" ]; then
+              echo "::error::Production runtime config secret was not found."
+              exit 1
+            fi
+          fi
+
+          account_id=$(aws sts get-caller-identity --query Account --output text)
+          openai_parameter_arn="arn:aws:ssm:${AWS_REGION}:${account_id}:parameter/miriyum/shared/openai-api-key"
+
+          jq --arg image "$IMAGE_URI" --arg container "$ECS_CONTAINER_NAME" \
+            --arg runtime_config_secret_arn "$runtime_config_secret_arn" \
+            --arg openai_parameter_arn "$openai_parameter_arn" --arg llm_enabled "$llm_enabled" \
+            --arg runtime_config_enabled "$runtime_config_enabled" '
             .containerDefinitions |= map(
-              if .name == $container then .image = $image else . end
+              if .name == $container then
+                .image = $image
+                | .environment = ((.environment // [] | map(select(
+                    .name != "MIRIYUM_STORE_SEARCH_LLM_ENABLED"
+                    and .name != "MIRIYUM_RUNTIME_CONFIG_ENABLED"
+                    and .name != "MIRIYUM_STORE_SEARCH_LLM_MODEL"
+                    and .name != "MIRIYUM_CLOUDWATCH_METRICS_ENABLED"
+                    and .name != "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE"
+                  ))) + [
+                    {name: "MIRIYUM_STORE_SEARCH_LLM_ENABLED", value: $llm_enabled},
+                    {name: "MIRIYUM_RUNTIME_CONFIG_ENABLED", value: $runtime_config_enabled},
+                    {name: "MIRIYUM_STORE_SEARCH_LLM_MODEL", value: "gpt-4o-mini"},
+                    {name: "MIRIYUM_CLOUDWATCH_METRICS_ENABLED", value: "true"},
+                    {name: "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE", value: "MiriYum/Production"}
+                  ])
+                | .secrets = ((.secrets // [] | map(select(
+                    .name != "SPRING_APPLICATION_JSON" and .name != "OPENAI_API_KEY"
+                  ))) + (if $runtime_config_enabled == "true" then
+                    [{name: "SPRING_APPLICATION_JSON", valueFrom: $runtime_config_secret_arn}]
+                  else [] end) + (if $llm_enabled == "true" then
+                    [{name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}]
+                  else [] end))
+              else . end
             )
             | del(
                 .taskDefinitionArn,

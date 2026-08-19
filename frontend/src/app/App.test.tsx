@@ -5,14 +5,14 @@ import {
   authenticatedConsumer,
   CONSUMER_REFRESH_PATH,
   unauthenticatedConsumer,
-} from '../features/auth/test/handlers'
+} from '../domains/account/consumer/auth/test/handlers'
 import {
   OPERATOR_REFRESH_PATH,
   unauthenticatedOperator,
-} from '../features/store-operator/test/handlers'
-import { storePage } from '../features/store-search/test/fixtures'
-import { catalogHandlers } from '../features/store-search/test/handlers'
-import { AuthErrorCode } from '../features/auth/model/authErrors'
+} from '../domains/store/store-operator/test/handlers'
+import { storePage } from '../domains/store/public/test/fixtures'
+import { catalogHandlers } from '../domains/store/public/test/handlers'
+import { AuthErrorCode } from '../shared/auth/authErrors'
 import { errorResponse, successResponse } from '../test/msw/envelope'
 import { server } from '../test/msw/server'
 import App from './App'

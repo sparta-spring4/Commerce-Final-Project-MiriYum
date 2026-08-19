@@ -4,7 +4,14 @@ Issue: [#120](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/i
 
 ## Scope
 
-This is a staging API pre-deployment route, not the first MVP's final user deployment. It runs the Spring Boot API, MySQL, Nginx, and the Valkey staging container on one ARM64 staging EC2 instance. Nginx only proxies `/api/`; it deliberately returns `404` for `/` and `/actuator/`. No frontend asset, Vite server, S3, RDS, ECS, ALB, TLS certificate, or domain is configured by this change. The Valkey container is infrastructure preparation only; the backend does not consume it until the Refresh Token work in #140.
+This is the same-origin staging deployment route. It runs the version-matched React production
+build, Spring Boot API, MySQL, gateway Nginx, and Valkey on one ARM64 staging EC2 instance.
+`staging.miriyum.click` serves the frontend at `/` and proxies `/api/` to Spring Boot;
+`staging-api.miriyum.click` remains API-only and deliberately returns `404` for `/` and
+`/actuator/`. The frontend image is built from the same dev SHA as the backend image and is tagged
+`<SHA>-frontend` in the existing staging ECR repository. Neither the frontend container nor the
+backend, MySQL, or Valkey receives a host port. S3, RDS, ECS, ALB, and production infrastructure
+are not part of this staging route.
 
 The later frontend delivery must add static frontend assets to Nginx and retain the `/api/` proxy route. That work needs its own issue, review, and deploy verification before this can be called a same-origin user release.
 
@@ -47,6 +54,82 @@ These are staging Environment variables, not application secrets. Application an
 3. Run `chmod 600 /opt/miriyum/.env`.
 4. Confirm the instance role has `AmazonEC2ContainerRegistryReadOnly` and Systems Manager access.
 5. Confirm the security group allows TCP `80` only as required for the API. Do not expose MySQL `3306`, backend `8080`, or Valkey `6379`.
+
+### S3 runtime activation gate (#223)
+
+S3 runtime activation is a separate deployment step. Do not set
+`MIRIYUM_STORAGE_S3_ENABLED=true` merely because the application image is
+deployed. Keep both `MIRIYUM_STORAGE_S3_ENABLED` and
+`MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED` set to `false` until the following
+checks pass in the same staging environment.
+
+**Preflight**
+
+- The bucket name and region are present in the server-local `.env`. The
+  bucket is private, public access is blocked, and versioning is disabled.
+- Before activation, record a non-sensitive pass/fail result that bucket
+  default encryption is enabled, the bucket policy denies non-TLS requests,
+  and the approved object lifecycle and retention policy exists. Do not enable
+  either flag while any of these settings is undecided or absent.
+- The instance role has only the required access to this bucket and cannot
+  access unrelated buckets. Do not copy bucket names, ARNs, secrets, or object
+  keys into Issues, PRs, or workflow logs.
+- The deployed image contains the matching Flyway schema and the reconciliation
+  migration completed successfully.
+- The current deployment is healthy with both flags disabled. Record the exact
+  full SHA before changing the flags so the activation can be rolled back to
+  that same image.
+
+**Activation and smoke**
+
+1. Set both flags to `true` in the server-local `.env` and redeploy the same
+   approved full SHA. Do not enable the worker while the S3 runtime is disabled.
+2. Confirm loopback health is `UP`, the reconciliation scheduler is registered,
+   and startup logs contain no missing bucket, region, or permission error.
+3. As an authorized staging store operator, upload one supported image, replace
+   it, and delete it. Confirm the public image changes only after metadata is
+   `CONFIRMED`, and that an unauthorized request is rejected.
+4. Confirm reconciliation success, retryable failure, and long-stay observations
+   contain aggregate counts only. Do not capture tokens, cookies, source
+   filenames, object keys, user IDs, or raw provider errors.
+
+**Reconciliation fault smoke**
+
+1. Use a new synthetic staging store and a generated test-only image. Do not
+   use an existing user, store, menu, object, or business-registration record.
+2. After a successful upload creates the synthetic object, apply the
+   pre-approved staging-only fault that denies `DeleteObject` only for that
+   generated test object's prefix. Do not broaden the denial to production
+   prefixes, the whole bucket, or unrelated actions.
+3. Delete the synthetic image through the normal authorized API. Separately
+   confirm the external `503 COMMON_012` response and the internal `DELETED`
+   retry target with its aggregate counter; neither observation may expose an
+   object key, file ID, user ID, token, or provider error.
+4. Keep the fault in place and run the reconciliation worker at least once.
+   Confirm the aggregate `failed` count increases and the synthetic target is
+   scheduled for retry. Do not remove the fault before this failed worker path
+   is observed.
+5. Remove the fault, wait until `nextAttemptAt`, and confirm the first eligible
+   worker execution converges the synthetic metadata and object cleanup. Confirm
+   the aggregate `failed` count does not increase again. If it does not
+   converge within the approved observation window, stop the smoke and follow
+   rollback.
+6. For a separately approved long-stay fixture, keep the same narrowly scoped
+   fault only until the configured long-stay threshold is crossed. Confirm the
+   long-stay observation is an aggregate count, then remove the fault and wait
+   for convergence. Record only the run URL, full SHA, aggregate counters, and
+   success/failure result.
+7. Remove the synthetic store and verify no temporary deny rule remains. Stop
+   immediately and roll back if the fault affects any non-synthetic object or
+   the cleanup worker reports an unexpected error.
+
+**Rollback**
+
+If any smoke, permission, health, or reconciliation check fails, set both flags
+back to `false` and redeploy the same approved SHA. Confirm the service is
+healthy and that new image requests fail closed without deleting the last
+confirmed public image. Preserve only the run URL, full SHA, health result, and
+aggregate observation outcome; never use ad hoc bucket deletion as rollback.
 
 ### Store geocoding secret migration
 

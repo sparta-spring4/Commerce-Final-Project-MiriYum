@@ -28,6 +28,15 @@ public interface ReservationDepositDispositionRepository
             String sourceEventId
     );
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select d from ReservationDepositDisposition d join fetch d.payment
+            where d.payment.id = :paymentId and d.sourceEventId = :sourceEventId
+            """)
+    Optional<ReservationDepositDisposition> findByPayment_IdAndSourceEventIdForUpdate(
+            @Param("paymentId") Long paymentId,
+            @Param("sourceEventId") String sourceEventId);
+
     @Query("""
             select case when count(d) > 0 then true else false end
             from ReservationDepositDisposition d

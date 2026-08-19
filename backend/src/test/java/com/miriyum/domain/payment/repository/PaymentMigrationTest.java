@@ -133,6 +133,45 @@ class PaymentMigrationTest {
         }
     }
 
+    @Test
+    @DisplayName("V59 데이터를 보존하며 V62 복구 handoff와 V63 자동 환불 대사를 추가한다")
+    void upgradesV59ToPaymentRecoveryV63() throws Exception {
+        try (MySQLContainer mysql = new MySQLContainer(MYSQL_IMAGE)
+                .withCommand("--log-bin-trust-function-creators=1")) {
+            mysql.start();
+            Flyway.configure()
+                    .dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())
+                    .target(MigrationVersion.fromVersion("59"))
+                    .load()
+                    .migrate();
+
+            Flyway upgraded = Flyway.configure()
+                    .dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())
+                    .load();
+            upgraded.migrate();
+
+            assertThat(upgraded.info().applied())
+                    .extracting(MigrationInfo::getScript)
+                    .contains(
+                            "V62__create_payment_recovery_handoffs.sql",
+                            "V63__schedule_reservation_refund_reconciliation.sql");
+            try (Connection connection = mysql.createConnection("")) {
+                assertThat(tableCount(connection, "payment_recovery_handoffs"))
+                        .isEqualTo(1L);
+                assertThat(tableCount(connection, "reservation_payment_recovery_outbox"))
+                        .isEqualTo(1L);
+                assertThat(singleString(connection, """
+                        SELECT CHECK_CLAUSE
+                          FROM information_schema.check_constraints
+                         WHERE constraint_schema = DATABASE()
+                           AND constraint_name =
+                               'ck_reservation_deposit_refund_operation'
+                        """))
+                        .contains("operation", "reconciliation_attempt_count", "attempt_count");
+            }
+        }
+    }
+
     private static void insertExistingConsumer(MySQLContainer mysql) throws Exception {
         try (Connection connection = mysql.createConnection("");
              PreparedStatement statement = connection.prepareStatement("""
@@ -160,6 +199,29 @@ class PaymentMigrationTest {
              ResultSet resultSet = statement.executeQuery(sql)) {
             resultSet.next();
             return resultSet.getLong(1);
+        }
+    }
+
+    private static String singleString(Connection connection, String sql) throws Exception {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(sql)) {
+            resultSet.next();
+            return resultSet.getString(1);
+        }
+    }
+
+    private static long tableCount(Connection connection, String tableName) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT COUNT(*)
+                  FROM information_schema.tables
+                 WHERE table_schema = DATABASE()
+                   AND table_name = ?
+                """)) {
+            statement.setString(1, tableName);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                return resultSet.getLong(1);
+            }
         }
     }
 
