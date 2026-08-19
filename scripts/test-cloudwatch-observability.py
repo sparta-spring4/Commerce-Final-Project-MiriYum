@@ -1179,7 +1179,7 @@ main
             [
                 BASH_EXECUTABLE,
                 "-c",
-                f"source <(tr -d '\\r' < deploy/deploy.sh); {script}",
+                f"source <(tr -d '\\r' < deploy/deploy.sh); load_runtime_config() {{ :; }}; {script}",
             ],
             cwd=ROOT,
             capture_output=True,

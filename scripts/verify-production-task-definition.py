@@ -70,11 +70,33 @@ def validate(contract_path, task_definition_path, application_config_path=None):
                 errors.append(f"Missing environment value: {name}")
 
     whole_secrets = set(contract.get("wholeSecrets", []))
+    whole_secret_references = contract.get("wholeSecretReferences", {})
     secret_prefixes = set()
     for name, value_from in secrets.items():
         if name in whole_secrets:
             if not value_from or value_from.endswith("::"):
                 errors.append(f"Whole secret reference must not select a JSON key: {name}")
+                continue
+
+            reference = whole_secret_references.get(name)
+            if reference is None:
+                errors.append(f"Missing whole secret reference contract entry: {name}")
+                continue
+
+            expected_placeholder = reference.get("templatePlaceholder", "")
+            expected_secret_name = reference.get("secretName", "")
+            if value_from == expected_placeholder:
+                continue
+
+            expected_arn_pattern = (
+                r"^arn:aws:secretsmanager:[^:]+:\d{12}:secret:"
+                + re.escape(expected_secret_name)
+                + r"(?:-[A-Za-z0-9]{6})?$"
+            )
+            if not re.fullmatch(expected_arn_pattern, value_from):
+                errors.append(
+                    f"Whole secret reference must use its expected Secrets Manager secret: {name}"
+                )
             continue
         if not value_from.endswith(f":{name}::"):
             errors.append(f"Secret reference must select its matching JSON key: {name}")

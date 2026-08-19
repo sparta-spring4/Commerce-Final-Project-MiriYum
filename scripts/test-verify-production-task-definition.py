@@ -266,7 +266,16 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
             contract = self.write_json(
                     directory,
                     "contract.json",
-                    {"requiredSecrets": [], "wholeSecrets": ["SPRING_APPLICATION_JSON"]},
+                    {
+                        "requiredSecrets": [],
+                        "wholeSecrets": ["SPRING_APPLICATION_JSON"],
+                        "wholeSecretReferences": {
+                            "SPRING_APPLICATION_JSON": {
+                                "secretName": "miriyum/production/backend-runtime-config",
+                                "templatePlaceholder": "REPLACE_WITH_RUNTIME_CONFIG_SECRET_ARN",
+                            }
+                        },
+                    },
             )
             task_definition = self.write_json(
                     directory,
@@ -277,12 +286,52 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
                         "runtimePlatform": {"cpuArchitecture": "ARM64"},
                         "containerDefinitions": [{"name": "backend", "secrets": [{
                             "name": "SPRING_APPLICATION_JSON",
-                            "valueFrom": "arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:miriyum/production/backend-runtime-config-example",
+                            "valueFrom": "arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:miriyum/production/backend-runtime-config-abcdef",
                         }]}],
                     },
             )
 
             self.assertEqual([], validate(contract, task_definition))
+
+    def test_rejects_an_unexpected_whole_runtime_config_secret(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                    directory,
+                    "contract.json",
+                    {
+                        "requiredSecrets": [],
+                        "wholeSecrets": ["SPRING_APPLICATION_JSON"],
+                        "wholeSecretReferences": {
+                            "SPRING_APPLICATION_JSON": {
+                                "secretName": "miriyum/production/backend-runtime-config",
+                                "templatePlaceholder": "REPLACE_WITH_RUNTIME_CONFIG_SECRET_ARN",
+                            }
+                        },
+                    },
+            )
+            task_definition = self.write_json(
+                    directory,
+                    "task-definition.json",
+                    {
+                        "requiresCompatibilities": ["FARGATE"],
+                        "networkMode": "awsvpc",
+                        "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                        "containerDefinitions": [{"name": "backend", "secrets": [{
+                            "name": "SPRING_APPLICATION_JSON",
+                            "valueFrom": "arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:miriyum/production/other-runtime-config-abcdef",
+                        }]}],
+                    },
+            )
+
+            self.assertEqual(
+                    [
+                        "Whole secret reference must use its expected Secrets Manager secret: "
+                        "SPRING_APPLICATION_JSON"
+                    ],
+                    validate(contract, task_definition),
+            )
 
     def test_production_task_definition_enables_valkey_tls(self):
         task_definition = json.loads(
