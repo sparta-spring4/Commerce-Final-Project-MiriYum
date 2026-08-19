@@ -10,6 +10,8 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 class StoreGeocodingEnvironmentBindingTest {
 
     private static final String CANONICAL_KEY = "canonical-geocoding-key";
+    private static final String KAKAO_REST_KEY = "kakao-rest-key";
+    private static final String KAKAO_LOCAL_KEY = "kakao-local-key";
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withInitializer(new ConfigDataApplicationContextInitializer())
@@ -23,8 +25,31 @@ class StoreGeocodingEnvironmentBindingTest {
     }
 
     @Test
-    @DisplayName("전용 지오코딩 키가 없으면 빈 값으로 바인딩해 실패 폐쇄 경계를 유지한다")
-    void bindsBlankWhenCanonicalKeyIsMissing() {
+    @DisplayName("canonical 키가 없으면 Kakao REST 키를 전환용 fallback으로 바인딩한다")
+    void fallsBackToKakaoRestKeyWhenCanonicalKeyIsMissing() {
+        assertRestApiKey(KAKAO_REST_KEY,
+                "MIRIYUM_KAKAO_REST_API_KEY=" + KAKAO_REST_KEY);
+    }
+
+    @Test
+    @DisplayName("canonical과 Kakao REST 키가 없으면 Kakao Local 키를 fallback으로 바인딩한다")
+    void fallsBackToKakaoLocalKeyWhenHigherPriorityKeysAreMissing() {
+        assertRestApiKey(KAKAO_LOCAL_KEY,
+                "MIRIYUM_KAKAO_LOCAL_REST_API_KEY=" + KAKAO_LOCAL_KEY);
+    }
+
+    @Test
+    @DisplayName("canonical 키는 Kakao REST와 Kakao Local 키보다 우선한다")
+    void prefersCanonicalKeyOverFallbackKeys() {
+        assertRestApiKey(CANONICAL_KEY,
+                "MIRIYUM_STORE_GEOCODING_REST_API_KEY=" + CANONICAL_KEY,
+                "MIRIYUM_KAKAO_REST_API_KEY=" + KAKAO_REST_KEY,
+                "MIRIYUM_KAKAO_LOCAL_REST_API_KEY=" + KAKAO_LOCAL_KEY);
+    }
+
+    @Test
+    @DisplayName("지오코딩 키가 모두 없으면 빈 값으로 바인딩해 실패 폐쇄 경계를 유지한다")
+    void bindsBlankWhenAllGeocodingKeysAreMissing() {
         assertRestApiKey("");
     }
 
