@@ -1,28 +1,19 @@
 # Production ECS 장애 대응 런북
 
-## 현재 운영 기준
+## 현재 확인된 운영 기준
 
-- ECS 서비스 `miriyum-prod-backend-service`의 desired count는 Terraform의
-  `production_backend_desired_count` 입력이 소유한다. 이 런북에 고정 수를
-  복제하지 않는다.
-- ALB는 blue/green target group을 사용한다. active listener rule의 가중치
-  전환은 ECS deployment controller가 소유하며 Terraform은 임시 가중치만
-  무시한다.
-- 운영 health endpoint는 `https://api.miriyum.click/actuator/health`이며 응답의
-  `status`는 `UP`이어야 한다.
-- delivery resource가 비용 절감 lifecycle로 중지돼 있으면 서비스가
-  `INACTIVE`인 것은 장애가 아니다. 먼저
-  [Production Terraform lifecycle runbook](production-terraform-lifecycle.md)을
-  따라 복구한 뒤 이 런북을 사용한다.
+- ECS 서비스 `miriyum-prod-backend-service`의 desired count는 `2`다.
+- ALB 대상 그룹 `miriyum-prod-backend-tg`에는 정상(Healthy) 대상이 `2`개여야 한다.
+- 롤링 배포는 minimum healthy percent `100`, maximum percent `200`을 유지한다.
+- 운영 health endpoint는 `https://api.miriyum.click/actuator/health`이며 응답의 `status`는 `UP`이어야 한다.
 
 이 문서는 운영 장애와 배포 실패를 안전하게 분류하고 복구하기 위한 실행 절차다. 민감값, 토큰, Secrets Manager 값, DB 비밀번호와 고객 식별자는 캡처·티켓·로그에 남기지 않는다.
 
 ## 배포 전 확인
 
 1. AWS 콘솔에서 **ECS > 클러스터 > miriyum-prod-cluster > 서비스 > miriyum-prod-backend-service**를 연다.
-2. 서비스 개요에서 `runningCount = desiredCount`, `pendingCount = 0`,
-   `status = ACTIVE`인지 확인한다.
-3. 현재 트래픽을 받는 target group의 모든 등록 대상이 `Healthy`인지 확인한다.
+2. 서비스 개요에서 `2 실행 중`, `0 보류 중`인지 확인한다.
+3. **대상 그룹** 링크를 열어 `Healthy 2`, `Unhealthy 0`인지 확인한다.
 4. PowerShell에서 다음을 실행한다.
 
 ```powershell
@@ -34,12 +25,9 @@ curl.exe https://api.miriyum.click/actuator/health
 ## 배포 중 확인
 
 1. ECS 서비스의 **배포** 탭에서 새 배포가 진행 중인지 확인한다.
-2. Blue/Green 전환 중에는 test rule과 production rule의 target group 가중치가
-   일시적으로 달라질 수 있다. 이 값만 보고 Terraform apply를 실행하지 않는다.
-3. 새 task가 현재 production target group에서 `Healthy`가 되기 전에는 전환을
-   성공으로 선언하지 않는다. `Draining` task는 전환 중에 보일 수 있다.
-4. 배포가 완료되면 `runningCount = desiredCount`, active target group의
-   `Healthy`, health endpoint `UP`을 함께 확인한다.
+2. 롤링 업데이트 중에는 기존 정상 task를 유지하면서 새 task가 추가될 수 있다. 이때 대상 그룹에는 일시적으로 `Draining` 대상이 보일 수 있다.
+3. 새 task가 `Healthy`가 되기 전에는 기존 task가 모두 사라지면 안 된다. `minimum healthy 100%`이므로 정상 대상은 최소 2개를 유지하는 것이 목표다.
+4. 배포가 완료되면 다시 `Healthy 2`, `Unhealthy 0`, health endpoint `UP`을 확인한다.
 
 ## 장애 분류
 
@@ -47,15 +35,13 @@ curl.exe https://api.miriyum.click/actuator/health
 | --- | --- | --- |
 | 새 task가 시작되지 않음 | ECS 서비스 > 이벤트, 중지된 task > 중지 사유 | 이미지 태그·ECR 존재 여부·task definition을 확인하고 배포를 진행하지 않는다. |
 | task는 실행되지만 대상이 Unhealthy | 대상 그룹 > 대상, CloudWatch `/miriyum/production/backend` | `/actuator/health`, 포트 8080, 보안 그룹, 애플리케이션 시작 오류를 확인한다. |
-| active target group에 Healthy 대상이 없음 | ECS 서비스 개요, 대상 그룹 | 신규 전환을 중단하고 직전 정상 task definition으로 롤백을 준비한다. |
+| Healthy 대상이 1개 이하 | ECS 서비스 개요, 대상 그룹 | 신규 배포를 중단하고 직전 정상 task definition으로 롤백을 준비한다. |
 | API health가 UP이 아님 | `https://api.miriyum.click/actuator/health`, CloudWatch Logs | 신규 배포를 중단하고 최근 변경·의존성 오류를 분류한다. |
 | RDS 또는 Valkey 연결 오류 | CloudWatch Logs, 각 서비스 상태 | 비밀값을 노출하지 않고 오류 코드·시각만 기록한다. |
 
 ## 롤백 절차
 
-다음 중 하나면 롤백을 검토한다: 배포 회로 차단기 롤백, 새 task 반복 종료,
-5분 이상 active target group의 healthy 대상을 회복하지 못함, health endpoint가
-`UP`이 아님.
+다음 중 하나면 롤백을 검토한다: 배포 회로 차단기 롤백, 새 task 반복 종료, 5분 이상 `Healthy 2`를 회복하지 못함, health endpoint가 `UP`이 아님.
 
 ### 롤백 호환성 확인
 
@@ -73,7 +59,7 @@ curl.exe https://api.miriyum.click/actuator/health
 2. **배포** 탭에서 마지막으로 성공한 배포의 task definition revision을 확인한다.
 3. 오른쪽 위 **서비스 업데이트**를 누른다.
 4. **task definition**에서 호환성 확인을 통과한 직전 정상 revision을 선택한다.
-5. desired count는 Terraform의 현재 승인값과 같게 유지한다.
-6. blue/green production rule과 alternate target group 연결을 유지하는지 확인한다.
+5. desired count는 `2`로 유지한다.
+6. 배포 설정의 minimum healthy `100`, maximum `200`이 유지되는지 확인한다.
 7. **업데이트**를 눌러 롤백 배포를 시작한다.
-8. 현재 production target group의 `Healthy`와 health endpoint `UP`을 확인한 뒤에만 복구 완료로 기록한다.
+8. 대상 그룹에서 `Healthy 2`, `Unhealthy 0`과 health endpoint `UP`을 확인한 뒤에만 복구 완료로 기록한다.

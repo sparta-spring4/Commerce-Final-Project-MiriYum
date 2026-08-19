@@ -162,7 +162,7 @@ Kafka, 범용 Outbox, 마이크로서비스, WebSocket과 검색 클러스터가
 
 배포 자동화나 AWS·Terraform은 핵심 흐름, Flyway, 비밀 분리, 상태 확인, Docker 실행, 백업·복원과 비용 책임이 검증된 뒤 승인한다. S3를 `고도화`에서 사용한다는 결정만으로 전체 AWS 배포·Terraform을 활성화하지 않는다.
 
-staging EC2 Compose는 같은 Git SHA의 frontend 정적 이미지와 backend 이미지를 배포하고, Nginx가 `/` SPA shell과 `/api` backend proxy를 함께 제공한다. `dev`에 통합된 뒤 CI가 성공한 SHA만 staging에 배포한다. 실제 배포 실행·ECR push·SSM command·EC2 loopback health의 성공 증거가 없으면 각각 `NOT CONFIGURED` 또는 `NOT RUN`으로 기록하며, browser smoke는 별도 사용자 흐름 증거로 남긴다. 운영 ECS 전환의 근거·검증·rollback은 [ADR-003](adr/ADR-003-aws-after-verification.md)의 2026-08-20 개정과 [Production Terraform lifecycle](deployment/production-terraform-lifecycle.md)을 따른다. `production` Environment 보호 규칙, `PRODUCTION_ECS_DEPLOYMENT_ENABLED=true`, ECR `IMMUTABLE` 태그 정책이 모두 준비되기 전에는 production deploy job을 실행하지 않는다.
+staging EC2 Compose는 같은 Git SHA의 frontend 정적 이미지와 backend 이미지를 배포하고, Nginx가 `/` SPA shell과 `/api` backend proxy를 함께 제공한다. `dev`에 통합된 뒤 CI가 성공한 SHA만 staging에 배포한다. 실제 배포 실행·ECR push·SSM command·EC2 loopback health의 성공 증거가 없으면 각각 `NOT CONFIGURED` 또는 `NOT RUN`으로 기록하며, browser smoke는 별도 사용자 흐름 증거로 남긴다. 운영 ECS 전환의 근거·검증·rollback은 [ADR-003](adr/ADR-003-aws-after-verification.md)의 2026-08-17 개정을 따른다. `production` Environment 보호 규칙, `PRODUCTION_ECS_DEPLOYMENT_ENABLED=true`, ECR `IMMUTABLE` 태그 정책이 모두 준비되기 전에는 production deploy job을 실행하지 않는다.
 
 ### staging 비용 가드레일과 종료 체크리스트
 

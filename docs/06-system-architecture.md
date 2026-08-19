@@ -19,7 +19,7 @@ React·TypeScript·Vite 프런트엔드는 HTTP API로 Spring Boot와 통신한�
 
 `1차 MVP`의 최종 사용자 배포는 하나의 Vite 빌드와 하나의 Spring Boot 애플리케이션을 같은 Origin에서 제공하고 백엔드 API를 `/api` 아래에 둔다. 교차 Origin 자격 증명 요청은 허용하지 않으며, 실제 배포 단위를 분리해야 하는 근거가 생기면 CORS·쿠키·CSRF 경계를 함께 재검토한다.
 
-staging EC2 Compose는 같은 Git SHA의 frontend 정적 이미지와 backend 이미지를 함께 배포한다. Nginx가 `/`에서 Vite build의 SPA shell을 제공하고 `/api`만 Spring Boot로 프록시하므로, staging 사용자 흐름은 same-origin으로 확인한다. 로컬 개발의 `localhost:5173`은 staging 화면이 아니라 Vite dev server이며, 상대 `/api` 요청은 mode별 proxy target을 통해 staging API로 전달할 수 있다. 운영 배포는 staging과 분리된 ECS Fargate·ALB·RDS·Valkey와 OIDC IAM 역할, GitHub `production` Environment 승인으로 구성한다. 운영 delivery resource의 비용 절감 lifecycle, 복구 검증 및 rollback 경계는 [ADR-003](adr/ADR-003-aws-after-verification.md)의 2026-08-20 개정과 [Production Terraform lifecycle](deployment/production-terraform-lifecycle.md)을 따른다.
+staging EC2 Compose는 같은 Git SHA의 frontend 정적 이미지와 backend 이미지를 함께 배포한다. Nginx가 `/`에서 Vite build의 SPA shell을 제공하고 `/api`만 Spring Boot로 프록시하므로, staging 사용자 흐름은 same-origin으로 확인한다. 로컬 개발의 `localhost:5173`은 staging 화면이 아니라 Vite dev server이며, 상대 `/api` 요청은 mode별 proxy target을 통해 staging API로 전달할 수 있다. 운영 배포는 staging과 분리된 ECS Fargate·ALB·RDS·Valkey와 OIDC IAM 역할, GitHub `production` Environment 승인으로 구성한다. 운영 전환 근거와 검증·rollback 경계는 [ADR-003](adr/ADR-003-aws-after-verification.md)의 2026-08-17 개정을 정본으로 따른다.
 
 ```text
 frontend/

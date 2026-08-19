@@ -61,8 +61,6 @@
 
 ## 배포 런북
 
-- [Production Terraform lifecycle](deployment/production-terraform-lifecycle.md)은
-  production delivery resource의 시작·중지와 데이터 보존 경계를 소유한다.
 - [Production ECS incident runbook](deployment/production-ecs-incident-runbook.md)은
   기동된 production 서비스의 배포 이상·rollback 분류를 소유한다.
 - [Staging runtime troubleshooting](deployment/staging-runtime-troubleshooting.md)은
