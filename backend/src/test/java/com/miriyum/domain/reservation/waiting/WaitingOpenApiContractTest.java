@@ -30,6 +30,10 @@ class WaitingOpenApiContractTest {
             "/api/v1/consumers/me/waiting-teams/current";
     private static final String CONSUMER_CANCEL_PATH =
             "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations";
+    private static final String CONSUMER_EVENTS_PATH =
+            "/api/v1/consumers/me/waiting-events";
+    private static final String OPERATOR_EVENTS_PATH =
+            "/api/v1/store-operators/stores/{storeId}/waiting-events";
     private static final String IDEMPOTENCY_KEY =
             "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey";
     private static final Map<String, Set<String>> LEDGER_OPERATIONS = Map.of(
@@ -52,9 +56,14 @@ class WaitingOpenApiContractTest {
         assertThat(schemas.keySet()).allSatisfy(schema ->
                 assertThat(schema).doesNotContain(
                         "WaitingAutoOpen", "WaitingReceptionWindow"));
+        Set<String> httpMethods = Set.of(
+                "get", "put", "post", "delete", "options", "head", "patch", "trace");
         for (Object pathItemValue : paths.values()) {
-            for (Object operationValue : map(pathItemValue).values()) {
-                Map<String, Object> operation = map(operationValue);
+            for (Map.Entry<String, Object> pathItem : map(pathItemValue).entrySet()) {
+                if (!httpMethods.contains(pathItem.getKey())) {
+                    continue;
+                }
+                Map<String, Object> operation = map(pathItem.getValue());
                 if (operation.containsKey("operationId")) {
                     assertThat(operation.get("operationId").toString())
                             .doesNotContain("AutoOpen", "autoOpen");
@@ -82,7 +91,9 @@ class WaitingOpenApiContractTest {
                         CONSUMER_AVAILABILITY_PATH,
                         CONSUMER_CREATE_PATH,
                         CONSUMER_CURRENT_PATH,
-                        CONSUMER_CANCEL_PATH);
+                        CONSUMER_CANCEL_PATH,
+                        CONSUMER_EVENTS_PATH,
+                        OPERATOR_EVENTS_PATH);
 
         Map<String, Object> settingsPath = map(paths.get(SETTINGS_PATH));
         assertThat(settingsPath).containsOnlyKeys("get", "put");
@@ -135,6 +146,115 @@ class WaitingOpenApiContractTest {
         String serialized = new Yaml().dump(document);
         assertThat(serialized)
                 .doesNotContain("radiusMeters", "radiusKilometers", "1000", "5000");
+    }
+
+    @Test
+    void waitingChangedSseContractsAreAudienceScopedChangeSignals() throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> components = map(document.get("components"));
+        Map<String, Object> schemas = map(components.get("schemas"));
+
+        assertWaitingEventStream(
+                map(paths.get(CONSUMER_EVENTS_PATH)),
+                "WaitingConsumerChangedEventStream",
+                Set.of("200", "400", "401", "403", "429", "503"),
+                false);
+        assertWaitingEventStream(
+                map(paths.get(OPERATOR_EVENTS_PATH)),
+                "WaitingStoreOperatorChangedEventStream",
+                Set.of("200", "400", "401", "403", "404", "429", "503"),
+                true);
+
+        Map<String, Object> invalidCursor =
+                map(map(components.get("responses")).get("WaitingEventCursorBadRequest"));
+        assertThat(invalidCursor.get("description").toString())
+                .contains("audience", "계정", "store", "결속");
+        Map<String, Object> invalidCursorJson =
+                map(map(invalidCursor.get("content")).get("application/json"));
+        assertThat(map(invalidCursorJson.get("example")))
+                .containsEntry("code", "COMMON_001");
+
+        Map<String, Object> lastEventId =
+                map(map(components.get("parameters")).get("WaitingLastEventId"));
+        assertThat(lastEventId)
+                .containsEntry("name", "Last-Event-ID")
+                .containsEntry("in", "header")
+                .containsEntry("required", false);
+        assertThat(lastEventId.get("description").toString())
+                .contains("audience", "인증 계정", "store scope", "계약 version", "최초 연결");
+        assertThat(map(lastEventId.get("schema")))
+                .containsEntry("minLength", 1)
+                .containsEntry("maxLength", 512)
+                .containsEntry("pattern", "^[A-Za-z0-9_-]+$");
+
+        assertThat(map(schemas.get("WaitingConsumerChangedEventStream")))
+                .containsKey("example");
+        assertThat(map(schemas.get("WaitingConsumerChangedEventStream"))
+                .get("description").toString())
+                .contains(
+                        "waiting.changed",
+                        "Last-Event-ID",
+                        "최초 연결·유효한 재연결",
+                        "현재 MySQL high-watermark",
+                        "한 번",
+                        "GET /api/v1/consumers/me/waiting-teams/current",
+                        "teamsAhead",
+                        "keepalive");
+        assertThat(map(schemas.get("WaitingConsumerChangedEventStream"))
+                .get("example").toString())
+                .isEqualTo("id: opaque-waiting-cursor\n"
+                        + "event: waiting.changed\n"
+                        + "data: {}\n\n");
+        assertThat(map(schemas.get("WaitingStoreOperatorChangedEventStream")))
+                .containsKey("example");
+        assertThat(map(schemas.get("WaitingStoreOperatorChangedEventStream"))
+                .get("description").toString())
+                .contains(
+                        "waiting.changed",
+                        "Last-Event-ID",
+                        "최초 연결·유효한 재연결",
+                        "현재 MySQL high-watermark",
+                        "한 번",
+                        "해당 store",
+                        "목록·상세",
+                        "keepalive");
+        assertThat(map(schemas.get("WaitingStoreOperatorChangedEventStream"))
+                .get("example").toString())
+                .isEqualTo("id: opaque-waiting-cursor\n"
+                        + "event: waiting.changed\n"
+                        + "data: {}\n\n");
+    }
+
+    private static void assertWaitingEventStream(
+            Map<String, Object> path,
+            String schemaName,
+            Set<String> expectedResponses,
+            boolean storeScoped
+    ) {
+        assertThat(path)
+                .containsEntry("x-miriyum-runtime-status", "contract-only")
+                .containsEntry("x-miriyum-owner-issue", 250);
+        Map<String, Object> operation = map(path.get("get"));
+        assertThat(list(operation.get("security")))
+                .containsExactly(Map.of("bearerAuth", List.of()));
+        assertThat(list(operation.get("parameters"))).anySatisfy(parameter ->
+                assertThat(map(parameter)).containsEntry(
+                        "$ref", "#/components/parameters/WaitingLastEventId"));
+        if (storeScoped) {
+            assertThat(list(operation.get("parameters"))).anySatisfy(parameter ->
+                    assertThat(map(parameter)).containsEntry(
+                            "$ref", "#/components/parameters/StoreId"));
+        }
+
+        Map<String, Object> responses = map(operation.get("responses"));
+        assertThat(responses.keySet()).containsExactlyInAnyOrderElementsOf(expectedResponses);
+        Map<String, Object> stream = map(map(map(responses.get("200")).get("content"))
+                .get("text/event-stream"));
+        assertThat(map(stream.get("schema")))
+                .containsEntry("$ref", "#/components/schemas/" + schemaName);
+        assertThat(map(responses.get("400"))).containsEntry(
+                "$ref", "#/components/responses/WaitingEventCursorBadRequest");
     }
 
     @Test
