@@ -20,6 +20,8 @@ import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservatio
 import com.miriyum.domain.payment.config.PaymentSettings;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundSummary;
+import com.miriyum.domain.payment.dto.PaymentContracts.StoreReservationPaymentSnapshot;
+import com.miriyum.domain.payment.dto.PaymentContracts.StoreReservationRefundSnapshot;
 import com.miriyum.domain.payment.entity.Payment;
 import com.miriyum.domain.payment.entity.PaymentAttempt;
 import com.miriyum.domain.payment.entity.PaymentLedgerEntry;
@@ -46,7 +48,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.data.domain.PageRequest;
@@ -1237,6 +1241,14 @@ public class PaymentTransactionService {
         return toResult(payment);
     }
 
+    @Transactional(readOnly = true)
+    public Optional<StoreReservationPaymentSnapshot> findReservationDepositPayment(
+            String paymentId
+    ) {
+        return payments.findByPaymentIdAndSourceType(paymentId, RESERVATION_DEPOSIT)
+                .map(this::toStoreReservationPaymentSnapshot);
+    }
+
     @Transactional
     public VerifiedWaitingReservationDeposit getVerifiedWaitingReservationDeposit(
             String paymentId,
@@ -1481,6 +1493,33 @@ public class PaymentTransactionService {
                 payment.getUpdatedAt(),
                 summaries
         );
+    }
+
+    private StoreReservationPaymentSnapshot toStoreReservationPaymentSnapshot(Payment payment) {
+        List<StoreReservationRefundSnapshot> snapshots =
+                refunds.findByPayment_IdOrderByRequestedAtAsc(payment.getId())
+                        .stream()
+                        .sorted(Comparator.comparing(PaymentRefund::getRequestedAt)
+                                .thenComparing(PaymentRefund::getRefundId))
+                        .map(refund -> new StoreReservationRefundSnapshot(
+                                refund.getRefundId(),
+                                refund.getAmountMinor(),
+                                refund.getStatus(),
+                                refund.getRequestedAt(),
+                                refund.getCompletedAt()))
+                        .toList();
+        return new StoreReservationPaymentSnapshot(
+                payment.getPaymentId(),
+                payment.getAmountMinor(),
+                payment.getRefundedAmountMinor(),
+                payment.getRefundableAmountMinor(),
+                payment.getCurrency(),
+                PaymentStatus.valueOf(payment.getStatus().name()),
+                PaymentAttemptStatus.valueOf(payment.getLastAttemptStatus().name()),
+                payment.getCreatedAt(),
+                payment.getPaidAt(),
+                payment.getUpdatedAt(),
+                snapshots);
     }
 
     private RefundResult toRefundResult(PaymentRefund refund) {
