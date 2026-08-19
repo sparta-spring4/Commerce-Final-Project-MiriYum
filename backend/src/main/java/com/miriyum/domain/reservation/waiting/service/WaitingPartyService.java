@@ -82,7 +82,7 @@ public class WaitingPartyService {
                                     now.plus(INVITATION_TTL)));
                     freshCode.set(rawCode);
                     audit(team, accountId, null, EventType.INVITATION_ISSUED,
-                            team.getVersion(), team.getVersion(), "INVITATION_ISSUED", key, now);
+                            team.getVersion(), team.getVersion(), "INVITATION_ISSUED", command, now);
                     return success("WAITING_PARTY_INVITATION", invitation.getId(),
                             new InvitationSnapshot(
                                     Long.toString(invitation.getId()), invitation.getExpiresAt(), null));
@@ -130,7 +130,8 @@ public class WaitingPartyService {
                     team.partyChanged(invitation.getIssuedTeamVersion());
                     invitation.accept(accountId, now);
                     audit(team, accountId, membership.getId(), EventType.MEMBER_JOINED,
-                            team.getVersion() - 1, team.getVersion(), "INVITATION_ACCEPTED", key, now);
+                            team.getVersion() - 1, team.getVersion(), "INVITATION_ACCEPTED",
+                            command, now);
                     return success("WAITING_TEAM", team.getId(), snapshot(team, accountId));
                     }));
         } catch (DataIntegrityViolationException failure) {
@@ -162,7 +163,7 @@ public class WaitingPartyService {
                     try { invitation.revoke(now); }
                     catch (IllegalStateException invalid) { throw invalidInvitation(); }
                     audit(team, accountId, null, EventType.INVITATION_REVOKED,
-                            team.getVersion(), team.getVersion(), "INVITATION_REVOKED", key, now);
+                            team.getVersion(), team.getVersion(), "INVITATION_REVOKED", command, now);
                     return success("WAITING_PARTY_INVITATION", invitation.getId(),
                             new InvitationSnapshot(
                                     Long.toString(invitation.getId()), invitation.getExpiresAt(), null));
@@ -208,7 +209,7 @@ public class WaitingPartyService {
                         audit(team, accountId, active.getTargetMembershipId(),
                                 EventType.REPRESENTATIVE_TRANSFER_EXPIRED,
                                 team.getVersion(), team.getVersion(), "TRANSFER_EXPIRED",
-                                expirationAuditKey(key, active.getId()), now);
+                                command, now);
                     });
                     WaitingRepresentativeTransferOffer offer = transferRepository.save(
                             WaitingRepresentativeTransferOffer.propose(
@@ -216,7 +217,7 @@ public class WaitingPartyService {
                                     now.plus(TRANSFER_TTL)));
                     audit(team, accountId, target.getId(),
                             EventType.REPRESENTATIVE_TRANSFER_PROPOSED,
-                            team.getVersion(), team.getVersion(), "TRANSFER_PROPOSED", key, now);
+                            team.getVersion(), team.getVersion(), "TRANSFER_PROPOSED", command, now);
                     return success("WAITING_REPRESENTATIVE_TRANSFER", offer.getId(),
                             transferSnapshot(offer));
                 }));
@@ -247,7 +248,7 @@ public class WaitingPartyService {
                     offer.accept(now);
                     audit(team, accountId, target.getId(),
                             EventType.REPRESENTATIVE_TRANSFER_ACCEPTED,
-                            before, team.getVersion(), "TRANSFER_ACCEPTED", key, now);
+                            before, team.getVersion(), "TRANSFER_ACCEPTED", command, now);
                     return success("WAITING_TEAM", team.getId(), snapshot(team, accountId));
                 }));
         return partyResult(outcome);
@@ -290,7 +291,7 @@ public class WaitingPartyService {
                                     ? EventType.REPRESENTATIVE_TRANSFER_REVOKED
                                     : EventType.REPRESENTATIVE_TRANSFER_REJECTED,
                             team.getVersion(), team.getVersion(),
-                            revoke ? "TRANSFER_REVOKED" : "TRANSFER_REJECTED", key, now);
+                            revoke ? "TRANSFER_REVOKED" : "TRANSFER_REJECTED", command, now);
                     return success("WAITING_REPRESENTATIVE_TRANSFER", offer.getId(),
                             transferSnapshot(offer));
                 }));
@@ -330,7 +331,7 @@ public class WaitingPartyService {
                     audit(team, accountId, target.getId(),
                             removal ? EventType.MEMBER_REMOVED : EventType.MEMBER_DEPARTED,
                             before, team.getVersion(), removal ? "MEMBER_REMOVED" : "MEMBER_DEPARTED",
-                            key, now);
+                            command, now);
                     return success("WAITING_TEAM", team.getId(), snapshot(team, accountId));
                 }));
         return partyResult(outcome);
@@ -360,12 +361,6 @@ public class WaitingPartyService {
         return "teamId=" + teamId + "|offerId=" + offerId + "|expectedVersion=" + version;
     }
 
-    private static IdempotencyKey expirationAuditKey(IdempotencyKey key, long offerId) {
-        String seed = key.value() + "|representative-transfer-expired|" + offerId;
-        return IdempotencyKey.parse(UUID.nameUUIDFromBytes(
-                seed.getBytes(StandardCharsets.UTF_8)).toString());
-    }
-
     private static TransferOfferSnapshot transferSnapshot(
             WaitingRepresentativeTransferOffer offer) {
         return new TransferOfferSnapshot(Long.toString(offer.getId()),
@@ -380,10 +375,16 @@ public class WaitingPartyService {
 
     private void audit(WaitingTeam team, long actorId, Long subjectMembershipId,
             EventType eventType, long beforeVersion, long afterVersion, String reason,
-            IdempotencyKey key, Instant now) {
+            IdempotencyCommand command, Instant now) {
         auditRepository.save(WaitingPartyAudit.record(
                 team.getId(), actorId, subjectMembershipId, eventType,
-                beforeVersion, afterVersion, reason, key.value(), now));
+                beforeVersion, afterVersion, reason, auditCommandId(command, eventType), now));
+    }
+
+    private static String auditCommandId(IdempotencyCommand command, EventType eventType) {
+        String scope = command.principalNamespace() + '|' + command.principalId() + '|'
+                + command.commandType() + '|' + command.idempotencyKey() + '|' + eventType.name();
+        return UUID.nameUUIDFromBytes(scope.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     private WaitingTeam lockTeam(long teamId) {

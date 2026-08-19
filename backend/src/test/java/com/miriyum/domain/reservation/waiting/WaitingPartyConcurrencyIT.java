@@ -185,6 +185,27 @@ class WaitingPartyConcurrencyIT {
     }
 
     @Test
+    void sameIdempotencyKeyAcrossDifferentPartyCommandsCreatesDistinctAudits() {
+        long storeId = fixtureStore();
+        long representative = createConsumer();
+        long candidate = createConsumer();
+        long teamId = createTeam(storeId, representative, 2);
+        IdempotencyKey reusedKey = key(15);
+
+        String code = parties.issueInvitation(representative, teamId, reusedKey,
+                new ExpectedVersionRequest(0L)).data().invitationCode();
+        parties.acceptInvitation(candidate, reusedKey,
+                new InvitationAcceptanceRequest(code));
+
+        assertThat(memberships.findByConsumerAccountId(candidate)).isPresent();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM waiting_party_audits "
+                + "WHERE waiting_team_id=?", Long.class, teamId)).isEqualTo(2L);
+        assertThat(jdbc.queryForObject("SELECT COUNT(DISTINCT command_id) "
+                + "FROM waiting_party_audits WHERE waiting_team_id=?", Long.class, teamId))
+                .isEqualTo(2L);
+    }
+
+    @Test
     void oneAccountAcceptingDifferentTeamsInParallelOccupiesOnlyOneTeam() throws Exception {
         long storeId = fixtureStore();
         long firstRep = createConsumer();
