@@ -8,6 +8,7 @@ CERTBOT_IMAGE="${CERTBOT_IMAGE:-certbot/certbot:v5.7.0}"
 
 require_configuration() {
     : "${STAGING_DOMAIN:?STAGING_DOMAIN is required}"
+    : "${STAGING_FRONTEND_DOMAIN:?STAGING_FRONTEND_DOMAIN is required}"
     : "${LETSENCRYPT_EMAIL:?LETSENCRYPT_EMAIL is required}"
     : "${LETSENCRYPT_DIR:?LETSENCRYPT_DIR is required}"
     : "${CERTBOT_WEBROOT_DIR:?CERTBOT_WEBROOT_DIR is required}"
@@ -58,6 +59,7 @@ issue() {
         --webroot \
         --webroot-path /var/www/certbot \
         --domain "${STAGING_DOMAIN}" \
+        --domain "${STAGING_FRONTEND_DOMAIN}" \
         --email "${LETSENCRYPT_EMAIL}" \
         --agree-tos \
         --non-interactive \

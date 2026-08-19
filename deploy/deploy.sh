@@ -137,6 +137,15 @@ verify_nginx() {
   fi
 }
 
+verify_frontend() {
+  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+
+  if ! "${compose[@]}" ps --status running --services frontend | grep -qx frontend; then
+    echo "Frontend is not running after deployment." >&2
+    return 1
+  fi
+}
+
 # 구버전 롤백 중 생성된 marker까지 다음 전달 대상에서 누락되지 않게 매 배포 이관한다.
 backfill_pending_risk_event_index() {
   local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
@@ -262,6 +271,8 @@ main() {
 
   : "${AWS_REGION:?AWS_REGION must be set}"
   : "${BACKEND_IMAGE:?BACKEND_IMAGE must be set to an immutable ECR image tag}"
+  # 같은 SHA의 frontend 태그가 기본값이다. CD는 이 값을 명시적으로 전달한다.
+  FRONTEND_IMAGE="${FRONTEND_IMAGE:-${BACKEND_IMAGE}-frontend}"
 
   if [[ ! -f "${ENV_FILE}" ]]; then
     echo "Missing runtime environment file: ${ENV_FILE}" >&2
@@ -280,7 +291,7 @@ main() {
   aws ecr get-login-password --region "${AWS_REGION}" \
     | docker login --username AWS --password-stdin "${registry}"
 
-  export BACKEND_IMAGE
+  export BACKEND_IMAGE FRONTEND_IMAGE
 
 # 실행 환경은 서버에만 두고 이미지와 배포 파일만 갱신한다.
   docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" pull
@@ -323,6 +334,13 @@ main() {
     publish_deployment_health 0
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 nginx || true
+    return 1
+  fi
+
+  if ! verify_frontend; then
+    publish_deployment_health 0
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 frontend || true
     return 1
   fi
 

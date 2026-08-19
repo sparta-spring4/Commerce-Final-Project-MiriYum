@@ -48,8 +48,11 @@ class ShouldDeployBackendTest(unittest.TestCase):
     def test_backend_cd_workflow_change_deploys(self):
         self.assert_decision([".github/workflows/backend-cd.yml"], "true")
 
-    def test_docs_and_frontend_only_changes_skip(self):
-        self.assert_decision(["docs/README.md", "frontend/src/App.tsx"], "false")
+    def test_frontend_change_deploys(self):
+        self.assert_decision(["frontend/src/App.tsx"], "true")
+
+    def test_docs_only_changes_skip(self):
+        self.assert_decision(["docs/README.md"], "false")
 
     def test_accumulated_backend_change_before_docs_change_still_deploys(self):
         self.assert_decision(

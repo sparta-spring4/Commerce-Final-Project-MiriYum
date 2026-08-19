@@ -162,13 +162,28 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn("file:/opt/miriyum/monitoring/cloudwatch-agent.json", self.workflow)
 
     def test_compose_sends_each_service_log_to_a_dedicated_stream(self):
-        expected_streams = ("mysql", "backend", "nginx", "valkey")
+        expected_streams = ("frontend", "mysql", "backend", "nginx", "valkey")
         for stream in expected_streams:
             self.assertIn("awslogs-stream: " + stream, self.compose)
         self.assertEqual(len(expected_streams), self.compose.count("driver: awslogs"))
         self.assertIn("awslogs-group: /miriyum/staging/docker", self.compose)
         self.assertNotIn("logs", self.config)
         self.assertNotIn("/var/lib/docker/containers/*", json.dumps(self.config))
+
+    def test_staging_frontend_is_internal_and_gateway_keeps_api_same_origin(self):
+        services = self.compose_config["services"]
+        frontend = services["frontend"]
+        nginx = services["nginx"]
+
+        self.assertNotIn("ports", frontend)
+        self.assertEqual({"app"}, set(frontend["networks"]))
+        self.assertEqual({"backend", "frontend"}, set(nginx["depends_on"]))
+        for template_name in ("http.conf.template", "https.conf.template"):
+            template = (
+                ROOT / "deploy" / "nginx" / "templates" / template_name
+            ).read_text(encoding="utf-8")
+            self.assertIn("proxy_pass http://frontend:80;", template)
+            self.assertIn("proxy_pass http://backend:8080;", template)
 
     def test_mysql_allows_trigger_migrations_when_binary_logging_is_enabled(self):
         mysql_command = self.compose_config["services"]["mysql"]["command"]

@@ -4,7 +4,14 @@ Issue: [#120](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/i
 
 ## Scope
 
-This is a staging API pre-deployment route, not the first MVP's final user deployment. It runs the Spring Boot API, MySQL, Nginx, and the Valkey staging container on one ARM64 staging EC2 instance. Nginx only proxies `/api/`; it deliberately returns `404` for `/` and `/actuator/`. No frontend asset, Vite server, S3, RDS, ECS, ALB, TLS certificate, or domain is configured by this change. The Valkey container is infrastructure preparation only; the backend does not consume it until the Refresh Token work in #140.
+This is the same-origin staging deployment route. It runs the version-matched React production
+build, Spring Boot API, MySQL, gateway Nginx, and Valkey on one ARM64 staging EC2 instance.
+`staging.miriyum.click` serves the frontend at `/` and proxies `/api/` to Spring Boot;
+`staging-api.miriyum.click` remains API-only and deliberately returns `404` for `/` and
+`/actuator/`. The frontend image is built from the same dev SHA as the backend image and is tagged
+`<SHA>-frontend` in the existing staging ECR repository. Neither the frontend container nor the
+backend, MySQL, or Valkey receives a host port. S3, RDS, ECS, ALB, and production infrastructure
+are not part of this staging route.
 
 The later frontend delivery must add static frontend assets to Nginx and retain the `/api/` proxy route. That work needs its own issue, review, and deploy verification before this can be called a same-origin user release.
 

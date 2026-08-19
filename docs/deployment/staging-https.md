@@ -1,10 +1,11 @@
 # Staging HTTPS Runbook
 
-This runbook enables HTTPS for the existing staging EC2 endpoint without adding an ALB.
+This runbook enables HTTPS for the staging EC2 endpoint without adding an ALB. The public UI is
+`staging.miriyum.click`; `staging-api.miriyum.click` remains an API-only endpoint.
 
 ## Preconditions
 
-- `staging-api.miriyum.click` resolves to the staging EC2 public IP.
+- `staging-api.miriyum.click` and `staging.miriyum.click` both resolve to the staging EC2 public IP.
 - The staging security group allows TCP 80 and TCP 443 from the internet.
 - The staging CD workflow has deployed `/opt/miriyum/certbot.sh` and the Nginx templates.
 
@@ -14,10 +15,20 @@ Through SSM, add these values to `/opt/miriyum/.env`. Replace the email with the
 
 ```dotenv
 STAGING_DOMAIN=staging-api.miriyum.click
+STAGING_FRONTEND_DOMAIN=staging.miriyum.click
 LETSENCRYPT_DIR=/opt/miriyum/letsencrypt
 CERTBOT_WEBROOT_DIR=/opt/miriyum/certbot-www
 LETSENCRYPT_EMAIL=team-contact@example.com
 ```
+
+Set `MIRIYUM_ALLOWED_ORIGIN=https://staging.miriyum.click` in the same server-local file before
+the first hosted-login smoke. The backend accepts one configured browser Origin; keep the local
+Vite proxy only for local development, not as evidence for the hosted staging flow.
+
+For Kakao login, add `https://staging.miriyum.click/auth/kakao/callback` to the Kakao Developer
+Console redirect URIs and append the exact same value to the comma-separated
+`MIRIYUM_KAKAO_REDIRECT_URIS` value in the server-local `.env`. Do not remove the existing local
+callback until its local test path is retired.
 
 ## Issue the Initial Certificate
 
@@ -41,9 +52,14 @@ From a local PowerShell terminal, run:
 curl.exe -I http://staging-api.miriyum.click/api/v1/consumers/auth/token-refreshes
 curl.exe -I https://staging-api.miriyum.click/api/v1/consumers/auth/token-refreshes
 curl.exe -I https://staging-api.miriyum.click/actuator/health
+curl.exe -I https://staging.miriyum.click/
+curl.exe -I https://staging.miriyum.click/api/v1/consumers/auth/token-refreshes
+curl.exe -I https://staging.miriyum.click/actuator/health
 ```
 
-The first request should redirect to HTTPS. The second should reach the API and can validly return an API-level `401` or `405`. The final request must remain `404`; Actuator health is intentionally private on both HTTP and HTTPS.
+The API HTTP request should redirect to HTTPS. API requests can validly return API-level `401` or
+`405`. The UI root must return `200`, and its `/api/` request must reach the same backend. Both
+Actuator requests must remain `404`; Actuator health is intentionally private on every public host.
 
 ## Recover HTTP-only Nginx
 
