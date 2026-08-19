@@ -49,6 +49,8 @@ function typeInto(label: string, value: string) {
 
 beforeEach(() => {
   receivedSearch = null
+  // 지도 기본 보기 설정이 테스트 사이로 새지 않게 한다.
+  window.localStorage.clear()
 })
 
 describe('매장 찾기 결과 화면', () => {
@@ -412,5 +414,279 @@ describe('매장 찾기 결과 화면', () => {
     await screen.findByRole('link', { name: '파스타 마스터즈' })
 
     expect(screen.queryByText('로그인하기')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * 목록과 지도.
+ *
+ * 지도 자체의 상태(SDK 실패·재시도·키 미설정·좌표 유효성)는
+ * `map/KakaoMap.test.tsx`가 소유한다. 여기서는 화면이 지도를 어디에 놓고,
+ * 무엇을 넘기고, 선택을 어떻게 주고받는지만 본다.
+ *
+ * page 모드 응답 항목(`StoreSummary`)에는 좌표 필드가 없다. 그래서 이 화면의
+ * 지도는 언제나 좌표 없음 폴백이며, 그 폴백 문구가 선택 상태에 따라 달라지는
+ * 것을 이용해 목록 → 지도 연결을 관찰한다. 좌표를 가진 가짜 응답을 만들어
+ * 계약에 없는 필드를 지어내지 않는다.
+ */
+describe('매장 찾기 목록과 지도', () => {
+  const 좌표없음 = '표시할 수 있는 매장 좌표가 없습니다.'
+  const 선택한매장표시불가 = '선택한 매장은 지도에 표시할 수 없습니다.'
+
+  function twoStores() {
+    return [
+      storeSummary({ storeId: '01JBQ8Z4T7K2N9V6M3P5R8W201', name: '첫째 매장' }),
+      storeSummary({ storeId: '01JBQ8Z4T7K2N9V6M3P5R8W202', name: '둘째 매장' }),
+    ] as const
+  }
+
+  function 지도영역() {
+    return screen.getByRole('region', { name: '지도 안내' })
+  }
+
+  function 지도열기버튼() {
+    return screen.getByRole('button', { name: '지도 보기' })
+  }
+
+  function 지도닫기버튼() {
+    return screen.getByRole('button', { name: '지도 닫기' })
+  }
+
+  function 지도가열렸나() {
+    return screen.queryByRole('region', { name: '지도 안내' }) !== null
+  }
+
+  function 카드(name: string) {
+    // 카드는 목록 항목이고, 그 안의 매장 이름이 상세 링크다.
+    return screen.getByRole('link', { name }).closest('li') as HTMLElement
+  }
+
+  it('기본은 목록만 보여 주고 지도를 그리지 않는다', async () => {
+    respondWithStores(...twoStores())
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+
+    expect(await screen.findByRole('link', { name: '첫째 매장' })).toBeVisible()
+    expect(지도가열렸나()).toBe(false)
+    expect(지도열기버튼()).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('지도 보기를 누르면 지도가 열리고 다시 누르면 닫힌다', async () => {
+    respondWithStores(...twoStores())
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+    await screen.findByRole('link', { name: '첫째 매장' })
+
+    fireEvent.click(지도열기버튼())
+
+    expect(지도가열렸나()).toBe(true)
+    expect(within(지도영역()).getByText(좌표없음)).toBeVisible()
+    expect(지도닫기버튼()).toHaveAttribute('aria-expanded', 'true')
+    // 목록은 지도를 열어도 그대로 남는다.
+    expect(screen.getByRole('link', { name: '첫째 매장' })).toBeVisible()
+
+    fireEvent.click(지도닫기버튼())
+
+    expect(지도가열렸나()).toBe(false)
+    expect(screen.getByRole('link', { name: '첫째 매장' })).toBeVisible()
+  })
+
+  it('지도 옆의 닫기 버튼으로도 닫을 수 있다', async () => {
+    respondWithStores(...twoStores())
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+    await screen.findByRole('link', { name: '첫째 매장' })
+    fireEvent.click(지도열기버튼())
+
+    fireEvent.click(screen.getByRole('button', { name: '지도 영역 닫기' }))
+
+    expect(지도가열렸나()).toBe(false)
+    expect(지도열기버튼()).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('카드에서 지도 보기를 누르면 지도가 열리며 그 매장을 짚는다', async () => {
+    respondWithStores(...twoStores())
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+    await screen.findByRole('link', { name: '첫째 매장' })
+    expect(지도가열렸나()).toBe(false)
+
+    fireEvent.click(
+      within(카드('둘째 매장')).getByRole('button', { name: '지도에서 보기' }),
+    )
+
+    expect(지도가열렸나()).toBe(true)
+    expect(카드('둘째 매장')).toHaveAttribute('aria-current', 'true')
+    expect(카드('첫째 매장')).not.toHaveAttribute('aria-current')
+    // 선택이 지도까지 닿았다. 안내 문구가 그 매장을 두고 달라진다.
+    expect(within(지도영역()).getByText(선택한매장표시불가)).toBeVisible()
+  })
+
+  /*
+   * "원하면 지도를 기본으로" — 열어 둔 선택이 다음 방문의 기본값이 된다.
+   * 화면을 새로 띄우는 것으로 다음 방문을 흉내 낸다.
+   */
+  it('열어 둔 선택을 기억해 다음 방문에 지도를 기본으로 연다', async () => {
+    respondWithStores(...twoStores())
+
+    const first = renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+    await screen.findByRole('link', { name: '첫째 매장' })
+    fireEvent.click(지도열기버튼())
+    expect(지도가열렸나()).toBe(true)
+    first.unmount()
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+
+    expect(await screen.findByRole('link', { name: '첫째 매장' })).toBeVisible()
+    expect(지도가열렸나()).toBe(true)
+    expect(지도닫기버튼()).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('닫아 둔 선택도 기억해 다음 방문에 지도를 열지 않는다', async () => {
+    respondWithStores(...twoStores())
+
+    const first = renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+    await screen.findByRole('link', { name: '첫째 매장' })
+    fireEvent.click(지도열기버튼())
+    fireEvent.click(지도닫기버튼())
+    first.unmount()
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+
+    await screen.findByRole('link', { name: '첫째 매장' })
+    expect(지도가열렸나()).toBe(false)
+  })
+
+  it('선택한 매장이 결과에서 사라지면 선택도 함께 풀린다', async () => {
+    let call = 0
+    server.use(
+      ...catalogHandlers,
+      http.get('/api/v1/stores', () => {
+        call += 1
+        return successResponse(
+          storePage(
+            call === 1
+              ? [...twoStores()]
+              : [
+                  storeSummary({
+                    storeId: '01JBQ8Z4T7K2N9V6M3P5R8W203',
+                    name: '다른 조건 매장',
+                  }),
+                ],
+          ),
+        )
+      }),
+    )
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+    await screen.findByRole('link', { name: '둘째 매장' })
+    fireEvent.click(
+      within(카드('둘째 매장')).getByRole('button', { name: '지도에서 보기' }),
+    )
+    expect(within(지도영역()).getByText(선택한매장표시불가)).toBeVisible()
+
+    typeInto('검색어', '다른 조건')
+    fireEvent.click(screen.getByRole('button', { name: '이 조건으로 검색' }))
+
+    expect(
+      await screen.findByRole('link', { name: '다른 조건 매장' }),
+    ).toBeVisible()
+    expect(카드('다른 조건 매장')).not.toHaveAttribute('aria-current')
+    expect(within(지도영역()).getByText(좌표없음)).toBeVisible()
+    expect(
+      within(지도영역()).queryByText(선택한매장표시불가),
+    ).not.toBeInTheDocument()
+  })
+
+  it('마커와 짝이 되도록 카드에 목록 순번을 붙인다', async () => {
+    respondWithStores(...twoStores())
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+    await screen.findByRole('link', { name: '첫째 매장' })
+
+    expect(within(카드('첫째 매장')).getByText('지도 표시 번호 1')).toBeVisible()
+    expect(within(카드('둘째 매장')).getByText('지도 표시 번호 2')).toBeVisible()
+  })
+
+  it('지도를 그릴 수 없어도 목록과 정렬은 계속 쓸 수 있다', async () => {
+    respondWithStores(...twoStores())
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+    await screen.findByRole('link', { name: '첫째 매장' })
+    fireEvent.click(지도열기버튼())
+
+    expect(within(지도영역()).getByText(좌표없음)).toBeVisible()
+    // 지도 폴백은 목록으로 계속 볼 수 있다고 안내한다.
+    expect(
+      within(지도영역()).getByText('매장 목록에서 계속 확인할 수 있습니다.'),
+    ).toBeVisible()
+
+    fireEvent.change(screen.getByLabelText('정렬'), {
+      target: { value: 'name,desc' },
+    })
+
+    await waitFor(() => expect(receivedSearch?.get('sort')).toBe('name,desc'))
+    expect(screen.getByRole('link', { name: '첫째 매장' })).toBeVisible()
+  })
+
+  it('검색 결과가 없으면 지도도 좌표 문제가 아니라 결과 없음으로 안내한다', async () => {
+    respondWithStores()
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+    expect(
+      await screen.findByText('조건에 맞는 매장이 없습니다.'),
+    ).toBeInTheDocument()
+
+    fireEvent.click(지도열기버튼())
+
+    expect(within(지도영역()).getByText('검색 결과가 없습니다.')).toBeVisible()
+    expect(within(지도영역()).queryByText(좌표없음)).not.toBeInTheDocument()
+  })
+
+  /*
+   * 아직 오지 않은 결과를 지도에 넘기면 "검색 결과가 없습니다"로 잘못 단정한다.
+   */
+  it('검색이 끝나기 전에는 지도가 결과 없음이라고 말하지 않는다', async () => {
+    window.localStorage.setItem('MIRIYUM_STORE_SEARCH_MAP_OPEN', 'true')
+    const pending = deferred()
+    server.use(
+      ...catalogHandlers,
+      http.get('/api/v1/stores', async () => {
+        await pending.promise
+        return successResponse(storePage([...twoStores()]))
+      }),
+    )
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+
+    expect(
+      await screen.findByText('지도를 준비하는 중입니다.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('검색 결과가 없습니다.')).not.toBeInTheDocument()
+
+    pending.resolve()
+
+    await screen.findByRole('link', { name: '첫째 매장' })
+    expect(within(지도영역()).getByText(좌표없음)).toBeVisible()
+  })
+
+  it('검색이 실패하면 지도도 결과 없음으로 오해하게 두지 않는다', async () => {
+    window.localStorage.setItem('MIRIYUM_STORE_SEARCH_MAP_OPEN', 'true')
+    server.use(
+      ...catalogHandlers,
+      http.get('/api/v1/stores', () =>
+        errorResponse(429, 'COMMON_010', '요청이 많습니다.'),
+      ),
+    )
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+
+    expect(
+      await screen.findByText('검색 결과를 불러오지 못했습니다.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('검색을 다시 시도하면 지도도 함께 표시됩니다.'),
+    ).toBeVisible()
+    expect(screen.queryByText('검색 결과가 없습니다.')).not.toBeInTheDocument()
   })
 })
