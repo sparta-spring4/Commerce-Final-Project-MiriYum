@@ -196,6 +196,38 @@ public class PaymentRecoveryHandoff {
                 && Objects.equals(this.registrationIdempotencyKey, idempotencyKey);
     }
 
+    public boolean beginOperation(String requiredOperationId, Instant now) {
+        String normalized = requireText(requiredOperationId, 36, "operationId");
+        Objects.requireNonNull(now);
+        if (normalized.equals(operationId)) {
+            return false;
+        }
+        if (operationId != null && operationStatus != OperationStatus.FAILED) {
+            throw new IllegalStateException("previous recovery operation is not retryable");
+        }
+        operationId = normalized;
+        operationStatus = OperationStatus.PROCESSING;
+        operationStartedAt = now;
+        operationFinishedAt = null;
+        updatedAt = now;
+        return true;
+    }
+
+    public void finishOperation(
+            String requiredOperationId,
+            OperationStatus result,
+            Instant now
+    ) {
+        if (!Objects.equals(operationId, requiredOperationId)
+                || operationStatus != OperationStatus.PROCESSING
+                || result == null || result == OperationStatus.PROCESSING) {
+            throw new IllegalStateException("stale recovery operation");
+        }
+        operationStatus = result;
+        operationFinishedAt = Objects.requireNonNull(now);
+        updatedAt = now;
+    }
+
     private static String requireText(String value, int maxLength, String field) {
         if (value == null || value.isBlank() || value.length() > maxLength) {
             throw new IllegalArgumentException(field + " must contain valid text");
@@ -215,4 +247,6 @@ public class PaymentRecoveryHandoff {
     public long getClaimToken() { return claimToken; }
     public String getAdminCaseId() { return adminCaseId; }
     public long getRowVersion() { return rowVersion; }
+    public String getOperationId() { return operationId; }
+    public OperationStatus getOperationStatus() { return operationStatus; }
 }

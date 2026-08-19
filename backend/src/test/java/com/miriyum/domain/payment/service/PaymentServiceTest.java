@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -23,6 +24,10 @@ import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservationDeposit;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.InspectManualRecoveryQuery;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ManualRecoveryInspection;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.ReconcileManualRecoveryCommand;
+import com.miriyum.domain.payment.dto.PaymentRecoveryContracts.RequestManualRecoveryRefundCommand;
 import com.miriyum.domain.payment.entity.Payment;
 import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
@@ -62,6 +67,9 @@ class PaymentServiceTest {
     @Mock
     private PaymentProviderClient providerClient;
 
+    @Mock
+    private PaymentRecoveryTransactionService recoveryTransactions;
+
     private PaymentService paymentService;
 
     @BeforeEach
@@ -69,9 +77,84 @@ class PaymentServiceTest {
         paymentService = new PaymentService(
                 transactions,
                 providerClient,
-                mock(PaymentRecoveryTransactionService.class),
+                recoveryTransactions,
                 Clock.fixed(NOW, ZoneOffset.UTC)
         );
+    }
+
+    @Test
+    @DisplayName("수동 복구 재조회는 provider 취소를 재전송하지 않고 기존 결과만 원장에 반영한다")
+    void reconcilesManualRefundByLookupWithoutResendingCancellation() {
+        ReconcileManualRecoveryCommand command = new ReconcileManualRecoveryCommand(
+                "21", 3L, 4L, 5L);
+        PaymentTransactionService.RefundClaim refundClaim =
+                PaymentTransactionService.RefundClaim.requiresCall(
+                        "910000000000000001", PAYMENT_ID, PORTONE_PAYMENT_ID,
+                        100_000L, "KRW", "RESERVATION_CANCELLED");
+        var claim = PaymentRecoveryTransactionService.ManualReconciliationClaim
+                .refund("21", refundClaim, 300_000L);
+        var cancellation = new ProviderCancellation(
+                "cancel-1", ProviderStatus.PARTIALLY_CANCELLED,
+                100_000L, "KRW",
+                PaymentProviderClient.cancellationReason(
+                        "RESERVATION_CANCELLED", "910000000000000001"));
+        var providerPayment = new ProviderPayment(
+                PORTONE_PAYMENT_ID, "transaction-1", ProviderStatus.PARTIALLY_CANCELLED,
+                300_000L, "KRW", List.of(cancellation));
+        ManualRecoveryInspection expected = mock(ManualRecoveryInspection.class);
+        when(recoveryTransactions.claimReconciliation(command)).thenReturn(claim);
+        when(providerClient.getPayment(PORTONE_PAYMENT_ID)).thenReturn(providerPayment);
+        when(recoveryTransactions.inspect(new InspectManualRecoveryQuery("21")))
+                .thenReturn(expected);
+
+        var result = paymentService.reconcileManualRecovery(command);
+
+        assertThat(result).isSameAs(expected);
+        verify(transactions).finalizeRefund(refundClaim, cancellation, NOW);
+        verify(providerClient, never()).cancelPayment(
+                PORTONE_PAYMENT_ID, "910000000000000001", 100_000L,
+                "KRW", "RESERVATION_CANCELLED");
+    }
+
+    @Test
+    @DisplayName("결과 불명 복구 환불의 동일 operation replay는 provider 명령을 반복하지 않는다")
+    void doesNotResendUnknownManualRefundOperation() {
+        RequestManualRecoveryRefundCommand command =
+                new RequestManualRecoveryRefundCommand(
+                        "21", 3L, 4L, 5L,
+                        "550e8400-e29b-41d4-a716-446655440099");
+        RequestRefundCommand canonical = new RequestRefundCommand(
+                PAYMENT_ID, "reservation:1:cancelled", 100_000L,
+                "RESERVATION_CANCELLED", 1L,
+                "550e8400-e29b-41d4-a716-446655440000");
+        PaymentTransactionService.RefundClaim refundClaim =
+                PaymentTransactionService.RefundClaim.requiresCall(
+                        "910000000000000001", PAYMENT_ID, PORTONE_PAYMENT_ID,
+                        100_000L, "KRW", "RESERVATION_CANCELLED");
+        RefundResult unknown = new RefundResult(
+                "910000000000000001", PAYMENT_ID, 100_000L, 0L,
+                0L, 300_000L, "KRW", RefundStatus.RECONCILIATION_REQUIRED,
+                NOW.minusSeconds(10), null);
+        when(recoveryTransactions.claimRefundExecution(command)).thenReturn(
+                PaymentRecoveryTransactionService.ManualRefundExecutionClaim
+                        .execute(canonical),
+                PaymentRecoveryTransactionService.ManualRefundExecutionClaim
+                        .replay(unknown));
+        when(transactions.claimRefund(canonical, NOW)).thenReturn(refundClaim);
+        when(providerClient.cancelPayment(
+                PORTONE_PAYMENT_ID, "910000000000000001", 100_000L,
+                "KRW", "RESERVATION_CANCELLED"))
+                .thenThrow(new PaymentProviderClient.ProviderUnavailableException("timeout"));
+        when(transactions.markRefundUnknown(refundClaim, NOW)).thenReturn(unknown);
+
+        assertThat(paymentService.requestManualRecoveryRefund(command)).isEqualTo(unknown);
+        assertThat(paymentService.requestManualRecoveryRefund(command)).isEqualTo(unknown);
+
+        verify(providerClient, times(1)).cancelPayment(
+                PORTONE_PAYMENT_ID, "910000000000000001", 100_000L,
+                "KRW", "RESERVATION_CANCELLED");
+        verify(recoveryTransactions).finishRefundExecution(
+                "21", command.operationId(), unknown);
     }
 
     @ParameterizedTest

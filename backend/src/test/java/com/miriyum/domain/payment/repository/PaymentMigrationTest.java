@@ -134,8 +134,8 @@ class PaymentMigrationTest {
     }
 
     @Test
-    @DisplayName("V59 데이터를 보존하며 V60 수동 복구 handoff와 전달 outbox를 추가한다")
-    void upgradesV59ToPaymentRecoveryV60() throws Exception {
+    @DisplayName("V59 데이터를 보존하며 V61 수동 복구 handoff와 전달 outbox를 추가한다")
+    void upgradesV59ToPaymentRecoveryV61() throws Exception {
         try (MySQLContainer mysql = new MySQLContainer(MYSQL_IMAGE)
                 .withCommand("--log-bin-trust-function-creators=1")) {
             mysql.start();
@@ -152,7 +152,7 @@ class PaymentMigrationTest {
 
             assertThat(upgraded.info().applied())
                     .extracting(MigrationInfo::getScript)
-                    .contains("V60__create_payment_recovery_handoffs.sql");
+                    .contains("V61__create_payment_recovery_handoffs.sql");
             try (Connection connection = mysql.createConnection("")) {
                 assertThat(tableCount(connection, "payment_recovery_handoffs"))
                         .isEqualTo(1L);
