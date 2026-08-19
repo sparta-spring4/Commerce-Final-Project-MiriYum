@@ -61,6 +61,13 @@ export interface paths {
      */
     get: operations["getWaitingCloseJob"];
   };
+  "/api/v1/store-operators/stores/{storeId}/waiting-events": {
+    /**
+     * 매장 운영자 웨이팅 변경 신호 구독
+     * @description 대표 운영 권한을 재검증한 해당 store 범위의 fetch streaming 연결이다. 연결 직후와 유효한 Last-Event-ID 재연결 뒤 현재 MySQL high-watermark에 결속된 waiting.changed 신호를 보내며, 클라이언트는 해당 store의 웨이팅 목록·상세를 다시 조회한다.
+     */
+    get: operations["streamStoreWaitingChanges"];
+  };
   "/api/v1/consumers/me/stores/{storeId}/waiting-availabilities": {
     /** 현재 웨이팅 접수 가능 상태 조회 */
     get: operations["getConsumerWaitingAvailability"];
@@ -80,12 +87,33 @@ export interface paths {
     /** 본인 활성 웨이팅 취소 */
     post: operations["cancelCurrentConsumerWaitingTeam"];
   };
+  "/api/v1/consumers/me/waiting-events": {
+    /**
+     * 본인 웨이팅 변경 신호 구독
+     * @description consumer Bearer 인증을 사용하는 fetch streaming 연결이다. 연결 직후와 유효한 Last-Event-ID 재연결 뒤 현재 MySQL high-watermark에 결속된 waiting.changed 신호를 보내며, 클라이언트는 본인의 현재 웨이팅 snapshot을 다시 조회한다.
+     */
+    get: operations["streamMyWaitingChanges"];
+  };
 }
 
 export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
+    /**
+     * @description UTF-8 SSE stream. 업무 event는 waiting.changed이고 id는 다음 Last-Event-ID로 그대로 재사용할 opaque cursor다. 최초 연결·유효한 재연결은 현재 MySQL high-watermark 수렴 신호를 한 번 보내고 이후에는 본인 팀 생성·상태 변경과 같은 매장·영업일의 앞선 활성 팀 변화로 teamsAhead가 달라질 수 있을 때 신호를 보낸다. 각 업무 frame은 빈 줄(\n\n)로 종료한다. 수신 뒤 GET /api/v1/consumers/me/waiting-teams/current를 다시 조회한다. keepalive comment는 업무 event가 아니며 cursor를 전진시키지 않는다.
+     * @example id: opaque-waiting-cursor
+     * event: waiting.changed
+     * data: {}
+     */
+    WaitingConsumerChangedEventStream: string;
+    /**
+     * @description UTF-8 SSE stream. 업무 event는 waiting.changed이고 id는 다음 Last-Event-ID로 그대로 재사용할 opaque cursor다. 최초 연결·유효한 재연결은 현재 MySQL high-watermark 수렴 신호를 한 번 보내고 이후에는 해당 store의 팀 생성·공개 상태 변경을 알린다. 각 업무 frame은 빈 줄(\n\n)로 종료한다. 수신 뒤 해당 store 웨이팅 목록·상세를 다시 조회한다. 설정과 AUTO·알림 worker 내부 상태는 신호가 아니다. keepalive comment는 업무 event가 아니며 cursor를 전진시키지 않는다.
+     * @example id: opaque-waiting-cursor
+     * event: waiting.changed
+     * data: {}
+     */
+    WaitingStoreOperatorChangedEventStream: string;
     /**
      * @description 자동 접수, 수동 접수 또는 신규 접수 일시중지
      * @enum {string}
@@ -282,6 +310,12 @@ export interface components {
     };
   };
   responses: {
+    /** @description Last-Event-ID 형식·무결성 또는 audience·계정·store 결속이 유효하지 않음 */
+    WaitingEventCursorBadRequest: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
     /** @description storeId가 양의 정수 문자열 PublicId 형식이 아님 */
     WaitingStoreIdBadRequest: {
       content: {
@@ -391,6 +425,8 @@ export interface components {
     /** @description 직전 페이지 마지막 항목의 opaque `(queueSequence, waitingTeamId)` cursor */
     WaitingQueueCursor?: components["schemas"]["WaitingQueueCursor"];
     WaitingPageSize?: number;
+    /** @description 서버가 발급하고 audience·인증 계정·필요한 store scope·계약 version에 결속한 무결성 보호 opaque cursor. 없으면 최초 연결이며 클라이언트가 해석하거나 수정하지 않는다. */
+    WaitingLastEventId?: string;
   };
   requestBodies: never;
   headers: never;
@@ -802,6 +838,34 @@ export interface operations {
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
     };
   };
+  /**
+   * 매장 운영자 웨이팅 변경 신호 구독
+   * @description 대표 운영 권한을 재검증한 해당 store 범위의 fetch streaming 연결이다. 연결 직후와 유효한 Last-Event-ID 재연결 뒤 현재 MySQL high-watermark에 결속된 waiting.changed 신호를 보내며, 클라이언트는 해당 store의 웨이팅 목록·상세를 다시 조회한다.
+   */
+  streamStoreWaitingChanges: {
+    parameters: {
+      header?: {
+        "Last-Event-ID"?: components["parameters"]["WaitingLastEventId"];
+      };
+      path: {
+        storeId: components["parameters"]["StoreId"];
+      };
+    };
+    responses: {
+      /** @description 해당 매장의 팀 생성·공개 상태 변경을 알리는 최소 변경 신호 stream */
+      200: {
+        content: {
+          "text/event-stream": components["schemas"]["WaitingStoreOperatorChangedEventStream"];
+        };
+      };
+      400: components["responses"]["WaitingEventCursorBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingStoreForbidden"];
+      404: components["responses"]["WaitingStoreNotFound"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
   /** 현재 웨이팅 접수 가능 상태 조회 */
   getConsumerWaitingAvailability: {
     parameters: {
@@ -899,6 +963,30 @@ export interface operations {
       404: components["responses"]["WaitingConsumerTeamNotFound"];
       409: components["responses"]["WaitingConsumerCancelConflict"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /**
+   * 본인 웨이팅 변경 신호 구독
+   * @description consumer Bearer 인증을 사용하는 fetch streaming 연결이다. 연결 직후와 유효한 Last-Event-ID 재연결 뒤 현재 MySQL high-watermark에 결속된 waiting.changed 신호를 보내며, 클라이언트는 본인의 현재 웨이팅 snapshot을 다시 조회한다.
+   */
+  streamMyWaitingChanges: {
+    parameters: {
+      header?: {
+        "Last-Event-ID"?: components["parameters"]["WaitingLastEventId"];
+      };
+    };
+    responses: {
+      /** @description 본인 팀과 teamsAhead에 영향을 주는 최소 변경 신호 stream */
+      200: {
+        content: {
+          "text/event-stream": components["schemas"]["WaitingConsumerChangedEventStream"];
+        };
+      };
+      400: components["responses"]["WaitingEventCursorBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
 }

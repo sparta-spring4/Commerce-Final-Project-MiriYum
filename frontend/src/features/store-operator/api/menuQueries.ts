@@ -237,3 +237,65 @@ export function useChangeMenuSellingStatus(storeId: string, menuId: string) {
     onSuccess: (menu) => refreshMenuViews(queryClient, storeId, menu),
   })
 }
+
+export function usePutMenuImage(storeId: string, menuId: string) {
+  const { apiClient } = useStoreOperatorAuth()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (variables: {
+      file: File
+      idempotencyKey: string
+    }): Promise<string> => {
+      const multipart = new FormData()
+      multipart.append('file', variables.file)
+      const response = await apiClient(
+        '/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images',
+        {
+          method: 'put',
+          pathParams: { storeId, menuId },
+          multipart,
+          idempotencyKey: variables.idempotencyKey,
+        },
+      )
+      return response.data.url
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: storeOperatorKeys.menu(storeId, menuId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: storeOperatorKeys.menus(storeId),
+      })
+      void queryClient.invalidateQueries({ queryKey: ['store-search'] })
+    },
+  })
+}
+
+export function useDeleteMenuImage(storeId: string, menuId: string) {
+  const { apiClient } = useStoreOperatorAuth()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (idempotencyKey: string): Promise<void> => {
+      await apiClient(
+        '/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images',
+        {
+          method: 'delete',
+          pathParams: { storeId, menuId },
+          allowNoContent: true,
+          idempotencyKey,
+        },
+      )
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: storeOperatorKeys.menu(storeId, menuId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: storeOperatorKeys.menus(storeId),
+      })
+      void queryClient.invalidateQueries({ queryKey: ['store-search'] })
+    },
+  })
+}

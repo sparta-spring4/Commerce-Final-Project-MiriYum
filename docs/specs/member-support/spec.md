@@ -31,7 +31,7 @@
 | --- | --- | --- |
 | 회원 최소 목록·상세 | `MEMBER_READ_MINIMAL` | 권한을 계정 조회보다 먼저 검사 |
 | 복구 사건 배정·결정 | `MEMBER_RECOVERY` | 현재 배정, 사건 version, `MEMBER_RECOVERY` 재인증 |
-| 경고·기능 제한·기간 정지 제안·적용 | `ACCOUNT_SANCTION` | 현재 배정, 사건 version, `ACCOUNT_SANCTION` 재인증 |
+| 경고·기능 제한·기간 정지 제안·적용 | `ACCOUNT_SANCTION` | `ENFORCEMENT_OPERATOR`는 대상의 최소 상세 조회를 위해 `MEMBER_READ_MINIMAL`도 함께 보유. 현재 배정, 사건 version, `ACCOUNT_SANCTION` 재인증 |
 | 영구 정지 추가 승인 | `ACCOUNT_PERMANENT_SANCTION_APPROVE` | 제안자와 다른 `SUPER_ADMIN`, 별도 재인증 |
 | 이의 배정·결정 | `ACCOUNT_APPEAL_REVIEW` | 현재 배정, 사건 version, `ACCOUNT_APPEAL_DECISION` 재인증 |
 
@@ -79,6 +79,23 @@
 경고·기능 제한·기간 정지는 한 명의 `ACCOUNT_SANCTION` 운영자가 적용한다. 영구 정지는 먼저 `PENDING_ADDITIONAL_APPROVAL`로 제안하고, 제안자와 다른 `SUPER_ADMIN`이 `ACCOUNT_PERMANENT_SANCTION_APPROVE` 권한과 별도 일회 재인증으로 승인해야 `APPLIED`가 된다. 같은 승인자, 중복 승인, 이미 종결된 제안은 `409 AUTH_020`이다. 승인 원장에는 제안자·추가 승인자 public operator ID, 사건·정책 version, 결정 코드와 시각만 저장한다.
 
 만료 작업은 기능 제한·기간 정지를 여러 인스턴스에서 멱등하게 종료한다. 제재 원장은 삭제하거나 덮어쓰지 않는다.
+
+### 추가 승인 대기 제재 조회
+
+`GET /api/v1/platform-operators/member-sanctions/pending-additional-approvals`는 현재 운영자가 추가 승인 후보로 검토할 수 있는 제재만 조회한다. 현재 DB 권한 snapshot에서 `ACCOUNT_PERMANENT_SANCTION_APPROVE` permission과 `SUPER_ADMIN` role을 계정 조회보다 먼저 검사하고, `PENDING_ADDITIONAL_APPROVAL` 상태이면서 `proposed_by_operator_id`가 현재 운영자와 다른 제재만 #278의 제재 원장에서 읽는다. 직접 permission만 가진 비-`SUPER_ADMIN`과 자기 제안자는 결과를 볼 수 없다. 자기 제안은 결과에서 제외하며 승인 가능한 항목처럼 표현하지 않는다. 기존 추가 승인 명령의 제안자와 다른 `SUPER_ADMIN`, 별도 재인증 조건은 변경하지 않는다.
+
+목록은 0 기반 `page`, 기본 `size=20`, 최대 `size=100`을 사용하고 `proposedAt DESC`, 동률이면 내부 제재 PK `DESC`로 정렬한다. 응답 항목은 다음 필드만 포함한다.
+
+- `sanctionId`: 추가 승인 path에 전달할 제재 public ID
+- `version`: 기존 추가 승인 `If-Match`에 전달할 현재 member-support case row version
+- `accountType`, `accountId`: 대상의 계정 유형과 문자열 public ID
+- `reasonCode`: 자유형 원문이 아닌 기존 제재 분류 코드
+- `policyVersion`
+- `proposedAt`
+
+Endpoint 자체가 영구 정지 추가 승인 대기 projection이므로 `level`과 `status`는 반환하지 않는다. 제안자 ID, 이메일, 휴대전화, 자유형 제재 사유 원문, 제한 기능, 감사·세션 정보도 반환하지 않는다.
+
+#275 보호 chain이 token namespace, 활성 계정, 중앙 세션과 session version을 검증한 뒤 조회를 시작한다. Service는 `OperatorAuthorityReader.requireCurrentAuthority`를 통해 principal의 authority version과 현재 MySQL version을 다시 대조한다. 중앙 세션·권한 version 무효는 `401 AUTH_015`, 현재 권한 부재는 repository 조회 전 `403 ADMIN_001`이다.
 
 ## 이의 접수·배정·결정
 
@@ -194,6 +211,22 @@
 - `docs/deployment/ecs-production-secret-contract.md`
 
 `docs/superpowers/**`, 기존 migration, 다른 도메인의 Entity·Repository 직접 참조, frontend, 위에 명시하지 않은 배포 파일, dev 직접 push는 allowlist 밖이다. 구현 중 새 파일 필요가 발견되면 먼저 이 명세의 allowlist와 계획을 갱신하고 별도 검토를 받는다.
+
+### #425 추가 승인 대기 제재 조회 delta allowlist
+
+#425 구현은 기존 allowlist 중 아래 파일만 수정하거나 추가한다.
+
+- `docs/specs/member-support/spec.md`
+- `docs/specs/member-support/openapi.yaml`
+- `docs/specs/platform-operator-openapi.yaml`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/controller/membersupport/PlatformOperatorMemberSupportController.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/dto/membersupport/MemberSupportResponses.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/repository/membersupport/MemberSanctionRepository.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/service/membersupport/PendingMemberSanctionQueryService.java`
+- `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/PendingMemberSanctionQueryServiceTest.java`
+- `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/PlatformOperatorMemberSupportHttpIT.java`
+- `backend/src/test/java/com/miriyum/domain/platformoperator/config/PlatformOperatorFeatureFlagIT.java`
+- `backend/src/test/java/com/miriyum/domain/platformoperator/PlatformOperatorOpenApiContractTest.java`
 
 ## 구현 계획
 

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.miriyum.domain.platformoperator.controller.auth.PlatformOperatorAuthController;
 import com.miriyum.domain.platformoperator.controller.account.PlatformOperatorCapabilitiesController;
 import com.miriyum.domain.platformoperator.controller.management.PlatformOperatorAccountQueryController;
+import com.miriyum.domain.platformoperator.controller.membersupport.PlatformOperatorMemberSupportController;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import java.io.InputStream;
@@ -39,6 +40,7 @@ class PlatformOperatorOpenApiContractTest {
             "/api/v1/platform-operators/member-support-cases/{caseId}/assignments",
             "/api/v1/platform-operators/member-support-cases/{caseId}/decisions",
             "/api/v1/platform-operators/members/{accountType}/{accountId}/sanctions",
+            "/api/v1/platform-operators/member-sanctions/pending-additional-approvals",
             "/api/v1/platform-operators/member-sanctions/{sanctionId}/additional-approvals");
     private static final Set<String> MANAGEMENT_AUDIT_PATHS = Set.of(
             "/api/v1/platform-operators/accounts",
@@ -134,6 +136,37 @@ class PlatformOperatorOpenApiContractTest {
         String responses = map(map(capabilities.get("components")).get("responses")).toString();
         assertThat(responses).contains(
                 "AUTH_001", "AUTH_002", "AUTH_003", "AUTH_004", "AUTH_015", "AUTH_011", "AUTH_012");
+    }
+
+    @Test
+    void pendingSanctionApprovalContractIsMinimalAndMatchesRuntime() throws Exception {
+        String path = "/api/v1/platform-operators/member-sanctions/pending-additional-approvals";
+        Map<String, Object> memberSupport = document("member-support/openapi.yaml");
+        Map<String, Object> paths = map(memberSupport.get("paths"));
+        assertThat(map(map(paths.get(path)).get("get")))
+                .containsEntry("operationId", "listPendingPermanentMemberSanctionApprovals");
+
+        Map<String, Object> schemas = map(map(memberSupport.get("components")).get("schemas"));
+        Map<String, Object> properties = map(map(schemas.get("PendingSanctionApproval")).get("properties"));
+        assertThat(properties).containsOnlyKeys(
+                "sanctionId", "version", "accountType", "accountId",
+                "reasonCode", "policyVersion", "proposedAt");
+
+        for (String entrypoint : Set.of(
+                "public-openapi.yaml", "consumer-openapi.yaml",
+                "store-operator-openapi.yaml", "mvp1-openapi.yaml")) {
+            assertThat(map(document(entrypoint).get("paths"))).doesNotContainKey(path);
+        }
+
+        Map<String, String> runtime = new LinkedHashMap<>();
+        for (var method : PlatformOperatorMemberSupportController.class.getDeclaredMethods()) {
+            if (method.isAnnotationPresent(GetMapping.class)) {
+                for (String value : method.getAnnotation(GetMapping.class).value()) {
+                    runtime.put("get /api/v1/platform-operators" + value, method.getName());
+                }
+            }
+        }
+        assertThat(runtime).containsEntry("get " + path, "pendingAdditionalApprovals");
     }
 
     @Test
