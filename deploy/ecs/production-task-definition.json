@@ -26,6 +26,7 @@
         {"name": "MIRIYUM_ALLOWED_ORIGIN", "value": "REPLACE_WITH_HTTPS_ORIGIN"},
         {"name": "MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED", "value": "false"},
         {"name": "MIRIYUM_KAKAO_ENABLED", "value": "false"},
+        {"name": "MIRIYUM_RUNTIME_CONFIG_ENABLED", "value": "false"},
         {"name": "MIRIYUM_STORE_SEARCH_LLM_ENABLED", "value": "true"},
         {"name": "MIRIYUM_STORE_SEARCH_LLM_MODEL", "value": "gpt-4o-mini"},
         {"name": "MIRIYUM_CLOUDWATCH_METRICS_ENABLED", "value": "true"},

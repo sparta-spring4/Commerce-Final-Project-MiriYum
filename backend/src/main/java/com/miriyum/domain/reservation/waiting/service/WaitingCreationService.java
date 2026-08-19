@@ -13,7 +13,6 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession
 import com.miriyum.domain.reservation.waiting.entity.WaitingReceptionMode;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSetting;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
-import com.miriyum.domain.reservation.waiting.entity.WaitingStatusEvent;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTransitionAudit;
@@ -21,7 +20,6 @@ import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembership
 import com.miriyum.domain.reservation.waiting.repository.WaitingQueueSequenceRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingLocationProofSessionRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingSettingRepository;
-import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
 import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
@@ -57,7 +55,7 @@ public class WaitingCreationService {
     private final WaitingTeamRepository teamRepository;
     private final WaitingActiveMembershipRepository membershipRepository;
     private final WaitingTransitionAuditRepository auditRepository;
-    private final WaitingStatusEventRepository eventRepository;
+    private final WaitingStatusEventAppender eventAppender;
     private final WaitingLocationProofSessionRepository proofRepository;
     private final ReceptionCheck receptionCheck;
     private final IdempotencyExecutor idempotencyExecutor;
@@ -79,7 +77,7 @@ public class WaitingCreationService {
             WaitingTeamRepository teamRepository,
             WaitingActiveMembershipRepository membershipRepository,
             WaitingTransitionAuditRepository auditRepository,
-            WaitingStatusEventRepository eventRepository,
+            WaitingStatusEventAppender eventAppender,
             WaitingLocationProofSessionRepository proofRepository,
             WaitingReceptionGate receptionGate,
             IdempotencyExecutor idempotencyExecutor,
@@ -89,7 +87,7 @@ public class WaitingCreationService {
             Clock clock
     ) {
         this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
-                eventRepository, proofRepository, receptionGate::requireOpen,
+                eventAppender, proofRepository, receptionGate::requireOpen,
                 idempotencyExecutor, transactionExecutor,
                 storeEligibility,
                 objectMapper, clock,
@@ -98,7 +96,7 @@ public class WaitingCreationService {
 
     WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
             WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
-            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventAppender eventAppender,
             WaitingLocationProofSessionRepository proofRepository,
             WaitingReceptionGate receptionGate,
             IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
@@ -106,40 +104,40 @@ public class WaitingCreationService {
             ObjectMapper objectMapper, Clock clock, IntToLongFunction retryDelayMillis,
             RetrySleeper retrySleeper) {
         this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
-                eventRepository, proofRepository, receptionGate::requireOpen, idempotencyExecutor,
+                eventAppender, proofRepository, receptionGate::requireOpen, idempotencyExecutor,
                 transactionExecutor, storeEligibility, objectMapper, clock, retryDelayMillis, retrySleeper);
     }
 
     WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
             WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
-            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventAppender eventAppender,
             WaitingReceptionGate receptionGate,
             IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
             StoreTransactionEligibilityService storeEligibility,
             ObjectMapper objectMapper, Clock clock, IntToLongFunction retryDelayMillis,
             RetrySleeper retrySleeper) {
         this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
-                eventRepository, null, receptionGate::requireOpen, idempotencyExecutor,
+                eventAppender, null, receptionGate::requireOpen, idempotencyExecutor,
                 transactionExecutor, storeEligibility, objectMapper, clock, retryDelayMillis, retrySleeper);
     }
 
     /** 기존 failure-classifier 단위 테스트의 생성자 호환 전용 경로다. */
     WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
             WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
-            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventAppender eventAppender,
             WaitingSettingRepository settingRepository,
             IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
             StoreTransactionEligibilityService storeEligibility, ObjectMapper objectMapper,
             Clock clock, IntToLongFunction retryDelayMillis,
             RetrySleeper retrySleeper) {
         this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
-                eventRepository, null, legacyReceptionCheck(settingRepository), idempotencyExecutor,
+                eventAppender, null, legacyReceptionCheck(settingRepository), idempotencyExecutor,
                 transactionExecutor, storeEligibility, objectMapper, clock, retryDelayMillis, retrySleeper);
     }
 
     private WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
             WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
-            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventAppender eventAppender,
             WaitingLocationProofSessionRepository proofRepository,
             ReceptionCheck receptionCheck,
             IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
@@ -150,7 +148,7 @@ public class WaitingCreationService {
         this.teamRepository = Objects.requireNonNull(teamRepository);
         this.membershipRepository = Objects.requireNonNull(membershipRepository);
         this.auditRepository = Objects.requireNonNull(auditRepository);
-        this.eventRepository = Objects.requireNonNull(eventRepository);
+        this.eventAppender = Objects.requireNonNull(eventAppender);
         this.proofRepository = proofRepository;
         this.receptionCheck = Objects.requireNonNull(receptionCheck);
         this.idempotencyExecutor = Objects.requireNonNull(idempotencyExecutor);
@@ -262,8 +260,7 @@ public class WaitingCreationService {
                             team.getId(), WaitingActorType.CONSUMER, consumerAccountId,
                             null, WaitingTeamStatus.WAITING, -1L, "WAITING_CREATED",
                             commandId, occurredAt, clock.instant()));
-                    eventRepository.save(WaitingStatusEvent.pending(
-                            team.getId(), 1L, WaitingTeamStatus.WAITING, occurredAt));
+                    eventAppender.append(team, occurredAt);
                     return new BusinessResult<>(HttpStatus.OK.value(), "SUCCESS",
                             "WAITING_TEAM", Long.toString(team.getId()), snapshotFactory.apply(team));
             });

@@ -45,7 +45,11 @@ def validate(contract_path, task_definition_path, application_config_path=None):
     ):
         errors.append("Task definition must declare ARM64 Fargate runtime")
 
-    required_secrets = set(contract.get("requiredSecrets", [])) | set(contract.get("parameterSecrets", []))
+    required_secrets = (
+        set(contract.get("requiredSecrets", []))
+        | set(contract.get("wholeSecrets", []))
+        | set(contract.get("parameterSecrets", []))
+    )
     for name in required_secrets:
         if name not in secrets:
             errors.append(f"Missing secret reference: {name}")
@@ -74,6 +78,18 @@ def validate(contract_path, task_definition_path, application_config_path=None):
             if name not in secrets:
                 errors.append(f"Missing parameter secret reference: {name}")
 
+    for feature_flag, required_secrets in contract.get("conditionalWholeSecrets", {}).items():
+        if environment.get(feature_flag, "false").lower() != "true":
+            for name in required_secrets:
+                if name in secrets:
+                    errors.append(
+                        f"Conditional whole secret must be absent when disabled: {name}"
+                    )
+            continue
+        for name in required_secrets:
+            if name not in secrets:
+                errors.append(f"Missing whole secret reference: {name}")
+
     for feature_flag, required_environment in contract.get("conditionalEnvironment", {}).items():
         if environment.get(feature_flag, "false").lower() != "true":
             continue
@@ -81,6 +97,11 @@ def validate(contract_path, task_definition_path, application_config_path=None):
             if not environment.get(name, ""):
                 errors.append(f"Missing environment value: {name}")
 
+    whole_secrets = (
+        set(contract.get("wholeSecrets", []))
+        | set(contract.get("wholeSecretReferences", {}))
+    )
+    whole_secret_references = contract.get("wholeSecretReferences", {})
     parameter_secrets = (
         set(contract.get("parameterSecrets", []))
         | set(contract.get("parameterReferencePaths", {}))
@@ -88,6 +109,31 @@ def validate(contract_path, task_definition_path, application_config_path=None):
     parameter_reference_paths = contract.get("parameterReferencePaths", {})
     secret_prefixes = set()
     for name, value_from in secrets.items():
+        if name in whole_secrets:
+            if not value_from or value_from.endswith("::"):
+                errors.append(f"Whole secret reference must not select a JSON key: {name}")
+                continue
+
+            reference = whole_secret_references.get(name)
+            if reference is None:
+                errors.append(f"Missing whole secret reference contract entry: {name}")
+                continue
+
+            expected_placeholder = reference.get("templatePlaceholder", "")
+            expected_secret_name = reference.get("secretName", "")
+            if value_from == expected_placeholder:
+                continue
+
+            expected_arn_pattern = (
+                r"^arn:aws:secretsmanager:[^:]+:\d{12}:secret:"
+                + re.escape(expected_secret_name)
+                + r"(?:-[A-Za-z0-9]{6})?$"
+            )
+            if not re.fullmatch(expected_arn_pattern, value_from):
+                errors.append(
+                    f"Whole secret reference must use its expected Secrets Manager secret: {name}"
+                )
+            continue
         if name in parameter_secrets:
             expected_path = parameter_reference_paths.get(name)
             if not expected_path:
