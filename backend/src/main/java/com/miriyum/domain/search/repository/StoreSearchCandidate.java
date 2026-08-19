@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
  * @param name 매장명
  * @param region 영업 지역
  * @param address 매장 주소
+ * @param addressVersion 후보 스냅샷의 주소 버전
  * @param storeCategoryCode 주 카테고리 코드
  * @param operationStatus 현재 운영 상태
  * @param reservationEnabled 예약 기능 활성 여부
@@ -26,6 +27,7 @@ public record StoreSearchCandidate(
         String name,
         Region region,
         String address,
+        long addressVersion,
         String storeCategoryCode,
         OperationStatus operationStatus,
         boolean reservationEnabled,
@@ -48,8 +50,27 @@ public record StoreSearchCandidate(
             boolean pickupEnabled,
             LocalDateTime createdAt
     ) {
-        this(storeId, name, region, address, storeCategoryCode, operationStatus,
+        this(storeId, name, region, address, 0, storeCategoryCode, operationStatus,
                 reservationEnabled, menuHoldEnabled, pickupEnabled, createdAt,
                 null, null);
+    }
+
+    public StoreSearchCandidate(
+            long storeId,
+            String name,
+            Region region,
+            String address,
+            String storeCategoryCode,
+            OperationStatus operationStatus,
+            boolean reservationEnabled,
+            boolean menuHoldEnabled,
+            boolean pickupEnabled,
+            LocalDateTime createdAt,
+            BigDecimal latitude,
+            BigDecimal longitude
+    ) {
+        this(storeId, name, region, address, 0, storeCategoryCode, operationStatus,
+                reservationEnabled, menuHoldEnabled, pickupEnabled, createdAt,
+                latitude, longitude);
     }
 }

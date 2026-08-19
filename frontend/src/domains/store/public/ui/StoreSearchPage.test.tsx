@@ -615,7 +615,7 @@ describe('매장 찾기 목록과 지도', () => {
     expect(지도가열렸나()).toBe(false)
   })
 
-  it('선택한 매장이 결과에서 사라지면 선택도 함께 풀린다', async () => {
+  it('결과에서 사라진 선택은 같은 매장이 재등장해도 부활하지 않는다', async () => {
     let call = 0
     server.use(
       ...catalogHandlers,
@@ -623,14 +623,14 @@ describe('매장 찾기 목록과 지도', () => {
         call += 1
         return successResponse(
           storePage(
-            call === 1
-              ? [...twoStores()]
-              : [
+            call === 2
+              ? [
                   storeSummary({
                     storeId: '01JBQ8Z4T7K2N9V6M3P5R8W203',
                     name: '다른 조건 매장',
                   }),
-                ],
+                ]
+              : [...twoStores()],
           ),
         )
       }),
@@ -651,6 +651,16 @@ describe('매장 찾기 목록과 지도', () => {
     ).toBeVisible()
     expect(카드('다른 조건 매장')).not.toHaveAttribute('aria-current')
     expect(within(지도영역()).getByText(좌표없음)).toBeVisible()
+    expect(
+      within(지도영역()).queryByText(선택한매장표시불가),
+    ).not.toBeInTheDocument()
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '다른 조건 조건 지우기' }),
+    )
+
+    expect(await screen.findByRole('link', { name: '둘째 매장' })).toBeVisible()
+    expect(카드('둘째 매장')).not.toHaveAttribute('aria-current')
     expect(
       within(지도영역()).queryByText(선택한매장표시불가),
     ).not.toBeInTheDocument()

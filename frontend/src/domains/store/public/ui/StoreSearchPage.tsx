@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { EmptyState, ErrorState, Loading } from '../../../../shared/ui/Feedback'
 import { Icon, type IconName } from '../../../../shared/ui/Icon'
@@ -66,13 +66,21 @@ export function StoreSearchPage() {
   /*
    * 선택은 지금 화면에 있는 매장에 대해서만 뜻이 있다. 조건을 바꾸거나 다음
    * 페이지로 넘어가 사라진 매장의 id를 그대로 들고 있으면 지도는 아무 데도
-   * 없는 매장을 선택됐다고 말하게 된다. state를 지우는 effect 대신 파생한다.
+   * 없는 매장을 선택됐다고 말하게 된다. 새 결과가 확정되기 전에는 파생값으로
+   * 숨기고, 확정된 결과에 없으면 원본 state도 지워 이후 재등장을 선택으로
+   * 오인하지 않게 한다.
    */
   const selectedInResults =
     selectedStoreId !== null &&
     mapStores.some((store: MapStore) => store.storeId === selectedStoreId)
       ? selectedStoreId
       : null
+
+  useEffect(() => {
+    if (search.isSuccess && selectedStoreId !== selectedInResults) {
+      setSelectedStoreId(null)
+    }
+  }, [search.isSuccess, selectedInResults, selectedStoreId])
 
   function applyFilters(next: StoreSearchFilters) {
     setSearchParams(writeFilters(next))

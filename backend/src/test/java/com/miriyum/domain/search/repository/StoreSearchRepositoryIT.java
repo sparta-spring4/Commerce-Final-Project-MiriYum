@@ -523,6 +523,40 @@ class StoreSearchRepositoryIT {
 
     @Test
     @Transactional
+    @DisplayName("후보 주소 버전과 다른 신규 좌표는 최종 재조회에서 노출하지 않는다")
+    void refreshCurrentlyPublicHidesCoordinatesVerifiedForANewerAddressVersion() {
+        Store moved = createStore("주소 변경", Region.SEOUL, "KOREAN", false);
+        setVerifiedCoordinates(moved, "37.566500000000000", "126.978000000000000");
+        flushAndClear();
+        StoreSearchCandidate candidate = repository.searchAll(
+                        query("주소 변경", null, null, "name,asc", 0, 20), 100)
+                .getFirst();
+
+        jdbcTemplate.update("""
+                UPDATE stores
+                SET address = '변경된 주소',
+                    address_version = address_version + 1,
+                    geocoding_status = 'UNVERIFIED',
+                    latitude = NULL,
+                    longitude = NULL,
+                    verified_address = NULL,
+                    geocoding_verified_at = NULL,
+                    geocoding_address_version = NULL
+                WHERE store_id = ?
+                """, moved.getId());
+        setVerifiedCoordinates(moved, "35.179600000000000", "129.075600000000000");
+
+        assertThat(repository.refreshCurrentlyPublic(List.of(candidate)))
+                .singleElement()
+                .satisfies(refreshed -> {
+                    assertThat(refreshed.address()).isEqualTo("테스트 주소");
+                    assertThat(refreshed.latitude()).isNull();
+                    assertThat(refreshed.longitude()).isNull();
+                });
+    }
+
+    @Test
+    @Transactional
     void refreshCurrentlyPublicPreservesRegionAfterConcurrentRegionChange() {
         Store moved = createStore("지역 이동", Region.SEOUL, "KOREAN", false);
         flushAndClear();

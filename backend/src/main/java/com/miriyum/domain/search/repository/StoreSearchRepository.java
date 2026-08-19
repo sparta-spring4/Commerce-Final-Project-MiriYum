@@ -31,6 +31,7 @@ public class StoreSearchRepository {
                    s.name,
                    s.region,
                    s.address,
+                   s.address_version,
                    s.store_category_code,
                    s.operation_status,
                    s.reservation_enabled,
@@ -173,7 +174,7 @@ public class StoreSearchRepository {
         }
         List<Long> storeIds = candidates.stream().map(StoreSearchCandidate::storeId).toList();
         List<CurrentPublicState> current = jdbcTemplate.query("""
-                SELECT store_id, operation_status, reservation_enabled,
+                SELECT store_id, address_version, operation_status, reservation_enabled,
                        menu_hold_enabled, pickup_enabled,
                        CASE
                            WHEN geocoding_status = 'VERIFIED'
@@ -194,6 +195,7 @@ public class StoreSearchRepository {
                 """, new MapSqlParameterSource("storeIds", storeIds),
                 (resultSet, rowNumber) -> new CurrentPublicState(
                         resultSet.getLong("store_id"),
+                        resultSet.getLong("address_version"),
                         OperationStatus.valueOf(resultSet.getString("operation_status")),
                         resultSet.getBoolean("reservation_enabled"),
                         resultSet.getBoolean("menu_hold_enabled"),
@@ -215,19 +217,21 @@ public class StoreSearchRepository {
         if (current == null) {
             return null;
         }
+        boolean sameAddressVersion = candidate.addressVersion() == current.addressVersion();
         return new StoreSearchCandidate(
                 candidate.storeId(),
                 candidate.name(),
                 candidate.region(),
                 candidate.address(),
+                candidate.addressVersion(),
                 candidate.storeCategoryCode(),
                 current.operationStatus(),
                 current.reservationEnabled(),
                 current.menuHoldEnabled(),
                 current.pickupEnabled(),
                 candidate.createdAt(),
-                current.latitude(),
-                current.longitude());
+                sameAddressVersion ? current.latitude() : null,
+                sameAddressVersion ? current.longitude() : null);
     }
 
     private static MapSqlParameterSource parameters(StoreSearchQuery query) {
@@ -246,6 +250,7 @@ public class StoreSearchRepository {
                 resultSet.getString("name"),
                 Region.valueOf(resultSet.getString("region")),
                 resultSet.getString("address"),
+                resultSet.getLong("address_version"),
                 resultSet.getString("store_category_code"),
                 OperationStatus.valueOf(resultSet.getString("operation_status")),
                 resultSet.getBoolean("reservation_enabled"),
@@ -258,6 +263,7 @@ public class StoreSearchRepository {
 
     private record CurrentPublicState(
             long storeId,
+            long addressVersion,
             OperationStatus operationStatus,
             boolean reservationEnabled,
             boolean menuHoldEnabled,
