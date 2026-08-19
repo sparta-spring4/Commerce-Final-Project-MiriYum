@@ -9,7 +9,11 @@ import {
   isNetworkError,
 } from './apiError'
 import { CommonErrorCode } from './envelope'
-import { createApiClient, type ApiClientDependencies } from './client'
+import {
+  createApiClient,
+  type ApiClientDependencies,
+  type RequestOptions,
+} from './client'
 import { IDEMPOTENCY_KEY_HEADER } from './idempotencyKey'
 
 const CATEGORIES = '/api/v1/store-categories'
@@ -23,6 +27,21 @@ function client(dependencies: ApiClientDependencies = {}) {
 function getCategories(dependencies: ApiClientDependencies = {}) {
   return client(dependencies)(CATEGORIES, { method: 'get' })
 }
+
+type CategoryGetOptions = RequestOptions<typeof CATEGORIES, 'get'>
+
+const categoryNoContentOptions: CategoryGetOptions = {
+  method: 'get',
+  // @ts-expect-error 카테고리 GET은 OpenAPI에 204를 선언하지 않았다.
+  allowNoContent: true,
+}
+const categoryMultipartOptions: CategoryGetOptions = {
+  method: 'get',
+  // @ts-expect-error 카테고리 GET은 OpenAPI에 multipart를 선언하지 않았다.
+  multipart: new FormData(),
+}
+void categoryNoContentOptions
+void categoryMultipartOptions
 
 describe('성공 봉투', () => {
   test('code·message·data를 구분해 노출한다', async () => {
@@ -111,13 +130,13 @@ describe('성공 봉투 검증 — 2xx라도 통과시키지 않는다', () => {
     expect((error as { violation: string }).violation).toBe('notAnObject')
   })
 
-  // 계약에 204를 선언한 operation이 없다. 본문 없는 2xx는 계약 위반이다.
-  test('본문 없는 204를 성공으로 통과시키지 않는다', async () => {
+  test('204는 operation이 허용한 경우에만 성공으로 처리한다', async () => {
     server.use(http.get(CATEGORIES, () => new HttpResponse(null, { status: 204 })))
 
     const error = await getCategories().catch((thrown: unknown) => thrown)
 
     expect(isApiContractError(error)).toBe(true)
+
   })
 
   test('계약 위반을 서버 오류 코드로 위장하지 않는다', async () => {

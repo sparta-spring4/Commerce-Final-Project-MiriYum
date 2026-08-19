@@ -19,6 +19,7 @@ import { storeErrorMessage } from '../model/storeErrors'
 import type { ManagedMenu } from '../model/types'
 import { MenuCommandPanel } from './MenuCommandPanel'
 import { MenuContentForm } from './MenuContentForm'
+import { MenuImagePanel } from './MenuImagePanel'
 import { PageHeader } from './PageHeader'
 
 /**
@@ -192,11 +193,14 @@ function MenuEditor({
               </p>
             </Alert>
           ) : (
-            <MenuCommandPanel
-              storeId={storeId}
-              menu={menu}
-              timeZoneId={timeZoneId}
-            />
+            <>
+              <MenuImagePanel storeId={storeId} menuId={menu.menuId} />
+              <MenuCommandPanel
+                storeId={storeId}
+                menu={menu}
+                timeZoneId={timeZoneId}
+              />
+            </>
           )}
         </div>
       </div>
