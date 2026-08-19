@@ -125,6 +125,27 @@
 
 각 shell은 `GET .../csrf-tokens/current`로 namespace별 CSRF 토큰을 준비한다. 응답 `data.token`과 같은 값이 해당 namespace의 CSRF 쿠키에 설정된다. CSRF 토큰은 인증 자격이나 비밀 값이 아니며 Refresh JWT와 분리한다.
 
+### 고도화 Kakao identity fingerprint 운영 경계
+
+- Kakao provider subject 원문은 계정 link 원장·응답·로그에 저장하지 않는다. Auth는
+  key version을 포함한 HMAC fingerprint로만 link를 찾고 저장한다.
+- Kakao 로그인을 켤 때 active key version과 active secret은 둘 다 필요하다. 둘 중
+  하나라도 비어 있으면 인증 흐름은 `COMMON_012`로 실패 폐쇄한다. 값 자체는
+  source control, task definition 일반 environment, 로그, Issue와 PR에 남기지
+  않는다.
+- key rotation은 새 active version/secret을 설치하고, 직전 version/secret을
+  previous pair로 함께 제공하는 기간에만 허용한다. previous version과 secret은
+  모두 비어 있거나 모두 설정돼야 하며, 한쪽만 설정하면 요청을 성공으로
+  처리하지 않는다.
+- 이전 fingerprint로 찾은 link는 같은 provider subject에 대한 active fingerprint로
+  원자적으로 이행한다. 이전 pair를 제거하기 전에는 실행 중인 모든 backend가 새
+  active pair와 동일한 previous pair를 사용하고, 이전 link의 이행 근거를 확인한다.
+- "기존 계정이 가입 화면으로 감"은 browser Kakao session, account link, deployed
+  image, active key version을 분리해 진단한다. browser session 문제를 해결하려고
+  fingerprint secret을 임의 교체하지 않는다. 상세 점검 절차는
+  [staging runtime troubleshooting](../../deployment/staging-runtime-troubleshooting.md)을
+  따른다.
+
 ## 멱등성과 요청 제한
 
 - 본인 정보 `PATCH`는 C-006의 `Idempotency-Key`를 요구한다.
@@ -180,6 +201,31 @@
 - 예약 도메인은 상태·날짜 필터, 정렬, 예약 스냅샷 DTO와 개인 자원 404 규칙을 소유한다.
 - 다른 사용자의 예약이나 매장 전체 예약을 이 경로로 조회할 수 없다.
 - 결과가 없으면 `200 OK`, `items: []`와 페이지 메타데이터를 반환한다.
+
+### 마이페이지 조합 경계
+
+- 일반 사용자 보호 route `/mypage`는 consumer shell의 인증 guard 뒤에서만 연다.
+  인증되지 않은 요청은 로그인 흐름으로 이동하며, URL이나 요청 본문으로 다른
+  `consumerAccountId`를 선택하지 않는다.
+- Account가 소유하는 화면은 `GET /api/v1/consumers/me` 프로필, 닉네임 수정
+  `PATCH /api/v1/consumers/me`, 그리고 `phoneNumber=null`일 때의 최초 연락처
+  등록 `PUT /api/v1/consumers/me/contact`이다. 이메일·등록된 연락처·비밀번호의
+  변경 UI는 이 범위에 없다.
+- 닉네임 수정과 최초 연락처 등록은 각각 같은 사용자 의도의 재시도에 같은
+  `Idempotency-Key`를 유지한다. 결과가 불명인 뒤 입력을 바꾼 새 요청은 자동
+  전송하지 않고 사용자가 새로고침해 현재 상태를 확인하도록 안내한다.
+- 마이페이지는 [예약 명세](../reservation/spec.md)의 내 예약 링크,
+  [결제 명세](../payment/spec.md)의 최근 결제 읽기,
+  [웨이팅 명세](../waiting/spec.md)의 현재 상태 읽기,
+  [알림 명세](../notification/spec.md)의 알림 이력 링크를 조합한다. 각
+  도메인의 API DTO, 상태 전이, 빈 결과 의미와 오류 코드는 원 소유 명세가
+  유지한다.
+- 프로필·최근 결제·현재 웨이팅은 서로 독립적으로 로딩·빈 상태·오류·재시도를
+  표시한다. 결제 내역이 비어 있거나 현재 웨이팅이 없다는 성공 응답은 오류로
+  표시하지 않는다. 과거 웨이팅, 픽업 내역, 환불 내역, 비밀번호 변경처럼 공개
+  계약 또는 route가 없는 항목은 빈 카드나 준비 중 버튼으로 노출하지 않는다.
+- 휴대전화는 서버가 마스킹한 값만 표시한다. 마이페이지 화면은 Access/Refresh
+  토큰, CSRF 값, Kakao 식별자, 연락처 원문을 표시·로그·분석에 남기지 않는다.
 - `status` 필터는 1차 MVP의 영속·공개 상태인 `CONFIRMED`, `CANCELLED`, `FULFILLED`만 공개한다.
 - 결제·환불·노쇼·체크인 필드는 포함하지 않는다.
 
