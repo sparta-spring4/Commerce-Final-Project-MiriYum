@@ -3,6 +3,7 @@ import type { paths as AuthAccountPaths } from './generated/auth-account'
 import type { paths as MemberSupportPaths } from './generated/member-support'
 import type { paths as MenuHoldPickupPaths } from './generated/menu-hold-pickup'
 import type { paths as NotificationPaths } from './generated/notification'
+import type { paths as PaymentPaths } from './generated/payment'
 import type { paths as PlatformOperatorAuthPaths } from './generated/platform-operator-auth'
 import type { paths as PlatformOperatorAuthorizationPaths } from './generated/platform-operator-authorization'
 import type { paths as PlatformOperatorCapabilitiesPaths } from './generated/platform-operator-capabilities'
@@ -27,6 +28,7 @@ type PathDocs = [
   AuthAccountPaths,
   StoreSearchPaths,
   ReservationPaths,
+  PaymentPaths,
   MenuHoldPickupPaths,
   NotificationPaths,
   PlatformOperatorAuthPaths,
