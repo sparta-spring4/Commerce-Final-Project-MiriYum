@@ -1,11 +1,14 @@
 package com.miriyum.domain.menuhold.dto;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 public final class MenuHoldMonitoringContracts {
+
+    private static final Duration MAX_CHANGE_RANGE = Duration.ofDays(31);
 
     private MenuHoldMonitoringContracts() {
     }
@@ -45,6 +48,9 @@ public final class MenuHoldMonitoringContracts {
             requireInstant(changedTo, "changedTo");
             if (changedFrom.isAfter(changedTo) || changedTo.isAfter(asOf)) {
                 throw new IllegalArgumentException("invalid change range");
+            }
+            if (Duration.between(changedFrom, changedTo).compareTo(MAX_CHANGE_RANGE) > 0) {
+                throw new IllegalArgumentException("change range exceeds 31 days");
             }
             if (storeId != null) {
                 requirePositiveId(storeId, "storeId");

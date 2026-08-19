@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.miriyum.domain.payment.dto.PaymentMonitoringContracts;
 import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import java.lang.reflect.RecordComponent;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
@@ -54,6 +55,18 @@ class PaymentMonitoringPublicContractTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new PaymentMonitoringContracts.BatchQuery(
                 AS_OF, List.of("payment:1")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void changeQueryAllowsExactlyThirtyOneDaysAndRejectsAnyLongerRange() {
+        assertThat(new PaymentMonitoringContracts.ChangeQuery(
+                AS_OF, AS_OF.minus(Duration.ofDays(31)), AS_OF,
+                null, Set.of(), null, 20)).isNotNull();
+
+        assertThatThrownBy(() -> new PaymentMonitoringContracts.ChangeQuery(
+                AS_OF, AS_OF.minus(Duration.ofDays(31)).minusNanos(1), AS_OF,
+                null, Set.of(), null, 20))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

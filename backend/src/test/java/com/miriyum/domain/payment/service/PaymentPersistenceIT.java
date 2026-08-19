@@ -45,6 +45,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -1642,6 +1643,43 @@ class PaymentPersistenceIT {
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(PaymentErrorCode.SOURCE_EXPIRED);
+    }
+
+    @Test
+    @DisplayName("V65 이전 준비 fingerprint는 동일 store replay만 허용한다")
+    void replaysLegacyPreparationFingerprintOnlyForThePersistedStore() throws Exception {
+        Instant expiresAt = Instant.now().plusSeconds(7_200).truncatedTo(ChronoUnit.MICROS);
+        Instant createdAt = expiresAt.minusSeconds(3_600);
+        String idempotencyKey = UUID.nameUUIDFromBytes(
+                "legacy-prepare:129".getBytes(StandardCharsets.UTF_8)).toString();
+        String legacyFingerprint = sha256("129\n11\n30000\nKRW\n"
+                + expiresAt.truncatedTo(ChronoUnit.MICROS) + "\n7");
+        jdbcTemplate.update("""
+                INSERT INTO payments (
+                    payment_id, source_type, source_reference_id, store_id,
+                    source_policy_version, source_expires_at,
+                    preparation_idempotency_key, preparation_request_fingerprint,
+                    consumer_account_id, amount_minor, refunded_amount_minor, currency,
+                    portone_payment_id, order_name, status, last_attempt_status,
+                    created_at, updated_at, version
+                ) VALUES (?, 'RESERVATION_DEPOSIT', '129', 12, 7, ?, ?, ?,
+                          11, 30000, 0, 'KRW', ?, ?, 'READY', 'NOT_STARTED', ?, ?, 0)
+                """,
+                "900000000000000129", Timestamp.from(expiresAt), idempotencyKey,
+                legacyFingerprint, "payment-reservation-900000000000000129",
+                "MiriYum 예약금 129", Timestamp.from(createdAt), Timestamp.from(createdAt));
+        PrepareReservationDepositCommand original = new PrepareReservationDepositCommand(
+                "129", 12L, 11L, 30_000L, "KRW", expiresAt, 7L, idempotencyKey);
+
+        PaymentPreparation replay = paymentService.prepareReservationDeposit(original);
+
+        assertThat(replay.paymentId()).isEqualTo("900000000000000129");
+        assertThatThrownBy(() -> paymentService.prepareReservationDeposit(
+                new PrepareReservationDepositCommand(
+                        "129", 13L, 11L, 30_000L, "KRW", expiresAt, 7L, idempotencyKey)))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
     }
 
     @Test

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.domain.reservation.dto.contract.ReservationMonitoringContracts;
 import java.lang.reflect.RecordComponent;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
@@ -41,6 +42,18 @@ class ReservationMonitoringPublicContractTest {
         assertThatThrownBy(() -> new ReservationMonitoringContracts.BatchQuery(
                 AS_OF, java.util.stream.IntStream.rangeClosed(1, 101)
                 .mapToObj(id -> "reservation:" + id).toList()))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void changeQueryAllowsExactlyThirtyOneDaysAndRejectsAnyLongerRange() {
+        assertThat(new ReservationMonitoringContracts.ChangeQuery(
+                AS_OF, AS_OF.minus(Duration.ofDays(31)), AS_OF,
+                null, Set.of(), null, 20)).isNotNull();
+
+        assertThatThrownBy(() -> new ReservationMonitoringContracts.ChangeQuery(
+                AS_OF, AS_OF.minus(Duration.ofDays(31)).minusNanos(1), AS_OF,
+                null, Set.of(), null, 20))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

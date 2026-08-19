@@ -254,6 +254,7 @@ public class PaymentTransactionService {
                 command.sourcePolicyVersion(),
                 command.idempotencyKey(),
                 preparationFingerprint(command),
+                legacyPreparationFingerprint(command),
                 now
         );
     }
@@ -275,6 +276,7 @@ public class PaymentTransactionService {
                 command.sourcePolicyVersion(),
                 command.idempotencyKey(),
                 preparationFingerprint(command),
+                legacyPreparationFingerprint(command),
                 now
         );
     }
@@ -290,6 +292,7 @@ public class PaymentTransactionService {
             long sourcePolicyVersion,
             String idempotencyKey,
             String fingerprint,
+            String legacyFingerprint,
             Instant now
     ) {
         if (!sourceExpiresAt.isAfter(now)) {
@@ -300,7 +303,8 @@ public class PaymentTransactionService {
                 idempotencyKey
         ).orElse(null);
         if (idempotent != null) {
-            if (idempotent.getPreparationRequestFingerprint().equals(fingerprint)) {
+            if (matchesPreparationFingerprint(
+                    idempotent, storeId, fingerprint, legacyFingerprint)) {
                 return toPreparation(idempotent);
             }
             throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
@@ -347,8 +351,10 @@ public class PaymentTransactionService {
         return replayPreparation(
                 RESERVATION_DEPOSIT,
                 command.sourceReferenceId(),
+                command.storeId(),
                 command.idempotencyKey(),
-                preparationFingerprint(command)
+                preparationFingerprint(command),
+                legacyPreparationFingerprint(command)
         );
     }
 
@@ -360,23 +366,28 @@ public class PaymentTransactionService {
         return replayPreparation(
                 WAITING_RESERVATION_DEPOSIT,
                 command.sourceReferenceId(),
+                command.storeId(),
                 command.idempotencyKey(),
-                preparationFingerprint(command)
+                preparationFingerprint(command),
+                legacyPreparationFingerprint(command)
         );
     }
 
     private PaymentPreparation replayPreparation(
             String sourceType,
             String sourceReferenceId,
+            long storeId,
             String idempotencyKey,
-            String fingerprint
+            String fingerprint,
+            String legacyFingerprint
     ) {
         Payment idempotent = payments.findBySourceTypeAndPreparationIdempotencyKey(
                 sourceType,
                 idempotencyKey
         ).orElse(null);
         if (idempotent != null) {
-            if (idempotent.getPreparationRequestFingerprint().equals(fingerprint)) {
+            if (matchesPreparationFingerprint(
+                    idempotent, storeId, fingerprint, legacyFingerprint)) {
                 return toPreparation(idempotent);
             }
             throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
@@ -1628,6 +1639,32 @@ public class PaymentTransactionService {
         );
     }
 
+    private static String legacyPreparationFingerprint(
+            PrepareReservationDepositCommand command
+    ) {
+        return legacyPreparationFingerprint(
+                command.sourceReferenceId(),
+                command.consumerAccountId(),
+                command.amountMinor(),
+                command.currency(),
+                command.sourceExpiresAt(),
+                command.sourcePolicyVersion()
+        );
+    }
+
+    private static String legacyPreparationFingerprint(
+            PrepareWaitingReservationDepositCommand command
+    ) {
+        return legacyPreparationFingerprint(
+                command.sourceReferenceId(),
+                command.consumerAccountId(),
+                command.amountMinor(),
+                command.currency(),
+                command.sourceExpiresAt(),
+                command.sourcePolicyVersion()
+        );
+    }
+
     private static String preparationFingerprint(
             String sourceReferenceId,
             long storeId,
@@ -1641,6 +1678,32 @@ public class PaymentTransactionService {
                 + "\n" + amountMinor + "\n" + currency
                 + "\n" + sourceExpiresAt.truncatedTo(ChronoUnit.MICROS)
                 + "\n" + sourcePolicyVersion);
+    }
+
+    private static String legacyPreparationFingerprint(
+            String sourceReferenceId,
+            long consumerAccountId,
+            long amountMinor,
+            String currency,
+            Instant sourceExpiresAt,
+            long sourcePolicyVersion
+    ) {
+        return sha256(sourceReferenceId + "\n" + consumerAccountId
+                + "\n" + amountMinor + "\n" + currency
+                + "\n" + sourceExpiresAt.truncatedTo(ChronoUnit.MICROS)
+                + "\n" + sourcePolicyVersion);
+    }
+
+    private static boolean matchesPreparationFingerprint(
+            Payment payment,
+            long requestedStoreId,
+            String fingerprint,
+            String legacyFingerprint
+    ) {
+        String persistedFingerprint = payment.getPreparationRequestFingerprint();
+        return persistedFingerprint.equals(fingerprint)
+                || (payment.getStoreId() == requestedStoreId
+                && persistedFingerprint.equals(legacyFingerprint));
     }
 
     private static String confirmationFingerprint(ConfirmPaymentCommand command) {

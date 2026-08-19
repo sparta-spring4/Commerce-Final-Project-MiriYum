@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.domain.menuhold.dto.MenuHoldMonitoringContracts;
 import java.lang.reflect.RecordComponent;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
@@ -43,6 +44,18 @@ class MenuHoldMonitoringPublicContractTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new MenuHoldMonitoringContracts.ChangeQuery(
                 AS_OF, AS_OF.minusSeconds(1), AS_OF, null, Set.of(), null, 101))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void changeQueryAllowsExactlyThirtyOneDaysAndRejectsAnyLongerRange() {
+        assertThat(new MenuHoldMonitoringContracts.ChangeQuery(
+                AS_OF, AS_OF.minus(Duration.ofDays(31)), AS_OF,
+                null, Set.of(), null, 20)).isNotNull();
+
+        assertThatThrownBy(() -> new MenuHoldMonitoringContracts.ChangeQuery(
+                AS_OF, AS_OF.minus(Duration.ofDays(31)).minusNanos(1), AS_OF,
+                null, Set.of(), null, 20))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

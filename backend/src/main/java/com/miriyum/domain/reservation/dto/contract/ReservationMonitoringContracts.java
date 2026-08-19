@@ -1,11 +1,14 @@
 package com.miriyum.domain.reservation.dto.contract;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 public final class ReservationMonitoringContracts {
+
+    private static final Duration MAX_CHANGE_RANGE = Duration.ofDays(31);
 
     private ReservationMonitoringContracts() {
     }
@@ -173,6 +176,9 @@ public final class ReservationMonitoringContracts {
     private static void boundary(Instant asOf, Instant from, Instant to) {
         time(asOf, "asOf"); time(from, "changedFrom"); time(to, "changedTo");
         if (from.isAfter(to) || to.isAfter(asOf)) throw new IllegalArgumentException("invalid range");
+        if (Duration.between(from, to).compareTo(MAX_CHANGE_RANGE) > 0) {
+            throw new IllegalArgumentException("change range exceeds 31 days");
+        }
     }
 
     private static void through(Instant asOf, Instant dataThrough) {

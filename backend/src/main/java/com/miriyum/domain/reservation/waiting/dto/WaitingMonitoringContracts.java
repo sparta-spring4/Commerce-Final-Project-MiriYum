@@ -1,5 +1,6 @@
 package com.miriyum.domain.reservation.waiting.dto;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -7,6 +8,8 @@ import java.util.Set;
 
 /** Waiting이 플랫폼 모니터링 계층에 공개하는 최소 조회 계약이다. */
 public final class WaitingMonitoringContracts {
+
+    private static final Duration MAX_CHANGE_RANGE = Duration.ofDays(31);
 
     private WaitingMonitoringContracts() {
     }
@@ -46,6 +49,9 @@ public final class WaitingMonitoringContracts {
             requireInstant(changedTo, "changedTo");
             if (changedFrom.isAfter(changedTo) || changedTo.isAfter(asOf)) {
                 throw new IllegalArgumentException("invalid change range");
+            }
+            if (Duration.between(changedFrom, changedTo).compareTo(MAX_CHANGE_RANGE) > 0) {
+                throw new IllegalArgumentException("change range exceeds 31 days");
             }
             if (storeId != null) requirePositiveId(storeId, "storeId");
             sourceStatuses = sourceStatuses == null ? Set.of() : Set.copyOf(sourceStatuses);
