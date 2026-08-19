@@ -45,6 +45,13 @@ management:
       show-details: never
 
 miriyum:
+  cloudwatch-metrics:
+    # Spring Boot 4에는 CloudWatch registry 자동 설정이 없으므로 CloudWatchMetricsConfig가 이
+    # 설정으로 registry를 직접 만든다. LLM meter 이외에는 CloudWatch로 전송하지 않는다.
+    enabled: ${MIRIYUM_CLOUDWATCH_METRICS_ENABLED:false}
+    namespace: ${MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE:MiriYum}
+    region: ${MIRIYUM_CLOUDWATCH_METRICS_REGION:ap-northeast-2}
+    step: ${MIRIYUM_CLOUDWATCH_METRICS_STEP:1m}
   platform-operator:
     enabled: ${MIRIYUM_PLATFORM_OPERATOR_ENABLED:false}
     reauthentication-fingerprint-secret: ${MIRIYUM_PLATFORM_OPERATOR_REAUTH_FINGERPRINT_SECRET:}
