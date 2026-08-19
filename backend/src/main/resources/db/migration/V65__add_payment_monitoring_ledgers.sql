@@ -4,23 +4,28 @@ ALTER TABLE payments
     ADD monitoring_case_reference_id VARCHAR(19) NULL AFTER monitoring_case_type;
 
 -- V55 이후 deposit process가 있으면 그 hold link가 정본이다.
--- process가 없는 구세대 payment는 payment 생성 시점에 이미 존재한 상관관계만 후보로 삼고,
--- Reservation 또는 ReservationHold 한쪽만 식별될 때만 backfill한다.
+-- process가 없는 구세대 hold payment는 consumer와 생성 명령 ID로 실제 관계를 복원한다.
+-- 독립 숫자 PK가 같은 Reservation은 이 관계보다 우선할 수 없다.
 UPDATE payments p
 LEFT JOIN reservation_deposit_processes rdp
     ON p.source_type = 'RESERVATION_DEPOSIT'
    AND rdp.payment_id = p.payment_id
 LEFT JOIN reservation_holds process_hold
     ON process_hold.reservation_hold_id = rdp.reservation_hold_id
-LEFT JOIN reservation_holds legacy_hold
+LEFT JOIN reservation_holds correlated_hold
     ON p.source_type = 'RESERVATION_DEPOSIT'
    AND rdp.reservation_deposit_process_id IS NULL
-   AND legacy_hold.reservation_hold_id = CAST(p.source_reference_id AS UNSIGNED)
-   AND legacy_hold.created_at <= p.created_at
+   AND correlated_hold.reservation_hold_id = CAST(p.source_reference_id AS UNSIGNED)
+   AND correlated_hold.consumer_account_id = p.consumer_account_id
+   AND correlated_hold.creation_command_id = CONCAT(
+        'reservation-deposit-create:', p.preparation_idempotency_key
+   )
+   AND correlated_hold.created_at <= p.created_at
 LEFT JOIN reservations direct_reservation
     ON p.source_type = 'RESERVATION_DEPOSIT'
    AND rdp.reservation_deposit_process_id IS NULL
    AND direct_reservation.reservation_id = CAST(p.source_reference_id AS UNSIGNED)
+   AND direct_reservation.consumer_account_id = p.consumer_account_id
    AND direct_reservation.created_at <= p.created_at
 LEFT JOIN waiting_teams wt
     ON p.source_type = 'WAITING_RESERVATION_DEPOSIT'
@@ -30,13 +35,11 @@ SET p.store_id = CASE
          AND rdp.reservation_deposit_process_id IS NOT NULL
         THEN process_hold.store_id
     WHEN p.source_type = 'RESERVATION_DEPOSIT'
-         AND direct_reservation.reservation_id IS NOT NULL
-         AND legacy_hold.reservation_hold_id IS NULL
-        THEN direct_reservation.store_id
+         AND correlated_hold.reservation_hold_id IS NOT NULL
+        THEN correlated_hold.store_id
     WHEN p.source_type = 'RESERVATION_DEPOSIT'
-         AND legacy_hold.reservation_hold_id IS NOT NULL
-         AND direct_reservation.reservation_id IS NULL
-        THEN legacy_hold.store_id
+         AND direct_reservation.reservation_id IS NOT NULL
+        THEN direct_reservation.store_id
     WHEN p.source_type = 'WAITING_RESERVATION_DEPOSIT' THEN wt.store_id
     ELSE NULL
 END,
@@ -45,13 +48,11 @@ p.monitoring_case_type = CASE
          AND rdp.reservation_deposit_process_id IS NOT NULL
         THEN 'RESERVATION_HOLD'
     WHEN p.source_type = 'RESERVATION_DEPOSIT'
-         AND direct_reservation.reservation_id IS NOT NULL
-         AND legacy_hold.reservation_hold_id IS NULL
-        THEN 'RESERVATION'
-    WHEN p.source_type = 'RESERVATION_DEPOSIT'
-         AND legacy_hold.reservation_hold_id IS NOT NULL
-         AND direct_reservation.reservation_id IS NULL
+         AND correlated_hold.reservation_hold_id IS NOT NULL
         THEN 'RESERVATION_HOLD'
+    WHEN p.source_type = 'RESERVATION_DEPOSIT'
+         AND direct_reservation.reservation_id IS NOT NULL
+        THEN 'RESERVATION'
     WHEN p.source_type = 'WAITING_RESERVATION_DEPOSIT' THEN 'WAITING'
     ELSE NULL
 END,
@@ -60,13 +61,11 @@ p.monitoring_case_reference_id = CASE
          AND rdp.reservation_deposit_process_id IS NOT NULL
         THEN CAST(rdp.reservation_hold_id AS CHAR)
     WHEN p.source_type = 'RESERVATION_DEPOSIT'
-         AND direct_reservation.reservation_id IS NOT NULL
-         AND legacy_hold.reservation_hold_id IS NULL
-        THEN CAST(direct_reservation.reservation_id AS CHAR)
+         AND correlated_hold.reservation_hold_id IS NOT NULL
+        THEN CAST(correlated_hold.reservation_hold_id AS CHAR)
     WHEN p.source_type = 'RESERVATION_DEPOSIT'
-         AND legacy_hold.reservation_hold_id IS NOT NULL
-         AND direct_reservation.reservation_id IS NULL
-        THEN CAST(legacy_hold.reservation_hold_id AS CHAR)
+         AND direct_reservation.reservation_id IS NOT NULL
+        THEN CAST(direct_reservation.reservation_id AS CHAR)
     WHEN p.source_type = 'WAITING_RESERVATION_DEPOSIT'
         THEN CAST(wt.waiting_team_id AS CHAR)
     ELSE NULL

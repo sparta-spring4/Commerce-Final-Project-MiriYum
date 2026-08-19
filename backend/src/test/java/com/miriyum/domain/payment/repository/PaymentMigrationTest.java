@@ -50,6 +50,49 @@ class PaymentMigrationTest {
     }
 
     @Test
+    @DisplayName("V65는 더 오래된 무관 Reservation과 ID가 겹쳐도 생성 명령으로 legacy hold를 복원한다")
+    void v65UsesHoldCreationCommandWhenReservationIdNamespaceOverlaps() throws Exception {
+        try (MySQLContainer mysql = new MySQLContainer(MYSQL_IMAGE)
+                .withCommand("--log-bin-trust-function-creators=1")) {
+            mysql.start();
+            Flyway.configure()
+                    .dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())
+                    .target(MigrationVersion.fromVersion("64"))
+                    .load()
+                    .migrate();
+            insertExistingConsumer(mysql);
+            try (Connection connection = mysql.createConnection("")) {
+                insertExistingReservationHoldCorrelation(connection);
+                insertOlderUnrelatedReservationWithHoldId(connection);
+                insertLegacyPayment(
+                        connection,
+                        "900000000000000001",
+                        "payment-reservation-900000000000000001");
+            }
+
+            Flyway.configure()
+                    .dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())
+                    .load()
+                    .migrate();
+
+            try (Connection connection = mysql.createConnection("")) {
+                assertThat(singleLong(connection, """
+                        SELECT store_id FROM payments
+                         WHERE payment_id = '900000000000000001'
+                        """)).isEqualTo(12L);
+                assertThat(singleString(connection, """
+                        SELECT monitoring_case_type FROM payments
+                         WHERE payment_id = '900000000000000001'
+                        """)).isEqualTo("RESERVATION_HOLD");
+                assertThat(singleString(connection, """
+                        SELECT monitoring_case_reference_id FROM payments
+                         WHERE payment_id = '900000000000000001'
+                        """)).isEqualTo("123");
+            }
+        }
+    }
+
+    @Test
     @DisplayName("실제 MySQL V28 데이터를 보존하며 Payment V30과 분리 공개 ID 채번을 적용한다")
     void upgradesV28ToPaymentRuntimeV30() throws Exception {
         try (MySQLContainer mysql = new MySQLContainer(MYSQL_IMAGE)
@@ -387,7 +430,8 @@ class PaymentMigrationTest {
                         'Asia/Seoul', 32400, 32400, 32400,
                         30, 60, 0, 12, 1, 2, 0, 0,
                         'migration-contact', TRUE, 1, 1,
-                        'ACTIVE', 0, 'payment-migration-hold',
+                        'ACTIVE', 0,
+                        'reservation-deposit-create:550e8400-e29b-41d4-a716-00000000001',
                         '2026-08-19 00:00:00', '2026-08-19 00:10:00'
                     )
                     """);
@@ -427,6 +471,29 @@ class PaymentMigrationTest {
                         '2026-08-21', '12:00:00', '13:00:00',
                         2, 0, 0, 'migration-contact', TRUE, 1, 1,
                         'CONFIRMED', DATE_ADD(NOW(6), INTERVAL 1 DAY)
+                    )
+                    """);
+            statement.execute("SET FOREIGN_KEY_CHECKS = 1");
+        }
+    }
+
+    private static void insertOlderUnrelatedReservationWithHoldId(Connection connection)
+            throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("SET FOREIGN_KEY_CHECKS = 0");
+            statement.executeUpdate("""
+                    INSERT INTO reservations (
+                        reservation_id, consumer_account_id, store_id, store_name_snapshot,
+                        service_date, start_time, end_time,
+                        adult_count, child_count, infant_count,
+                        notification_target_reference, contact_available_at_confirmation,
+                        capacity_policy_version, reservation_policy_version,
+                        status, created_at
+                    ) VALUES (
+                        123, 10001, 14, 'older unrelated reservation',
+                        '2026-08-21', '12:00:00', '13:00:00',
+                        2, 0, 0, 'migration-contact', TRUE, 1, 1,
+                        'CONFIRMED', '2026-08-18 00:00:00'
                     )
                     """);
             statement.execute("SET FOREIGN_KEY_CHECKS = 1");
