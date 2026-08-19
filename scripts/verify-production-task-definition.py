@@ -70,11 +70,22 @@ def validate(contract_path, task_definition_path, application_config_path=None):
                 errors.append(f"Missing environment value: {name}")
 
     parameter_secrets = set(contract.get("parameterSecrets", []))
+    parameter_reference_paths = contract.get("parameterReferencePaths", {})
     secret_prefixes = set()
     for name, value_from in secrets.items():
         if name in parameter_secrets:
-            if not value_from or value_from.endswith(f":{name}::"):
-                errors.append(f"Parameter reference must not select a JSON key: {name}")
+            expected_path = parameter_reference_paths.get(name)
+            if not expected_path:
+                errors.append(f"Missing parameter reference contract entry: {name}")
+                continue
+            if value_from == "REPLACE_WITH_OPENAI_API_KEY_PARAMETER_ARN":
+                continue
+            parameter_match = re.fullmatch(
+                r"arn:aws:ssm:[a-z0-9-]+:\d{12}:parameter/(.+)",
+                value_from,
+            )
+            if not parameter_match or parameter_match.group(1) != expected_path:
+                errors.append(f"Parameter reference does not match contract path: {name}")
             continue
         if not value_from.endswith(f":{name}::"):
             errors.append(f"Secret reference must select its matching JSON key: {name}")
