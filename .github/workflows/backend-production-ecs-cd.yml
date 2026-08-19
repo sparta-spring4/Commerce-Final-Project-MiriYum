@@ -249,7 +249,7 @@ jobs:
 
           llm_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
             [.containerDefinitions[] | select(.name == $container) | .environment[]?
-              | select(.name == "MIRIYUM_STORE_SEARCH_LLM_ENABLED") | .value][0] // "true"
+              | select(.name == "MIRIYUM_STORE_SEARCH_LLM_ENABLED") | .value][0] // "false"
           ' current-task-definition.json)
           if [ "$llm_enabled" != "true" ] && [ "$llm_enabled" != "false" ]; then
             echo "::error::Current task definition has an invalid MIRIYUM_STORE_SEARCH_LLM_ENABLED value."

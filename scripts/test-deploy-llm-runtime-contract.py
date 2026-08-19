@@ -13,11 +13,16 @@ class DeployLlmRuntimeContractTest(unittest.TestCase):
 
     def test_explicitly_disabled_llm_skips_ssm_and_removes_stale_key(self):
         disabled_branch = self.script.split(
-            'if [[ "${llm_enabled:-true}" == "false" ]]; then', 1
-        )[1].split("fi", 1)[0]
+            'case "${llm_enabled}" in', 1
+        )[1].split("esac", 1)[0]
         self.assertIn("awk '!/^OPENAI_API_KEY=/'", disabled_branch)
         self.assertIn("return 0", disabled_branch)
         self.assertNotIn("aws ssm get-parameter", disabled_branch)
+
+    def test_missing_llm_flag_defaults_to_disabled_before_synchronizing_openai(self):
+        self.assertIn('llm_enabled="${llm_enabled:-false}"', self.script)
+        self.assertNotIn('llm_enabled="${llm_enabled:-true}"', self.script)
+        self.assertIn("false)", self.script)
 
     def test_enabled_llm_reads_the_openai_parameter(self):
         self.assertIn('aws ssm get-parameter', self.script)

@@ -35,14 +35,22 @@ sync_llm_runtime_environment() {
   local api_key temporary_env llm_enabled
 
   llm_enabled=$(awk -F= '$1 == "MIRIYUM_STORE_SEARCH_LLM_ENABLED" { print substr($0, index($0, "=") + 1); exit }' "${ENV_FILE}")
-  if [[ "${llm_enabled:-true}" == "false" ]]; then
+  llm_enabled="${llm_enabled:-false}"
+  case "${llm_enabled}" in
+    false)
     temporary_env=$(mktemp "${ENV_FILE}.XXXXXX")
     chmod 600 "${temporary_env}"
     awk '!/^OPENAI_API_KEY=/' "${ENV_FILE}" > "${temporary_env}"
     mv "${temporary_env}" "${ENV_FILE}"
     echo "LLM runtime disabled; skipping OpenAI parameter synchronization."
     return 0
-  fi
+    ;;
+    true) ;;
+    *)
+      echo "Invalid MIRIYUM_STORE_SEARCH_LLM_ENABLED value: ${llm_enabled}" >&2
+      return 1
+      ;;
+  esac
 
   api_key=$(aws ssm get-parameter \
     --region "${AWS_REGION}" \

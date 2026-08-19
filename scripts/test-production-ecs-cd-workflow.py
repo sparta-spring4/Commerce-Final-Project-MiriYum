@@ -73,6 +73,8 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
     def test_llm_runtime_flag_is_preserved_from_current_task_definition(self):
         self.assertIn('llm_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME"', self.workflow)
         self.assertIn('value: $llm_enabled', self.workflow)
+        self.assertIn('| .value][0] // "false"', self.workflow)
+        self.assertNotIn('| .value][0] // "true"', self.workflow)
         self.assertNotIn('{name: "MIRIYUM_STORE_SEARCH_LLM_ENABLED", value: "true"}', self.workflow)
 
     def test_openai_secret_is_added_only_when_llm_is_enabled(self):
