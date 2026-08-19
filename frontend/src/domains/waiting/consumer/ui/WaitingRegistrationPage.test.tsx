@@ -227,7 +227,7 @@ describe('웨이팅 등록 화면 - 실패 안내', () => {
     },
     {
       notice: { code: 'MANIPULATION_SUSPECTED' },
-      title: '위치 정보를 신뢰할 수 없습니다.',
+      title: '현재 위치를 확인할 수 없습니다.',
     },
     {
       notice: { code: 'LOCATION_PROOF_INVALID' },
@@ -298,8 +298,8 @@ describe('웨이팅 등록 화면 - 등록 성공', () => {
   it('대기 순번과 앞 팀 수를 보여 준다', () => {
     renderPage({
       progress: 'succeeded',
-      partySize: 4,
-      result: { queueSequence: 12, teamsAhead: 3 },
+      partySize: 99,
+      result: { queueSequence: 12, teamsAhead: 3, partySize: 4 },
     })
 
     const success = screen.getByRole('status')
@@ -314,7 +314,7 @@ describe('웨이팅 등록 화면 - 등록 성공', () => {
   it('마이페이지에서 확인하는 이동 버튼을 제공한다', () => {
     renderPage({
       progress: 'succeeded',
-      result: { queueSequence: 1, teamsAhead: 0 },
+      result: { queueSequence: 1, teamsAhead: 0, partySize: 2 },
     })
 
     expect(
@@ -325,7 +325,7 @@ describe('웨이팅 등록 화면 - 등록 성공', () => {
   it('성공한 뒤에는 등록 폼을 다시 두지 않는다', () => {
     renderPage({
       progress: 'succeeded',
-      result: { queueSequence: 1, teamsAhead: 0 },
+      result: { queueSequence: 1, teamsAhead: 0, partySize: 2 },
     })
 
     expect(

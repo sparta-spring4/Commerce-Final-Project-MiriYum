@@ -137,7 +137,6 @@ export function WaitingRegistrationPage({
         (done && result != null ? (
           <RegistrationResult
             result={result}
-            partySize={partySize}
             storeDetailPath={storeDetailPath}
           />
         ) : (
@@ -301,11 +300,9 @@ function RegistrationNotice({
 /** 등록 성공. 순번과 앞 팀 수는 서버가 준 값을 그대로 보여 준다. */
 function RegistrationResult({
   result,
-  partySize,
   storeDetailPath,
 }: {
   result: WaitingRegistrationResult
-  partySize: number
   storeDetailPath: string
 }) {
   return (
@@ -331,7 +328,7 @@ function RegistrationResult({
           </div>
           <div>
             <dt>인원</dt>
-            <dd>{`${partySize}명`}</dd>
+            <dd>{`${result.partySize}명`}</dd>
           </div>
         </dl>
 

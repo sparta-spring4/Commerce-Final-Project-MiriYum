@@ -46,10 +46,16 @@ describe('readPartySize', () => {
     expect(validatePartySize(readPartySize(''))).not.toBeNull()
   })
 
-  it('숫자가 아닌 문자를 버린다', () => {
-    expect(readPartySize('3명')).toBe(3)
-    expect(readPartySize('-2')).toBe(2)
-    expect(readPartySize('e')).toBe(0)
+  it('부호와 소수점을 보존해 검증 단계에서 거절하게 한다', () => {
+    expect(readPartySize('-2')).toBe(-2)
+    expect(readPartySize('1.5')).toBe(1.5)
+    expect(validatePartySize(readPartySize('-2'))).not.toBeNull()
+    expect(validatePartySize(readPartySize('1.5'))).not.toBeNull()
+  })
+
+  it('숫자가 아닌 전체 입력은 NaN으로 읽어 검증 단계에서 거절하게 한다', () => {
+    expect(readPartySize('3명')).toBe(Number.NaN)
+    expect(readPartySize('e')).toBe(Number.NaN)
   })
 })
 

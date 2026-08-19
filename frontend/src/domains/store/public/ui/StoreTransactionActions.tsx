@@ -40,9 +40,19 @@ export function StoreTransactionActions({ store, search }: Props) {
 
   if (!reservationEnabled && !pickupEnabled) {
     return (
-      <Alert tone="info" title="이 매장은 온라인 예약을 받지 않습니다.">
-        <p>매장 정보와 메뉴만 확인할 수 있습니다.</p>
-      </Alert>
+      <>
+        <Alert tone="info" title="이 매장은 온라인 예약을 받지 않습니다.">
+          <p>매장 정보와 메뉴를 확인하거나 웨이팅 접수 여부를 확인할 수 있습니다.</p>
+        </Alert>
+        <div className="store-detail__actions">
+          <Link
+            className="mi-button mi-button--ghost"
+            to={`/stores/${store.storeId}/waiting`}
+          >
+            웨이팅 등록
+          </Link>
+        </div>
+      </>
     )
   }
 

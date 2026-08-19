@@ -100,9 +100,8 @@ export const WAITING_REGISTRATION_GUIDANCE: Record<
     retry: 'location',
   },
   MANIPULATION_SUSPECTED: {
-    title: '위치 정보를 신뢰할 수 없습니다.',
-    description:
-      '위치를 바꾸는 앱이나 확장 프로그램을 끈 뒤 다시 확인해 주세요.',
+    title: '현재 위치를 확인할 수 없습니다.',
+    description: '위치 확인에 실패했습니다. 잠시 후 다시 확인해 주세요.',
     retry: 'location',
   },
   LOCATION_PROOF_INVALID: {
@@ -122,6 +121,7 @@ export const WAITING_REGISTRATION_GUIDANCE: Record<
 export interface WaitingRegistrationResult {
   queueSequence: number
   teamsAhead: number
+  partySize: number
 }
 
 /**
@@ -153,9 +153,8 @@ export function validatePartySize(value: number): string | null {
  * 되돌리면 사용자가 지운 사실이 화면에서 사라진다.
  */
 export function readPartySize(text: string): number {
-  const digits = text.replace(/[^0-9]/g, '')
-  if (digits.length === 0) {
+  if (text.trim().length === 0) {
     return 0
   }
-  return Number.parseInt(digits, 10)
+  return Number(text)
 }

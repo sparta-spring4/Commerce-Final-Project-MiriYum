@@ -118,6 +118,24 @@ describe('매장 상세 화면', () => {
     ).toHaveAttribute('href', `/stores/${STORE_ID}/waiting`)
   })
 
+  it('예약과 픽업이 꺼져도 OPEN 매장의 웨이팅 판정을 상세 화면이 대신하지 않는다', async () => {
+    respondWithDetail(
+      storeDetail({
+        modes: {
+          reservationEnabled: false,
+          menuHoldEnabled: false,
+          pickupEnabled: false,
+        },
+      }),
+    )
+
+    renderDetail()
+
+    expect(
+      await screen.findByRole('link', { name: '웨이팅 등록' }),
+    ).toHaveAttribute('href', `/stores/${STORE_ID}/waiting`)
+  })
+
   it('픽업만 활성화한 매장은 픽업 경로만 제시한다', async () => {
     respondWithDetail(
       storeDetail({
