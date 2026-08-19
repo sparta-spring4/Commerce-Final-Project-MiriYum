@@ -104,6 +104,20 @@ describe('매장 상세 화면', () => {
     ).not.toBeInTheDocument()
   })
 
+  /*
+   * 웨이팅은 매장 상세 계약에 on/off 필드가 없다. 접수 가능 여부는 등록 화면이
+   * 서버 availability로 판정하므로 상세 화면은 진입만 제공한다.
+   */
+  it('영업 중인 매장에 웨이팅 등록 진입을 제공한다', async () => {
+    respondWithDetail(storeDetail())
+
+    renderDetail()
+
+    expect(
+      await screen.findByRole('link', { name: '웨이팅 등록' }),
+    ).toHaveAttribute('href', `/stores/${STORE_ID}/waiting`)
+  })
+
   it('픽업만 활성화한 매장은 픽업 경로만 제시한다', async () => {
     respondWithDetail(
       storeDetail({
@@ -263,7 +277,11 @@ describe('매장 상세 화면', () => {
     ).toBeInTheDocument()
   })
 
-  it('1차 MVP에 없는 기능 버튼을 만들지 않는다', async () => {
+  /*
+   * 웨이팅 등록은 이 목록에서 빠졌다. 소비자 웨이팅 등록 진입점이 승인돼
+   * 위의 진입 테스트가 그 노출을 소유한다. 아직 승인 계약이 없는 기능만 남긴다.
+   */
+  it('승인되지 않은 기능 버튼을 만들지 않는다', async () => {
     respondWithDetail(storeDetail())
 
     renderDetail()
@@ -271,7 +289,6 @@ describe('매장 상세 화면', () => {
     await screen.findByRole('heading', { level: 1 })
 
     for (const label of [
-      '웨이팅 등록',
       '매장에 채팅 문의',
       '리뷰',
       '찜하기',
