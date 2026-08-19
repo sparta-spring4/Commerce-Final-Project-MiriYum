@@ -198,9 +198,14 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
 
     def test_frontend_image_receives_the_staging_kakao_map_public_key(self):
         dockerfile = (ROOT / "frontend" / "Dockerfile").read_text(encoding="utf-8")
+        staging_runbook = (ROOT / "docs" / "deployment" / "staging-https.md").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("ARG VITE_KAKAO_MAP_APP_KEY", dockerfile)
         self.assertIn("ENV VITE_KAKAO_MAP_APP_KEY=${VITE_KAKAO_MAP_APP_KEY}", dockerfile)
         self.assertIn("VITE_KAKAO_MAP_APP_KEY=${{ vars.STAGING_KAKAO_MAP_APP_KEY }}", self.workflow)
+        self.assertIn("environment: staging", self.workflow)
+        self.assertIn("GitHub\n`staging` Environment", staging_runbook)
 
     def test_mysql_allows_trigger_migrations_when_binary_logging_is_enabled(self):
         mysql_command = self.compose_config["services"]["mysql"]["command"]
