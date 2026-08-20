@@ -33,8 +33,8 @@ class AdminMonitoringOpenApiContractTest {
 
         for (String path : List.of(LIST, DETAIL)) {
             Map<String, Object> pathItem = map(featurePaths.get(path));
-            assertThat(pathItem).doesNotContainKey("x-miriyum-runtime-status")
-                    .containsEntry("x-miriyum-owner-issue", 280);
+            assertThat(pathItem).doesNotContainKeys(
+                    "x-miriyum-runtime-status", "x-miriyum-owner-issue");
             Map<String, Object> get = map(pathItem.get("get"));
             assertThat(map(get.get("responses")).keySet())
                     .contains("200", "400", "401", "403", "404", "503");
