@@ -212,7 +212,7 @@ public class WaitingConsumerController {
                 queryService.getCurrent(principal.accountId()));
     }
 
-    @GetMapping("/waiting-teams/history")
+    @GetMapping("/waiting-team-histories")
     public ApiResponse<WaitingConsumerHistoryPage> getHistory(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @RequestParam(defaultValue = "0") int page,

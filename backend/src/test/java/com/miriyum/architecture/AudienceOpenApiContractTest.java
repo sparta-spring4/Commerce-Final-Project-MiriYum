@@ -49,6 +49,7 @@ class AudienceOpenApiContractTest {
             "/api/v1/consumers/me/stores/{storeId}/waiting-teams",
             "/api/v1/consumers/me/waiting-invitation-acceptances",
             "/api/v1/consumers/me/waiting-teams/current",
+            "/api/v1/consumers/me/waiting-team-histories",
             "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations",
             "/api/v1/consumers/me/waiting-teams/{teamId}/invitations",
             "/api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations",

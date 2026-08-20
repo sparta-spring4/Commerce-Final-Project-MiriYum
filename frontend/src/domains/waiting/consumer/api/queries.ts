@@ -77,7 +77,7 @@ export function useConsumerWaitingHistory(page: number) {
   return useQuery({
     queryKey: consumerWaitingKeys.history(page),
     queryFn: async ({ signal }) => {
-      const response = await apiClient('/api/v1/consumers/me/waiting-teams/history', {
+      const response = await apiClient('/api/v1/consumers/me/waiting-team-histories', {
         method: 'get', query: { page, size: 20 }, signal,
       })
       return response.data

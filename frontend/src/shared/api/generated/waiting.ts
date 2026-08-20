@@ -95,7 +95,7 @@ export interface paths {
     /** 본인 현재 활성 웨이팅 조회 */
     get: operations["getCurrentConsumerWaitingTeam"];
   };
-  "/api/v1/consumers/me/waiting-teams/history": {
+  "/api/v1/consumers/me/waiting-team-histories": {
     /** 본인 지난 웨이팅 이력 조회 */
     get: operations["getCurrentConsumerWaitingHistory"];
   };

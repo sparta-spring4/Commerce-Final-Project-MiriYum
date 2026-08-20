@@ -68,7 +68,7 @@ class WaitingConsumerControllerTest {
                         Instant.parse("2026-08-17T00:20:00Z"), null)),
                         new PageMetadata(0, 20, 1, 1, false)));
 
-        mockMvc.perform(get("/api/v1/consumers/me/waiting-teams/history")
+        mockMvc.perform(get("/api/v1/consumers/me/waiting-team-histories")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items[0].waitingTeamId").value("300"))

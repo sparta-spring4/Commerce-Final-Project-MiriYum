@@ -31,7 +31,7 @@ class WaitingOpenApiContractTest {
     private static final String CONSUMER_CURRENT_PATH =
             "/api/v1/consumers/me/waiting-teams/current";
     private static final String CONSUMER_HISTORY_PATH =
-            "/api/v1/consumers/me/waiting-teams/history";
+            "/api/v1/consumers/me/waiting-team-histories";
     private static final String CONSUMER_CANCEL_PATH =
             "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations";
     private static final String CONSUMER_EVENTS_PATH =

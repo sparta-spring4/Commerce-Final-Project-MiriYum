@@ -13,7 +13,7 @@ describe('지난 웨이팅 이력', () => {
   it('종결 상태와 예약 전환 링크를 표시한다', async () => {
     server.use(
       authenticatedConsumer(),
-      http.get('/api/v1/consumers/me/waiting-teams/history', () => successResponse({
+      http.get('/api/v1/consumers/me/waiting-team-histories', () => successResponse({
         items: [{
           waitingTeamId: '300', storeId: '100', businessDate: '2026-08-17',
           status: 'RESERVATION_CONVERTED', queueSequence: 9, partySize: 2,

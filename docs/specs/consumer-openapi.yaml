@@ -56,6 +56,8 @@ paths:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1stores~1{storeId}~1waiting-teams"
   /api/v1/consumers/me/waiting-teams/current:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1current"
+  /api/v1/consumers/me/waiting-team-histories:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-team-histories"
   /api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{waitingTeamId}~1cancellations"
   /api/v1/consumers/me/waiting-invitation-acceptances:
