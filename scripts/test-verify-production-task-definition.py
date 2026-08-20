@@ -528,6 +528,16 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
 
         self.assertEqual("true", environment["MIRIYUM_VALKEY_SSL_ENABLED"])
 
+    def test_production_task_definition_supplies_qr_storage_generation(self):
+        task_definition = json.loads(
+                Path("deploy/ecs/production-task-definition.json").read_text(encoding="utf-8"))
+        environment = {
+                item["name"]: item["value"]
+                for item in task_definition["containerDefinitions"][0]["environment"]
+        }
+
+        self.assertTrue(environment["MIRIYUM_QR_STORAGE_GENERATION"])
+
     def test_production_task_definition_keeps_waiting_auto_open_disabled_by_default(self):
         task_definition = json.loads(
                 Path("deploy/ecs/production-task-definition.json").read_text(encoding="utf-8"))

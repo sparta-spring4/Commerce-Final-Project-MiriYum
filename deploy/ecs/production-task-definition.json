@@ -24,6 +24,7 @@
       "environment": [
         {"name": "MIRIYUM_JWT_ISSUER", "value": "miriyum"},
         {"name": "MIRIYUM_ALLOWED_ORIGIN", "value": "REPLACE_WITH_HTTPS_ORIGIN"},
+        {"name": "MIRIYUM_QR_STORAGE_GENERATION", "value": "prod-v1"},
         {"name": "MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED", "value": "false"},
         {"name": "MIRIYUM_KAKAO_ENABLED", "value": "false"},
         {"name": "MIRIYUM_RUNTIME_CONFIG_ENABLED", "value": "false"},
