@@ -18,7 +18,10 @@ import {
   ReservationDetailPage,
   MyReservationsPage,
 } from '../../domains/reservation/consumer'
-import { WaitingRegistrationRoute } from '../../domains/waiting/consumer'
+import {
+  WaitingInvitationAcceptRoute,
+  WaitingRegistrationRoute,
+} from '../../domains/waiting/consumer'
 import { ConsumerShell } from '../shells/consumer/ConsumerShell'
 import { RequireConsumerAuth } from '../shells/consumer/RequireConsumerAuth'
 import { useConsumerAuth } from '../shells/consumer/ConsumerAuthProvider'
@@ -59,6 +62,10 @@ export const consumerRoutes = (
       <Route path={CONSUMER_PATHS.pickupCreate} element={<PickupCreatePage />} />
       <Route path={CONSUMER_PATHS.pickupDetail} element={<PickupDetailPage />} />
       <Route path={CONSUMER_PATHS.pickupComplete} element={<PickupCompletePage />} />
+      <Route
+        path={CONSUMER_PATHS.waitingInvitationAccept}
+        element={<WaitingInvitationAcceptRoute />}
+      />
       <Route
         path={CONSUMER_PATHS.waitingRegister}
         element={<WaitingRegistrationRoute />}

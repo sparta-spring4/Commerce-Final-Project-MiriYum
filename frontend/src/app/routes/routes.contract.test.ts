@@ -33,6 +33,7 @@ describe('사용자별 route 계약', () => {
       pickupCreate: '/stores/:storeId/pickup',
       pickupDetail: '/pickup-reservations/:pickupReservationId',
       pickupComplete: '/pickup-reservations/:pickupReservationId/complete',
+      waitingInvitationAccept: '/waiting/invitations/accept',
       waitingRegister: '/stores/:storeId/waiting',
     })
   })
