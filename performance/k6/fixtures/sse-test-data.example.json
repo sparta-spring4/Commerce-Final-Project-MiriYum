@@ -1,0 +1,32 @@
+{
+  "consumerAccounts": [
+    {
+      "alias": "consumer-01",
+      "emailEnv": "K6_CONSUMER_01_EMAIL",
+      "passwordEnv": "K6_CONSUMER_01_PASSWORD"
+    },
+    {
+      "alias": "consumer-02",
+      "emailEnv": "K6_CONSUMER_02_EMAIL",
+      "passwordEnv": "K6_CONSUMER_02_PASSWORD"
+    }
+  ],
+  "storeOperatorAccounts": [
+    {
+      "alias": "operator-01",
+      "emailEnv": "K6_OPERATOR_01_EMAIL",
+      "passwordEnv": "K6_OPERATOR_01_PASSWORD",
+      "storeIds": ["301"]
+    }
+  ],
+  "scopes": {
+    "notificationConsumerAliases": ["consumer-01"],
+    "waitingConsumerAliases": ["consumer-02"],
+    "waitingStoreOperatorTargets": [
+      {
+        "accountAlias": "operator-01",
+        "storeId": "301"
+      }
+    ]
+  }
+}

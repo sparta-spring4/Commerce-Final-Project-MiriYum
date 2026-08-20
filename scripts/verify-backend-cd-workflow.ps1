@@ -42,7 +42,10 @@ $requiredFragments = @(
     "cloudwatch_base64",
     "/opt/miriyum/monitoring/cloudwatch-agent.json",
     "amazon-cloudwatch-agent-ctl -a fetch-config",
-    "file:/opt/miriyum/monitoring/cloudwatch-agent.json"
+    "file:/opt/miriyum/monitoring/cloudwatch-agent.json",
+    "deploy/nginx/templates/snippets/sse-location.conf",
+    "nginx_sse_base64",
+    "/opt/miriyum/nginx/templates/snippets/sse-location.conf"
 )
 
 foreach ($fragment in $requiredFragments) {

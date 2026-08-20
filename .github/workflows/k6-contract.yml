@@ -7,7 +7,11 @@ on:
       - 'performance/k6/**'
       - 'deploy/local/docker-compose.dev.yml'
       - 'deploy/local/docker-compose.loadtest.yml'
+      - 'deploy/local/Caddyfile.loadtest'
+      - 'deploy/local/nginx.sse.conf'
       - 'deploy/local/.env.example'
+      - 'deploy/nginx/templates/**'
+      - 'scripts/test-sse-deployment-contract.py'
       - 'deploy/docker-compose.prod.yml'
       - 'deploy/.env.example'
       - '.github/workflows/k6-contract.yml'
@@ -17,7 +21,11 @@ on:
       - 'performance/k6/**'
       - 'deploy/local/docker-compose.dev.yml'
       - 'deploy/local/docker-compose.loadtest.yml'
+      - 'deploy/local/Caddyfile.loadtest'
+      - 'deploy/local/nginx.sse.conf'
       - 'deploy/local/.env.example'
+      - 'deploy/nginx/templates/**'
+      - 'scripts/test-sse-deployment-contract.py'
       - 'deploy/docker-compose.prod.yml'
       - 'deploy/.env.example'
       - '.github/workflows/k6-contract.yml'
@@ -112,6 +120,36 @@ jobs:
             }
           '
 
+      - name: Verify SSE deployment contracts
+        shell: bash
+        run: python3 scripts/test-sse-deployment-contract.py
+
+      - name: Build and inspect pinned SSE k6 runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --tag miriyum/k6-sse:contract performance/k6/sse
+          version_output="$(docker run --rm miriyum/k6-sse:contract version)"
+          grep -Fq 'k6 v1.2.2' <<<"$version_output"
+          grep -Fq 'github.com/phymbert/xk6-sse v0.1.12' <<<"$version_output"
+          docker run --rm \
+            -v "$PWD/performance/k6:/scripts:ro" \
+            miriyum/k6-sse:contract inspect \
+            -e TARGET_ENV=local \
+            -e BASE_URL=https://loadtest-proxy:8443 \
+            -e ALLOWED_HOSTS=loadtest-proxy \
+            -e SSE_PROFILE=smoke \
+            -e SSE_FIXTURE_PATH=/scripts/fixtures/sse-test-data.example.json \
+            -e SSE_RUN_ID=ci-sse-inspect \
+            -e COMMIT_SHA=1111111111111111111111111111111111111111 \
+            -e HARNESS_COMMIT_SHA=1111111111111111111111111111111111111111 \
+            -e SSE_CONNECTIONS=1 \
+            -e SSE_CONNECTIONS_PER_ACCOUNT=1 \
+            -e SSE_HOLD_DURATION_SECONDS=5 \
+            -e SSE_SLOW_CLIENT_DELAY_SECONDS=1 \
+            -e SSE_ENDPOINT_KINDS=notification-consumer \
+            /scripts/sse/main.js >/dev/null
+
       - name: Run isolated k6 contracts
         shell: bash
         run: |
@@ -124,8 +162,12 @@ jobs:
           fi
           for test in "${tests[@]}"; do
             echo "Running $test"
+            runtime_image="grafana/k6:2.1.0"
+            if [[ "$(basename "$test")" == sse-* ]]; then
+              runtime_image="miriyum/k6-sse:contract"
+            fi
             docker run --rm --network none \
               -v "$PWD/performance/k6:/scripts:ro" \
-              grafana/k6:2.1.0 \
+              "$runtime_image" \
               run "/scripts/tests/$(basename "$test")"
           done

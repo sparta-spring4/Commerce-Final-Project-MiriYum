@@ -71,7 +71,7 @@
 | 구간 | 상태 | 관찰 결과 |
 |---|---|---|
 | k6 계약 테스트 | PASS | 고정 k6 이미지에서 config 38, 공통 계약 27, recovery rate-limit 10, runtime options 2, scenario 45, smoke proof 9, summary 6 — 총 137 checks가 성공했다. |
-| k6 계약 CI workflow | PASS | `rhysd/actionlint:1.7.7`이 path-filtered workflow를 오류 없이 검증했으며 workflow는 `--network none`으로 외부·local API 접근을 차단한 고정 k6 이미지에서 계약 테스트만 실행한다. |
+| k6 계약 CI workflow | PASS | `rhysd/actionlint:1.7.7`이 path-filtered workflow를 오류 없이 검증했다. HTTP 계약과 SSE 순수 계약은 각각 고정 이미지의 `--network none`에서 실행하고, SSE 전용 이미지 build·버전·entrypoint inspect는 실제 extension 컴파일 계약으로 별도 검증한다. |
 | k6 smoke profile inspect | PASS | 인증 1 iteration, 검색 1, 예약 1, 알림은 명시한 2개 합성 계정에 대해 2 iterations로 해석됐다. |
 | k6 local-baseline profile inspect | PASS | 동일 target·commit·fixture의 smoke artifact를 전달했을 때 `storeSearch`, 1 VU·1 arrival/s·10초가 하나의 constant-arrival-rate executor로 해석됐다. commit이 다른 artifact는 init context에서 요청 전에 거부됐다. |
 | k6 Secure cookie TLS probe | PASS | 고정 k6 이미지의 실제 VU cookie jar가 Caddy 내부 TLS를 거쳐 mock login의 `Secure` refresh cookie를 다음 refresh 요청에 재전송했다. |
@@ -319,3 +319,7 @@ staging 요청을 보내지 않은 상태에서 #429 병합 SHA `b468ccb34a367db
 - [#359](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/359): Notification worker 시간대·기본 활성화 계약
 
 현재 SQL 실행 시간, rows examined 또는 실행 계획 증거가 없으므로 [#286](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/286)에 병목을 주장하거나 인덱스 변경을 제안하지 않는다. 실제 local/staging 결과에서 쿼리 병목이 관찰된 경우에만 환경·commit·scenario·부하 입력과 함께 #286으로 연결하고, 다른 병목은 소유 도메인 Issue로 분리한다.
+
+## SSE 기준선과의 분리
+
+이 문서의 HTTP 핵심 API 기준선은 `grafana/k6:2.1.0`을 유지한다. Notification·Waiting 장기 연결은 고정 `k6 v1.2.2 + xk6-sse v0.1.12` 전용 실행기와 별도 summary schema를 사용하며 HTTP 수치에 합산하지 않는다. SSE proxy·연결·재연결·Valkey 중단·backend 교체 증거와 현재 차단 상태는 [SSE Runtime 검증 기록](sse-runtime-validation.md)이 소유한다.
