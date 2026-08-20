@@ -77,6 +77,7 @@ class StoreBusinessRegistrationEvidenceServiceTest {
         assertThat(previous.getRetentionDueAt()).isEqualTo(NOW.plusSeconds(7 * 24 * 60 * 60));
 
         ArgumentCaptor<BusinessRegistrationEvidence> saved = ArgumentCaptor.forClass(BusinessRegistrationEvidence.class);
+        then(evidenceRepository).should().flush();
         then(evidenceRepository).should().saveAndFlush(saved.capture());
         assertThat(saved.getValue().getFileId()).isEqualTo(nextFileId.toString());
     }

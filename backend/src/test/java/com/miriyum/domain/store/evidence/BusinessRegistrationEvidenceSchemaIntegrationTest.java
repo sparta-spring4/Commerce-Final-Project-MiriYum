@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.store.evidence.dto.BusinessRegistrationEvidenceCommand;
 import com.miriyum.global.storage.entity.FileMetadata;
 import com.miriyum.global.storage.repository.FileMetadataRepository;
 import java.time.Instant;
@@ -18,6 +19,9 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -31,6 +35,7 @@ import org.testcontainers.mysql.MySQLContainer;
 @Tag("integration")
 @Tag("integration-shard-b")
 @Testcontainers
+@Import(BusinessRegistrationEvidenceSchemaIntegrationTest.OwnershipPortTestConfiguration.class)
 @SpringBootTest(
         classes = MiriyumApplication.class,
         properties = {
@@ -54,6 +59,9 @@ class BusinessRegistrationEvidenceSchemaIntegrationTest {
 
     @Autowired
     private FileMetadataRepository fileMetadataRepository;
+
+    @Autowired
+    private StoreBusinessRegistrationEvidenceService evidenceService;
 
     @Autowired
     private TransactionTemplate transactionTemplate;
@@ -144,6 +152,55 @@ class BusinessRegistrationEvidenceSchemaIntegrationTest {
         assertThat(status).isEqualTo("DELETED");
     }
 
+    @Test
+    @DisplayName("서비스 증빙 교체는 기존 CURRENT를 먼저 반영한 뒤 새 CURRENT를 저장한다")
+    void replacesCurrentEvidenceWithoutViolatingCurrentMarkerConstraint() {
+        long applicationId = 903L;
+        long applicationVersion = 1L;
+        long storeOperatorAccountId = 55L;
+        UUID firstFileId = UUID.randomUUID();
+        UUID replacementFileId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-20T00:00:00Z");
+        insertPrivateLicenseMetadata(firstFileId, applicationId, now);
+        insertPrivateLicenseMetadata(replacementFileId, applicationId, now);
+
+        evidenceService.replaceCurrentEvidence(new BusinessRegistrationEvidenceCommand(
+                applicationId, applicationVersion, storeOperatorAccountId, firstFileId));
+        evidenceService.replaceCurrentEvidence(new BusinessRegistrationEvidenceCommand(
+                applicationId, applicationVersion, storeOperatorAccountId, replacementFileId));
+
+        Integer currentCount = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM store_business_registration_evidences
+                WHERE onboarding_application_id = ?
+                  AND application_version = ?
+                  AND current_marker = 1
+                """,
+                Integer.class,
+                applicationId,
+                applicationVersion);
+        String firstStatus = jdbcTemplate.queryForObject(
+                "SELECT evidence_status FROM store_business_registration_evidences WHERE file_id = ?",
+                String.class,
+                firstFileId.toString());
+        String currentFileId = jdbcTemplate.queryForObject(
+                """
+                SELECT file_id
+                FROM store_business_registration_evidences
+                WHERE onboarding_application_id = ?
+                  AND application_version = ?
+                  AND current_marker = 1
+                """,
+                String.class,
+                applicationId,
+                applicationVersion);
+
+        assertThat(currentCount).isEqualTo(1);
+        assertThat(firstStatus).isEqualTo("REPLACED");
+        assertThat(currentFileId).isEqualTo(replacementFileId.toString());
+    }
+
     private void insertEvidence(long applicationId, long applicationVersion, String status, Integer currentMarker) {
         UUID fileId = UUID.randomUUID();
         Instant now = Instant.parse("2026-08-20T00:00:00Z");
@@ -209,5 +266,16 @@ class BusinessRegistrationEvidenceSchemaIntegrationTest {
                 "CONFIRMED",
                 "BUSINESS_LICENSE_REVIEW",
                 createdAt);
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class OwnershipPortTestConfiguration {
+
+        @Bean
+        StoreOnboardingApplicationOwnershipPort storeOnboardingApplicationOwnershipPort() {
+            return (applicationId, applicationVersion, storeOperatorAccountId) -> {
+                // #277의 authoritative ownership aggregate는 해당 PR에서 제공한다.
+            };
+        }
     }
 }

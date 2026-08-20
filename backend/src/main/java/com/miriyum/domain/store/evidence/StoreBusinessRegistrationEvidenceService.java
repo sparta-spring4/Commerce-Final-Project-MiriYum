@@ -48,7 +48,11 @@ public class StoreBusinessRegistrationEvidenceService {
         Instant now = clock.instant();
         Optional<BusinessRegistrationEvidence> previous = evidenceRepository.findCurrentForUpdate(
                 command.onboardingApplicationId(), command.applicationVersion());
-        previous.ifPresent(evidence -> evidence.replace(now, now.plus(REPLACED_RETENTION_DAYS, ChronoUnit.DAYS)));
+        previous.ifPresent(evidence -> {
+            evidence.replace(now, now.plus(REPLACED_RETENTION_DAYS, ChronoUnit.DAYS));
+            // Clear the unique current marker before inserting the replacement row.
+            evidenceRepository.flush();
+        });
 
         try {
             BusinessRegistrationEvidence saved = evidenceRepository.saveAndFlush(BusinessRegistrationEvidence.createCurrent(
