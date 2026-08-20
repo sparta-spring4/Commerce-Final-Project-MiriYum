@@ -138,7 +138,17 @@ export function ReservationDetailPage() {
       </section>
 
       {reservation.status === 'CONFIRMED' && (
-        <CancelSection reservationId={reservationId} />
+        <>
+          <section className="reservation-detail__section">
+            <Link
+              className="mi-button mi-button--primary"
+              to={CONSUMER_PATHS.reservationCheckIn.replace(':reservationId', reservationId)}
+            >
+              체크인 QR 열기
+            </Link>
+          </section>
+          <CancelSection reservationId={reservationId} />
+        </>
       )}
     </div>
   )

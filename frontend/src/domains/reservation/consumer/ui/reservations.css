@@ -30,6 +30,11 @@
   color: var(--color-on-surface-variant);
 }
 
+.reservation-check-in { padding-bottom: var(--space-8); }
+.reservation-check-in__card { max-width: 30rem; margin: var(--space-3) auto; text-align: center; }
+.reservation-check-in__qr { display: inline-flex; padding: var(--space-2); background: #fff; border-radius: var(--radius-md); }
+.reservation-check-in__expiry { margin: var(--space-1) 0 var(--space-2); color: var(--color-on-surface-variant); }
+
 .reservation-payment__summary dd {
   font-weight: 700;
   text-align: right;

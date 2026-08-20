@@ -157,6 +157,13 @@ export type IdempotencyOf<Op> = Op extends {
   ? { idempotencyKey: string }
   : { idempotencyKey?: never }
 
+/** operation이 X-Correlation-Id를 요구하면 호출에서도 필수로 만든다. */
+export type CorrelationIdOf<Op> = Op extends {
+  parameters: { header: { 'X-Correlation-Id': unknown } }
+}
+  ? { correlationId: string }
+  : { correlationId?: never }
+
 /**
  * operation이 X-CSRF-TOKEN 헤더를 요구하면 호출에서도 필수로 만든다.
  *

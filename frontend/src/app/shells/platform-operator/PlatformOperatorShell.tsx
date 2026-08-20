@@ -20,6 +20,8 @@ import { MemberDetailPage } from '../../../domains/platform-operation/platform-o
 import { MemberListPage } from '../../../domains/platform-operation/platform-operator/ui/MemberListPage'
 import { SupportCaseDetailPage } from '../../../domains/platform-operation/platform-operator/ui/SupportCaseDetailPage'
 import { SupportCaseListPage } from '../../../domains/platform-operation/platform-operator/ui/SupportCaseListPage'
+import { PaymentRecoveryCaseListPage } from '../../../domains/platform-operation/platform-operator/ui/PaymentRecoveryCaseListPage'
+import { PaymentRecoveryCaseDetailPage } from '../../../domains/platform-operation/platform-operator/ui/PaymentRecoveryCaseDetailPage'
 
 /**
  * 운영 콘솔의 route 묶음.
@@ -49,6 +51,14 @@ export default function PlatformOperatorConsole() {
 
         <Route element={<RequirePlatformOperatorAuth />}>
           <Route element={<ConsoleLayout />}>
+            <Route
+              path={relative(PLATFORM_OPERATOR_PATHS.paymentRecoveryCases)}
+              element={<PaymentRecoveryCaseListPage />}
+            />
+            <Route
+              path={relative(PLATFORM_OPERATOR_PATHS.paymentRecoveryDetail)}
+              element={<PaymentRecoveryCaseDetailPage />}
+            />
             <Route
               path={relative(PLATFORM_OPERATOR_PATHS.members)}
               element={<MemberListPage />}

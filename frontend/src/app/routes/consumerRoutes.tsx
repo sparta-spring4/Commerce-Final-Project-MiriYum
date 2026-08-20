@@ -18,6 +18,7 @@ import {
   ReservationCreatePage,
   ReservationDetailPage,
   ReservationPaymentPage,
+  ReservationCheckInQrPage,
   MyReservationsPage,
 } from '../../domains/reservation/consumer'
 import {
@@ -70,6 +71,7 @@ export const consumerRoutes = (
       <Route path={CONSUMER_PATHS.reservationCreate} element={<ReservationCreatePage />} />
       <Route path={CONSUMER_PATHS.reservationDetail} element={<ReservationDetailPage />} />
       <Route path={CONSUMER_PATHS.reservationPayment} element={<ReservationPaymentPage />} />
+      <Route path={CONSUMER_PATHS.reservationCheckIn} element={<ReservationCheckInQrPage />} />
       <Route path={CONSUMER_PATHS.reservationComplete} element={<ReservationCompletePage />} />
       <Route path={CONSUMER_PATHS.pickupCreate} element={<PickupCreatePage />} />
       <Route path={CONSUMER_PATHS.pickupDetail} element={<PickupDetailPage />} />

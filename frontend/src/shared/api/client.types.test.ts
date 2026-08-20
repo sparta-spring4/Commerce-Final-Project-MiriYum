@@ -76,6 +76,33 @@ export function rejectedCalls() {
   void api<{ anything: true }>('/api/v1/store-categories', { method: 'get' })
 }
 
+export function paymentRecoveryHeaderCalls() {
+  void api(
+    '/api/v1/platform-operators/payment-recovery-cases/{caseId}/assignments',
+    {
+      method: 'post',
+      pathParams: { caseId: 'case-1' },
+      body: { expectedCaseVersion: 1 },
+      idempotencyKey: 'key-1',
+      adminReauthentication: 'approval-1',
+      correlationId: 'correlation-1',
+    },
+  )
+
+  void api(
+    '/api/v1/platform-operators/payment-recovery-cases/{caseId}/assignments',
+    {
+      method: 'post',
+      pathParams: { caseId: 'case-1' },
+      body: { expectedCaseVersion: 1 },
+      idempotencyKey: 'key-1',
+      adminReauthentication: 'approval-1',
+      // @ts-expect-error 결제 복구 명령은 상관관계 ID가 필수다
+      correlationId: undefined,
+    },
+  )
+}
+
 /**
  * 플랫폼 운영자 고위험 명령과 감사 조회의 헤더 조건.
  *

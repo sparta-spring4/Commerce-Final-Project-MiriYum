@@ -12,6 +12,7 @@ export const CONSUMER_PATHS = {
   reservationDetail: '/reservations/:reservationId',
   reservationComplete: '/reservations/:reservationId/complete',
   reservationPayment: '/reservation-requests/:reservationRequestId/payment',
+  reservationCheckIn: '/reservations/:reservationId/check-in',
   pickupCreate: '/stores/:storeId/pickup',
   pickupDetail: '/pickup-reservations/:pickupReservationId',
   pickupComplete: '/pickup-reservations/:pickupReservationId/complete',

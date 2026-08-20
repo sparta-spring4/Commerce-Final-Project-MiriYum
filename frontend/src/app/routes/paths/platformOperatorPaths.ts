@@ -14,4 +14,6 @@ export const PLATFORM_OPERATOR_PATHS = {
   memberSanctionApproval: '/admin/member-sanctions/approvals',
   audit: '/admin/audit',
   auditDetail: '/admin/audit/:eventKey',
+  paymentRecoveryCases: '/admin/payment-recovery-cases',
+  paymentRecoveryDetail: '/admin/payment-recovery-cases/:caseId',
 } as const

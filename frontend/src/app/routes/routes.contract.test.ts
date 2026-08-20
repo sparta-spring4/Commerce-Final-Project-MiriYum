@@ -33,6 +33,7 @@ describe('사용자별 route 계약', () => {
       reservationDetail: '/reservations/:reservationId',
       reservationComplete: '/reservations/:reservationId/complete',
       reservationPayment: '/reservation-requests/:reservationRequestId/payment',
+      reservationCheckIn: '/reservations/:reservationId/check-in',
       pickupCreate: '/stores/:storeId/pickup',
       pickupDetail: '/pickup-reservations/:pickupReservationId',
       pickupComplete: '/pickup-reservations/:pickupReservationId/complete',
@@ -98,6 +99,8 @@ describe('사용자별 route 계약', () => {
       memberSanctionApproval: '/admin/member-sanctions/approvals',
       audit: '/admin/audit',
       auditDetail: '/admin/audit/:eventKey',
+      paymentRecoveryCases: '/admin/payment-recovery-cases',
+      paymentRecoveryDetail: '/admin/payment-recovery-cases/:caseId',
     })
   })
 })
@@ -166,6 +169,11 @@ describe('사용자별 navigation 계약', () => {
 
   test('플랫폼 운영자 메뉴와 권한을 그대로 유지한다', () => {
     expect(PLATFORM_OPERATOR_NAVIGATION).toEqual([
+      {
+        label: '결제 복구',
+        path: '/admin/payment-recovery-cases',
+        permissions: ['PAYMENT_RECOVERY_EXECUTE'],
+      },
       {
         label: '회원 관리',
         path: '/admin/members',
