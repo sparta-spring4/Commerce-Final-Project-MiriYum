@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { http } from 'msw'
+import { HttpResponse, http } from 'msw'
 import { StrictMode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
@@ -12,6 +12,7 @@ import { consumerWaitingKeys, type ConsumerWaitingSnapshot } from '../api/querie
 import { CurrentWaitingRoute } from './CurrentWaitingRoute'
 
 const CURRENT_PATH = '/api/v1/consumers/me/waiting-teams/current'
+const WAITING_EVENT_PATH = '/api/v1/consumers/me/waiting-events'
 const CANCEL_PATH =
   '/api/v1/consumers/me/waiting-teams/:waitingTeamId/cancellations'
 const TEAM_ID = 'team-410'
@@ -85,6 +86,36 @@ describe('현재 웨이팅 조회', () => {
     expect(await screen.findByText('12번')).toBeInTheDocument()
     expect(screen.getByText('3팀')).toBeInTheDocument()
     expect(screen.getByText('대기 중')).toBeInTheDocument()
+  })
+
+  it('waiting.changed를 받으면 중앙 snapshot을 다시 조회해 최신 순번으로 수렴한다', async () => {
+    let snapshotRequests = 0
+    server.use(
+      authenticatedConsumer(),
+      http.get(CURRENT_PATH, () => {
+        snapshotRequests += 1
+        return successResponse(
+          snapshot({
+            version: snapshotRequests === 1 ? 9 : 10,
+            teamsAhead: snapshotRequests === 1 ? 3 : 1,
+          }),
+        )
+      }),
+      http.get(
+        WAITING_EVENT_PATH,
+        () =>
+          new HttpResponse(
+            'id: opaque-waiting-cursor\nevent: waiting.changed\ndata: {}\n\n',
+            { headers: { 'Content-Type': 'text/event-stream' } },
+          ),
+      ),
+    )
+
+    renderRoute()
+
+    expect(await screen.findByText('3팀')).toBeInTheDocument()
+    expect(await screen.findByText('1팀')).toBeInTheDocument()
+    expect(snapshotRequests).toBeGreaterThanOrEqual(2)
   })
 
   it('일행 패널을 함께 붙여 일행 목록을 보여 준다', async () => {

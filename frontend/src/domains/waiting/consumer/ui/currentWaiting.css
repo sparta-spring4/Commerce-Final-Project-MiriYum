@@ -127,10 +127,13 @@
 }
 
 .waiting-current__refresh-text {
-  margin: 0;
   color: var(--color-on-surface-variant);
   font-size: var(--font-size-label-md);
   line-height: var(--line-height-label-md);
+}
+
+.waiting-current__refresh-text p {
+  margin: 0;
 }
 
 .waiting-current__store-link {

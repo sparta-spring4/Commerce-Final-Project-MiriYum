@@ -20,6 +20,7 @@ import {
 } from '../model/currentWaitingView'
 import { CurrentWaitingPage, type WaitingCancelPhase } from './CurrentWaitingPage'
 import { WaitingPartyPanelContainer } from './WaitingPartyPanelContainer'
+import type { WaitingEventConnectionState } from '../waitingEventStream'
 import './currentWaiting.css'
 
 /**
@@ -35,7 +36,7 @@ export function CurrentWaitingRoute() {
 }
 
 function CurrentWaitingController() {
-  const { apiClient } = useConsumerAuth()
+  const { apiClient, waitingEventStream } = useConsumerAuth()
   const queryClient = useQueryClient()
   const current = useCurrentConsumerWaiting()
   const [phase, setPhase] = useState<WaitingCancelPhase>('idle')
@@ -45,6 +46,8 @@ function CurrentWaitingController() {
   const [cancelled, setCancelled] = useState<ConsumerWaitingSnapshot | null>(
     null,
   )
+  const [realtimeState, setRealtimeState] =
+    useState<WaitingEventConnectionState | null>(null)
   const active = useRef(true)
 
   /*
@@ -57,6 +60,20 @@ function CurrentWaitingController() {
       active.current = false
     }
   }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void waitingEventStream.subscribe({
+      signal: controller.signal,
+      onChanged: () => {
+        void queryClient.invalidateQueries({
+          queryKey: consumerWaitingKeys.current,
+        })
+      },
+      onConnectionStateChange: setRealtimeState,
+    })
+    return () => controller.abort()
+  }, [queryClient, waitingEventStream])
 
   const snapshot = current.data ?? null
 
@@ -205,6 +222,7 @@ function CurrentWaitingController() {
       snapshot={snapshot}
       fetchedAt={current.dataUpdatedAt}
       refreshing={current.isFetching}
+      realtimeState={realtimeState}
       cancelPhase={phase}
       cancelError={cancelError}
       partyPanel={<WaitingPartyPanelContainer snapshot={snapshot} />}

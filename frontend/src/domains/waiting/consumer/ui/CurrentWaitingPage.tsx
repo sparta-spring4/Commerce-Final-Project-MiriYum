@@ -6,6 +6,7 @@ import { Button } from '../../../../shared/ui/Button'
 import { Alert } from '../../../../shared/ui/Feedback'
 import { Icon } from '../../../../shared/ui/Icon'
 import type { ConsumerWaitingSnapshot } from '../api/queries'
+import type { WaitingEventConnectionState } from '../waitingEventStream'
 import {
   WAITING_CANCEL_GUIDANCE,
   WAITING_STATUS_GUIDE,
@@ -29,6 +30,7 @@ interface Props {
   /** 이 snapshot을 서버에서 받은 시각. 화면이 스스로 만들지 않는다. */
   fetchedAt: number
   refreshing: boolean
+  realtimeState?: WaitingEventConnectionState | null
   cancelPhase: WaitingCancelPhase
   cancelError?: WaitingCancelErrorView | null
   /** 일행 관리 패널. 컨테이너가 연결한 노드를 그대로 끼운다. */
@@ -53,6 +55,7 @@ export function CurrentWaitingPage({
   snapshot,
   fetchedAt,
   refreshing,
+  realtimeState = null,
   cancelPhase,
   cancelError = null,
   partyPanel,
@@ -131,9 +134,15 @@ export function CurrentWaitingPage({
           </dl>
 
           <div className="waiting-current__refresh">
-            <p className="waiting-current__refresh-text" role="status">
-              {`마지막 갱신 ${formatDateTime(new Date(fetchedAt).toISOString()) ?? '확인 필요'}`}
-            </p>
+            <div className="waiting-current__refresh-text" role="status" aria-live="polite">
+              <p>{`마지막 갱신 ${formatDateTime(new Date(fetchedAt).toISOString()) ?? '확인 필요'}`}</p>
+              {realtimeState === 'reconnecting' && (
+                <p>실시간 연결을 다시 시도하고 있습니다.</p>
+              )}
+              {realtimeState === 'unavailable' && (
+                <p>실시간 갱신을 사용할 수 없습니다. 상태를 직접 확인해 주세요.</p>
+              )}
+            </div>
             <Button
               variant="ghost"
               size="sm"
