@@ -107,6 +107,18 @@ class ProductionTerraformLifecycleContractTest(unittest.TestCase):
         ):
             self.assertFalse((AUTOSCALING_CONFIGURATION.parent / filename).exists(), filename)
 
+    def test_terraform_apply_preserves_runtime_off_state(self) -> None:
+        source = AUTOSCALING_CONFIGURATION.read_text(encoding="utf-8")
+        lifecycle = re.search(
+            r"lifecycle\s*\{\s*ignore_changes\s*=\s*\[(?P<attributes>.*?)\]\s*\}",
+            source,
+            re.DOTALL,
+        )
+
+        self.assertIsNotNone(lifecycle)
+        self.assertIn("min_capacity", lifecycle.group("attributes"))
+        self.assertIn("suspended_state", lifecycle.group("attributes"))
+
 
 if __name__ == "__main__":
     unittest.main()
