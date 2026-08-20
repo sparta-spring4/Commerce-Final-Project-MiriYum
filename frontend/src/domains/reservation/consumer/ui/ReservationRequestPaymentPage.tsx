@@ -114,7 +114,11 @@ export function ReservationRequestPaymentPage() {
   const [lastAction, setLastAction] = useState<LastAction | null>(null)
 
   useEffect(() => {
-    if (request !== undefined && TERMINAL_REQUEST_STATUSES.has(request.status)) {
+    if (
+      request !== undefined &&
+      (request.abandonmentRequested ||
+        TERMINAL_REQUEST_STATUSES.has(request.status))
+    ) {
       clearConfirmationHint(reservationRequestId)
       setConfirmationKey(null)
     }
@@ -149,7 +153,14 @@ export function ReservationRequestPaymentPage() {
   }
 
   const paymentPreparation = requestQuery.data.paymentPreparation
-  const canPay = requestQuery.data.status === 'AWAITING_PAYMENT'
+  const canPay =
+    requestQuery.data.status === 'AWAITING_PAYMENT' &&
+    !requestQuery.data.abandonmentRequested
+  const statusMessage =
+    requestQuery.data.status === 'AWAITING_PAYMENT' &&
+    requestQuery.data.abandonmentRequested
+      ? '예약 요청 포기가 접수되어 이 요청으로는 더 이상 결제할 수 없습니다.'
+      : STATUS_MESSAGE[requestQuery.data.status]
   const isWorking =
     confirmation.isPending || finalization.isPending || abandonment.isPending
 
@@ -282,7 +293,7 @@ export function ReservationRequestPaymentPage() {
 
       <Alert
         tone={canPay ? 'info' : 'warning'}
-        title={STATUS_MESSAGE[requestQuery.data.status]}
+        title={statusMessage}
       />
       {actionMessage && <Alert tone="warning" title={actionMessage} />}
       {actionError !== null && (

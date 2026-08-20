@@ -452,6 +452,80 @@ describe('예약금 결제 화면', () => {
     expect(localStorage.getItem(CONFIRMATION_HINT_STORAGE_KEY)).toBeNull()
   })
 
+  it('포기 명령이 202로 포기 의사를 기록하면 결제를 다시 허용하지 않는다', async () => {
+    let confirmationCalls = 0
+    localStorage.setItem(
+      CONFIRMATION_HINT_STORAGE_KEY,
+      PERSISTED_CONFIRMATION_KEY,
+    )
+    server.use(
+      authenticatedConsumer(),
+      http.get(REQUEST_PATH, () => successResponse(reservationRequest())),
+      http.post(CONFIRM_PATH, () => {
+        confirmationCalls += 1
+        return successResponse(payment('PAID'))
+      }),
+      http.post(ABANDON_PATH, () =>
+        HttpResponse.json(
+          {
+            code: SUCCESS_CODE,
+            message: '예약 요청 포기 처리를 진행 중입니다.',
+            data: reservationRequest({ abandonmentRequested: true }),
+          },
+          { status: 202 },
+        ),
+      ),
+    )
+
+    renderPayment()
+    await screen.findByRole('button', { name: '결제 상태 다시 확인' })
+    fireEvent.click(screen.getByRole('button', { name: '예약 요청 포기' }))
+
+    expect(
+      await screen.findByText(
+        '예약 요청 포기가 접수되어 이 요청으로는 더 이상 결제할 수 없습니다.',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '예약금 결제하기' }),
+    ).toBeDisabled()
+    expect(
+      screen.queryByRole('button', { name: '예약 요청 포기' }),
+    ).not.toBeInTheDocument()
+    expect(requestDepositPaymentMock).not.toHaveBeenCalled()
+    expect(confirmationCalls).toBe(0)
+    expect(localStorage.getItem(CONFIRMATION_HINT_STORAGE_KEY)).toBeNull()
+  })
+
+  it('포기 의사가 기록된 요청으로 재진입하면 confirmation 힌트를 제거한다', async () => {
+    let confirmationCalls = 0
+    localStorage.setItem(
+      CONFIRMATION_HINT_STORAGE_KEY,
+      PERSISTED_CONFIRMATION_KEY,
+    )
+    server.use(
+      authenticatedConsumer(),
+      http.get(REQUEST_PATH, () =>
+        successResponse(reservationRequest({ abandonmentRequested: true })),
+      ),
+      http.post(CONFIRM_PATH, () => {
+        confirmationCalls += 1
+        return successResponse(payment('PAID'))
+      }),
+    )
+
+    renderPayment()
+
+    expect(
+      await screen.findByRole('button', { name: '예약금 결제하기' }),
+    ).toBeDisabled()
+    expect(requestDepositPaymentMock).not.toHaveBeenCalled()
+    expect(confirmationCalls).toBe(0)
+    await waitFor(() =>
+      expect(localStorage.getItem(CONFIRMATION_HINT_STORAGE_KEY)).toBeNull(),
+    )
+  })
+
   it('종결된 요청에서는 결제창을 열지 않는다', async () => {
     localStorage.setItem(
       CONFIRMATION_HINT_STORAGE_KEY,
