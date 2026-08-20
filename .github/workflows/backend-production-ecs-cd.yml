@@ -387,19 +387,37 @@ jobs:
         env:
           TASK_DEFINITION_ARN: ${{ steps.task-definition.outputs.arn }}
         run: |
-          aws ecs wait services-stable \
-            --cluster "$ECS_CLUSTER" \
-            --services "$ECS_SERVICE"
+          # ALB connection draining can exceed the AWS CLI waiter's 10-minute default.
+          # Poll for at most 20 minutes instead of relying on the fixed 40-attempt waiter.
+          for attempt in $(seq 1 80); do
+            service=$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$ECS_SERVICE" \
+              --query 'services[0]' \
+              --output json)
 
-          primary_task_definition=$(aws ecs describe-services \
-            --cluster "$ECS_CLUSTER" \
-            --services "$ECS_SERVICE" \
-            --query 'services[0].deployments[?status==`PRIMARY`].taskDefinition | [0]' \
-            --output text)
+            primary_task_definition=$(jq -r '.deployments[] | select(.status == "PRIMARY") | .taskDefinition' <<< "$service")
+            primary_rollout_state=$(jq -r '.deployments[] | select(.status == "PRIMARY") | .rolloutState // "UNKNOWN"' <<< "$service")
+            running_count=$(jq -r '.runningCount' <<< "$service")
+            desired_count=$(jq -r '.desiredCount' <<< "$service")
+            pending_count=$(jq -r '.pendingCount' <<< "$service")
 
-          if [ "$primary_task_definition" != "$TASK_DEFINITION_ARN" ]; then
-            echo "::error::ECS did not retain the new task definition as PRIMARY. The deployment may have rolled back."
-            exit 1
-          fi
+            if jq -e '.deployments[] | select(.rolloutState == "FAILED")' <<< "$service" >/dev/null; then
+              echo "::error::ECS deployment entered FAILED rollout state."
+              exit 1
+            fi
 
-          echo "ECS deployment completed with $TASK_DEFINITION_ARN"
+            if [ "$primary_task_definition" = "$TASK_DEFINITION_ARN" ] \
+              && [ "$primary_rollout_state" = "COMPLETED" ] \
+              && [ "$running_count" = "$desired_count" ] \
+              && [ "$pending_count" = "0" ]; then
+              echo "ECS deployment completed with $TASK_DEFINITION_ARN"
+              exit 0
+            fi
+
+            echo "Waiting for ECS service stability ($attempt/80)..."
+            sleep 15
+          done
+
+          echo "::error::ECS service did not stabilize within the 20-minute deployment budget."
+          exit 1
