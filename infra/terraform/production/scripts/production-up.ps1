@@ -9,6 +9,8 @@ $Service = "miriyum-prod-backend-service"
 $TaskFamily = "miriyum-production-backend"
 $Database = "miriyum-prod-mysql"
 $TimeoutSeconds = 900
+$AutoscalingMinCapacity = 2
+$AutoscalingMaxCapacity = 3
 
 function Assert-AwsContext {
   $accountId = aws sts get-caller-identity --query Account --output text --region $Region
@@ -36,6 +38,18 @@ function Wait-ForRdsStatus([string]$ExpectedStatus) {
   throw "RDS did not reach $ExpectedStatus within $TimeoutSeconds seconds."
 }
 
+function Restore-BackendAutoScaling {
+  aws application-autoscaling register-scalable-target `
+    --service-namespace ecs `
+    --resource-id "service/$Cluster/$Service" `
+    --scalable-dimension ecs:service:DesiredCount `
+    --min-capacity $AutoscalingMinCapacity `
+    --max-capacity $AutoscalingMaxCapacity `
+    --suspended-state DynamicScalingInSuspended=false,DynamicScalingOutSuspended=false,ScheduledScalingSuspended=false `
+    --region $Region | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "ECS Auto Scaling restoration failed." }
+}
+
 Assert-AwsContext
 Assert-BackendServiceFamily
 $rdsStatus = aws rds describe-db-instances --db-instance-identifier $Database --region $Region --query "DBInstances[0].DBInstanceStatus" --output text
@@ -53,6 +67,7 @@ elseif ($rdsStatus -notin @("available", "starting")) {
 }
 Wait-ForRdsStatus "available"
 
+Restore-BackendAutoScaling
 aws ecs update-service --cluster $Cluster --service $Service --desired-count 2 --region $Region | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "ECS desired count update failed." }
 aws ecs wait services-stable --cluster $Cluster --services $Service --region $Region

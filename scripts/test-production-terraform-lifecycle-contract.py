@@ -2,12 +2,15 @@
 """Guards the approved production compute OFF/ON boundary."""
 
 from pathlib import Path
+import re
 import unittest
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DOWN_SCRIPT = REPOSITORY_ROOT / "infra/terraform/production/scripts/production-down.ps1"
 UP_SCRIPT = REPOSITORY_ROOT / "infra/terraform/production/scripts/production-up.ps1"
+AUTOSCALING_CONFIGURATION = REPOSITORY_ROOT / "infra/terraform/production/autoscaling.tf"
+TERRAFORM_VERSIONS = REPOSITORY_ROOT / "infra/terraform/production/versions.tf"
 
 
 class ProductionTerraformLifecycleContractTest(unittest.TestCase):
@@ -21,6 +24,11 @@ class ProductionTerraformLifecycleContractTest(unittest.TestCase):
         self.assertIn('$TaskFamily = "miriyum-production-backend"', source)
         self.assertIn("--desired-count 0", source)
         self.assertIn("--desired-count 2", source)
+        self.assertIn("application-autoscaling register-scalable-target", source)
+        self.assertIn("DynamicScalingInSuspended=true", source)
+        self.assertIn("DynamicScalingOutSuspended=true", source)
+        self.assertIn("DynamicScalingInSuspended=false", source)
+        self.assertIn("DynamicScalingOutSuspended=false", source)
         self.assertIn("stop-db-instance", source)
         self.assertIn("start-db-instance", source)
         self.assertIn("Wait-ForRdsStatus", source)
@@ -53,6 +61,38 @@ class ProductionTerraformLifecycleContractTest(unittest.TestCase):
         self.assertIn('Wait-ForRdsStatus "stopped"', up_source)
         self.assertIn('$rdsStatus -eq "starting"', down_source)
         self.assertIn('Wait-ForRdsStatus "available"', down_source)
+
+    def test_down_suspends_scaling_before_scaling_service_to_zero(self) -> None:
+        source = DOWN_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn("Suspend-BackendAutoScaling\naws ecs update-service", source)
+
+    def test_up_restores_scaling_after_database_is_available(self) -> None:
+        source = UP_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn(
+            'Wait-ForRdsStatus "available"\n\nRestore-BackendAutoScaling\naws ecs update-service',
+            source,
+        )
+
+    def test_autoscaling_does_not_take_persistent_infrastructure_ownership(self) -> None:
+        source = AUTOSCALING_CONFIGURATION.read_text(encoding="utf-8")
+
+        self.assertIsNone(re.search(r"^\s*count\s*=", source, re.MULTILINE))
+        self.assertNotIn("aws_ecs_service", source)
+        self.assertIn("축소가 완료된 뒤 5분", source)
+        self.assertIn('required_version = ">= 1.10.0"', TERRAFORM_VERSIONS.read_text(encoding="utf-8"))
+        for filename in (
+            "generated-alb-ecs.tf",
+            "generated-dns-listener-rule.tf",
+            "generated-network.tf",
+            "generated-rds.tf",
+            "generated-routes.tf",
+            "generated-security-groups.tf",
+            "imports.tf",
+            "moved.tf",
+        ):
+            self.assertFalse((AUTOSCALING_CONFIGURATION.parent / filename).exists(), filename)
 
 
 if __name__ == "__main__":

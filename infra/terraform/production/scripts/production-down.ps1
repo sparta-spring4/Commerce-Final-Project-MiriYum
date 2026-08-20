@@ -9,6 +9,8 @@ $Service = "miriyum-prod-backend-service"
 $TaskFamily = "miriyum-production-backend"
 $Database = "miriyum-prod-mysql"
 $TimeoutSeconds = 900
+$AutoscalingMinCapacity = 0
+$AutoscalingMaxCapacity = 3
 
 function Assert-AwsContext {
   $accountId = aws sts get-caller-identity --query Account --output text --region $Region
@@ -36,6 +38,18 @@ function Wait-ForRdsStatus([string]$ExpectedStatus) {
   throw "RDS did not reach $ExpectedStatus within $TimeoutSeconds seconds."
 }
 
+function Suspend-BackendAutoScaling {
+  aws application-autoscaling register-scalable-target `
+    --service-namespace ecs `
+    --resource-id "service/$Cluster/$Service" `
+    --scalable-dimension ecs:service:DesiredCount `
+    --min-capacity $AutoscalingMinCapacity `
+    --max-capacity $AutoscalingMaxCapacity `
+    --suspended-state DynamicScalingInSuspended=true,DynamicScalingOutSuspended=true,ScheduledScalingSuspended=true `
+    --region $Region | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "ECS Auto Scaling suspension failed." }
+}
+
 Write-Host "This operation scales only the ECS service to zero and stops RDS. It never deletes infrastructure resources." -ForegroundColor Yellow
 if ((Read-Host "Type DOWN to continue") -cne "DOWN") {
   Write-Host "Cancelled."
@@ -52,6 +66,7 @@ if ($rdsStatus -eq "starting") {
 elseif ($rdsStatus -notin @("available", "stopped", "stopping")) {
   throw "RDS cannot be stopped from state: $rdsStatus"
 }
+Suspend-BackendAutoScaling
 aws ecs update-service --cluster $Cluster --service $Service --desired-count 0 --region $Region | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "ECS desired count update failed." }
 aws ecs wait services-stable --cluster $Cluster --services $Service --region $Region

@@ -79,3 +79,10 @@ AWS 배포와 Terraform 구현은 정의된 테스트 게이트를 통과한 뒤
 - 이 절차는 예상 AWS 계정 `579750808837`과 리전 `ap-northeast-2`를 먼저 확인한다. 계정·리전·정확한 ECS task family `miriyum-production-backend`가 일치하지 않으면 중단한다.
 - VPC, subnet, route table, NAT Gateway, Elastic IP, security group, ALB, listener, target group, Route 53, RDS 데이터·백업, ElastiCache Valkey, ECR, Secrets Manager, S3는 조회 전용 영속 리소스다. OFF/ON 절차와 Terraform state에서 수정·삭제·재생성 대상으로 삼지 않는다.
 - Terraform 전체 전환, import, apply, Blue/Green, ECS service 재생성은 계속 제외 범위다. 실제 OFF/ON은 비용·중단 영향이 있으므로 별도 운영 승인 뒤 수동 실행하고, 실행 전후 service 안정화와 RDS 상태를 기록한다.
+
+### Auto Scaling과 OFF/ON 공존 경계
+
+- ECS Auto Scaling은 기존 service의 desired count만 `2..3` 범위에서 조절하며, VPC·ALB·DNS·RDS·Valkey 같은 영속 리소스를 Terraform state에 편입하거나 변경하지 않는다.
+- 운영 OFF는 Auto Scaling의 동적·예약 scaling을 먼저 중지하고 최소 용량을 `0`으로 내린 다음 desired count를 `0`으로 전환한다.
+- 운영 ON은 RDS가 `available`이 된 뒤 Auto Scaling 최소 용량을 `2`로 복구하고 desired count `2`를 확인한 다음 동적·예약 scaling을 재개한다.
+- `scale_in_cooldown=300`은 첫 축소 전 관찰 시간이 아니라 축소 완료 뒤 다음 축소를 막는 시간이다.
