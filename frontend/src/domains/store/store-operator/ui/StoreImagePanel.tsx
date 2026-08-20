@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { createIdempotencyKey } from '../../../../shared/api/idempotencyKey'
 import { Button } from '../../../../shared/ui/Button'
 import { Alert, Loading } from '../../../../shared/ui/Feedback'
@@ -29,6 +29,7 @@ export function StoreImagePanel({ storeId }: { storeId: string }) {
   const remove = useDeleteStoreImage(storeId)
   const [message, setMessage] = useState<string | null>(null)
   const [retry, setRetry] = useState<RetryRequest | null>(null)
+  const deleteKeys = useRef(new Map<string, string>())
 
   const busy = upload.isPending || replace.isPending || remove.isPending
 
@@ -73,10 +74,13 @@ export function StoreImagePanel({ storeId }: { storeId: string }) {
     setMessage(null)
     setRetry(null)
     try {
+      const idempotencyKey =
+        deleteKeys.current.get(imageId) ?? createDeleteKey(imageId, deleteKeys.current)
       await remove.mutateAsync({
         imageId,
-        idempotencyKey: createIdempotencyKey(),
+        idempotencyKey,
       })
+      deleteKeys.current.delete(imageId)
     } catch (error) {
       setMessage(storeErrorMessage(error))
     }
@@ -199,4 +203,10 @@ export function StoreImagePanel({ storeId }: { storeId: string }) {
       )}
     </SectionCard>
   )
+}
+
+function createDeleteKey(imageId: string, keys: Map<string, string>): string {
+  const key = createIdempotencyKey()
+  keys.set(imageId, key)
+  return key
 }

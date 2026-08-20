@@ -105,6 +105,43 @@ describe('매장 이미지 패널', () => {
     expect(await screen.findByText('등록된 매장 이미지가 없습니다.')).toBeInTheDocument()
   })
 
+  it('삭제 실패 뒤 같은 이미지를 다시 삭제하면 같은 멱등 키를 사용한다', async () => {
+    const images = [
+      { imageId: 'image-1', url: 'https://cdn.example/store-before.webp' },
+    ]
+    const idempotencyKeys: string[] = []
+    let attempts = 0
+    server.use(
+      authenticatedOperator(),
+      http.get(IMAGE_PATH, () => successResponse(images)),
+      http.delete(`${IMAGE_PATH}/image-1`, ({ request }) => {
+        idempotencyKeys.push(request.headers.get('idempotency-key') ?? '')
+        attempts += 1
+        if (attempts === 1) {
+          return HttpResponse.json(
+            { code: 'COMMON_012', message: '잠시 후 다시 시도해 주세요.' },
+            { status: 503 },
+          )
+        }
+        images.splice(0, 1)
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+
+    renderPanel()
+    await screen.findByAltText('매장 이미지 1')
+    fireEvent.click(screen.getByRole('button', { name: '이미지 삭제' }))
+
+    expect(
+      await screen.findByText('서비스를 일시적으로 이용할 수 없습니다. 잠시 후 다시 시도해 주세요.'),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '이미지 삭제' }))
+
+    expect(await screen.findByText('등록된 매장 이미지가 없습니다.')).toBeInTheDocument()
+    expect(idempotencyKeys).toHaveLength(2)
+    expect(idempotencyKeys[0]).toBe(idempotencyKeys[1])
+  })
+
   it('지원하지 않는 형식은 업로드하지 않는다', async () => {
     let uploadCalled = false
     server.use(
