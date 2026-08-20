@@ -353,6 +353,8 @@ jobs:
       - name: Wait for ECS service stability
         env:
           TASK_DEFINITION_ARN: ${{ steps.task-definition.outputs.arn }}
+          # ALB connection draining can exceed the AWS CLI waiter's 10-minute default.
+          AWS_MAX_ATTEMPTS: "80"
         run: |
           aws ecs wait services-stable \
             --cluster "$ECS_CLUSTER" \
