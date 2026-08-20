@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,6 +14,7 @@ import {
   reservationRequest,
 } from '../test/fixtures'
 import { requestDepositPayment } from '../../../payment/consumer/api/portOneBrowser'
+import { reservationKeys } from '../api/queries'
 import { ReservationRequestPaymentPage } from './ReservationRequestPaymentPage'
 
 vi.mock('../../../payment/consumer/api/portOneBrowser', () => ({
@@ -46,7 +47,7 @@ function renderPayment() {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
 
-  return render(
+  const renderResult = render(
     <QueryClientProvider client={queryClient}>
       <ConsumerAuthProvider>
         <MemoryRouter
@@ -68,6 +69,8 @@ function renderPayment() {
       </ConsumerAuthProvider>
     </QueryClientProvider>,
   )
+
+  return { ...renderResult, queryClient }
 }
 
 function payment(status: 'PAID' | 'READY' | 'RECONCILIATION_REQUIRED') {
@@ -208,6 +211,69 @@ describe('예약금 결제 화면', () => {
       screen.getByRole('button', { name: '예약금 결제하기' }),
     ).toBeEnabled()
   })
+
+  it.each([
+    {
+      changedState: '포기 의사가 기록된 상태',
+      request: reservationRequest({ abandonmentRequested: true }),
+      message:
+        '예약 요청 포기가 접수되어 이 요청으로는 더 이상 결제할 수 없습니다.',
+    },
+    {
+      changedState: '만료 상태',
+      request: reservationRequest({ status: 'EXPIRED' }),
+      message: '결제 가능 시간이 지난 예약 요청입니다.',
+    },
+  ])(
+    '결제 오류 뒤 $changedState로 갱신되면 재시도로 결제를 반복하지 않는다',
+    async ({ request, message }) => {
+      let confirmationCalls = 0
+      requestDepositPaymentMock.mockRejectedValue(
+        new Error('PortOne SDK를 실행할 수 없습니다.'),
+      )
+      server.use(
+        authenticatedConsumer(),
+        http.get(REQUEST_PATH, () => successResponse(reservationRequest())),
+        http.post(CONFIRM_PATH, () => {
+          confirmationCalls += 1
+          return successResponse(payment('PAID'))
+        }),
+      )
+
+      const { queryClient } = renderPayment()
+      fireEvent.click(
+        await screen.findByRole('button', { name: '예약금 결제하기' }),
+      )
+      expect(
+        await screen.findByText(
+          '결제 처리 중 문제가 발생했습니다. 서버 상태를 다시 확인해 주세요.',
+        ),
+      ).toBeInTheDocument()
+
+      act(() => {
+        queryClient.setQueryData(
+          reservationKeys.request(RESERVATION_REQUEST_ID),
+          request,
+        )
+      })
+
+      expect(await screen.findByText(message)).toBeInTheDocument()
+      expect(
+        screen.getByRole('button', { name: '예약금 결제하기' }),
+      ).toBeDisabled()
+      fireEvent.click(screen.getByRole('button', { name: '다시 시도' }))
+
+      await waitFor(() =>
+        expect(
+          screen.queryByText(
+            '결제 처리 중 문제가 발생했습니다. 서버 상태를 다시 확인해 주세요.',
+          ),
+        ).not.toBeInTheDocument(),
+      )
+      expect(requestDepositPaymentMock).toHaveBeenCalledTimes(1)
+      expect(confirmationCalls).toBe(0)
+    },
+  )
 
   it('결제창 성공 뒤 확인 실패와 새로고침 후에도 같은 키로 복구한다', async () => {
     const confirmationKeys: string[] = []

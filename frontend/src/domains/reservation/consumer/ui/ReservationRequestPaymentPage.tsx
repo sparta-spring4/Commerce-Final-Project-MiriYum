@@ -206,6 +206,11 @@ export function ReservationRequestPaymentPage() {
   }
 
   async function pay() {
+    if (!canPay) {
+      setActionError(null)
+      return
+    }
+
     setLastAction('pay')
     setActionMessage(null)
     setActionError(null)
