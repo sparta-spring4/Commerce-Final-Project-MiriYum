@@ -1,6 +1,6 @@
 import { CONSUMER_PATHS } from '../../../app/routes/paths/consumerPaths'
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 
 import type { ApiClient } from '../../../shared/api/client'
@@ -11,11 +11,16 @@ import {
   type NotificationHistoryItem,
 } from './notificationHistoryApi'
 import { getNotificationPurposeLabel } from './notificationPurposeLabel'
+import type {
+  NotificationEventConnectionState,
+  NotificationEventStreamClient,
+} from './notificationEventStream'
 
 const NOTIFICATION_HISTORY_QUERY_ROOT = ['consumer', 'notification-history'] as const
 
 type NotificationHistoryPageProps = {
   apiClient: ApiClient
+  eventStream: NotificationEventStreamClient
   sessionKey: number
 }
 
@@ -117,9 +122,12 @@ function HistoryError({
 
 export function NotificationHistoryPage({
   apiClient,
+  eventStream,
   sessionKey,
 }: NotificationHistoryPageProps) {
   const queryClient = useQueryClient()
+  const [eventConnectionState, setEventConnectionState] =
+    useState<NotificationEventConnectionState | null>(null)
   const queryKey = useMemo(
     () => [...NOTIFICATION_HISTORY_QUERY_ROOT, sessionKey] as const,
     [sessionKey],
@@ -137,6 +145,23 @@ export function NotificationHistoryPage({
         ? lastPage.nextCursor
         : undefined,
   })
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setEventConnectionState(null)
+    void eventStream.subscribe({
+      signal: controller.signal,
+      onChanged: () => {
+        void queryClient.invalidateQueries({
+          queryKey,
+          exact: true,
+        })
+      },
+      onConnectionStateChange: setEventConnectionState,
+    })
+
+    return () => controller.abort()
+  }, [eventStream, queryClient, queryKey])
 
   useEffect(
     () => () => {
@@ -160,6 +185,19 @@ export function NotificationHistoryPage({
   return (
     <main>
       <h1>알림 이력</h1>
+
+      {eventConnectionState === 'reconnecting' ? (
+        <p
+          role="status"
+          aria-label="실시간 알림 연결을 복구하는 중입니다."
+        >
+          실시간 알림 연결을 복구하는 중입니다.
+        </p>
+      ) : null}
+
+      {eventConnectionState === 'unavailable' ? (
+        <p role="status">실시간 알림 연결을 사용할 수 없습니다.</p>
+      ) : null}
 
       {history.isPending ? <p role="status">알림 이력을 불러오는 중입니다.</p> : null}
 
