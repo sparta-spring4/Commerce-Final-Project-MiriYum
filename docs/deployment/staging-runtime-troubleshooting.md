@@ -91,3 +91,59 @@ or `.max`.
 - Lack of `cloudwatch:ListMetrics` on the EC2 instance role does not prevent the
   application from publishing metrics. Inspect with an approved read-only IAM
   principal or the CloudWatch console instead of widening the runtime role.
+
+## Staging CD is blocked by EC2 memory pressure
+
+Do not treat a high Linux `used` value alone as an out-of-memory incident.
+Check `available` memory, container RSS, and kernel OOM history before deciding
+whether to deploy. Record a non-sensitive timestamp, instance shape, memory
+summary, and private health result in the owning Issue or PR evidence; do not
+turn one host observation into a permanent runbook threshold.
+
+```sh
+free -h
+
+sudo docker stats --no-stream \
+  --format 'table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.CPUPerc}}'
+
+ps -eo pid,comm,%mem,%cpu,rss --sort=-%mem | head -n 15
+
+sudo dmesg -T | grep -Ei 'out of memory|oom|killed process' | tail -n 20
+```
+
+Java RSS can exceed its maximum heap because native memory, metaspace, JIT code
+cache, and thread stacks are outside the Java heap. Record unexplained MySQL
+RSS as an investigation item rather than claiming a cause without evidence.
+
+### Deployment decision
+
+Do not start staging CD when available-memory headroom is too small for backend
+container replacement and JVM initialization, or when a recent kernel OOM is
+present. Either condition risks an OOM termination or failed health check.
+Only a `dev` merge that changes deployment inputs (`backend/`, `frontend/`,
+`deploy/`, or the deployment workflow) starts staging CD automatically. A
+documentation-only merge does not deploy; a manual workflow dispatch remains
+an explicit deployment path. Defer only the affected deployment, then address
+the memory issue before resuming it.
+
+The 85% memory-use threshold is an operational guardrail, not an AWS guarantee.
+Use it together with a meaningful available-memory margin, no OOM history, and
+backend health `UP`; do not resume merely because a single percentage sample
+falls below the threshold.
+
+### Follow-up options
+
+1. Increase staging EC2 memory capacity for the combined backend, MySQL, and
+   Valkey Compose workload.
+2. Measure and tune JVM heap/native memory and MySQL table/cache settings, then
+   repeat the commands above before resuming CD.
+3. Keep the deployment blocked until one of the options restores headroom and a
+   controlled health check succeeds.
+
+### Evidence location
+
+Keep one-off instance changes, measured memory values, and health results in
+the owning Issue or PR evidence. The current staging memory recovery evidence
+is tracked in Issue #521. Continue to collect container-memory evidence during
+later load tests without printing secrets, account identifiers, or `.env`
+contents.
