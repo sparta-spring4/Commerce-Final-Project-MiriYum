@@ -497,3 +497,35 @@
   padding: var(--space-1) var(--space-2);
   resize: vertical;
 }
+
+.reservation-payment {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.reservation-payment__summary dl {
+  display: grid;
+  gap: 0.875rem;
+  margin: 0;
+}
+
+.reservation-payment__summary dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.reservation-payment__summary dt {
+  color: var(--color-on-surface-variant);
+}
+
+.reservation-payment__summary dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 700;
+}
+
+.reservation-payment__actions {
+  display: grid;
+  gap: 0.75rem;
+}
