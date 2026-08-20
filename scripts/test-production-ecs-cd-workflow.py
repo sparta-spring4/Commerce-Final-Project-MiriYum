@@ -91,13 +91,20 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("SPRING_APPLICATION_JSON", self.workflow)
         self.assertIn("runtime_config_secret_arn", self.workflow)
 
-    def test_ecs_stability_wait_allows_the_approved_rolling_deployment_budget(self):
+    def test_ecs_stability_wait_polls_for_the_approved_rolling_deployment_budget(self):
         stability_step = self.workflow.split(
             "- name: Wait for ECS service stability", 1
         )[1].split("- name:", 1)[0]
 
-        self.assertIn('AWS_MAX_ATTEMPTS: "80"', stability_step)
-        self.assertIn("aws ecs wait services-stable", stability_step)
+        self.assertIn("for attempt in $(seq 1 80)", stability_step)
+        self.assertIn("aws ecs describe-services", stability_step)
+        self.assertIn("sleep 15", stability_step)
+        self.assertIn("rolloutState", stability_step)
+        self.assertIn('select(.rolloutState == "FAILED")', stability_step)
+        self.assertIn('"$primary_rollout_state" = "COMPLETED"', stability_step)
+        self.assertIn('"$primary_task_definition" = "$TASK_DEFINITION_ARN"', stability_step)
+        self.assertIn("did not stabilize within the 20-minute deployment budget", stability_step)
+        self.assertNotIn("aws ecs wait services-stable", stability_step)
 
     def test_backend_ci_runs_the_workflow_contract_test(self):
         self.assertIn("Verify production ECS CD workflow contract", self.backend_ci)
