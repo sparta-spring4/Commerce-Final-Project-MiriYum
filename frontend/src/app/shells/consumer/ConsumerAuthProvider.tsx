@@ -10,7 +10,11 @@ import {
 import type { ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { createApiClient, type ApiClient } from '../../../shared/api/client'
-import { isApiError, isNetworkError } from '../../../shared/api/apiError'
+import {
+  isApiError,
+  isNetworkError,
+  type ApiError,
+} from '../../../shared/api/apiError'
 import { clearConsumerProtectedQueries } from './querySession'
 import {
   prepareConsumerCsrfToken,
@@ -22,6 +26,10 @@ import {
 import { AuthErrorCode, isRefreshableAuthError } from '../../../shared/auth/authErrors'
 import { readCookie } from '../../../shared/auth/readCookie'
 import { CONSUMER_CSRF_COOKIE } from '../../../domains/account/consumer/auth/model/csrfCookie'
+import {
+  createNotificationEventStreamClient,
+  type NotificationEventStreamClient,
+} from '../../../domains/notification/consumer/notificationEventStream'
 
 /**
  * 일반 사용자 shell의 인증 상태.
@@ -49,6 +57,8 @@ export interface ConsumerAuthContextValue {
   sessionKey: number
   /** 보호 API 호출용 client. Access Token과 401 재발급이 이미 걸려 있다. */
   apiClient: ApiClient
+  /** 본인 알림 변경 신호용 fetch streaming client. Token은 외부에 노출하지 않는다. */
+  notificationEventStream: NotificationEventStreamClient
   signIn: (credentials: LoginRequest) => Promise<void>
   completeKakaoSignIn: (accessToken: string) => Promise<void>
   signOut: () => Promise<SignOutOutcome>
@@ -223,20 +233,34 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
     return attempt
   }, [runRefresh])
 
+  const handleUnauthorized = useCallback(
+    async (error: ApiError): Promise<boolean> => {
+      // 만료만 재발급 대상이다. 형식 오류·namespace 불일치는 재발급해도 같다.
+      if (!isRefreshableAuthError(error.code)) {
+        clearSession()
+        return false
+      }
+      return refreshOnce()
+    },
+    [clearSession, refreshOnce],
+  )
+
   const apiClient = useMemo(
     () =>
       createApiClient({
         getAccessToken: () => accessTokenRef.current,
-        onUnauthorized: async (error) => {
-          // 만료만 재발급 대상이다. 형식 오류·namespace 불일치는 재발급해도 같다.
-          if (!isRefreshableAuthError(error.code)) {
-            clearSession()
-            return false
-          }
-          return refreshOnce()
-        },
+        onUnauthorized: handleUnauthorized,
       }),
-    [clearSession, refreshOnce],
+    [handleUnauthorized],
+  )
+
+  const notificationEventStream = useMemo(
+    () =>
+      createNotificationEventStreamClient({
+        getAccessToken: () => accessTokenRef.current,
+        onUnauthorized: handleUnauthorized,
+      }),
+    [handleUnauthorized],
   )
 
   // 새로고침 직후 같은 shell의 재발급으로 세션을 복구한다.
@@ -327,6 +351,7 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
       status,
       sessionKey,
       apiClient,
+      notificationEventStream,
       signIn,
       completeKakaoSignIn,
       signOut,
@@ -337,6 +362,7 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
       status,
       sessionKey,
       apiClient,
+      notificationEventStream,
       signIn,
       completeKakaoSignIn,
       signOut,
