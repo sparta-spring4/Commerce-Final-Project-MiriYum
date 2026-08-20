@@ -121,14 +121,94 @@ docker compose --env-file deploy/local/.env `
   /scripts/sse/main.js
 ```
 
-`slow-client` 실행에는 위 명령과 함께 `SSE_ENDPOINT_KINDS=waiting-store-operator`,
-`SSE_CONNECTIONS>=2`, `SSE_SLOW_CLIENT_CONNECTIONS`,
-`SSE_SLOW_CLIENT_TRIGGER_APPROVED=true`,
-`SSE_SLOW_CLIENT_IDEMPOTENCY_KEY=<승인된 UUID>`를 지정한다. `capacity` 실행은
+`slow-client`는 일반 profile 명령을 그대로 재사용하지 않는다. 먼저 정상 companion의 90초
+emitter timeout과 구분되는 backpressure를 만들도록 heartbeat burst로 backend를 재생성한다.
+
+```powershell
+$previousTimeout = [Environment]::GetEnvironmentVariable(
+  'MIRIYUM_LOADTEST_SSE_TIMEOUT', 'Process'
+)
+$previousHeartbeat = [Environment]::GetEnvironmentVariable(
+  'MIRIYUM_LOADTEST_SSE_HEARTBEAT_INTERVAL', 'Process'
+)
+
+try {
+  $env:MIRIYUM_LOADTEST_SSE_TIMEOUT = 'PT90S'
+  $env:MIRIYUM_LOADTEST_SSE_HEARTBEAT_INTERVAL = 'PT0.001S'
+  docker compose --env-file deploy/local/.env `
+    -f deploy/local/docker-compose.dev.yml `
+    -f deploy/local/docker-compose.loadtest.yml `
+    --profile loadtest up -d --no-deps --force-recreate backend sse-proxy loadtest-proxy
+  if ($LASTEXITCODE -ne 0) {
+    throw 'slow-client backend/proxy recreation failed'
+  }
+
+  $profile = 'slow-client'
+  $connections = 2
+  $runId = "local-sse-$profile-YYYYMMDD-NN"
+  docker compose --env-file deploy/local/.env `
+    -f deploy/local/docker-compose.dev.yml `
+    -f deploy/local/docker-compose.loadtest.yml `
+    --profile loadtest run --rm --env-from-file $credentialFile sse-slow-loadtest run `
+    -e TARGET_ENV=local `
+    -e BASE_URL=https://loadtest-proxy:8443 `
+    -e ALLOWED_HOSTS=loadtest-proxy `
+    -e SSE_PROFILE=$profile `
+    -e SSE_FIXTURE_PATH=$fixturePath `
+    -e SSE_RUN_ID=$runId `
+    -e SSE_SMOKE_PROOF_PATH=/results/$smokeRunId.json `
+    -e COMMIT_SHA=$commitSha `
+    -e HARNESS_COMMIT_SHA=$commitSha `
+    -e SSE_CONNECTIONS=$connections `
+    -e SSE_CONNECTIONS_PER_ACCOUNT=2 `
+    -e SSE_HOLD_DURATION_SECONDS=100 `
+    -e SSE_SLOW_CLIENT_DELAY_SECONDS=40 `
+    -e SSE_SLOW_CLIENT_MAX_CLEANUP_SECONDS=60 `
+    -e SSE_COMPANION_MIN_LIFETIME_SECONDS=85 `
+    -e SSE_SLOW_CLIENT_CONNECTIONS=1 `
+    -e SSE_SLOW_CLIENT_TRIGGER_APPROVED=true `
+    -e SSE_SLOW_CLIENT_IDEMPOTENCY_KEY=<승인된 UUID> `
+    -e SSE_HTTP_PROBE_RATE=3 `
+    -e SSE_HTTP_MAX_P95_RATIO=10 `
+    -e SSE_ENDPOINT_KINDS=waiting-store-operator `
+    /scripts/sse/main.js
+  if ($LASTEXITCODE -ne 0) {
+    throw 'slow-client validation failed'
+  }
+} finally {
+  if ($null -eq $previousTimeout) {
+    Remove-Item Env:MIRIYUM_LOADTEST_SSE_TIMEOUT -ErrorAction SilentlyContinue
+  } else {
+    $env:MIRIYUM_LOADTEST_SSE_TIMEOUT = $previousTimeout
+  }
+  if ($null -eq $previousHeartbeat) {
+    Remove-Item Env:MIRIYUM_LOADTEST_SSE_HEARTBEAT_INTERVAL -ErrorAction SilentlyContinue
+  } else {
+    $env:MIRIYUM_LOADTEST_SSE_HEARTBEAT_INTERVAL = $previousHeartbeat
+  }
+  docker compose --env-file deploy/local/.env `
+    -f deploy/local/docker-compose.dev.yml `
+    -f deploy/local/docker-compose.loadtest.yml `
+    --profile loadtest up -d --no-deps --force-recreate backend sse-proxy loadtest-proxy
+  if ($LASTEXITCODE -ne 0) {
+    throw 'SSE loadtest timing restoration failed'
+  }
+}
+```
+
+slow client는 최초 changed frame 뒤 40초 동안 한 번만 수신을 멈춘다. `sse-slow-loadtest`의
+4 KiB TCP receive buffer, 1ms heartbeat와 로컬 Nginx의 제한된 send buffer가 backlog를 만들고,
+slow 연결은 최초 changed frame과 실제 수신 중단을 확인한 뒤 60초 안에 종료돼야 한다. companion은
+최초 changed frame을 수신한 콜백에서 후속 Waiting 변경을 실행하므로 고정 시간 대기 없이 구독 준비를 보장한다. 그 변경의
+두 번째 changed frame은 backpressure로 먼저 정리될 수 있는 slow 연결이 아니라 companion이 검증한다. companion은
+85초 이상 유지된 뒤 정상 90초 emitter timeout으로 종료돼야 하며 같은 100초 구간의 소유 HTTP
+probe도 계속 성공해야 한다. burst 입력 복원 전에 다음 profile을 실행하지 않는다.
+
+`capacity` 실행은
 `SSE_ENDPOINT_KINDS`를 하나로 줄이고 `SSE_CONNECTIONS=7`,
 `SSE_CONNECTIONS_PER_ACCOUNT=7`로 고정한다.
 
-성공 기준은 요청한 모든 연결·event 계약 성공(단, `capacity`의 예상 429 1건은 예외), unexpected 4xx·5xx·transport·contract error·dropped iteration 0, 유한 timeout 종료, 동시 HTTP 이력 오류 0이다. summary JSON과 Markdown은 승인된 aggregate만 보존한다.
+성공 기준은 요청한 모든 연결·event 계약 성공(단, `capacity`의 예상 429 1건은 예외), unexpected 4xx·5xx·transport·contract error·dropped iteration 0, 유한 timeout 종료, 동시 HTTP 이력 오류 0이다. `slow-client`는 여기에 slow cleanup 최대 60초와 companion 최소 85초를 함께 만족해야 한다. summary JSON과 Markdown은 승인된 aggregate만 보존한다.
 
 ## Valkey 중단과 backend 교체
 

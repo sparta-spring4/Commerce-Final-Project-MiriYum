@@ -9,8 +9,8 @@ services:
       # SSE는 opt-in loadtest stack에서만 활성화하고 연결 수와 유지 시간을 로컬 자원 범위로 제한한다.
       MIRIYUM_SSE_ENABLED: "true"
       MIRIYUM_SSE_CURSOR_SECRET: ${MIRIYUM_SSE_CURSOR_SECRET:?MIRIYUM_SSE_CURSOR_SECRET is required}
-      MIRIYUM_SSE_TIMEOUT: PT30S
-      MIRIYUM_SSE_HEARTBEAT_INTERVAL: PT5S
+      MIRIYUM_SSE_TIMEOUT: ${MIRIYUM_LOADTEST_SSE_TIMEOUT:-PT30S}
+      MIRIYUM_SSE_HEARTBEAT_INTERVAL: ${MIRIYUM_LOADTEST_SSE_HEARTBEAT_INTERVAL:-PT5S}
       MIRIYUM_SSE_CORRECTION_INTERVAL: PT2S
       MIRIYUM_SSE_CORRECTION_BATCH_SIZE: "100"
       MIRIYUM_SSE_MAX_CONNECTIONS_TOTAL: "200"
@@ -128,3 +128,10 @@ services:
     depends_on:
       loadtest-proxy:
         condition: service_healthy
+
+  sse-slow-loadtest:
+    extends:
+      service: sse-loadtest
+    profiles: [loadtest]
+    sysctls:
+      net.ipv4.tcp_rmem: "4096 4096 4096"

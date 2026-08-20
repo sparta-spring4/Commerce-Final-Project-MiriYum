@@ -158,11 +158,15 @@ function validateBehavior(behavior) {
     && (typeof behavior.delay !== 'function'
       || !Number.isInteger(behavior.delaySeconds)
       || behavior.delaySeconds <= 0
-      || behavior.delaySeconds > 30)) {
+      || behavior.delaySeconds > 60)) {
     throw new Error('slow-client behavior requires a bounded delay')
   }
   if (behavior.onLastEventId !== undefined && typeof behavior.onLastEventId !== 'function') {
     throw new Error('onLastEventId must be a function')
+  }
+  if (behavior.onFirstValidEvent !== undefined
+    && typeof behavior.onFirstValidEvent !== 'function') {
+    throw new Error('onFirstValidEvent must be a function')
   }
   if (behavior.minimumValidEvents !== undefined
     && (!Number.isInteger(behavior.minimumValidEvents)
@@ -243,6 +247,7 @@ export function openChangedStream({
   let contractError = false
   let transportError = false
   let clientClosedByHarness = false
+  let receivePaused = false
   const startedAt = Date.now()
   let response
 
@@ -260,9 +265,6 @@ export function openChangedStream({
           emitMetric(metrics, 'opened', 1, selectedTags)
         })
         client.on('event', (event) => {
-          if (selectedBehavior.mode === 'slow-client') {
-            selectedBehavior.delay(selectedBehavior.delaySeconds)
-          }
           if (isHeartbeatComment(event)) {
             heartbeatFrames += 1
             emitMetric(metrics, 'heartbeatFrame', 1, selectedTags)
@@ -284,6 +286,13 @@ export function openChangedStream({
             if (typeof selectedBehavior.onLastEventId === 'function') {
               selectedBehavior.onLastEventId(event.id)
             }
+            if (typeof selectedBehavior.onFirstValidEvent === 'function') {
+              selectedBehavior.onFirstValidEvent()
+            }
+          }
+          if (selectedBehavior.mode === 'slow-client' && !receivePaused) {
+            receivePaused = true
+            selectedBehavior.delay(selectedBehavior.delaySeconds)
           }
 
           if ((selectedBehavior.mode === 'smoke'
@@ -323,6 +332,7 @@ export function openChangedStream({
     opened,
     validEvents,
     heartbeatFrames,
+    receivePaused,
     serverClosed,
     completed: classification === 'success',
   })

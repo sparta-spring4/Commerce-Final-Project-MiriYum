@@ -20,6 +20,16 @@ function requireProfile(value) {
   return value
 }
 
+function requireSlowClientConnections(connections, value) {
+  const slowConnections = requirePositiveInteger(
+    'slow-client connections', value, connections - 1,
+  )
+  if (slowConnections !== connections - 1) {
+    throw new Error('slow-client requires exactly one companion connection')
+  }
+  return slowConnections
+}
+
 function streamScenario(exec, vus, holdDurationSeconds) {
   return {
     executor: 'shared-iterations',
@@ -66,8 +76,8 @@ export function buildSseScenarioOptions(config) {
     return Object.freeze(scenarios)
   }
 
-  const slowConnections = requirePositiveInteger(
-    'slow-client connections', config?.slowClientConnections, connections - 1,
+  const slowConnections = requireSlowClientConnections(
+    connections, config?.slowClientConnections,
   )
   scenarios.sse_slow = streamScenario(
     'sseSlowClient', slowConnections, holdDurationSeconds,
@@ -75,16 +85,6 @@ export function buildSseScenarioOptions(config) {
   scenarios.sse_companion = streamScenario(
     'sseCompanion', connections - slowConnections, holdDurationSeconds,
   )
-  scenarios.slow_client_trigger = {
-    executor: 'shared-iterations',
-    exec: 'slowClientTrigger',
-    vus: 1,
-    iterations: 1,
-    startTime: '1s',
-    maxDuration: `${holdDurationSeconds + 30}s`,
-    gracefulStop: '5s',
-    tags: { phase: 'measured' },
-  }
   return Object.freeze(scenarios)
 }
 
@@ -109,16 +109,41 @@ export function buildSseThresholds(config) {
       = [`p(95)<=${maxP95Ratio}`]
   }
   if (profile === 'slow-client') {
+    const endpointKind = endpointKinds[0]
+    const maxCleanupSeconds = requirePositiveInteger(
+      'slow-client max cleanup', config?.slowClientMaxCleanupSeconds, 600,
+    )
+    const companionMinSeconds = requirePositiveInteger(
+      'companion minimum lifetime', config?.companionMinLifetimeSeconds, 600,
+    )
     result['slow_client_triggers{phase:measured,profile:slow-client,traffic:trigger}'] = ['count==1']
+    result[`sse_slow_cleanup_duration{phase:measured,profile:slow-client,endpoint_kind:${endpointKind}}`]
+      = [`max<=${maxCleanupSeconds * 1000}`]
+    result[`sse_companion_lifetime{phase:measured,profile:slow-client,endpoint_kind:${endpointKind}}`]
+      = [`min>=${companionMinSeconds * 1000}`]
   }
   return Object.freeze(result)
+}
+
+export function requireSlowCleanupResult(result) {
+  if (result === null
+    || typeof result !== 'object'
+    || result.completed !== true
+    || result.classification !== 'success'
+    || result.receivePaused !== true
+    || result.serverClosed !== true
+    || !Number.isInteger(result.validEvents)
+    || result.validEvents < 1) {
+    throw new Error('slow-client cleanup evidence is invalid')
+  }
+  return result
 }
 
 export function assignSlowClientRoles(sessions, slowConnections) {
   if (!Array.isArray(sessions) || sessions.length < 2) {
     throw new Error('slow-client sessions are missing')
   }
-  requirePositiveInteger('slow-client connections', slowConnections, sessions.length - 1)
+  requireSlowClientConnections(sessions.length, slowConnections)
   return Object.freeze(sessions.map((session, index) => Object.freeze({
     ...session,
     role: index < slowConnections ? 'slow' : 'companion',

@@ -6,6 +6,7 @@ import {
   buildSseThresholds,
   captureOwnedHttpBaseline,
   ownedHttpPath,
+  requireSlowCleanupResult,
   runOwnedHttpProbe,
   triggerWaitingChange,
 } from '../sse/probe.js'
@@ -191,11 +192,19 @@ export default function () {
     ...steadyConfig,
     profile: 'slow-client',
     connections: 2,
+    holdDurationSeconds: 100,
     slowClientConnections: 1,
+    slowClientMaxCleanupSeconds: 60,
+    companionMinLifetimeSeconds: 85,
     endpointKinds: ['waiting-store-operator'],
   }
   const slowScenarios = buildSseScenarioOptions(slowConfig)
   const slowThresholds = buildSseThresholds(slowConfig)
+  const multipleCompanionScenarios = errorMessage(() => buildSseScenarioOptions({
+    ...slowConfig,
+    connections: 3,
+    slowClientConnections: 1,
+  }))
   const capacityConfig = {
     profile: 'capacity',
     connections: 7,
@@ -211,6 +220,17 @@ export default function () {
     { target: targets.waitingOperator, accessToken: TOKEN, baselineMilliseconds: 10 },
     { target: targets.waitingOperator, accessToken: TOKEN, baselineMilliseconds: 10 },
   ], 1)
+  const validSlowCleanup = {
+    completed: true,
+    classification: 'success',
+    receivePaused: true,
+    serverClosed: true,
+    validEvents: 1,
+  }
+  const invalidSlowCleanup = errorMessage(() => requireSlowCleanupResult({
+    ...validSlowCleanup,
+    receivePaused: false,
+  }))
 
   check(null, {
     'owned HTTP paths stay inside their audience contract': () =>
@@ -256,17 +276,23 @@ export default function () {
       && steadyThresholds['owned_http_errors{phase:measured,profile:steady,traffic:owned-http}'][0] === 'count==0'
       && steadyConfig.endpointKinds.every((kind) =>
         steadyThresholds[`owned_http_degradation_ratio{phase:measured,profile:steady,endpoint_kind:${kind},traffic:owned-http}`][0] === 'p(95)<=2'),
-    'slow profile separates delayed and normal streams and triggers one follow-up change': () =>
+    'slow profile separates delayed and readiness-triggering companion streams': () =>
       slowScenarios.sse_slow.exec === 'sseSlowClient'
       && slowScenarios.sse_slow.vus === 1
       && slowScenarios.sse_companion.exec === 'sseCompanion'
       && slowScenarios.sse_companion.vus === 1
-      && slowScenarios.slow_client_trigger.iterations === 1
+      && slowScenarios.slow_client_trigger === undefined
+      && multipleCompanionScenarios === 'slow-client requires exactly one companion connection'
       && slowScenarios.owned_http_probe.executor === 'constant-arrival-rate'
-      && slowThresholds['slow_client_triggers{phase:measured,profile:slow-client,traffic:trigger}'][0] === 'count==1',
+      && slowThresholds['slow_client_triggers{phase:measured,profile:slow-client,traffic:trigger}'][0] === 'count==1'
+      && slowThresholds['sse_slow_cleanup_duration{phase:measured,profile:slow-client,endpoint_kind:waiting-store-operator}']?.[0] === 'max<=60000'
+      && slowThresholds['sse_companion_lifetime{phase:measured,profile:slow-client,endpoint_kind:waiting-store-operator}']?.[0] === 'min>=85000',
     'slow-client role assignment preserves at least one normal companion': () =>
       roleSessions.filter((session) => session.role === 'slow').length === 1
       && roleSessions.filter((session) => session.role === 'companion').length === 1,
+    'slow cleanup evidence requires the receive pause and server close': () =>
+      requireSlowCleanupResult(validSlowCleanup) === validSlowCleanup
+      && invalidSlowCleanup === 'slow-client cleanup evidence is invalid',
     'capacity profile deliberately runs one overflow connection': () =>
       capacityScenarios.sse.exec === 'sseCapacity'
       && capacityScenarios.sse.vus === 7

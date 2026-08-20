@@ -64,6 +64,36 @@ const SUMMARY_INPUT = {
   },
 }
 
+const SLOW_METADATA = {
+  ...METADATA,
+  profile: 'slow-client',
+  runId: 'safe-slow-run',
+  endpointKinds: ['waiting-store-operator'],
+  limits: {
+    connections: 2,
+    connectionsPerAccount: 2,
+    holdDurationSeconds: 100,
+    slowClientDelaySeconds: 40,
+    slowClientMaxCleanupSeconds: 60,
+    companionMinLifetimeSeconds: 85,
+  },
+}
+
+const SLOW_SUMMARY_INPUT = {
+  metrics: {
+    'sse_slow_cleanup_duration{phase:measured,profile:slow-client,endpoint_kind:waiting-store-operator}': {
+      type: 'trend',
+      values: { avg: 52000, min: 52000, med: 52000, max: 52000, 'p(50)': 52000, 'p(95)': 52000, 'p(99)': 52000 },
+      thresholds: { 'max<=60000': { ok: true } },
+    },
+    'sse_companion_lifetime{phase:measured,profile:slow-client,endpoint_kind:waiting-store-operator}': {
+      type: 'trend',
+      values: { avg: 90000, min: 90000, med: 90000, max: 90000, 'p(50)': 90000, 'p(95)': 90000, 'p(99)': 90000 },
+      thresholds: { 'min>=85000': { ok: true } },
+    },
+  },
+}
+
 function message(action) {
   try {
     action()
@@ -87,6 +117,10 @@ export default function () {
     fixtureSha256: FIXTURE_SHA,
     endpointKinds: ['notification-consumer'],
   })
+  let slowParsed = null
+  const slowError = message(() => {
+    slowParsed = JSON.parse(renderSafeSseSummary(SLOW_SUMMARY_INPUT, SLOW_METADATA).json)
+  })
 
   check(null, {
     'summary keeps only approved run evidence': () =>
@@ -109,6 +143,13 @@ export default function () {
       parsed.limits.connections === 1
       && parsed.limits.holdDurationSeconds === 5
       && parsed.runMetrics.droppedIterations.count === 0,
+    'slow summary preserves only bounded cleanup and companion evidence': () =>
+      slowError === null
+      && slowParsed.limits.slowClientDelaySeconds === 40
+      && slowParsed.limits.slowClientMaxCleanupSeconds === 60
+      && slowParsed.limits.companionMinLifetimeSeconds === 85
+      && slowParsed.metrics['waiting-store-operator'].slowCleanupDuration.max === 52000
+      && slowParsed.metrics['waiting-store-operator'].companionLifetime.min === 90000,
     'summary omits unknown metadata metrics and identifier sentinels': () =>
       !combined.includes('forbidden-token')
       && !combined.includes('forbidden-cursor')

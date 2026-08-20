@@ -80,9 +80,14 @@ docker compose --env-file deploy/local/.env `
   --profile loadtest up -d mysql valkey backend sse-proxy loadtest-proxy
 ```
 
-이 프로필의 30초 timeout, 5초 heartbeat, 총 200개·계정별 6개 연결 한도는 로컬 검증 입력이다.
+이 프로필의 기본 30초 timeout, 5초 heartbeat, 총 200개·계정별 6개 연결 한도는 로컬 검증 입력이다.
 staging·production 운영값이나 활성화 승인을 뜻하지 않는다. 일반 API는 Caddy에서 backend로 직접
 전달하고 세 SSE endpoint만 공유 Nginx snippet을 통과한다.
+
+`slow-client` backpressure 검증에서만 `MIRIYUM_LOADTEST_SSE_TIMEOUT=PT90S`와
+`MIRIYUM_LOADTEST_SSE_HEARTBEAT_INTERVAL=PT0.001S`로 backend를 재생성한다. 실행 후 두 값을
+기본값으로 복원해 backend와 proxy를 다시 만든다. 해당 실행은 4 KiB TCP receive buffer가 설정된
+`sse-slow-loadtest`만 사용하며, 일반 `sse-loadtest`와 운영 설정에는 적용하지 않는다.
 
 ## 포트
 

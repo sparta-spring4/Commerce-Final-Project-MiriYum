@@ -108,40 +108,42 @@ export default function () {
       return opened.result.classification === 'success'
         && opened.transport.closeCount === 0
     },
-    'slow client delays every frame and waits for server completion': () => {
+    'slow client accepts server cleanup after pausing on the initial changed frame': () => {
       const delays = []
+      let firstValidCallbacks = 0
       const opened = openWith({
-        transport: fakeTransport({
-          events: [validEvent(), heartbeat(), validEvent('notifications.changed', 'opaque_cursor-2')],
-        }),
+        transport: fakeTransport({ events: [validEvent()] }),
         behavior: {
           mode: 'slow-client',
           delaySeconds: 2,
           delay: (seconds) => delays.push(seconds),
-          minimumValidEvents: 2,
+          minimumValidEvents: 1,
           requireServerClose: true,
+          onFirstValidEvent: () => { firstValidCallbacks += 1 },
         },
       })
-      return JSON.stringify(delays) === JSON.stringify([2, 2, 2])
+      return JSON.stringify(delays) === JSON.stringify([2])
+        && firstValidCallbacks === 1
         && opened.transport.closeCount === 0
-        && opened.result.validEvents === 2
-        && opened.result.heartbeatFrames === 1
+        && opened.result.validEvents === 1
+        && opened.result.receivePaused === true
         && opened.result.serverClosed === true
         && opened.result.classification === 'success'
     },
-    'slow client requires a second changed signal': () => {
+    'slow client still requires an initial changed signal': () => {
       const opened = openWith({
-        transport: fakeTransport({ events: [validEvent(), heartbeat()] }),
+        transport: fakeTransport({ events: [heartbeat()] }),
         behavior: {
           mode: 'slow-client',
           delaySeconds: 2,
           delay: () => {},
-          minimumValidEvents: 2,
+          minimumValidEvents: 1,
           requireServerClose: true,
         },
       })
       return opened.result.classification === 'missing_event'
-        && opened.result.validEvents === 1
+        && opened.result.validEvents === 0
+        && opened.result.receivePaused === false
         && opened.transport.closeCount === 0
     },
     'validated cursor can be handed to an in-memory callback but not returned': () => {

@@ -96,9 +96,21 @@ export function loadSseConfig(env) {
   const httpMaxP95Ratio = profile === 'smoke'
     ? null
     : parsePositiveInt('SSE_HTTP_MAX_P95_RATIO', env.SSE_HTTP_MAX_P95_RATIO, 10)
+  const holdDurationSeconds = parsePositiveInt(
+    'SSE_HOLD_DURATION_SECONDS',
+    env.SSE_HOLD_DURATION_SECONDS,
+    600,
+  )
+  const slowClientDelaySeconds = parsePositiveInt(
+    'SSE_SLOW_CLIENT_DELAY_SECONDS',
+    env.SSE_SLOW_CLIENT_DELAY_SECONDS,
+    60,
+  )
 
   let slowClientConnections = null
   let slowClientIdempotencyKey = null
+  let slowClientMaxCleanupSeconds = null
+  let companionMinLifetimeSeconds = null
   if (profile === 'slow-client') {
     if (endpointKinds.length !== 1 || endpointKinds[0] !== 'waiting-store-operator') {
       throw new Error('slow-client requires only waiting-store-operator')
@@ -111,6 +123,9 @@ export function loadSseConfig(env) {
       env.SSE_SLOW_CLIENT_CONNECTIONS,
       connections - 1,
     )
+    if (slowClientConnections !== connections - 1) {
+      throw new Error('slow-client requires exactly one companion connection')
+    }
     if (env.SSE_SLOW_CLIENT_TRIGGER_APPROVED !== 'true') {
       throw new Error('slow-client requires SSE_SLOW_CLIENT_TRIGGER_APPROVED=true')
     }
@@ -118,6 +133,22 @@ export function loadSseConfig(env) {
       'SSE_SLOW_CLIENT_IDEMPOTENCY_KEY',
       env.SSE_SLOW_CLIENT_IDEMPOTENCY_KEY,
     )
+    slowClientMaxCleanupSeconds = parsePositiveInt(
+      'SSE_SLOW_CLIENT_MAX_CLEANUP_SECONDS',
+      env.SSE_SLOW_CLIENT_MAX_CLEANUP_SECONDS,
+      600,
+    )
+    companionMinLifetimeSeconds = parsePositiveInt(
+      'SSE_COMPANION_MIN_LIFETIME_SECONDS',
+      env.SSE_COMPANION_MIN_LIFETIME_SECONDS,
+      600,
+    )
+    if (slowClientDelaySeconds <= 30
+      || slowClientDelaySeconds >= slowClientMaxCleanupSeconds
+      || slowClientMaxCleanupSeconds >= companionMinLifetimeSeconds
+      || companionMinLifetimeSeconds >= holdDurationSeconds) {
+      throw new Error('slow-client timing windows must be strictly ordered')
+    }
   }
 
   const connectionsPerAccount = parsePositiveInt(
@@ -146,21 +177,15 @@ export function loadSseConfig(env) {
       : requireJsonPath('SSE_SMOKE_PROOF_PATH', env.SSE_SMOKE_PROOF_PATH),
     connections,
     connectionsPerAccount,
-    holdDurationSeconds: parsePositiveInt(
-      'SSE_HOLD_DURATION_SECONDS',
-      env.SSE_HOLD_DURATION_SECONDS,
-      600,
-    ),
-    slowClientDelaySeconds: parsePositiveInt(
-      'SSE_SLOW_CLIENT_DELAY_SECONDS',
-      env.SSE_SLOW_CLIENT_DELAY_SECONDS,
-      30,
-    ),
+    holdDurationSeconds,
+    slowClientDelaySeconds,
     endpointKinds,
     httpProbeRate,
     httpMaxP95Ratio,
     slowClientConnections,
     slowClientIdempotencyKey,
+    slowClientMaxCleanupSeconds,
+    companionMinLifetimeSeconds,
     ...shaEvidence,
   })
 }

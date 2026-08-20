@@ -9,7 +9,7 @@
 
 SSE는 `data: {}` 변경 신호이며 결과 상태는 Notification 이력 또는 Waiting HTTP API와 MySQL에서 다시 읽는다. Valkey Pub/Sub, SSE payload, cursor 또는 keepalive는 원장·전달 성공·상태 성공의 근거가 아니다. 결과에는 credential, Authorization, Token, cookie, cursor, event ID, account/store/team/notification/reservation ID와 전체 URL을 남기지 않는다.
 
-로컬 loadtest 입력은 timeout 30초, heartbeat 5초, correction 2초, correction batch 100, 전체 연결 상한 200, 계정별 연결 상한 6이다. `capacity` 프로필만 단일 계정에 7개 연결을 시도해 예상 429 1건과 나머지 연결·HTTP probe의 격리를 검증하는 음성 테스트이며, 운영 상한이나 SLO로 승격하지 않는다.
+로컬 loadtest 기본 입력은 timeout 30초, heartbeat 5초, correction 2초, correction batch 100, 전체 연결 상한 200, 계정별 연결 상한 6이다. `slow-client` 검증만 timeout 90초·heartbeat 1ms·40초 1회 수신 중단·60초 cleanup 상한·85초 companion 하한을 사용하고 종료 즉시 기본값으로 복원한다. `capacity` 프로필만 단일 계정에 7개 연결을 시도해 예상 429 1건과 나머지 연결·HTTP probe의 격리를 검증하는 음성 테스트다. 이 값들은 운영 상한이나 SLO로 승격하지 않는다.
 
 ## 현재 증거
 
@@ -19,11 +19,11 @@ SSE는 `data: {}` 변경 신호이며 결과 상태는 Notification 이력 또�
 | loadtest bounded SSE 설정 | PASS | Compose 계약이 일곱 SSE 설정, backend-only cursor secret과 별도 proxy를 검증 |
 | 실제 Nginx first frame | PASS | Alpine fake upstream이 종료되기 전에 실제 Nginx를 거친 `notifications.changed`, `data: {}` frame을 2초 안에 수신 |
 | SSE 실행기 build | PASS | `grafana/xk6:1.4.11` → `k6 v1.2.2` + `xk6-sse v0.1.12`; 실제 `k6/x/sse` import와 `main.js inspect` 성공 |
-| 순수 k6 계약 | PASS | target·fixture·event·session·profile·safe summary를 `--network none`에서 검증 |
+| 순수 k6 계약 | PASS | target·fixture·event·session·profile·safe summary와 slow 1회 수신 중단·cleanup/companion threshold를 `--network none`에서 검증 |
 | 실제 local endpoint smoke | BLOCKED | 기존 local DB의 Flyway V43 실패 기록과 부분 적용 DDL을 안전하게 복구해야 backend가 시작됨 |
 | HTTP 비교 3회 | BLOCKED | 같은 SHA·fixture의 성공 SSE smoke proof 필요 |
 | steady 25→50→100→200 | BLOCKED | 실제 local smoke와 승인된 synthetic scope 필요 |
-| reconnect·slow-client | BLOCKED | 마지막 성공 steady 단계와 smoke proof 필요 |
+| reconnect·slow-client | BLOCKED | 마지막 성공 steady 단계와 smoke proof가 필요하며, slow 실행은 heartbeat burst·cleanup/companion duration 실제 증거까지 필요 |
 | Valkey stop/recovery | BLOCKED | 사전 인증 synthetic 계정과 승인된 public owner mutation fixture 필요 |
 | same-SHA backend replacement | BLOCKED | 실제 reconnect 실행 입력 필요 |
 | staging | NOT RUN | 배포 SHA, clean harness, fixture, 시간·부하·operator·observer·중단 담당 승인 없음 |

@@ -8,6 +8,7 @@ import subprocess
 import time
 import unittest
 import uuid
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +23,7 @@ HTTPS_TEMPLATE = ROOT / "deploy" / "nginx" / "templates" / "https.conf.template"
 PROD_COMPOSE = ROOT / "deploy" / "docker-compose.prod.yml"
 SSE_K6_DOCKERFILE = ROOT / "performance" / "k6" / "sse" / "Dockerfile"
 K6_WORKFLOW = ROOT / ".github" / "workflows" / "k6-contract.yml"
+SSE_RUNBOOK = ROOT / "docs" / "deployment" / "sse-runtime-runbook.md"
 
 
 def run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -176,12 +178,43 @@ class SseDeploymentContractTest(unittest.TestCase):
         )
         self.assertEqual("Dockerfile", sse_loadtest["build"]["dockerfile"])
         self.assertNotIn("environment", sse_loadtest)
+        self.assertNotIn("sysctls", sse_loadtest)
+        self.assertIn("sse-slow-loadtest", config["services"])
+        slow_loadtest = config["services"]["sse-slow-loadtest"]
+        self.assertEqual(
+            "4096 4096 4096",
+            slow_loadtest["sysctls"]["net.ipv4.tcp_rmem"],
+        )
+        self.assertEqual(sse_loadtest["image"], slow_loadtest["image"])
+        self.assertIn(
+            "listen 8080 sndbuf=4k;",
+            LOCAL_NGINX.read_text(encoding="utf-8"),
+        )
 
         dockerfile = SSE_K6_DOCKERFILE.read_text(encoding="utf-8")
         self.assertIn("FROM grafana/xk6:1.4.11 AS builder", dockerfile)
         self.assertIn("xk6 build v1.2.2", dockerfile)
         self.assertIn("github.com/phymbert/xk6-sse@v0.1.12", dockerfile)
         self.assertIn("FROM grafana/k6:1.2.2", dockerfile)
+
+    def test_loadtest_stack_accepts_explicit_backpressure_timing(self) -> None:
+        with patch.dict(os.environ, {
+            "MIRIYUM_LOADTEST_SSE_TIMEOUT": "PT90S",
+            "MIRIYUM_LOADTEST_SSE_HEARTBEAT_INTERVAL": "PT0.001S",
+        }):
+            config = compose_json(LOCAL_COMPOSE, LOADTEST_COMPOSE, profile="loadtest")
+
+        backend_environment = config["services"]["backend"]["environment"]
+        self.assertEqual("PT90S", backend_environment["MIRIYUM_SSE_TIMEOUT"])
+        self.assertEqual(
+            "PT0.001S",
+            backend_environment["MIRIYUM_SSE_HEARTBEAT_INTERVAL"],
+        )
+        runbook = SSE_RUNBOOK.read_text(encoding="utf-8")
+        self.assertIn("try {", runbook)
+        self.assertIn("} finally {", runbook)
+        self.assertIn("throw 'slow-client validation failed'", runbook)
+        self.assertIn("throw 'SSE loadtest timing restoration failed'", runbook)
 
     def test_nginx_flushes_first_sse_frame_before_upstream_close(self) -> None:
         frame, elapsed, status, content_type = first_sse_frame()

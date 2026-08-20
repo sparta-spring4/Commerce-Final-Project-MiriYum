@@ -7,6 +7,8 @@ const ENDPOINT_KINDS = new Set([
 const ALLOWED_METRICS = Object.freeze({
   sse_first_event: ['firstEvent', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
   sse_connection_duration: ['connectionDuration', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
+  sse_slow_cleanup_duration: ['slowCleanupDuration', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
+  sse_companion_lifetime: ['companionLifetime', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
   sse_heartbeat_frames: ['heartbeatFrames', ['count', 'rate']],
   http_req_duration: ['httpRequestDuration', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
   http_reqs: ['httpRequests', ['count', 'rate']],
@@ -91,6 +93,28 @@ function safeMetadata(metadata) {
     throw new Error('endpointKinds is invalid')
   }
   const limits = metadata.limits || {}
+  const holdDurationSeconds = requirePositiveInt(
+    'holdDurationSeconds', limits.holdDurationSeconds, 600,
+  )
+  const slowClientDelaySeconds = requirePositiveInt(
+    'slowClientDelaySeconds', limits.slowClientDelaySeconds, 60,
+  )
+  let slowClientMaxCleanupSeconds = null
+  let companionMinLifetimeSeconds = null
+  if (profile === 'slow-client') {
+    slowClientMaxCleanupSeconds = requirePositiveInt(
+      'slowClientMaxCleanupSeconds', limits.slowClientMaxCleanupSeconds, 600,
+    )
+    companionMinLifetimeSeconds = requirePositiveInt(
+      'companionMinLifetimeSeconds', limits.companionMinLifetimeSeconds, 600,
+    )
+    if (slowClientDelaySeconds <= 30
+      || slowClientDelaySeconds >= slowClientMaxCleanupSeconds
+      || slowClientMaxCleanupSeconds >= companionMinLifetimeSeconds
+      || companionMinLifetimeSeconds >= holdDurationSeconds) {
+      throw new Error('slow-client timing windows are invalid')
+    }
+  }
   return {
     schemaVersion: 'miriyum-k6-sse-summary-v1',
     targetEnv,
@@ -116,12 +140,10 @@ function safeMetadata(metadata) {
       connectionsPerAccount: requirePositiveInt(
         'connectionsPerAccount', limits.connectionsPerAccount, 7,
       ),
-      holdDurationSeconds: requirePositiveInt(
-        'holdDurationSeconds', limits.holdDurationSeconds, 600,
-      ),
-      slowClientDelaySeconds: requirePositiveInt(
-        'slowClientDelaySeconds', limits.slowClientDelaySeconds, 30,
-      ),
+      holdDurationSeconds,
+      slowClientDelaySeconds,
+      slowClientMaxCleanupSeconds,
+      companionMinLifetimeSeconds,
     },
   }
 }
@@ -180,12 +202,12 @@ function renderMarkdown(summary) {
     `- harnessCommitSha: ${summary.harnessCommitSha}`,
     `- thresholdsPassed: ${summary.thresholdsPassed}`,
     '',
-    '| endpoint kind | first event p95 ms | connection p95 ms | successful | rejected | recovery successful | unexpected 4xx | 5xx |',
-    '|---|---:|---:|---:|---:|---:|---:|---:|',
+    '| endpoint kind | first event p95 ms | connection p95 ms | slow cleanup max ms | companion min ms | successful | rejected | recovery successful | unexpected 4xx | 5xx |',
+    '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
   ]
   for (const endpointKind of summary.endpointKinds) {
     const metrics = summary.metrics[endpointKind] || {}
-    lines.push(`| ${endpointKind} | ${metrics.firstEvent?.p95 ?? '-'} | ${metrics.connectionDuration?.p95 ?? '-'} | ${metrics.successfulConnections?.count ?? 0} | ${metrics.rejectedConnections?.count ?? 0} | ${metrics.recoverySuccessful?.count ?? 0} | ${metrics.unexpected4xx?.count ?? 0} | ${metrics.server5xx?.count ?? 0} |`)
+    lines.push(`| ${endpointKind} | ${metrics.firstEvent?.p95 ?? '-'} | ${metrics.connectionDuration?.p95 ?? '-'} | ${metrics.slowCleanupDuration?.max ?? '-'} | ${metrics.companionLifetime?.min ?? '-'} | ${metrics.successfulConnections?.count ?? 0} | ${metrics.rejectedConnections?.count ?? 0} | ${metrics.recoverySuccessful?.count ?? 0} | ${metrics.unexpected4xx?.count ?? 0} | ${metrics.server5xx?.count ?? 0} |`)
   }
   return `${lines.join('\n')}\n`
 }

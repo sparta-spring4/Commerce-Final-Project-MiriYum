@@ -17,6 +17,7 @@ import {
   buildSseScenarioOptions,
   buildSseThresholds,
   captureOwnedHttpBaseline,
+  requireSlowCleanupResult,
   runOwnedHttpProbe,
   triggerWaitingChange,
 } from './probe.js'
@@ -78,6 +79,8 @@ const ownedHttpDegradationRatio = new Trend('owned_http_degradation_ratio')
 const ownedHttpSuccess = new Counter('owned_http_success')
 const ownedHttpErrors = new Counter('owned_http_errors')
 const slowClientTriggers = new Counter('slow_client_triggers')
+const slowClientCleanupMilliseconds = new Trend('sse_slow_cleanup_duration', true)
+const companionLifetimeMilliseconds = new Trend('sse_companion_lifetime', true)
 
 function thresholds() {
   const expectedCapacityRejections = config.profile === 'capacity'
@@ -317,13 +320,18 @@ export function sseSteady(data) {
 
 export function sseSlowClient(data) {
   const session = selectedSession(data, 'slow')
-  safelyExecute(() => openSession(session, {
-    mode: 'slow-client',
-    delay: sleep,
-    delaySeconds: config.slowClientDelaySeconds,
-    minimumValidEvents: 2,
-    requireServerClose: true,
-  }), session.target)
+  safelyExecute(() => {
+    const startedAt = Date.now()
+    const result = openSession(session, {
+      mode: 'slow-client',
+      delay: sleep,
+      delaySeconds: config.slowClientDelaySeconds,
+      minimumValidEvents: 1,
+      requireServerClose: true,
+    })
+    requireSlowCleanupResult(result)
+    slowClientCleanupMilliseconds.add(Date.now() - startedAt, tagsFor(session.target))
+  }, session.target)
 }
 
 export function sseCapacity(data) {
@@ -333,11 +341,29 @@ export function sseCapacity(data) {
 
 export function sseCompanion(data) {
   const session = selectedSession(data, 'companion')
-  safelyExecute(() => openSession(session, {
-    mode: 'steady',
-    minimumValidEvents: 2,
-    requireServerClose: true,
-  }), session.target)
+  safelyExecute(() => {
+    const startedAt = Date.now()
+    const triggerTags = tagsFor(session.target, 'trigger')
+    openSession(session, {
+      mode: 'steady',
+      minimumValidEvents: 2,
+      requireServerClose: true,
+      onFirstValidEvent: () => {
+        const triggered = triggerWaitingChange({
+          client: http,
+          baseUrl: config.baseUrl,
+          session,
+          idempotencyKey: config.slowClientIdempotencyKey,
+          metrics: {
+            trigger: (value, metricTags) => slowClientTriggers.add(value, metricTags),
+          },
+          tags: triggerTags,
+        })
+        check(triggered, { 'slow-client follow-up change is triggered': Boolean }, triggerTags)
+      },
+    })
+    companionLifetimeMilliseconds.add(Date.now() - startedAt, tagsFor(session.target))
+  }, session.target)
 }
 
 export function ownedHttpProbe(data) {
@@ -363,26 +389,6 @@ export function ownedHttpProbe(data) {
   }
 }
 
-export function slowClientTrigger(data) {
-  const session = selectedSession(data, 'companion')
-  const tags = tagsFor(session.target, 'trigger')
-  try {
-    const triggered = triggerWaitingChange({
-      client: http,
-      baseUrl: config.baseUrl,
-      session,
-      idempotencyKey: config.slowClientIdempotencyKey,
-      metrics: {
-        trigger: (value, metricTags) => slowClientTriggers.add(value, metricTags),
-      },
-      tags,
-    })
-    check(triggered, { 'slow-client follow-up change is triggered': Boolean }, tags)
-  } catch (_) {
-    check(null, { 'slow-client follow-up change is triggered': () => false }, tags)
-  }
-}
-
 export function handleSummary(data) {
   const rendered = renderSafeSseSummary(data, {
     targetEnv: config.targetEnv,
@@ -401,6 +407,8 @@ export function handleSummary(data) {
       connectionsPerAccount: config.connectionsPerAccount,
       holdDurationSeconds: config.holdDurationSeconds,
       slowClientDelaySeconds: config.slowClientDelaySeconds,
+      slowClientMaxCleanupSeconds: config.slowClientMaxCleanupSeconds,
+      companionMinLifetimeSeconds: config.companionMinLifetimeSeconds,
       httpProbeRate: config.httpProbeRate,
       httpMaxP95Ratio: config.httpMaxP95Ratio,
       slowClientConnections: config.slowClientConnections,

@@ -22,6 +22,8 @@ function validEnv(overrides = {}) {
     SSE_CONNECTIONS_PER_ACCOUNT: '2',
     SSE_HOLD_DURATION_SECONDS: '30',
     SSE_SLOW_CLIENT_DELAY_SECONDS: '2',
+    SSE_SLOW_CLIENT_MAX_CLEANUP_SECONDS: '60',
+    SSE_COMPANION_MIN_LIFETIME_SECONDS: '85',
     SSE_HTTP_PROBE_RATE: '3',
     SSE_HTTP_MAX_P95_RATIO: '2',
     SSE_SLOW_CLIENT_CONNECTIONS: '1',
@@ -78,6 +80,8 @@ export default function () {
           SSE_SMOKE_PROOF_PATH: profile === 'smoke' ? undefined : '/results/sse-smoke.json',
           ...(profile === 'slow-client' ? {
             SSE_CONNECTIONS: '2',
+            SSE_HOLD_DURATION_SECONDS: '100',
+            SSE_SLOW_CLIENT_DELAY_SECONDS: '40',
             SSE_ENDPOINT_KINDS: 'waiting-store-operator',
           } : {}),
           ...(profile === 'capacity' ? {
@@ -132,8 +136,18 @@ export default function () {
         SSE_CONNECTIONS: '1',
         SSE_ENDPOINT_KINDS: 'waiting-store-operator',
       })))
+      const multipleCompanions = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'slow-client',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_CONNECTIONS: '3',
+        SSE_SLOW_CLIENT_CONNECTIONS: '1',
+        SSE_HOLD_DURATION_SECONDS: '100',
+        SSE_SLOW_CLIENT_DELAY_SECONDS: '40',
+        SSE_ENDPOINT_KINDS: 'waiting-store-operator',
+      })))
       return mixedKinds === 'slow-client requires only waiting-store-operator'
         && noCompanion === 'slow-client requires slow and companion connections'
+        && multipleCompanions === 'slow-client requires exactly one companion connection'
     },
     'slow-client mutation is explicit and fail-closed': () => {
       const unapproved = errorMessage(() => loadSseConfig(validEnv({
@@ -152,6 +166,47 @@ export default function () {
       })))
       return unapproved?.includes('SSE_SLOW_CLIENT_TRIGGER_APPROVED') === true
         && invalidKey?.includes('SSE_SLOW_CLIENT_IDEMPOTENCY_KEY') === true
+    },
+    'slow-client backpressure windows are explicit and strictly ordered': () => {
+      let config = null
+      const validError = errorMessage(() => {
+        config = loadSseConfig(validEnv({
+          SSE_PROFILE: 'slow-client',
+          SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+          SSE_CONNECTIONS: '2',
+          SSE_HOLD_DURATION_SECONDS: '100',
+          SSE_SLOW_CLIENT_DELAY_SECONDS: '40',
+          SSE_SLOW_CLIENT_MAX_CLEANUP_SECONDS: '60',
+          SSE_COMPANION_MIN_LIFETIME_SECONDS: '85',
+          SSE_ENDPOINT_KINDS: 'waiting-store-operator',
+        }))
+      })
+      const unordered = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'slow-client',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_CONNECTIONS: '2',
+        SSE_HOLD_DURATION_SECONDS: '100',
+        SSE_SLOW_CLIENT_DELAY_SECONDS: '40',
+        SSE_SLOW_CLIENT_MAX_CLEANUP_SECONDS: '90',
+        SSE_COMPANION_MIN_LIFETIME_SECONDS: '85',
+        SSE_ENDPOINT_KINDS: 'waiting-store-operator',
+      })))
+      const tooShort = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'slow-client',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_CONNECTIONS: '2',
+        SSE_HOLD_DURATION_SECONDS: '100',
+        SSE_SLOW_CLIENT_DELAY_SECONDS: '30',
+        SSE_SLOW_CLIENT_MAX_CLEANUP_SECONDS: '60',
+        SSE_COMPANION_MIN_LIFETIME_SECONDS: '85',
+        SSE_ENDPOINT_KINDS: 'waiting-store-operator',
+      })))
+      return validError === null
+        && config.slowClientDelaySeconds === 40
+        && config.slowClientMaxCleanupSeconds === 60
+        && config.companionMinLifetimeSeconds === 85
+        && tooShort === 'slow-client timing windows must be strictly ordered'
+        && unordered === 'slow-client timing windows must be strictly ordered'
     },
     'unknown SSE profile is rejected': () =>
       errorMessage(() => loadSseConfig(validEnv({ SSE_PROFILE: 'burst' })))
@@ -199,7 +254,7 @@ export default function () {
         SSE_HOLD_DURATION_SECONDS: '601',
       })))
       const slow = errorMessage(() => loadSseConfig(validEnv({
-        SSE_SLOW_CLIENT_DELAY_SECONDS: '31',
+        SSE_SLOW_CLIENT_DELAY_SECONDS: '61',
       })))
       return hold?.includes('SSE_HOLD_DURATION_SECONDS') === true
         && slow?.includes('SSE_SLOW_CLIENT_DELAY_SECONDS') === true
