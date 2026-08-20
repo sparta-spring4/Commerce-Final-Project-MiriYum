@@ -173,6 +173,14 @@ export function MyPage() {
             <Icon name="arrowRight" className="mi-icon--sm" />
           </span>
         </Link>
+        <Link className="mypage__link-card" to={CONSUMER_PATHS.waitingHistory}>
+          <span className="mypage__link-art" aria-hidden="true"><Icon name="clock" /></span>
+          <span className="mypage__link-body">
+            <span className="mypage__link-title">지난 웨이팅</span>
+            <span className="mypage__link-text">종료된 대기와 예약 전환 기록을 확인하세요.</span>
+          </span>
+          <span className="mypage__link-go">자세히 보기<Icon name="arrowRight" className="mi-icon--sm" /></span>
+        </Link>
       </section>
     </div>
   )

@@ -95,6 +95,10 @@ export interface paths {
     /** 본인 현재 활성 웨이팅 조회 */
     get: operations["getCurrentConsumerWaitingTeam"];
   };
+  "/api/v1/consumers/me/waiting-teams/history": {
+    /** 본인 지난 웨이팅 이력 조회 */
+    get: operations["getCurrentConsumerWaitingHistory"];
+  };
   "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations": {
     /** 본인 활성 웨이팅 취소 */
     post: operations["cancelCurrentConsumerWaitingTeam"];
@@ -313,6 +317,23 @@ export interface components {
       version: number;
       memberships: components["schemas"]["WaitingPartyMember"][];
     };
+    WaitingConsumerHistoryItem: {
+      waitingTeamId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      storeId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      businessDate: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalDate"];
+      /** @enum {string} */
+      status: "CHECKED_IN" | "CANCELLED" | "NO_SHOW" | "CLOSED_BY_STORE" | "RESERVATION_CONVERTED";
+      /** Format: int64 */
+      queueSequence: number;
+      partySize: number;
+      createdAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      endedAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      reservationId: string | null;
+    };
+    WaitingConsumerHistoryPage: {
+      items: components["schemas"]["WaitingConsumerHistoryItem"][];
+      page: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PageMetadata"];
+    };
     WaitingExpectedVersionRequest: {
       /** Format: int64 */
       expectedVersion: number;
@@ -447,6 +468,11 @@ export interface components {
       code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["WaitingConsumerSnapshot"];
+    };
+    WaitingConsumerHistoryPageSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["WaitingConsumerHistoryPage"];
     };
   };
   responses: {
@@ -1111,6 +1137,27 @@ export interface operations {
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["WaitingConsumerAccountForbidden"];
       404: components["responses"]["WaitingConsumerTeamNotFound"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 본인 지난 웨이팅 이력 조회 */
+  getCurrentConsumerWaitingHistory: {
+    parameters: {
+      query?: {
+        page?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Page"];
+        size?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Size"];
+      };
+    };
+    responses: {
+      /** @description 생성 시각 최신순의 본인 종결 웨이팅 페이지 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingConsumerHistoryPageSuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingLedgerBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
     };
   };

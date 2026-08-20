@@ -18,6 +18,8 @@ export type WaitingLocationProofSnapshot =
   components['schemas']['WaitingLocationProofSnapshot']
 export type ConsumerWaitingCreateRequest =
   components['schemas']['WaitingConsumerCreateRequest']
+export type ConsumerWaitingHistoryItem =
+  components['schemas']['WaitingConsumerHistoryItem']
 
 interface IdempotentCommand {
   idempotencyKey: string
@@ -29,6 +31,8 @@ interface VersionedTeamCommand extends IdempotentCommand {
 }
 export const consumerWaitingKeys = {
   current: [...CONSUMER_PROTECTED_QUERY_ROOTS.account, 'me', 'waiting-teams', 'current'] as const,
+  history: (page: number) =>
+    [...CONSUMER_PROTECTED_QUERY_ROOTS.account, 'me', 'waiting-teams', 'history', page] as const,
   availability: (storeId: string) =>
     [
       ...CONSUMER_PROTECTED_QUERY_ROOTS.account,
@@ -65,6 +69,19 @@ export function useCurrentConsumerWaiting() {
   return useQuery({
     queryKey: consumerWaitingKeys.current,
     queryFn: ({ signal }) => fetchCurrentConsumerWaiting(apiClient, signal),
+  })
+}
+
+export function useConsumerWaitingHistory(page: number) {
+  const { apiClient } = useConsumerAuth()
+  return useQuery({
+    queryKey: consumerWaitingKeys.history(page),
+    queryFn: async ({ signal }) => {
+      const response = await apiClient('/api/v1/consumers/me/waiting-teams/history', {
+        method: 'get', query: { page, size: 20 }, signal,
+      })
+      return response.data
+    },
   })
 }
 

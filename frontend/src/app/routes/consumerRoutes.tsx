@@ -23,6 +23,7 @@ import {
 import {
   WaitingInvitationAcceptRoute,
   WaitingRegistrationRoute,
+  WaitingHistoryPage,
 } from '../../domains/waiting/consumer'
 import { ConsumerShell } from '../shells/consumer/ConsumerShell'
 import { RequireConsumerAuth } from '../shells/consumer/RequireConsumerAuth'
@@ -61,6 +62,7 @@ export const consumerRoutes = (
       <Route path={CONSUMER_PATHS.myPage} element={<MyPage />} />
       <Route path={CONSUMER_PATHS.myReservations} element={<MyReservationsPage />} />
       <Route path={CONSUMER_PATHS.myPickups} element={<MyPickupsPage />} />
+      <Route path={CONSUMER_PATHS.waitingHistory} element={<WaitingHistoryPage />} />
       <Route
         path={CONSUMER_PATHS.notificationHistory}
         element={<ConsumerNotificationHistoryRoute />}

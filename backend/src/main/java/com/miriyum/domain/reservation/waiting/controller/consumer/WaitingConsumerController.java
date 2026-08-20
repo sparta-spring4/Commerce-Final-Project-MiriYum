@@ -4,6 +4,7 @@ import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCreateRequest;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryPage;
 import com.miriyum.domain.reservation.waiting.dto.WaitingReceptionAvailability;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.dto.WaitingLocationProofContracts;
@@ -26,6 +27,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestParam;
 
 /** 소비자 JWT 주체의 웨이팅 등록·현재 조회·취소 HTTP 경계다. */
 @RestController
@@ -208,6 +210,17 @@ public class WaitingConsumerController {
         return ApiResponse.success(
                 "현재 웨이팅을 조회했습니다.",
                 queryService.getCurrent(principal.accountId()));
+    }
+
+    @GetMapping("/waiting-teams/history")
+    public ApiResponse<WaitingConsumerHistoryPage> getHistory(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        return ApiResponse.success(
+                "지난 웨이팅을 조회했습니다.",
+                queryService.getHistory(principal.accountId(), page, size));
     }
 
     @PostMapping("/waiting-teams/{waitingTeamId}/cancellations")

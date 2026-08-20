@@ -508,6 +508,31 @@ paths:
           $ref: "#/components/responses/WaitingConsumerTeamNotFound"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/consumers/me/waiting-teams/history:
+    get:
+      tags: [Consumer Waiting]
+      summary: 본인 지난 웨이팅 이력 조회
+      operationId: getCurrentConsumerWaitingHistory
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Page"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Size"
+      responses:
+        "200":
+          description: 생성 시각 최신순의 본인 종결 웨이팅 페이지
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingConsumerHistoryPageSuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingLedgerBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingConsumerAccountForbidden"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations:
     post:
       tags: [Consumer Waiting]
@@ -1249,6 +1274,39 @@ components:
         memberships:
           type: array
           items: { $ref: "#/components/schemas/WaitingPartyMember" }
+    WaitingConsumerHistoryItem:
+      type: object
+      additionalProperties: false
+      required: [waitingTeamId, storeId, businessDate, status, queueSequence, partySize, createdAt, endedAt, reservationId]
+      properties:
+        waitingTeamId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        businessDate:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+        status:
+          type: string
+          enum: [CHECKED_IN, CANCELLED, NO_SHOW, CLOSED_BY_STORE, RESERVATION_CONVERTED]
+        queueSequence: { type: integer, format: int64, minimum: 1 }
+        partySize: { type: integer, minimum: 1 }
+        createdAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        endedAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        reservationId:
+          type: [string, "null"]
+          pattern: "^[1-9][0-9]{0,18}$"
+    WaitingConsumerHistoryPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/WaitingConsumerHistoryItem" }
+        page:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PageMetadata"
     WaitingExpectedVersionRequest:
       type: object
       additionalProperties: false
@@ -1510,6 +1568,17 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
         data:
           $ref: "#/components/schemas/WaitingConsumerSnapshot"
+    WaitingConsumerHistoryPageSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/WaitingConsumerHistoryPage"
   responses:
     WaitingLocationProofBadRequest:
       description: storeId, 조건부 위치 측정 본문 또는 JSON 형식이 올바르지 않음

@@ -10,6 +10,7 @@ import java.util.Optional;
 import java.util.List;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Page;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -17,6 +18,12 @@ import org.springframework.data.repository.query.Param;
 
 /** 웨이팅 팀 잠금, FIFO 선두와 활성 수·종결 대상 조회를 소유한다. */
 public interface WaitingTeamRepository extends JpaRepository<WaitingTeam, Long> {
+
+    Page<WaitingTeam> findAllByConsumerAccountIdAndStatusIn(
+            long consumerAccountId,
+            Collection<WaitingTeamStatus> statuses,
+            Pageable pageable
+    );
 
     List<WaitingTeam> findAllByIdIn(List<Long> waitingTeamIds);
 

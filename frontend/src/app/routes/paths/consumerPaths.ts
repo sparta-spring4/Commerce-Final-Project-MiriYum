@@ -6,6 +6,7 @@ export const CONSUMER_PATHS = {
   myPage: '/mypage',
   myReservations: '/mypage/reservations',
   myPickups: '/mypage/pickups',
+  waitingHistory: '/mypage/waiting-history',
   notificationHistory: '/mypage/notifications',
   reservationCreate: '/stores/:storeId/reserve',
   reservationDetail: '/reservations/:reservationId',

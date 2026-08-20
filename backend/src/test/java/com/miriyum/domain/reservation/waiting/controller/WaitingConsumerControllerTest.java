@@ -19,6 +19,9 @@ import com.miriyum.domain.reservation.config.ReservationSecurityConfig;
 import com.miriyum.domain.reservation.waiting.controller.consumer.WaitingConsumerController;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryItem;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryPage;
+import com.miriyum.global.response.PageMetadata;
 import com.miriyum.domain.reservation.waiting.dto.WaitingReceptionAvailability;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.dto.WaitingLocationProofContracts.Snapshot;
@@ -39,6 +42,7 @@ import com.miriyum.global.idempotency.IdempotencyKey;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -52,6 +56,24 @@ import org.springframework.test.web.servlet.MvcResult;
 @WebMvcTest(WaitingConsumerController.class)
 @Import({ReservationSecurityConfig.class, GlobalExceptionHandler.class})
 class WaitingConsumerControllerTest {
+
+    @Test
+    void consumerCanReadTerminalWaitingHistory() throws Exception {
+        authenticateConsumer(200L);
+        given(queryService.getHistory(200L, 0, 20)).willReturn(
+                new WaitingConsumerHistoryPage(List.of(new WaitingConsumerHistoryItem(
+                        "300", "100", LocalDate.of(2026, 8, 17),
+                        WaitingTeamStatus.CHECKED_IN, 9, 2,
+                        Instant.parse("2026-08-17T00:00:00Z"),
+                        Instant.parse("2026-08-17T00:20:00Z"), null)),
+                        new PageMetadata(0, 20, 1, 1, false)));
+
+        mockMvc.perform(get("/api/v1/consumers/me/waiting-teams/history")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].waitingTeamId").value("300"))
+                .andExpect(jsonPath("$.data.items[0].consumerAccountId").doesNotExist());
+    }
 
     private static final String KEY = "550e8400-e29b-41d4-a716-446655440301";
     private static final UUID LOCATION_PROOF_ID =

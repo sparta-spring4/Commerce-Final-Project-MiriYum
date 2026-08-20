@@ -294,7 +294,11 @@ describe('마이페이지', () => {
       CONSUMER_PATHS.notificationHistory,
     )
 
-    for (const label of ['환불 내역', '지난 웨이팅', '비밀번호 변경']) {
+    expect(screen.getByRole('link', { name: /지난 웨이팅/ })).toHaveAttribute(
+      'href', CONSUMER_PATHS.waitingHistory,
+    )
+
+    for (const label of ['환불 내역', '비밀번호 변경']) {
       expect(screen.queryByText(label)).not.toBeInTheDocument()
     }
   })

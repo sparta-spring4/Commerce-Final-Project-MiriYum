@@ -30,6 +30,8 @@ class WaitingOpenApiContractTest {
             "/api/v1/consumers/me/stores/{storeId}/waiting-location-proofs";
     private static final String CONSUMER_CURRENT_PATH =
             "/api/v1/consumers/me/waiting-teams/current";
+    private static final String CONSUMER_HISTORY_PATH =
+            "/api/v1/consumers/me/waiting-teams/history";
     private static final String CONSUMER_CANCEL_PATH =
             "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations";
     private static final String CONSUMER_EVENTS_PATH =
@@ -94,6 +96,7 @@ class WaitingOpenApiContractTest {
                         CONSUMER_LOCATION_PROOF_PATH,
                         CONSUMER_CREATE_PATH,
                         CONSUMER_CURRENT_PATH,
+                        CONSUMER_HISTORY_PATH,
                         CONSUMER_CANCEL_PATH,
                         "/api/v1/consumers/me/waiting-invitation-acceptances",
                         "/api/v1/consumers/me/waiting-teams/{teamId}/invitations",

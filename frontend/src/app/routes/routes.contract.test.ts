@@ -27,6 +27,7 @@ describe('사용자별 route 계약', () => {
       myPage: '/mypage',
       myReservations: '/mypage/reservations',
       myPickups: '/mypage/pickups',
+      waitingHistory: '/mypage/waiting-history',
       notificationHistory: '/mypage/notifications',
       reservationCreate: '/stores/:storeId/reserve',
       reservationDetail: '/reservations/:reservationId',

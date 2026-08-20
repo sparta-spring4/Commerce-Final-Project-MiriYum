@@ -214,6 +214,8 @@ public class ReservationSecurityConfig {
                         .requestMatchers(HttpMethod.POST, CONSUMER_WAITING_STORE_ROOT).authenticated()
                         .requestMatchers(HttpMethod.GET,
                                 CONSUMER_WAITING_ME_ROOT + "/current").authenticated()
+                        .requestMatchers(HttpMethod.GET,
+                                CONSUMER_WAITING_ME_ROOT + "/history").authenticated()
                         .requestMatchers(HttpMethod.POST,
                                 CONSUMER_WAITING_ME_ROOT + "/*/cancellations").authenticated()
                         .requestMatchers(HttpMethod.POST,
