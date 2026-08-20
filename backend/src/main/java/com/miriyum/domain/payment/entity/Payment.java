@@ -57,6 +57,15 @@ public class Payment {
     @Column(name = "source_reference_id", nullable = false, length = 19)
     private String sourceReferenceId;
 
+    @Column(name = "monitoring_case_type", nullable = false, length = 32)
+    private String monitoringCaseType;
+
+    @Column(name = "monitoring_case_reference_id", nullable = false, length = 19)
+    private String monitoringCaseReferenceId;
+
+    @Column(name = "store_id", nullable = false)
+    private long storeId;
+
     @Column(name = "source_policy_version", nullable = false)
     private long sourcePolicyVersion;
 
@@ -118,6 +127,9 @@ public class Payment {
             String paymentId,
             String sourceType,
             String sourceReferenceId,
+            String monitoringCaseType,
+            String monitoringCaseReferenceId,
+            long storeId,
             long sourcePolicyVersion,
             Instant sourceExpiresAt,
             String preparationIdempotencyKey,
@@ -132,6 +144,10 @@ public class Payment {
         this.paymentId = requirePublicId(paymentId, "paymentId");
         this.sourceType = requireText(sourceType, 40, "sourceType");
         this.sourceReferenceId = requirePublicId(sourceReferenceId, "sourceReferenceId");
+        this.monitoringCaseType = requireMonitoringCaseType(this.sourceType, monitoringCaseType);
+        this.monitoringCaseReferenceId = requirePublicId(
+                monitoringCaseReferenceId, "monitoringCaseReferenceId");
+        this.storeId = requirePositive(storeId, "storeId");
         this.sourcePolicyVersion = requirePositive(sourcePolicyVersion, "sourcePolicyVersion");
         this.sourceExpiresAt = Objects.requireNonNull(
                 sourceExpiresAt, "sourceExpiresAt must not be null").truncatedTo(ChronoUnit.MICROS);
@@ -162,6 +178,9 @@ public class Payment {
             String paymentId,
             String sourceType,
             String sourceReferenceId,
+            String monitoringCaseType,
+            String monitoringCaseReferenceId,
+            long storeId,
             long sourcePolicyVersion,
             Instant sourceExpiresAt,
             String preparationIdempotencyKey,
@@ -177,6 +196,9 @@ public class Payment {
                 paymentId,
                 sourceType,
                 sourceReferenceId,
+                monitoringCaseType,
+                monitoringCaseReferenceId,
+                storeId,
                 sourcePolicyVersion,
                 sourceExpiresAt,
                 preparationIdempotencyKey,
@@ -188,6 +210,33 @@ public class Payment {
                 orderName,
                 createdAt
         );
+    }
+
+    public static Payment prepare(
+            String paymentId,
+            String sourceType,
+            String sourceReferenceId,
+            long storeId,
+            long sourcePolicyVersion,
+            Instant sourceExpiresAt,
+            String preparationIdempotencyKey,
+            String preparationRequestFingerprint,
+            Long consumerAccountId,
+            long amountMinor,
+            String currency,
+            String portOnePaymentId,
+            String orderName,
+            Instant createdAt
+    ) {
+        String monitoringCaseType = switch (sourceType) {
+            case "RESERVATION_DEPOSIT" -> "RESERVATION_HOLD";
+            case "WAITING_RESERVATION_DEPOSIT" -> "WAITING";
+            default -> throw new IllegalArgumentException("unsupported payment source type");
+        };
+        return prepare(paymentId, sourceType, sourceReferenceId,
+                monitoringCaseType, sourceReferenceId, storeId, sourcePolicyVersion,
+                sourceExpiresAt, preparationIdempotencyKey, preparationRequestFingerprint,
+                consumerAccountId, amountMinor, currency, portOnePaymentId, orderName, createdAt);
     }
 
     public void beginConfirmation(Instant confirmedAt) {
@@ -333,6 +382,17 @@ public class Payment {
         return value;
     }
 
+    private static String requireMonitoringCaseType(String sourceType, String value) {
+        boolean reservationCase = "RESERVATION_DEPOSIT".equals(sourceType)
+                && ("RESERVATION_HOLD".equals(value) || "RESERVATION".equals(value));
+        boolean waitingCase = "WAITING_RESERVATION_DEPOSIT".equals(sourceType)
+                && "WAITING".equals(value);
+        if (!reservationCase && !waitingCase) {
+            throw new IllegalArgumentException("monitoringCaseType is not supported");
+        }
+        return value;
+    }
+
     public Long getId() {
         return id;
     }
@@ -347,6 +407,18 @@ public class Payment {
 
     public String getSourceReferenceId() {
         return sourceReferenceId;
+    }
+
+    public String getMonitoringCaseType() {
+        return monitoringCaseType;
+    }
+
+    public String getMonitoringCaseReferenceId() {
+        return monitoringCaseReferenceId;
+    }
+
+    public long getStoreId() {
+        return storeId;
     }
 
     public long getSourcePolicyVersion() {

@@ -220,6 +220,7 @@ class ReservationDepositDispositionTest {
                 "900000000000000001",
                 "RESERVATION_DEPOSIT",
                 "123",
+                12L,
                 2L,
                 REQUESTED_AT.plusSeconds(600),
                 "550e8400-e29b-41d4-a716-446655440000",

@@ -61,6 +61,11 @@ public enum PaymentErrorCode implements ErrorCode {
             HttpStatus.CONFLICT,
             "PAYMENT_012",
             "지원하지 않는 결제 복구 작업입니다."
+    ),
+    MONITORING_SOURCE_UNAVAILABLE(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "PAYMENT_013",
+            "결제 모니터링 원장을 조회할 수 없습니다."
     );
 
     private final HttpStatus httpStatus;

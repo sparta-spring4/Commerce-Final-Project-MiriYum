@@ -37,6 +37,17 @@ public interface ReservationDepositProcessRepository
             @Param("finalReservationId") long finalReservationId);
 
     @Query("""
+            select process.reservationHoldId as reservationHoldId,
+                   process.finalReservationId as finalReservationId
+              from ReservationDepositProcess process
+             where process.reservationHoldId in :reservationHoldIds
+                or process.finalReservationId in :finalReservationIds
+            """)
+    List<MonitoringLink> findMonitoringLinks(
+            @Param("reservationHoldIds") List<Long> reservationHoldIds,
+            @Param("finalReservationIds") List<Long> finalReservationIds);
+
+    @Query("""
             select process.reservationHoldId from ReservationDepositProcess process
             where process.finalReservationId in :finalReservationIds
               and process.reservationHoldId in :reservationHoldIds
@@ -88,5 +99,10 @@ public interface ReservationDepositProcessRepository
         ReservationDepositProcessStatus getStatus();
         Long getFinalReservationId();
         String getPaymentId();
+    }
+
+    interface MonitoringLink {
+        long getReservationHoldId();
+        Long getFinalReservationId();
     }
 }

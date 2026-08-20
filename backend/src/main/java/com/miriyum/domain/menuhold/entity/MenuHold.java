@@ -11,6 +11,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -55,6 +56,9 @@ public class MenuHold extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 32)
     private MenuHoldStatus status;
+    @Version
+    @Column(name = "status_version", nullable = false)
+    private long statusVersion;
     @OneToMany(mappedBy = "menuHold", cascade = CascadeType.ALL)
     private List<MenuHoldItem> items = new ArrayList<>();
 

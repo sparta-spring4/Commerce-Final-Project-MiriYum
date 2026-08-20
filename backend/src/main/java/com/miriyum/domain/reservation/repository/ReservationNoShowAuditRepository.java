@@ -3,6 +3,7 @@ package com.miriyum.domain.reservation.repository;
 import com.miriyum.domain.reservation.entity.ReservationNoShowAudit;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
@@ -11,6 +12,9 @@ import org.springframework.data.repository.query.Param;
 public interface ReservationNoShowAuditRepository extends Repository<ReservationNoShowAudit, Long> {
 
     ReservationNoShowAudit save(ReservationNoShowAudit audit);
+
+    List<ReservationNoShowAudit> findAllByReservationIdInOrderByOccurredAtAscIdAsc(
+            List<Long> reservationIds);
 
     @Query(value = """
             SELECT

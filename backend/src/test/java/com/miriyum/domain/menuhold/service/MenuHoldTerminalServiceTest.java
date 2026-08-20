@@ -16,16 +16,20 @@ import com.miriyum.domain.menuhold.dto.TemporaryMenuHoldContracts;
 import com.miriyum.domain.menuhold.entity.MenuHold;
 import com.miriyum.domain.menuhold.entity.MenuHoldItemSnapshot;
 import com.miriyum.domain.menuhold.entity.MenuHoldStatus;
+import com.miriyum.domain.menuhold.entity.MenuHoldTransitionAudit;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
+import com.miriyum.domain.menuhold.repository.MenuHoldTransitionAuditRepository;
 import com.miriyum.domain.menu.service.MenuTransactionFacade;
 import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -35,6 +39,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
@@ -44,6 +49,10 @@ class MenuHoldTerminalServiceTest {
     @Mock StoreServiceIntervalValidationService intervalService;
     @Mock MenuInventoryService inventoryService;
     @Mock MenuHoldRepository holdRepository;
+    @Mock MenuHoldTransitionAuditRepository transitionAuditRepository;
+
+    private static final Instant AUDIT_TIME = Instant.parse("2026-08-10T03:05:00Z");
+    private static final Clock CLOCK = Clock.fixed(AUDIT_TIME, ZoneOffset.UTC);
 
     @Test
     void runtimeImplementsThePublicMenuHoldService() {
@@ -88,6 +97,7 @@ class MenuHoldTerminalServiceTest {
         assertThat(result).isEqualTo(MenuHoldCommandResult.released(10L));
         verify(inventoryService).restoreInventory(new InventoryRestoreRequest(
                 "release-operation", "acquire-operation"));
+        assertSavedTransition(MenuHoldStatus.CONFIRMED, MenuHoldStatus.RELEASED);
     }
 
     @Test
@@ -103,6 +113,7 @@ class MenuHoldTerminalServiceTest {
         assertThat(result).isEqualTo(MenuHoldCommandResult.released(10L));
         verify(inventoryService, never()).restoreInventory(
                 org.mockito.ArgumentMatchers.any());
+        verifyNoInteractions(transitionAuditRepository);
     }
 
     @Test
@@ -117,6 +128,7 @@ class MenuHoldTerminalServiceTest {
         assertThat(result).isEqualTo(MenuHoldCommandResult.fulfilled(10L));
         verify(inventoryService, never()).restoreInventory(
                 org.mockito.ArgumentMatchers.any());
+        assertSavedTransition(MenuHoldStatus.CONFIRMED, MenuHoldStatus.FULFILLED);
     }
 
     @Test
@@ -132,6 +144,7 @@ class MenuHoldTerminalServiceTest {
         assertThat(result).isEqualTo(MenuHoldCommandResult.fulfilled(10L));
         verify(inventoryService, never()).restoreInventory(
                 org.mockito.ArgumentMatchers.any());
+        verifyNoInteractions(transitionAuditRepository);
     }
 
     @Test
@@ -147,6 +160,7 @@ class MenuHoldTerminalServiceTest {
         assertThat(hold.getStatus()).isEqualTo(MenuHoldStatus.FORFEITED);
         verify(inventoryService, never()).restoreInventory(
                 org.mockito.ArgumentMatchers.any());
+        assertSavedTransition(MenuHoldStatus.CONFIRMED, MenuHoldStatus.FORFEITED);
     }
 
     @Test
@@ -162,6 +176,7 @@ class MenuHoldTerminalServiceTest {
         assertThat(result).isEqualTo(MenuHoldCommandResult.forfeited(10L));
         verify(inventoryService, never()).restoreInventory(
                 org.mockito.ArgumentMatchers.any());
+        verifyNoInteractions(transitionAuditRepository);
     }
 
     @Test
@@ -391,7 +406,18 @@ class MenuHoldTerminalServiceTest {
 
     private MenuHoldServiceRuntime service() {
         return new MenuHoldServiceRuntime(
-                menuTransactionFacade, intervalService, inventoryService, holdRepository);
+                menuTransactionFacade, intervalService, inventoryService, holdRepository,
+                transitionAuditRepository, CLOCK);
+    }
+
+    private void assertSavedTransition(MenuHoldStatus before, MenuHoldStatus after) {
+        ArgumentCaptor<MenuHoldTransitionAudit> captor =
+                ArgumentCaptor.forClass(MenuHoldTransitionAudit.class);
+        verify(transitionAuditRepository).save(captor.capture());
+        assertThat(captor.getValue().getBeforeStatus()).isEqualTo(before);
+        assertThat(captor.getValue().getAfterStatus()).isEqualTo(after);
+        assertThat(captor.getValue().getResultVersion()).isEqualTo(1L);
+        assertThat(captor.getValue().getOccurredAt()).isEqualTo(AUDIT_TIME);
     }
 
     private static MenuHold confirmedHold() {
