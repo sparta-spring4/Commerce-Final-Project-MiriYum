@@ -1,0 +1,211 @@
+openapi: 3.1.0
+info:
+  title: MiriYum Store Onboarding API
+  version: 1.0.0
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+  description: 사업자등록증과 자동검사가 필수인 매장 입점 신청 계약이다.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/store-operators/stores:
+    post:
+      summary: 사업자등록증을 포함한 신규 매장 입점 신청 접수
+      tags: [Store Onboarding]
+      operationId: submitStoreOnboardingApplication
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [application, businessRegistrationEvidence]
+              properties:
+                application:
+                  $ref: '#/components/schemas/StoreOnboardingApplicationRequest'
+                businessRegistrationEvidence:
+                  type: string
+                  format: binary
+            encoding:
+              application:
+                contentType: application/json
+              businessRegistrationEvidence:
+                contentType: application/pdf, image/jpeg, image/png
+      responses:
+        '202': {$ref: '#/components/responses/ApplicationAccepted'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /api/v1/store-operators/onboarding-applications/{applicationId}:
+    get:
+      summary: 본인 소유 입점 신청의 현재 상태 조회
+      tags: [Store Onboarding]
+      operationId: getOwnStoreOnboardingApplication
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+      responses:
+        '200': {$ref: '#/components/responses/ApplicationFound'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/store-operators/onboarding-applications/{applicationId}/versions:
+    post:
+      summary: 보완 요청된 입점 신청의 새 version 접수
+      tags: [Store Onboarding]
+      operationId: submitStoreOnboardingSupplement
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [application, businessRegistrationEvidence]
+              properties:
+                application:
+                  $ref: '#/components/schemas/StoreOnboardingApplicationRequest'
+                businessRegistrationEvidence:
+                  type: string
+                  format: binary
+            encoding:
+              application:
+                contentType: application/json
+              businessRegistrationEvidence:
+                contentType: application/pdf, image/jpeg, image/png
+      responses:
+        '202': {$ref: '#/components/responses/ApplicationAccepted'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: '../mvp1-common/openapi.yaml#/components/securitySchemes/bearerAuth'
+  parameters:
+    ApplicationId:
+      name: applicationId
+      in: path
+      required: true
+      schema: {type: integer, format: int64, minimum: 1}
+    IdempotencyKey:
+      $ref: '../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey'
+  schemas:
+    StoreOnboardingApplicationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - description
+        - address
+        - contactNumber
+        - businessRegistrationNumber
+        - businessType
+        - legalBusinessName
+        - representativeName
+        - openingDate
+        - primaryBusinessCategory
+        - primaryBusinessItem
+        - pickupEnabled
+        - applicantDeclarationAgreed
+        - requiredTermsAgreed
+      properties:
+        name: {type: string, minLength: 1, maxLength: 100}
+        description: {type: string, minLength: 1, maxLength: 2000}
+        address: {type: string, minLength: 1, maxLength: 255}
+        contactNumber: {type: string, minLength: 8, maxLength: 20}
+        businessRegistrationNumber:
+          type: string
+          pattern: '^[0-9]{10}$'
+        businessType:
+          type: string
+          enum: [CAFE, BAKERY, OTHER]
+        legalBusinessName: {type: string, minLength: 1, maxLength: 200}
+        representativeName: {type: string, minLength: 1, maxLength: 100}
+        openingDate: {type: string, format: date}
+        primaryBusinessCategory: {type: string, minLength: 1, maxLength: 100}
+        primaryBusinessItem: {type: string, minLength: 1, maxLength: 100}
+        pickupEnabled: {type: boolean}
+        applicantDeclarationAgreed: {type: boolean, const: true}
+        requiredTermsAgreed: {type: boolean, const: true}
+    StoreOnboardingApplicationStatus:
+      type: string
+      enum:
+        - RECEIVED
+        - EVIDENCE_PENDING
+        - AUTO_CHECKING
+        - REVIEW_READY
+        - UNDER_REVIEW
+        - CHANGES_REQUESTED
+        - AUTO_APPROVED
+        - APPROVED
+        - REJECTED
+    StoreOnboardingApplicationData:
+      type: object
+      additionalProperties: false
+      required:
+        - applicationId
+        - applicationVersion
+        - status
+        - reviewRequired
+        - nextAction
+        - storeId
+      properties:
+        applicationId: {type: integer, format: int64, minimum: 1}
+        applicationVersion: {type: integer, format: int64, minimum: 1}
+        status: {$ref: '#/components/schemas/StoreOnboardingApplicationStatus'}
+        reviewRequired: {type: boolean}
+        nextAction: {type: string, minLength: 1, maxLength: 100}
+        storeId:
+          type: [integer, 'null']
+          format: int64
+          minimum: 1
+    StoreOnboardingApplicationEnvelope:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessCode'}
+        message: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage'}
+        data: {$ref: '#/components/schemas/StoreOnboardingApplicationData'}
+  responses:
+    ApplicationAccepted:
+      description: 입점 신청 또는 보완본 접수
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/StoreOnboardingApplicationEnvelope'}
+    ApplicationFound:
+      description: 본인 소유 입점 신청
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/StoreOnboardingApplicationEnvelope'}
+    BadRequest:
+      $ref: '../mvp1-common/openapi.yaml#/components/responses/BadRequest'
+    Unauthorized:
+      $ref: '../mvp1-common/openapi.yaml#/components/responses/Unauthorized'
+    NotFound:
+      description: 본인 소유의 신청을 찾을 수 없음
+      content:
+        application/json:
+          schema: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse'}
+    Conflict:
+      $ref: '../mvp1-common/openapi.yaml#/components/responses/Conflict'
+    PayloadTooLarge:
+      description: 사업자등록증이 10 MiB 제한을 초과함
+      content:
+        application/json:
+          schema: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse'}
+    Unavailable:
+      $ref: '../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable'

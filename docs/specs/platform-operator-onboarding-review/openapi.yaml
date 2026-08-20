@@ -1,0 +1,296 @@
+openapi: 3.1.0
+info:
+  title: MiriYum Platform Operator Onboarding Review API
+  version: 1.0.0
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+  description: 자동검사를 통과한 매장 입점 신청의 배정·심사·일회 증빙 열람 계약이다.
+servers:
+  - url: /
+security:
+  - platformOperatorBearerAuth: []
+paths:
+  /api/v1/platform-operators/onboarding-review-cases:
+    get:
+      summary: 권한 범위의 입점 심사 사건 목록 조회
+      tags: [Platform Operator Onboarding Review]
+      operationId: listOnboardingReviewCases
+      parameters:
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200': {$ref: '#/components/responses/CasePageFound'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/platform-operators/onboarding-review-cases/{caseId}:
+    get:
+      summary: 입점 심사 사건 상세 조회
+      tags: [Platform Operator Onboarding Review]
+      operationId: getOnboardingReviewCase
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      responses:
+        '200': {$ref: '#/components/responses/CaseFound'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/platform-operators/onboarding-review-cases/{caseId}/assignments:
+    post:
+      summary: 입점 심사 사건 최초 자기 배정
+      tags: [Platform Operator Onboarding Review]
+      operationId: assignOnboardingReviewCase
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminReauthentication'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AssignmentRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/CaseFound'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/platform-operators/onboarding-review-cases/{caseId}/reassignments:
+    post:
+      summary: 입점 심사 사건 담당자 명시적 재배정
+      tags: [Platform Operator Onboarding Review]
+      operationId: reassignOnboardingReviewCase
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminReauthentication'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReassignmentRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/CaseFound'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/platform-operators/onboarding-review-cases/{caseId}/decisions:
+    post:
+      summary: 입점 신청 승인·거절·보완 요청 결정
+      tags: [Platform Operator Onboarding Review]
+      operationId: decideOnboardingReviewCase
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminReauthentication'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OnboardingDecisionRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/ApplicationChanged'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/platform-operators/onboarding-review-cases/{caseId}/evidence:
+    get:
+      summary: 현재 신청 version 사업자등록증 일회 열람
+      tags: [Platform Operator Onboarding Review]
+      operationId: readOnboardingReviewEvidence
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/ExpectedCaseVersion'
+        - $ref: '#/components/parameters/AdminReauthentication'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: 현재 신청 version의 사업자등록증 원문
+          content:
+            application/pdf:
+              schema: {type: string, format: binary}
+            image/jpeg:
+              schema: {type: string, format: binary}
+            image/png:
+              schema: {type: string, format: binary}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+components:
+  securitySchemes:
+    platformOperatorBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    CaseId:
+      name: caseId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    ExpectedCaseVersion:
+      name: expectedCaseVersion
+      in: query
+      required: true
+      schema: {type: integer, format: int64, minimum: 1}
+    Status:
+      name: status
+      in: query
+      required: false
+      schema: {$ref: '#/components/schemas/OnboardingReviewCaseStatus'}
+    Type:
+      name: type
+      in: query
+      required: false
+      schema: {$ref: '#/components/schemas/OnboardingReviewCaseType'}
+    Page:
+      $ref: '../mvp1-common/openapi.yaml#/components/parameters/Page'
+    Size:
+      $ref: '../mvp1-common/openapi.yaml#/components/parameters/Size'
+    IdempotencyKey:
+      $ref: '../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey'
+    AdminReauthentication:
+      name: X-Admin-Reauthentication
+      in: header
+      required: true
+      description: 현재 사건·version·목적에 결속된 5분 일회 승인값
+      schema: {type: string, minLength: 43, maxLength: 512}
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 100}
+  schemas:
+    OnboardingReviewCaseType:
+      type: string
+      enum: [ONBOARDING, OWNERSHIP_CONFLICT]
+    OnboardingReviewCaseStatus:
+      type: string
+      enum: [REVIEW_READY, UNDER_REVIEW, CHANGES_REQUESTED, APPROVED, REJECTED, CLOSED]
+    OnboardingDecisionType:
+      type: string
+      enum: [APPROVE, REJECT, REQUEST_CHANGES]
+    AssignmentRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedCaseVersion]
+      properties:
+        expectedCaseVersion: {type: integer, format: int64, minimum: 1}
+    ReassignmentRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedCaseVersion, nextOperatorId]
+      properties:
+        expectedCaseVersion: {type: integer, format: int64, minimum: 1}
+        nextOperatorId: {type: integer, format: int64, minimum: 1}
+    OnboardingDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [action, expectedApplicationVersion, expectedCaseVersion, reasonCode]
+      properties:
+        action: {$ref: '#/components/schemas/OnboardingDecisionType'}
+        expectedApplicationVersion: {type: integer, format: int64, minimum: 1}
+        expectedCaseVersion: {type: integer, format: int64, minimum: 1}
+        reasonCode:
+          type: string
+          pattern: '^[A-Z][A-Z0-9_]{1,49}$'
+    ApplicationData:
+      $ref: '../store-onboarding/openapi.yaml#/components/schemas/StoreOnboardingApplicationData'
+    OnboardingReviewCaseSummary:
+      type: object
+      additionalProperties: false
+      required: [caseId, type, status, applicationId, applicationVersion, caseVersion, maskedBusinessNumber, receivedAt]
+      properties:
+        caseId: {type: string, format: uuid}
+        type: {$ref: '#/components/schemas/OnboardingReviewCaseType'}
+        status: {$ref: '#/components/schemas/OnboardingReviewCaseStatus'}
+        applicationId: {type: integer, format: int64, minimum: 1}
+        applicationVersion: {type: integer, format: int64, minimum: 1}
+        caseVersion: {type: integer, format: int64, minimum: 1}
+        maskedBusinessNumber: {type: string, pattern: '^[0-9]{3}-\*\*-\*{5}$'}
+        receivedAt: {type: string, format: date-time}
+    OnboardingReviewCaseDetail:
+      allOf:
+        - $ref: '#/components/schemas/OnboardingReviewCaseSummary'
+        - type: object
+          additionalProperties: false
+          required: [assignedOperatorId, application]
+          properties:
+            assignedOperatorId:
+              type: [integer, 'null']
+              format: int64
+              minimum: 1
+            application: {$ref: '#/components/schemas/ApplicationData'}
+    OnboardingReviewCasePage:
+      type: object
+      additionalProperties: false
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items: {$ref: '#/components/schemas/OnboardingReviewCaseSummary'}
+        page: {type: integer, minimum: 0}
+        size: {type: integer, minimum: 1, maximum: 100}
+        totalElements: {type: integer, format: int64, minimum: 0}
+        totalPages: {type: integer, minimum: 0}
+    CaseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessCode'}
+        message: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage'}
+        data: {$ref: '#/components/schemas/OnboardingReviewCaseDetail'}
+    CasePageEnvelope:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessCode'}
+        message: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage'}
+        data: {$ref: '#/components/schemas/OnboardingReviewCasePage'}
+    ApplicationEnvelope:
+      $ref: '../store-onboarding/openapi.yaml#/components/schemas/StoreOnboardingApplicationEnvelope'
+  responses:
+    CaseFound:
+      description: 현재 입점 심사 사건
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/CaseEnvelope'}
+    CasePageFound:
+      description: 마스킹된 입점 심사 사건 목록
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/CasePageEnvelope'}
+    ApplicationChanged:
+      description: 심사 결정이 반영된 신청 상태
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ApplicationEnvelope'}
+    BadRequest:
+      $ref: '../mvp1-common/openapi.yaml#/components/responses/BadRequest'
+    Unauthorized:
+      $ref: '../mvp1-common/openapi.yaml#/components/responses/Unauthorized'
+    Forbidden:
+      $ref: '../mvp1-common/openapi.yaml#/components/responses/Forbidden'
+    NotFound:
+      description: 현재 접근 가능한 심사 사건을 찾을 수 없음
+      content:
+        application/json:
+          schema: {$ref: '../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse'}
+    Conflict:
+      $ref: '../mvp1-common/openapi.yaml#/components/responses/Conflict'
+    Unavailable:
+      $ref: '../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable'

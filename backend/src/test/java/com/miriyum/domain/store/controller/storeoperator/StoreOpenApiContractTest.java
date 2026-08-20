@@ -43,13 +43,24 @@ class StoreOpenApiContractTest {
     }
 
     @Test
+    void storeRegistrationRequiresJsonApplicationAndPrivateEvidence()
+            throws IOException {
+        Map<String, Object> document = document(Path.of(
+                "..", "docs", "specs", "store-onboarding", "openapi.yaml"));
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> post = map(map(
+                paths.get("/api/v1/store-operators/stores")).get("post"));
+        Map<String, Object> multipart = map(map(post.get("requestBody")).get("content"));
+
+        assertThat(multipart).containsKey("multipart/form-data");
+        assertThat(map(post.get("responses"))).containsKey("202");
+    }
+
+    @Test
     void managedStoreGeocodingAndFailureResponsesMatchControllerContract()
             throws IOException {
         Path contract = Path.of("..", "docs", "specs", "store-search", "openapi.yaml");
-        Map<String, Object> document;
-        try (InputStream input = Files.newInputStream(contract)) {
-            document = new Yaml().load(input);
-        }
+        Map<String, Object> document = document(contract);
 
         Map<String, Object> paths = map(document.get("paths"));
         Map<String, Object> collection = map(paths.get("/api/v1/store-operators/stores"));
@@ -93,5 +104,11 @@ class StoreOpenApiContractTest {
     @SuppressWarnings("unchecked")
     private static List<String> list(Object value) {
         return (List<String>) value;
+    }
+
+    private static Map<String, Object> document(Path contract) throws IOException {
+        try (InputStream input = Files.newInputStream(contract)) {
+            return map(new Yaml().load(input));
+        }
     }
 }
