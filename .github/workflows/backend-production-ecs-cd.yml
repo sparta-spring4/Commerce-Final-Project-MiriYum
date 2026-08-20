@@ -266,6 +266,24 @@ jobs:
             exit 1
           fi
 
+          storage_s3_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .environment[]?
+              | select(.name == "MIRIYUM_STORAGE_S3_ENABLED") | .value][0] // "false"
+          ' current-task-definition.json)
+          if [ "$storage_s3_enabled" != "true" ] && [ "$storage_s3_enabled" != "false" ]; then
+            echo "::error::Current task definition has an invalid MIRIYUM_STORAGE_S3_ENABLED value."
+            exit 1
+          fi
+
+          storage_s3_reconciliation_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .environment[]?
+              | select(.name == "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED") | .value][0] // "false"
+          ' current-task-definition.json)
+          if [ "$storage_s3_reconciliation_enabled" != "true" ] && [ "$storage_s3_reconciliation_enabled" != "false" ]; then
+            echo "::error::Current task definition has an invalid MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED value."
+            exit 1
+          fi
+
           runtime_config_secret_arn=""
           if [ "$runtime_config_enabled" = "true" ]; then
             runtime_config_secret_arn=$(aws secretsmanager describe-secret \
@@ -280,11 +298,16 @@ jobs:
 
           account_id=$(aws sts get-caller-identity --query Account --output text)
           openai_parameter_arn="arn:aws:ssm:${AWS_REGION}:${account_id}:parameter/miriyum/shared/openai-api-key"
+          storage_s3_bucket_parameter_arn="arn:aws:ssm:${AWS_REGION}:${account_id}:parameter/miriyum/production/storage-s3-bucket"
 
           jq --arg image "$IMAGE_URI" --arg container "$ECS_CONTAINER_NAME" \
             --arg runtime_config_secret_arn "$runtime_config_secret_arn" \
             --arg openai_parameter_arn "$openai_parameter_arn" --arg llm_enabled "$llm_enabled" \
-            --arg runtime_config_enabled "$runtime_config_enabled" '
+            --arg runtime_config_enabled "$runtime_config_enabled" \
+            --arg storage_s3_enabled "$storage_s3_enabled" \
+            --arg storage_s3_reconciliation_enabled "$storage_s3_reconciliation_enabled" \
+            --arg storage_s3_bucket_parameter_arn "$storage_s3_bucket_parameter_arn" \
+            --arg aws_region "$AWS_REGION" '
             .containerDefinitions |= map(
               if .name == $container then
                 .image = $image
@@ -294,17 +317,27 @@ jobs:
                     and .name != "MIRIYUM_STORE_SEARCH_LLM_MODEL"
                     and .name != "MIRIYUM_CLOUDWATCH_METRICS_ENABLED"
                     and .name != "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE"
+                    and .name != "MIRIYUM_STORAGE_S3_ENABLED"
+                    and .name != "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"
+                    and .name != "MIRIYUM_STORAGE_S3_REGION"
                   ))) + [
                     {name: "MIRIYUM_STORE_SEARCH_LLM_ENABLED", value: $llm_enabled},
                     {name: "MIRIYUM_RUNTIME_CONFIG_ENABLED", value: $runtime_config_enabled},
                     {name: "MIRIYUM_STORE_SEARCH_LLM_MODEL", value: "gpt-4o-mini"},
                     {name: "MIRIYUM_CLOUDWATCH_METRICS_ENABLED", value: "true"},
-                    {name: "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE", value: "MiriYum/Production"}
+                    {name: "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE", value: "MiriYum/Production"},
+                    {name: "MIRIYUM_STORAGE_S3_ENABLED", value: $storage_s3_enabled},
+                    {name: "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED", value: $storage_s3_reconciliation_enabled},
+                    {name: "MIRIYUM_STORAGE_S3_REGION", value: $aws_region}
                   ])
                 | .secrets = ((.secrets // [] | map(select(
-                    .name != "SPRING_APPLICATION_JSON" and .name != "OPENAI_API_KEY"
+                    .name != "SPRING_APPLICATION_JSON"
+                    and .name != "OPENAI_API_KEY"
+                    and .name != "MIRIYUM_STORAGE_S3_BUCKET"
                   ))) + (if $runtime_config_enabled == "true" then
                     [{name: "SPRING_APPLICATION_JSON", valueFrom: $runtime_config_secret_arn}]
+                  else [] end) + (if $storage_s3_enabled == "true" then
+                    [{name: "MIRIYUM_STORAGE_S3_BUCKET", valueFrom: $storage_s3_bucket_parameter_arn}]
                   else [] end) + (if $llm_enabled == "true" then
                     [{name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}]
                   else [] end))

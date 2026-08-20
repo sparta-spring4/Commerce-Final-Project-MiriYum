@@ -99,7 +99,13 @@ checks pass in the same staging environment.
 - Before activation, record a non-sensitive pass/fail result that bucket
   default encryption is enabled, the bucket policy denies non-TLS requests,
   and the approved object lifecycle and retention policy exists. Do not enable
-  either flag while any of these settings is undecided or absent.
+either flag while any of these settings is undecided or absent.
+
+Production ECS CD preserves the current two flags and treats an absent flag as
+`false`; it must not activate S3 merely because a new backend image is deployed.
+The production bucket lifecycle only aborts incomplete multipart uploads. Normal
+public image retention and deletion remain owned by FileMetadata reconciliation
+until #223 staging smoke has approved activation.
 - The instance role has only the required access to this bucket and cannot
   access unrelated buckets. Do not copy bucket names, ARNs, secrets, or object
   keys into Issues, PRs, or workflow logs.
