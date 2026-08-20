@@ -4,7 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.global.storage.entity.FileMetadata;
+import com.miriyum.global.storage.repository.FileMetadataRepository;
 import java.time.Instant;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -15,6 +22,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -43,6 +51,12 @@ class BusinessRegistrationEvidenceSchemaIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private FileMetadataRepository fileMetadataRepository;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     @Test
     @DisplayName("현재 증빙은 하나만 보관하고 교체 이력은 여러 건 보관한다")
@@ -84,10 +98,66 @@ class BusinessRegistrationEvidenceSchemaIntegrationTest {
         assertThat(replacedCount).isEqualTo(2);
     }
 
+    @Test
+    @DisplayName("파일 삭제 전이는 잠긴 파일 검증과 증빙 연결이 커밋된 뒤에만 진행한다")
+    void serializesFileDeletionAfterEvidenceLinkCommit() throws Exception {
+        long applicationId = 902L;
+        UUID fileId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-20T00:00:00Z");
+        insertPrivateLicenseMetadata(fileId, applicationId, now);
+
+        CountDownLatch metadataLocked = new CountDownLatch(1);
+        CountDownLatch releaseEvidenceCommit = new CountDownLatch(1);
+        CountDownLatch deletionAttempted = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> evidenceLink = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                FileMetadata metadata = fileMetadataRepository.findByFileIdForUpdate(fileId.toString()).orElseThrow();
+                assertThat(metadata.getStorageStatus().name()).isEqualTo("CONFIRMED");
+                insertEvidence(applicationId, 1L, "CURRENT", 1, fileId, now);
+                metadataLocked.countDown();
+                await(releaseEvidenceCommit);
+            }));
+
+            assertThat(metadataLocked.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<?> deletion = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                deletionAttempted.countDown();
+                jdbcTemplate.update(
+                        "UPDATE file_metadata SET storage_status = 'DELETED', deleted_at = ? WHERE file_id = ?",
+                        now, fileId.toString());
+            }));
+            assertThat(deletionAttempted.await(5, TimeUnit.SECONDS)).isTrue();
+            Thread.sleep(200);
+            assertThat(deletion.isDone()).isFalse();
+
+            releaseEvidenceCommit.countDown();
+            evidenceLink.get(5, TimeUnit.SECONDS);
+            deletion.get(5, TimeUnit.SECONDS);
+        }
+
+        Integer evidenceCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM store_business_registration_evidences WHERE file_id = ?",
+                Integer.class, fileId.toString());
+        String status = jdbcTemplate.queryForObject(
+                "SELECT storage_status FROM file_metadata WHERE file_id = ?",
+                String.class, fileId.toString());
+        assertThat(evidenceCount).isEqualTo(1);
+        assertThat(status).isEqualTo("DELETED");
+    }
+
     private void insertEvidence(long applicationId, long applicationVersion, String status, Integer currentMarker) {
         UUID fileId = UUID.randomUUID();
         Instant now = Instant.parse("2026-08-20T00:00:00Z");
         insertPrivateLicenseMetadata(fileId, applicationId, now);
+        insertEvidence(applicationId, applicationVersion, status, currentMarker, fileId, now);
+    }
+
+    private void insertEvidence(
+            long applicationId,
+            long applicationVersion,
+            String status,
+            Integer currentMarker,
+            UUID fileId,
+            Instant now) {
         jdbcTemplate.update(
                 """
                 INSERT INTO store_business_registration_evidences (
@@ -106,6 +176,17 @@ class BusinessRegistrationEvidenceSchemaIntegrationTest {
                 "REPLACED".equals(status) ? now : null,
                 now,
                 0L);
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("timed out waiting for concurrent transaction");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while waiting for concurrent transaction", exception);
+        }
     }
 
     private void insertPrivateLicenseMetadata(UUID fileId, long applicationId, Instant createdAt) {

@@ -10,6 +10,7 @@ import com.miriyum.domain.store.evidence.dto.BusinessRegistrationEvidenceCommand
 import com.miriyum.domain.store.evidence.entity.BusinessRegistrationEvidence;
 import com.miriyum.domain.store.evidence.enums.BusinessRegistrationEvidenceStatus;
 import com.miriyum.domain.store.evidence.repository.BusinessRegistrationEvidenceRepository;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.storage.FileStoragePurpose;
 import com.miriyum.global.storage.FileStorageStatus;
@@ -40,6 +41,9 @@ class StoreBusinessRegistrationEvidenceServiceTest {
     @Mock
     private FileMetadataRepository fileMetadataRepository;
 
+    @Mock
+    private StoreOnboardingApplicationOwnershipPort ownershipPort;
+
     private StoreBusinessRegistrationEvidenceService service;
 
     @BeforeEach
@@ -47,6 +51,7 @@ class StoreBusinessRegistrationEvidenceServiceTest {
         service = new StoreBusinessRegistrationEvidenceService(
                 evidenceRepository,
                 fileMetadataRepository,
+                ownershipPort,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -56,7 +61,7 @@ class StoreBusinessRegistrationEvidenceServiceTest {
         UUID nextFileId = UUID.randomUUID();
         BusinessRegistrationEvidence previous = BusinessRegistrationEvidence.createCurrent(
                 UUID.randomUUID(), 10L, 2L, 7L, previousFileId, NOW.minusSeconds(60));
-        given(fileMetadataRepository.findById(nextFileId.toString()))
+        given(fileMetadataRepository.findByFileIdForUpdate(nextFileId.toString()))
                 .willReturn(Optional.of(privateConfirmedLicense(nextFileId, 10L)));
         given(evidenceRepository.findCurrentForUpdate(10L, 2L)).willReturn(Optional.of(previous));
         given(evidenceRepository.saveAndFlush(any(BusinessRegistrationEvidence.class)))
@@ -84,7 +89,7 @@ class StoreBusinessRegistrationEvidenceServiceTest {
                 "public/invalid.png", "image/png", 10L, "0".repeat(64),
                 FileStorageVisibility.PUBLIC, "STORE_IMAGE_PUBLIC", NOW);
         publicImage.confirm();
-        given(fileMetadataRepository.findById(fileId.toString())).willReturn(Optional.of(publicImage));
+        given(fileMetadataRepository.findByFileIdForUpdate(fileId.toString())).willReturn(Optional.of(publicImage));
 
         assertThatThrownBy(() -> service.replaceCurrentEvidence(
                 new BusinessRegistrationEvidenceCommand(10L, 2L, 7L, fileId)))
@@ -95,7 +100,7 @@ class StoreBusinessRegistrationEvidenceServiceTest {
     @Test
     void translatesConcurrentCurrentEvidenceCreationToServiceError() {
         UUID fileId = UUID.randomUUID();
-        given(fileMetadataRepository.findById(fileId.toString()))
+        given(fileMetadataRepository.findByFileIdForUpdate(fileId.toString()))
                 .willReturn(Optional.of(privateConfirmedLicense(fileId, 10L)));
         given(evidenceRepository.findCurrentForUpdate(10L, 2L)).willReturn(Optional.empty());
         given(evidenceRepository.saveAndFlush(any(BusinessRegistrationEvidence.class)))
@@ -104,6 +109,20 @@ class StoreBusinessRegistrationEvidenceServiceTest {
         assertThatThrownBy(() -> service.replaceCurrentEvidence(
                 new BusinessRegistrationEvidenceCommand(10L, 2L, 7L, fileId)))
                 .isInstanceOf(ServiceException.class);
+    }
+
+    @Test
+    void rejectsEvidenceLinkWhenOnboardingOwnershipDoesNotMatch() {
+        UUID fileId = UUID.randomUUID();
+        org.mockito.BDDMockito.willThrow(new ServiceException(CommonErrorCode.VALIDATION_FAILED))
+                .given(ownershipPort)
+                .requireOwnership(10L, 2L, 8L);
+
+        assertThatThrownBy(() -> service.replaceCurrentEvidence(
+                new BusinessRegistrationEvidenceCommand(10L, 2L, 8L, fileId)))
+                .isInstanceOf(ServiceException.class);
+        then(fileMetadataRepository).shouldHaveNoInteractions();
+        then(evidenceRepository).shouldHaveNoInteractions();
     }
 
     private static FileMetadata privateConfirmedLicense(UUID fileId, long applicationId) {

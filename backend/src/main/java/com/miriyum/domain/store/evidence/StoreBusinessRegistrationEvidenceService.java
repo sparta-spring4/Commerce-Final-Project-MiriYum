@@ -36,11 +36,14 @@ public class StoreBusinessRegistrationEvidenceService {
 
     private final BusinessRegistrationEvidenceRepository evidenceRepository;
     private final FileMetadataRepository fileMetadataRepository;
+    private final StoreOnboardingApplicationOwnershipPort ownershipPort;
     private final Clock clock;
 
     /** 같은 신청 version의 현재 증빙을 교체하고 구버전은 즉시 접근 불가 상태로 전환한다. */
     @Transactional
     public BusinessRegistrationEvidenceView replaceCurrentEvidence(BusinessRegistrationEvidenceCommand command) {
+        ownershipPort.requireOwnership(
+                command.onboardingApplicationId(), command.applicationVersion(), command.storeOperatorAccountId());
         requirePrivateConfirmedBusinessLicense(command);
         Instant now = clock.instant();
         Optional<BusinessRegistrationEvidence> previous = evidenceRepository.findCurrentForUpdate(
@@ -73,7 +76,8 @@ public class StoreBusinessRegistrationEvidenceService {
     }
 
     private void requirePrivateConfirmedBusinessLicense(BusinessRegistrationEvidenceCommand command) {
-        FileMetadata metadata = fileMetadataRepository.findById(command.fileId().toString())
+        // 파일 삭제 전이와 증빙 연결은 같은 행 잠금으로 직렬화한다.
+        FileMetadata metadata = fileMetadataRepository.findByFileIdForUpdate(command.fileId().toString())
                 .orElseThrow(() -> new ServiceException(CommonErrorCode.VALIDATION_FAILED));
         if (!OWNER_TYPE.equals(metadata.getOwnerType())
                 || metadata.getOwnerId() != command.onboardingApplicationId()
