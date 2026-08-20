@@ -48,10 +48,11 @@ Manual dispatch is reserved for rollback or redeployment of an image that alread
 | `MIRIYUM_PORTONE_CHANNEL_KEY` | The public Channel Key for the approved staging PortOne channel |
 
 These are staging Environment variables, not application secrets. The workflow passes only the two
-public PortOne values to the Frontend image build. Never register `MIRIYUM_PORTONE_API_SECRET` as a
-GitHub Variable or Secret, and never add it to Frontend build arguments. Runtime copies of
-application and database secrets remain only in the staging EC2's `/opt/miriyum/.env`; the
-authoritative PortOne API Secret remains in staging AWS Secrets Manager.
+public PortOne values to the Frontend image build. Never register `MIRIYUM_PORTONE_API_SECRET` or
+`MIRIYUM_PORTONE_WEBHOOK_SECRET` as a GitHub Variable or Secret, and never add either value to
+Frontend build arguments. Runtime copies of application and database secrets remain only in the
+staging EC2's `/opt/miriyum/.env`; both authoritative PortOne secrets remain in staging AWS Secrets
+Manager.
 
 ## EC2 runtime setup
 
@@ -68,21 +69,37 @@ authoritative PortOne API Secret remains in staging AWS Secrets Manager.
 | `MIRIYUM_PORTONE_STORE_ID` | Approved staging PortOne public configuration | GitHub `staging` Environment Variable for the Frontend build and the server-local `/opt/miriyum/.env` for the Backend container |
 | `MIRIYUM_PORTONE_CHANNEL_KEY` | Approved staging PortOne public configuration | GitHub `staging` Environment Variable for the Frontend build only |
 | `MIRIYUM_PORTONE_API_SECRET` | Staging AWS Secrets Manager | Server-local `/opt/miriyum/.env`, then the Backend container only |
+| `MIRIYUM_PORTONE_WEBHOOK_SECRET` | Staging AWS Secrets Manager | Server-local `/opt/miriyum/.env`, then the Backend container only |
 
-The deployment operator owns materialization of `MIRIYUM_PORTONE_API_SECRET`. In an approved
-operator session, retrieve it with an IAM role restricted to the staging secret and write it into
-`/opt/miriyum/.env` without displaying the value. Keep shell tracing disabled, do not use a GitHub
-Actions or SSM command as the transfer channel, and do not retain the value in command output,
-temporary artifacts, Issues, or PRs. If the approved procedure uses a temporary file, create it
-with mode `600` and remove it immediately after updating the environment file. Restore
-`chmod 600 /opt/miriyum/.env` after every edit.
+The deployment operator owns materialization of `MIRIYUM_PORTONE_API_SECRET` and
+`MIRIYUM_PORTONE_WEBHOOK_SECRET`. In an approved operator session, retrieve them with an IAM role
+restricted to the staging secrets and write them into `/opt/miriyum/.env` without displaying either
+value. Keep shell tracing disabled, do not use a GitHub Actions or SSM command as the transfer
+channel, and do not retain either value in command output, temporary artifacts, Issues, or PRs. If
+the approved procedure uses a temporary file, create it with mode `600` and remove it immediately
+after updating the environment file. Restore `chmod 600 /opt/miriyum/.env` after every edit.
 
 The Store ID in `/opt/miriyum/.env` must match the public Store ID registered in the GitHub
-`staging` Environment. The Channel Key is not a Backend or Compose setting. The API Secret is not a
-Frontend setting and is never part of a static image. These three values only establish the
-delivery contract: they do not set `MIRIYUM_PAYMENT_ENABLED`, register a webhook, enable a payment
-worker, or prove a staging payment. Keep payment disabled when any required PortOne value or the
-separate activation prerequisites are not configured and verified.
+`staging` Environment. The Channel Key is not a Backend or Compose setting. The API Secret and
+Webhook Secret are not Frontend settings and are never part of a static image. These four values
+only establish the delivery contract: they do not set `MIRIYUM_PAYMENT_ENABLED`, register a
+webhook, enable a payment worker, or prove a staging payment. Keep payment disabled when any
+required PortOne value or the separate activation prerequisites are not configured and verified.
+
+#### PortOne staging webhook registration and recovery evidence
+
+After the separate payment activation prerequisites are approved, the deployment operator registers
+`https://staging-api.miriyum.click/api/v1/payments/webhooks/portone` as the staging test-channel
+callback in the PortOne console. The callback must reach the Backend through public HTTPS. The
+registered Webhook Secret must be the same value materialized from staging AWS Secrets Manager into
+the Backend-only environment; do not copy the value or provider response body into evidence.
+
+Use an actual signed `Transaction.Paid` delivery from the staging test channel to verify recovery.
+Interrupt browser confirmation after provider payment success, then record only masked correlation
+identifiers, the Webhook delivery result, and the final Payment and Reservation states. Redeliver the
+same event and verify that it creates no additional Payment, Reservation, or refund result. Until
+those checks have actual environment-specific evidence, report callback reachability and recovery as
+`NOT RUN`; repository configuration or a successful image build is not proof of either result.
 
 ### S3 runtime activation gate (#223)
 

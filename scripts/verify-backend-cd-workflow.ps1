@@ -90,8 +90,11 @@ $publicPortOneNames = @(
     'MIRIYUM_PORTONE_STORE_ID',
     'MIRIYUM_PORTONE_CHANNEL_KEY'
 )
-$serverPortOneSecretName = 'MIRIYUM_PORTONE_API_SECRET'
-$allPortOneNames = @($publicPortOneNames + $serverPortOneSecretName)
+$serverPortOneSecretNames = @(
+    'MIRIYUM_PORTONE_API_SECRET',
+    'MIRIYUM_PORTONE_WEBHOOK_SECRET'
+)
+$allPortOneNames = @($publicPortOneNames + $serverPortOneSecretNames)
 
 foreach ($name in $publicPortOneNames) {
     $escapedName = [regex]::Escape($name)
@@ -110,14 +113,16 @@ foreach ($name in $publicPortOneNames) {
     }
 }
 
-if (
-    $workflow.Contains($serverPortOneSecretName) -or
-    $frontendDockerfile.Contains($serverPortOneSecretName)
-) {
-    throw "PortOne API Secret must not be a Frontend build argument."
+foreach ($name in $serverPortOneSecretNames) {
+    if (
+        $workflow.Contains($name) -or
+        $frontendDockerfile.Contains($name)
+    ) {
+        throw "$name must not be a Frontend build argument."
+    }
 }
 
-foreach ($name in @('MIRIYUM_PORTONE_STORE_ID', $serverPortOneSecretName)) {
+foreach ($name in @('MIRIYUM_PORTONE_STORE_ID') + $serverPortOneSecretNames) {
     $composeKeyCount = [regex]::Matches(
         $composeSource,
         "(?m)^\s+$([regex]::Escape($name)):\s*"
@@ -146,10 +151,12 @@ $cursorSecretName = "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET"
 $cursorSecret = "test-only-notification-history-cursor-secret"
 $portOneStoreId = 'test-only-portone-store-id'
 $portOneApiSecret = 'test-only-portone-api-secret'
+$portOneWebhookSecret = 'test-only-portone-webhook-secret'
 $testEnvironment = @{
     $cursorSecretName = $cursorSecret
     MIRIYUM_PORTONE_STORE_ID = $portOneStoreId
     MIRIYUM_PORTONE_API_SECRET = $portOneApiSecret
+    MIRIYUM_PORTONE_WEBHOOK_SECRET = $portOneWebhookSecret
 }
 $previousEnvironment = @{}
 
@@ -177,6 +184,9 @@ try {
     }
     if ($compose.services.backend.environment.MIRIYUM_PORTONE_API_SECRET -ne $portOneApiSecret) {
         throw "Production backend does not receive MIRIYUM_PORTONE_API_SECRET."
+    }
+    if ($compose.services.backend.environment.MIRIYUM_PORTONE_WEBHOOK_SECRET -ne $portOneWebhookSecret) {
+        throw "Production backend does not receive MIRIYUM_PORTONE_WEBHOOK_SECRET."
     }
 
     foreach ($serviceProperty in $compose.services.PSObject.Properties) {
