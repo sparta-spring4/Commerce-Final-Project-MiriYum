@@ -48,6 +48,8 @@ server {
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 10m;
 
+    include /opt/miriyum-nginx-templates/snippets/sse-location.conf;
+
     location /api/ {
         proxy_pass http://backend:8080;
         proxy_http_version 1.1;
@@ -75,6 +77,8 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 10m;
+
+    include /opt/miriyum-nginx-templates/snippets/sse-location.conf;
 
     location /api/ {
         proxy_pass http://backend:8080;
