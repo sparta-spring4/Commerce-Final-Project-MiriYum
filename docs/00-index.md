@@ -59,6 +59,13 @@
 
 같은 정책을 여러 문서에 전체 규칙으로 반복하지 않는다. 상위 문서는 왜 필요한지와 적용 경계만 적고, 절차·예외·상태·권한 세부는 하나의 상세 정책 문서가 소유한다.
 
+## 배포 런북
+
+- [Production ECS incident runbook](deployment/production-ecs-incident-runbook.md)은
+  기동된 production 서비스의 배포 이상·rollback 분류를 소유한다.
+- [Staging runtime troubleshooting](deployment/staging-runtime-troubleshooting.md)은
+  staging Compose, Vite proxy, Kakao/지오코딩/LLM runtime 진단 절차를 소유한다.
+
 ## 변경 시 함께 확인할 문서
 
 - 제품 범위나 비목표를 바꾸면 `01-product-vision.md`, 관련 서비스 정책, 연결된 실제 기능 명세를 함께 확인한다.

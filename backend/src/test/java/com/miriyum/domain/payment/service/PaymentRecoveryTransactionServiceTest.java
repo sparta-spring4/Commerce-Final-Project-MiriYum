@@ -374,7 +374,7 @@ class PaymentRecoveryTransactionServiceTest {
 
     private static Payment paidPayment() {
         Payment payment = Payment.prepare(
-                "900000000000000001", "RESERVATION_DEPOSIT", "1", 1L,
+                "900000000000000001", "RESERVATION_DEPOSIT", "1", 7L, 1L,
                 NOW.plusSeconds(3600),
                 "550e8400-e29b-41d4-a716-446655440010",
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

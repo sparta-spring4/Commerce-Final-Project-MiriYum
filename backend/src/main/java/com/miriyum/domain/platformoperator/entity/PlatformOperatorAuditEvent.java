@@ -257,6 +257,31 @@ public class PlatformOperatorAuditEvent {
         return event;
     }
 
+    public static PlatformOperatorAuditEvent createRecovery(
+            long actorId, long authorityVersion, Set<PlatformOperatorRole> actorRoles,
+            Set<PlatformOperatorPermission> actorPermissions, PlatformOperatorAuditAction action,
+            PlatformOperatorAuditOutcome outcome, PlatformOperatorAuditReason reason,
+            String targetType, String targetId, AdminCaseType caseType, String caseId,
+            long caseVersion, String idempotencyKey, Map<String, Object> beforeSnapshot,
+            Map<String, Object> afterSnapshot, String correlationId, Instant occurredAt) {
+        if (caseType != AdminCaseType.PAYMENT_RECOVERY
+                || reason != PlatformOperatorAuditReason.PAYMENT_RECOVERY
+                || !action.name().startsWith("PAYMENT_RECOVERY_")) {
+            throw new IllegalArgumentException("payment recovery audit classification is invalid");
+        }
+        PlatformOperatorAuditEvent event = base(
+                actorId, authorityVersion, actorRoles, actorPermissions, action, outcome, reason,
+                targetType, targetId, caseType, caseId, caseVersion, idempotencyKey,
+                correlationId, occurredAt);
+        event.beforeRoles = Set.of();
+        event.afterRoles = Set.of();
+        event.beforePermissions = Set.of();
+        event.afterPermissions = Set.of();
+        event.beforeSnapshot = Map.copyOf(Objects.requireNonNull(beforeSnapshot));
+        event.afterSnapshot = Map.copyOf(Objects.requireNonNull(afterSnapshot));
+        return event;
+    }
+
     private static PlatformOperatorAuditEvent base(
             long actorId,
             long authorityVersion,
