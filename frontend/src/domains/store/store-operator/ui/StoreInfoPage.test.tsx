@@ -17,6 +17,7 @@ import { renderOperator } from '../test/renderOperator'
 import { StoreInfoPage } from './StoreInfoPage'
 
 function renderStoreInfo() {
+  server.use(http.get(operatorStorePath('/images'), () => successResponse([])))
   return renderOperator(<StoreInfoPage />, {
     route: fillPath(STORE_OPERATOR_PATHS.store, { storeId: STORE_ID }),
     path: STORE_OPERATOR_PATHS.store,
@@ -37,6 +38,7 @@ describe('매장 정보 화면', () => {
     expect(screen.getByLabelText('매장 주소')).toHaveValue(
       '서울 강남구 테헤란로 152',
     )
+    expect(screen.getByText('매장 이미지')).toBeInTheDocument()
   })
 
   it('건드리지 않은 필드는 PATCH 본문에 넣지 않는다', async () => {
