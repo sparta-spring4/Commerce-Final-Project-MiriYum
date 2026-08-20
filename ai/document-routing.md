@@ -22,6 +22,7 @@
 2. 현재 승인 기준과 단계가 정렬된 `docs/service-policies/`
 3. 상태와 날짜별 개정 이력상 현재 유효한 `docs/adr/`
 4. `docs/05-functional-requirements.md` 또는 소유 서비스 정책이 명시적으로 연결한 `docs/specs/<feature>/spec.md`
+5. 현재 `dev` Flyway 기준 전체 테이블 색인과 주요 업무·논리 관계를 소유하는 `docs/erd/`
 
 `docs/specs/_template/`은 작성 형식이며 정본이 아니다. `README.md`, `CONTRIBUTING.md`, `AGENTS.md`와 `ai/`는 제품 사실이 아니라 사람·AI 진입, 라우팅, 명령과 증거 경계를 소유한다.
 
