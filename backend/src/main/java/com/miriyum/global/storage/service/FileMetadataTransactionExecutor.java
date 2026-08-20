@@ -30,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class FileMetadataTransactionExecutor {
 
     private final FileMetadataRepository fileMetadataRepository;
+    private final List<FileMetadataDeletionGuard> deletionGuards;
 
     /** 파일 저장을 시도하기 전에 대기 상태를 별도로 확정한다. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -71,6 +72,7 @@ public class FileMetadataTransactionExecutor {
         if (metadata.getStorageStatus() == FileStorageStatus.DELETED) {
             return metadata;
         }
+        requireDeletionAllowed(metadata);
         metadata.delete(deletedAt);
         return saveTerminalState(metadata);
     }
@@ -135,6 +137,7 @@ public class FileMetadataTransactionExecutor {
         if (metadata.getStorageStatus() == FileStorageStatus.DELETED) {
             return metadata;
         }
+        requireDeletionAllowed(metadata);
         metadata.delete(deletedAt);
         return saveTerminalState(metadata);
     }
@@ -242,6 +245,12 @@ public class FileMetadataTransactionExecutor {
     private FileMetadata findMetadata(String fileId) {
         return fileMetadataRepository.findById(fileId)
                 .orElseThrow(() -> new IllegalStateException("파일 메타데이터를 찾을 수 없습니다."));
+    }
+
+    private void requireDeletionAllowed(FileMetadata metadata) {
+        if (deletionGuards.stream().anyMatch(guard -> guard.blocksDeletion(metadata.getFileId()))) {
+            throw new FileMetadataConflictException("현재 보존 중인 증빙이 참조하는 파일은 삭제할 수 없습니다.");
+        }
     }
 
     private boolean isDuplicateKey(DataIntegrityViolationException exception) {
