@@ -423,6 +423,7 @@ class PaymentServiceTest {
     void replaysPreparationRaceWithoutCallerTransaction(String constraintName) {
         PrepareReservationDepositCommand command = new PrepareReservationDepositCommand(
                 "123",
+                12L,
                 11L,
                 30_000L,
                 "KRW",
@@ -537,6 +538,7 @@ class PaymentServiceTest {
         PrepareWaitingReservationDepositCommand command =
                 new PrepareWaitingReservationDepositCommand(
                         "123",
+                        12L,
                         11L,
                         30_000L,
                         "KRW",
@@ -1039,7 +1041,7 @@ class PaymentServiceTest {
     @DisplayName("Reservation 공개 준비·환불 DTO는 Payment 정본의 scalar 필드만 정확히 노출한다")
     void exposesCanonicalReservationPaymentContracts() {
         assertThat(recordComponentNames(PrepareReservationDepositCommand.class)).containsExactly(
-                "sourceReferenceId", "consumerAccountId", "amountMinor", "currency",
+                "sourceReferenceId", "storeId", "consumerAccountId", "amountMinor", "currency",
                 "sourceExpiresAt", "sourcePolicyVersion", "idempotencyKey");
         assertThat(recordComponentNames(PaymentPreparation.class)).containsExactly(
                 "paymentId", "portOnePaymentId", "orderName", "amountMinor", "currency",
@@ -1111,6 +1113,7 @@ class PaymentServiceTest {
     private static PrepareReservationDepositCommand prepareCommand() {
         return new PrepareReservationDepositCommand(
                 "123",
+                12L,
                 11L,
                 30_000L,
                 "KRW",
@@ -1252,6 +1255,7 @@ class PaymentServiceTest {
                 PAYMENT_ID,
                 sourceType,
                 sourceReferenceId,
+                12L,
                 7L,
                 NOW.plusSeconds(600),
                 "550e8400-e29b-41d4-a716-446655440128",

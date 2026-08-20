@@ -94,6 +94,8 @@ class PaymentRecoveryPersistenceIT {
         jdbcTemplate.execute("DELETE FROM payment_recovery_handoffs");
         jdbcTemplate.execute("DELETE FROM payment_ledger_entries");
         jdbcTemplate.execute("DELETE FROM reservation_deposit_dispositions");
+        jdbcTemplate.execute("TRUNCATE TABLE payment_refund_monitoring_snapshots");
+        jdbcTemplate.execute("TRUNCATE TABLE payment_monitoring_snapshots");
         jdbcTemplate.execute("DELETE FROM payment_refunds");
         jdbcTemplate.execute("DELETE FROM payment_attempts");
         jdbcTemplate.execute("DELETE FROM payments");
@@ -226,7 +228,7 @@ class PaymentRecoveryPersistenceIT {
     private void persistFailedRefund() {
         transactionTemplate.executeWithoutResult(ignored -> {
             Payment payment = Payment.prepare(
-                    PAYMENT_ID, "RESERVATION_DEPOSIT", "1", 1L,
+                    PAYMENT_ID, "RESERVATION_DEPOSIT", "1", 7L, 1L,
                     NOW.plusSeconds(3600),
                     "550e8400-e29b-41d4-a716-446655440010",
                     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
