@@ -1,9 +1,12 @@
 import type { paths as AdminStorePaths } from './generated/admin-store'
+import type { paths as AdminMonitoringPaths } from './generated/admin-monitoring'
+import type { paths as AnalyticsPaths } from './generated/analytics'
 import type { paths as AuthAccountPaths } from './generated/auth-account'
 import type { paths as MemberSupportPaths } from './generated/member-support'
 import type { paths as MenuHoldPickupPaths } from './generated/menu-hold-pickup'
 import type { paths as NotificationPaths } from './generated/notification'
 import type { paths as PaymentPaths } from './generated/payment'
+import type { paths as PaymentRecoveryPaths } from './generated/payment-recovery'
 import type { paths as PlatformOperatorAuthPaths } from './generated/platform-operator-auth'
 import type { paths as PlatformOperatorAuthorizationPaths } from './generated/platform-operator-authorization'
 import type { paths as PlatformOperatorCapabilitiesPaths } from './generated/platform-operator-capabilities'
@@ -37,6 +40,9 @@ type PathDocs = [
   MemberSupportPaths,
   PlatformOperatorManagementAuditPaths,
   AdminStorePaths,
+  AdminMonitoringPaths,
+  AnalyticsPaths,
+  PaymentRecoveryPaths,
   WaitingPaths,
 ]
 

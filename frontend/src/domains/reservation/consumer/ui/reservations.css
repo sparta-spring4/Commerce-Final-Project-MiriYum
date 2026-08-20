@@ -1,8 +1,43 @@
 /* 예약 작성·상세 배치. 토큰은 shared/ui/theme.css가 소유한다. */
 
 .reservation-create,
-.reservation-detail {
+.reservation-detail,
+.reservation-payment {
   padding-bottom: var(--space-8);
+}
+
+.reservation-payment__card {
+  max-width: 38rem;
+  margin: var(--space-3) auto 0;
+}
+
+.reservation-payment__summary {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-3) 0;
+}
+
+.reservation-payment__summary > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--color-outline-variant);
+}
+
+.reservation-payment__summary dt,
+.reservation-payment__notice {
+  color: var(--color-on-surface-variant);
+}
+
+.reservation-payment__summary dd {
+  font-weight: 700;
+  text-align: right;
+}
+
+.reservation-payment__notice {
+  margin-bottom: var(--space-3);
+  font-size: var(--font-size-body-md);
 }
 
 .reservation-create__header {

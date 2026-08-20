@@ -27,11 +27,13 @@ export function storeOperatorNavigation(
       path: fillPath(STORE_OPERATOR_PATHS.reservationTimePolicy, params),
     },
     { label: '예약 목록', path: fillPath(STORE_OPERATOR_PATHS.reservations, params) },
+    { label: '체크인·노쇼', path: fillPath(STORE_OPERATOR_PATHS.reservationVisits, params) },
     ...(capabilities.pickupEnabled
       ? [{ label: '픽업 목록', path: fillPath(STORE_OPERATOR_PATHS.pickupReservations, params) }]
       : []),
     { label: '메뉴 재고', path: fillPath(STORE_OPERATOR_PATHS.menuInventory, params) },
     { label: '추천 메뉴', path: fillPath(STORE_OPERATOR_PATHS.representativeMenus, params) },
+    { label: '운영 통계', path: fillPath(STORE_OPERATOR_PATHS.dashboardStatistics, params) },
     {
       label: '웨이팅 설정',
       path: fillPath(STORE_OPERATOR_PATHS.waitingSettings, params),

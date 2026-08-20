@@ -37,6 +37,8 @@ export const storeOperatorKeys = {
     [...storeOperatorKeys.store(storeId), 'menu-inventory-buckets'] as const,
   inventoryPage: (storeId: string, query: object) =>
     [...storeOperatorKeys.inventoryBuckets(storeId), 'page', query] as const,
+  dashboardStatistics: (storeId: string) =>
+    [...storeOperatorKeys.store(storeId), 'dashboard-statistics'] as const,
   waitingSettings: (storeId: string) =>
     [...storeOperatorKeys.store(storeId), 'waiting-settings'] as const,
   waitingDisableImpact: (storeId: string) =>

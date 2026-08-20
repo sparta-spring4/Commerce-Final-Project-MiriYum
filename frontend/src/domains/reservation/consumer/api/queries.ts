@@ -4,7 +4,7 @@ import { publicApiClient } from '../../../../shared/api/publicApiClient'
 import { useConsumerAuth } from '../../../account/consumer/auth'
 import { consumerReservationHistoryKeys } from './historyQueries'
 import { storeSearchKeys } from '../../../store/public/api/queries'
-import type { ReservationCreateRequest, ReservationDetail } from '../model/draft'
+import { isReservationRequest, type ReservationCreateRequest, type ReservationCreateResult, type ReservationDetail } from '../model/draft'
 
 export const reservationKeys = {
   // 뿌리는 shared가 소유한다. 세션 종료 정리가 같은 값을 보고 지운다.
@@ -92,16 +92,19 @@ export function useCreateReservation() {
     mutationFn: async (variables: {
       body: ReservationCreateRequest
       idempotencyKey: string
-    }): Promise<ReservationDetail> => {
+    }): Promise<ReservationCreateResult> => {
       const response = await apiClient('/api/v1/consumers/me/reservations', {
         method: 'post',
         body: variables.body,
         idempotencyKey: variables.idempotencyKey,
       })
-      return response.data
+      // 이 operation은 201 Reservation 또는 202 ReservationRequest를 반환한다.
+      return response.data as unknown as ReservationCreateResult
     },
-    onSuccess: (reservation) => {
-      void invalidateAfterReservationChange(queryClient, reservation)
+    onSuccess: (result) => {
+      if (!isReservationRequest(result)) {
+        void invalidateAfterReservationChange(queryClient, result)
+      }
     },
   })
 }

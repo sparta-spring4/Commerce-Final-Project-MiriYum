@@ -11,6 +11,7 @@ import {
   RepresentativeMenusPage,
 } from '../../domains/store/store-operator'
 import { MenuInventoryPage } from '../../domains/menu-hold/store-operator'
+import { StoreDashboardStatisticsPage } from '../../domains/analytics/store-operator'
 import {
   PickupReservationDetailPage,
   PickupReservationsPage,
@@ -22,6 +23,7 @@ import {
   ReservationTimePolicyPage,
   StoreReservationDetailPage,
   StoreReservationsPage,
+  ReservationVisitOperationsPage,
 } from '../../domains/reservation/store-operator'
 import {
   WaitingSettingsPage,
@@ -51,10 +53,12 @@ export const storeOperatorRoutes = (
         <Route path={STORE_OPERATOR_PATHS.menu} element={<MenuEditorPage />} />
         <Route path={STORE_OPERATOR_PATHS.menuInventory} element={<MenuInventoryPage />} />
         <Route path={STORE_OPERATOR_PATHS.representativeMenus} element={<RepresentativeMenusPage />} />
+        <Route path={STORE_OPERATOR_PATHS.dashboardStatistics} element={<StoreDashboardStatisticsPage />} />
         <Route path={STORE_OPERATOR_PATHS.reservationCapacities} element={<ReservationCapacityPage />} />
         <Route path={STORE_OPERATOR_PATHS.reservationTimePolicy} element={<ReservationTimePolicyPage />} />
         <Route path={STORE_OPERATOR_PATHS.reservations} element={<StoreReservationsPage />} />
         <Route path={STORE_OPERATOR_PATHS.reservation} element={<StoreReservationDetailPage />} />
+        <Route path={STORE_OPERATOR_PATHS.reservationVisits} element={<ReservationVisitOperationsPage />} />
         <Route element={<RequirePickupEnabled />}>
           <Route path={STORE_OPERATOR_PATHS.pickupReservations} element={<PickupReservationsPage />} />
           <Route path={STORE_OPERATOR_PATHS.pickupReservation} element={<PickupReservationDetailPage />} />

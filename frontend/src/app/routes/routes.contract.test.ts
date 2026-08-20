@@ -30,6 +30,7 @@ describe('사용자별 route 계약', () => {
       reservationCreate: '/stores/:storeId/reserve',
       reservationDetail: '/reservations/:reservationId',
       reservationComplete: '/reservations/:reservationId/complete',
+      reservationPayment: '/reservation-requests/:reservationRequestId/payment',
       pickupCreate: '/stores/:storeId/pickup',
       pickupDetail: '/pickup-reservations/:pickupReservationId',
       pickupComplete: '/pickup-reservations/:pickupReservationId/complete',
@@ -59,6 +60,8 @@ describe('사용자별 route 계약', () => {
       reservations: '/store-operator/stores/:storeId/reservations',
       reservation:
         '/store-operator/stores/:storeId/reservations/:reservationId',
+      reservationVisits:
+        '/store-operator/stores/:storeId/reservation-visits',
       pickupReservations:
         '/store-operator/stores/:storeId/pickup-reservations',
       pickupReservation:
@@ -67,6 +70,8 @@ describe('사용자별 route 계약', () => {
         '/store-operator/stores/:storeId/menu-inventory',
       representativeMenus:
         '/store-operator/stores/:storeId/representative-menus',
+      dashboardStatistics:
+        '/store-operator/stores/:storeId/dashboard-statistics',
       waitingSettings: '/store-operator/stores/:storeId/waiting-settings',
       waitingTeams: '/store-operator/stores/:storeId/waiting-teams',
       waitingTeam:
@@ -129,6 +134,7 @@ describe('사용자별 navigation 계약', () => {
         path: '/store-operator/stores/store%2F7/reservation-time-policy',
       },
       { label: '예약 목록', path: '/store-operator/stores/store%2F7/reservations' },
+      { label: '체크인·노쇼', path: '/store-operator/stores/store%2F7/reservation-visits' },
       {
         label: '픽업 목록',
         path: '/store-operator/stores/store%2F7/pickup-reservations',
@@ -140,6 +146,10 @@ describe('사용자별 navigation 계약', () => {
       {
         label: '추천 메뉴',
         path: '/store-operator/stores/store%2F7/representative-menus',
+      },
+      {
+        label: '운영 통계',
+        path: '/store-operator/stores/store%2F7/dashboard-statistics',
       },
       {
         label: '웨이팅 설정',

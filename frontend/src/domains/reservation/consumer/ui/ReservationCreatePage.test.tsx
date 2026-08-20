@@ -58,6 +58,10 @@ function renderCreate(search = SCHEDULE_QUERY) {
               path={CONSUMER_PATHS.reservationDetail}
               element={<LocationProbe />}
             />
+            <Route
+              path={CONSUMER_PATHS.reservationPayment}
+              element={<LocationProbe />}
+            />
             <Route path={CONSUMER_PATHS.myPage} element={<LocationProbe />} />
           </Routes>
         </MemoryRouter>
@@ -165,6 +169,35 @@ describe('예약 생성 화면', () => {
         '/reservations/01JBQ8Z4T7K2N9V6M3P5R8W1R1/complete',
       ),
     )
+  })
+
+  it('예약금 대기 결과는 결제 준비 화면으로 이동한다', async () => {
+    respondCreateWith(() => successResponse({
+      reservationRequestId: 'request-701',
+      status: 'AWAITING_PAYMENT',
+      expiresAt: '2026-09-01T10:00:00+09:00',
+      paymentPreparation: {
+        paymentId: '01JBQ8Z4T7K2N9V6M3P5R8W1P1',
+        portOnePaymentId: 'payment-reservation-701',
+        orderName: '카페 에비뉴 예약금',
+        amountMinor: 10000,
+        currency: 'KRW',
+        sourceExpiresAt: '2026-09-01T10:00:00+09:00',
+        status: 'READY',
+      },
+      abandonmentRequested: false,
+      reservation: null,
+    }))
+
+    renderCreate()
+    await advanceToSubmit()
+    await screen.findByRole('button', { name: '다음' })
+    fireEvent.click(screen.getByRole('button', { name: '다음' }))
+    fireEvent.click(screen.getByRole('button', { name: '예약하기' }))
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
+      '/reservation-requests/request-701/payment',
+    ))
   })
 
   it('CONFIRMED가 아닌 결과를 성공으로 표시하지 않는다', async () => {

@@ -3,8 +3,14 @@ import type { components } from '../../../../shared/api/generated/reservation'
 export type ReservationCreateRequest =
   components['schemas']['ReservationCreateRequest']
 export type ReservationDetail = components['schemas']['ReservationDetail']
+export type ReservationRequest = components['schemas']['ReservationRequest']
+export type ReservationCreateResult = ReservationDetail | ReservationRequest
 export type MenuSelectionRequest =
   components['schemas']['MenuSelectionRequest']
+
+export function isReservationRequest(result: ReservationCreateResult): result is ReservationRequest {
+  return 'reservationRequestId' in result
+}
 
 /** 계약의 인원 범위. 세 값의 합은 1 이상이어야 한다. */
 export const MIN_PARTY_TOTAL = 1
