@@ -108,6 +108,15 @@ function validReservationData() {
   }
 }
 
+function validCancelledReservationData() {
+  return {
+    ...validReservationData(),
+    status: 'CANCELLED',
+    cancelledBy: 'CONSUMER',
+    cancellationReason: 'synthetic k6 reservation cleanup',
+  }
+}
+
 function validDepositDispositionData() {
   return {
     policyVersion: 2,
@@ -238,7 +247,10 @@ function responseClient(status, data) {
     get() {
       return { status, body: envelope(data), headers: {} }
     },
-    post() {
+    post(url) {
+      if (url.includes('/cancellations')) {
+        return { status: 200, body: envelope(validCancelledReservationData()), headers: {} }
+      }
       return { status, body: envelope(data), headers: {} }
     },
   }
@@ -328,6 +340,13 @@ class RecordingClient {
         headers: {},
       }
     }
+    if (url.endsWith('/cancellations')) {
+      return {
+        status: 200,
+        body: envelope(validCancelledReservationData()),
+        headers: {},
+      }
+    }
     return {
       status: 200,
       body: envelope({ accessToken: 'rotated-access-token', tokenType: 'Bearer', expiresIn: 900 }),
@@ -370,6 +389,51 @@ class RecordingClient {
         'Set-Cookie': 'MIRIYUM_CONSUMER_REFRESH=; Max-Age=0',
       },
     }
+  }
+}
+
+class MalformedReservationClient extends RecordingClient {
+  post(url, body, params) {
+    if (url.endsWith('/api/v1/consumers/me/reservations')) {
+      this.calls.push({ method: 'POST', url, body, ...params })
+      return {
+        status: 201,
+        body: envelope({
+          ...validReservationData(),
+          unexpected: true,
+        }),
+        headers: {},
+      }
+    }
+    return super.post(url, body, params)
+  }
+}
+
+class CleanupFailureClient extends RecordingClient {
+  post(url, body, params) {
+    if (url.endsWith('/cancellations')) {
+      this.calls.push({ method: 'POST', url, body, ...params })
+      return {
+        status: 503,
+        body: JSON.stringify({ code: 'COMMON_012', message: 'cleanup unavailable', data: null }),
+        headers: {},
+      }
+    }
+    return super.post(url, body, params)
+  }
+}
+
+class InvalidCleanupStateClient extends RecordingClient {
+  post(url, body, params) {
+    if (url.endsWith('/cancellations')) {
+      this.calls.push({ method: 'POST', url, body, ...params })
+      return {
+        status: 200,
+        body: envelope(validReservationData()),
+        headers: {},
+      }
+    }
+    return super.post(url, body, params)
   }
 }
 
@@ -544,6 +608,9 @@ export default function () {
   const logoutCall = client.calls.find((call) => call.tags.request === 'consumerLogout')
   const searchCall = client.calls.find((call) => call.tags.request === 'storeSearch')
   const reservationCall = client.calls.find((call) => call.tags.request === 'reservationCreate')
+  const reservationCleanupCall = client.calls.find(
+    (call) => call.tags.request === 'reservationCancel',
+  )
   const firstNotificationCall = client.calls.find(
     (call) => call.tags.request === 'notificationHistoryFirstPage',
   )
@@ -614,6 +681,20 @@ export default function () {
     allowedOrigin: 'http://localhost:5173',
     account: { email: 'additional-field@example.test', password: 'synthetic-password' },
     tags: { phase: 'measured' },
+  }))
+  const malformedReservationClient = new MalformedReservationClient()
+  const malformedReservationRejectedAfterCleanup = throws(() => runReservationCreate({
+    client: malformedReservationClient,
+    ...RESERVATION_INPUT,
+  }))
+  const cleanupFailureClient = new CleanupFailureClient()
+  const cleanupFailureRejected = throws(() => runReservationCreate({
+    client: cleanupFailureClient,
+    ...RESERVATION_INPUT,
+  }))
+  const invalidCleanupStateRejected = throws(() => runReservationCreate({
+    client: new InvalidCleanupStateClient(),
+    ...RESERVATION_INPUT,
   }))
   const noShowReservationAccepted = !throws(() => runReservationCreate({
     client: responseClient(201, {
@@ -793,7 +874,11 @@ export default function () {
       && searchCall.url === 'http://backend:8080/api/v1/stores?searchInput=%EC%84%9C%EC%9A%B8%20%ED%95%9C%EC%8B%9D',
     'measurement and cleanup requests use separate phase tags': () =>
       client.calls.every((call) =>
-        call.tags.phase === (['consumerCsrfToken', 'consumerLogout'].includes(call.tags.request)
+        call.tags.phase === ([
+          'consumerCsrfToken',
+          'consumerLogout',
+          'reservationCancel',
+        ].includes(call.tags.request)
           ? 'cleanup'
           : 'measured')),
     'scenario results expose statuses but not tokens or cookies': () =>
@@ -808,8 +893,32 @@ export default function () {
       ),
     'reservation sends only the approved fixture fields': () =>
       reservationCall.body === '{"storeId":"301","serviceDate":"2026-08-20","startTime":"18:00:00","startOffset":"+09:00","party":{"adultCount":2,"childCount":0,"infantCount":0},"menuSelections":[]}',
+    'reservation cleanup cancels the created reservation outside measured traffic': () =>
+      reservationCleanupCall !== undefined
+      && reservationCleanupCall.method === 'POST'
+      && reservationCleanupCall.url
+        === 'http://backend:8080/api/v1/consumers/me/reservations/9001/cancellations'
+      && reservationCleanupCall.body === '{"reason":"synthetic k6 reservation cleanup"}'
+      && reservationCleanupCall.tags.phase === 'cleanup',
+    'reservation cleanup uses a distinct deterministic UUID idempotency key': () =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+        reservationCleanupCall?.headers['Idempotency-Key'],
+      )
+      && reservationCleanupCall.headers['Idempotency-Key']
+        !== reservationCall.headers['Idempotency-Key'],
     'reservation exposes no created resource identifier': () =>
-      reservationResult.status === 201 && !combinedResult.includes('9001'),
+      reservationResult.status === 201
+      && reservationResult.cleanupStatus === 200
+      && !combinedResult.includes('9001'),
+    'malformed reservation success is rejected after safe cleanup': () =>
+      malformedReservationRejectedAfterCleanup
+      && malformedReservationClient.calls.some(
+        (call) => call.tags.request === 'reservationCancel',
+      ),
+    'reservation cleanup failure rejects the iteration': () =>
+      cleanupFailureRejected,
+    'reservation cleanup rejects a response without consumer-cancelled state': () =>
+      invalidCleanupStateRejected,
     'approved capacity conflict is an expected 4xx': () =>
       capacityConflict.classification === 'expected_4xx',
     'reservation duplicate conflict is not hidden as an expected baseline result': () =>
