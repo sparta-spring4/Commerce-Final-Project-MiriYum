@@ -313,6 +313,7 @@ jobs:
                 .image = $image
                 | .environment = ((.environment // [] | map(select(
                     .name != "MIRIYUM_STORE_SEARCH_LLM_ENABLED"
+                    and .name != "MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS"
                     and .name != "MIRIYUM_RUNTIME_CONFIG_ENABLED"
                     and .name != "MIRIYUM_STORE_SEARCH_LLM_MODEL"
                     and .name != "MIRIYUM_CLOUDWATCH_METRICS_ENABLED"
@@ -322,6 +323,7 @@ jobs:
                     and .name != "MIRIYUM_STORAGE_S3_REGION"
                   ))) + [
                     {name: "MIRIYUM_STORE_SEARCH_LLM_ENABLED", value: $llm_enabled},
+                    {name: "MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS", value: "5000"},
                     {name: "MIRIYUM_RUNTIME_CONFIG_ENABLED", value: $runtime_config_enabled},
                     {name: "MIRIYUM_STORE_SEARCH_LLM_MODEL", value: "gpt-4o-mini"},
                     {name: "MIRIYUM_CLOUDWATCH_METRICS_ENABLED", value: "true"},
