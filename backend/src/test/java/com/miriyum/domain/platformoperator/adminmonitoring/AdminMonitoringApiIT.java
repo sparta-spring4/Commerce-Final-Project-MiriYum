@@ -14,10 +14,13 @@ import com.miriyum.domain.auth.ratelimit.RateLimiter;
 import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringResponses.CasePage;
 import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringResponses.Completeness;
 import com.miriyum.domain.platformoperator.adminmonitoring.service.AdminMonitoringQueryService;
+import com.miriyum.domain.platformoperator.adminmonitoring.service.AdminMonitoringAuthorizationService;
 import com.miriyum.domain.platformoperator.config.PlatformOperatorSecurityConfig;
 import com.miriyum.domain.platformoperator.controller.management.adminmonitoring.AdminMonitoringController;
 import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorAuthService;
+import com.miriyum.domain.platformoperator.service.AdminCaseAssignmentVerifier;
+import com.miriyum.domain.platformoperator.service.OperatorAuthorityReader;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;
@@ -111,6 +114,21 @@ class AdminMonitoringApiIT {
                 .withUserConfiguration(AdminMonitoringController.class)
                 .run(context -> assertThat(context)
                         .doesNotHaveBean(AdminMonitoringController.class));
+    }
+
+    @Test
+    void platformOperatorOffDoesNotCreateMonitoringRuntimeBeans() {
+        new ApplicationContextRunner()
+                .withPropertyValues(
+                        "miriyum.platform-operator.enabled=false",
+                        "miriyum.admin-monitoring.enabled=true")
+                .withBean(OperatorAuthorityReader.class,
+                        () -> org.mockito.Mockito.mock(OperatorAuthorityReader.class))
+                .withBean(AdminCaseAssignmentVerifier.class,
+                        () -> org.mockito.Mockito.mock(AdminCaseAssignmentVerifier.class))
+                .withUserConfiguration(AdminMonitoringAuthorizationService.class)
+                .run(context -> assertThat(context)
+                        .doesNotHaveBean(AdminMonitoringAuthorizationService.class));
     }
 
     private void authenticate() {

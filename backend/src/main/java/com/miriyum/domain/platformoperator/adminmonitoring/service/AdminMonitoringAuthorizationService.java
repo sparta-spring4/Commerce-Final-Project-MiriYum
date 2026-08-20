@@ -8,12 +8,13 @@ import com.miriyum.domain.platformoperator.service.AdminCaseAssignmentVerifier;
 import com.miriyum.domain.platformoperator.service.OperatorAuthorityReader;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.global.exception.ServiceException;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@ConditionalOnProperty(prefix = "miriyum.admin-monitoring", name = "enabled", havingValue = "true")
+@ConditionalOnExpression("'${miriyum.platform-operator.enabled:false}' == 'true' and "
+        + "'${miriyum.admin-monitoring.enabled:false}' == 'true'")
 public class AdminMonitoringAuthorizationService {
 
     private final OperatorAuthorityReader authorities;

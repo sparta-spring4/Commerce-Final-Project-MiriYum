@@ -69,6 +69,20 @@ class AdminMonitoringStatusMapperTest {
     }
 
     @Test
+    void rejectsSourceStatusFiltersThatCannotBelongToTheSelectedCaseTypes() {
+        Instant from = Instant.parse("2026-08-01T00:00:00Z");
+
+        assertThatThrownBy(() -> new ListQuery(
+                null, Set.of(WAITING), Set.of(), Set.of("RESERVATION:CONFIRMED"), Set.of(),
+                from, from.plusSeconds(1), 20, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ListQuery(
+                null, Set.of(RESERVATION), Set.of(), Set.of("WAITING:CALLED"), Set.of(),
+                from, from.plusSeconds(1), 20, null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void canonicalizesFiltersForStableCursorBinding() {
         Instant from = Instant.parse("2026-08-01T00:00:00Z");
         ListQuery query = new ListQuery(

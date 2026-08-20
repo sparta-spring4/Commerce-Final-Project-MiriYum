@@ -47,6 +47,19 @@ public final class AdminMonitoringRequests {
                 throw new IllegalArgumentException("size must be between 1 and 100");
             }
             sourceStatuses.forEach(AdminMonitoringRequests::validateSourceStatus);
+            if (!caseTypes.isEmpty()) {
+                boolean reservationSelected = caseTypes.contains(CaseType.RESERVATION);
+                boolean waitingSelected = caseTypes.contains(CaseType.WAITING);
+                for (String qualified : sourceStatuses) {
+                    Source source = Source.valueOf(qualified.substring(0, qualified.indexOf(':')));
+                    if ((!reservationSelected && (source == Source.RESERVATION
+                            || source == Source.RESERVATION_HOLD || source == Source.MENU_HOLD))
+                            || (!waitingSelected && source == Source.WAITING)) {
+                        throw new IllegalArgumentException(
+                                "source status does not belong to selected case types");
+                    }
+                }
+            }
             if (cursor != null && cursor.isBlank()) {
                 throw new IllegalArgumentException("cursor must not be blank");
             }

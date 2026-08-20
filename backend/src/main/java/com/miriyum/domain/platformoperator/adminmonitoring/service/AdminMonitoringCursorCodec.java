@@ -14,12 +14,13 @@ import java.util.Objects;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
-@ConditionalOnProperty(prefix = "miriyum.admin-monitoring", name = "enabled", havingValue = "true")
+@ConditionalOnExpression("'${miriyum.platform-operator.enabled:false}' == 'true' and "
+        + "'${miriyum.admin-monitoring.enabled:false}' == 'true'")
 public class AdminMonitoringCursorCodec {
 
     private static final int CONTRACT_VERSION = 1;

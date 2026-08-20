@@ -3,11 +3,12 @@ package com.miriyum.domain.platformoperator.adminmonitoring.service;
 import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringResponses.LifecycleStatus;
 import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringResponses.Source;
 import java.util.Set;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 
 @Service
-@ConditionalOnProperty(prefix = "miriyum.admin-monitoring", name = "enabled", havingValue = "true")
+@ConditionalOnExpression("'${miriyum.platform-operator.enabled:false}' == 'true' and "
+        + "'${miriyum.admin-monitoring.enabled:false}' == 'true'")
 public class AdminMonitoringStatusMapper {
 
     public LifecycleStatus lifecycle(Source source, String sourceStatus) {

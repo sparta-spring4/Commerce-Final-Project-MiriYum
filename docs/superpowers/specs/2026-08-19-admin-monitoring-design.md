@@ -53,7 +53,7 @@ cursor payload는 다음을 포함하고 HMAC-SHA256으로 보호한다.
 
 원장별 checkpoint가 있어 동일 statusChangedAt에서 Reservation과 Waiting의 상대 순서를 유지하면서도 어느 한 원장의 남은 후보를 건너뛰지 않는다. decode 시 서명, version, key ID, 30분 TTL, 미래 issuedAt/asOf, filter fingerprint를 검증한다. 손상·불일치는 INVALID_CURSOR, 알 수 없는/퇴역 key 또는 TTL 초과는 EXPIRED_CURSOR다.
 
-각 source에서 최대 100개를 읽어 k-way merge하고, batch hydration 후 필터를 평가한다. 결과가 size에 미달하면서 source page가 가득 찬 경우 최대 10회 내부 scan한다. 한도에 도달해도 누락을 완료로 위장하지 않고 마지막 평가 checkpoint의 nextCursor를 반환할 수 있다. 출력 size가 채워지면 아직 평가하지 않은 후보의 source checkpoint는 전진시키지 않는다.
+각 HTTP page에서 source별 최대 100개를 읽어 k-way merge하고, batch hydration 후 필터를 평가한다. 필터 후 결과가 size에 미달해도 source page가 가득 찼다면 마지막 평가 checkpoint의 nextCursor를 반환해 남은 후보가 없다고 위장하지 않는다. 출력 size가 채워지면 아직 평가하지 않은 후보의 source checkpoint는 전진시키지 않는다.
 
 ## 동일 기준 시각과 부분 실패
 

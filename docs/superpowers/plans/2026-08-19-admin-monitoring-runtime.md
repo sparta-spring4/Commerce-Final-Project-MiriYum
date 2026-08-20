@@ -100,7 +100,7 @@
 
 - [ ] **Step 1: Write failing list tests** proving global tie order, source-specific seek continuation, same asOf on all calls, one-base failure PARTIAL/null cursor, both-base failure 503, ancillary failure isolation, delayed preservation and filters after hydration.
 - [ ] **Step 2: Run the query service test** and confirm the missing service failure.
-- [ ] **Step 3: Implement the minimal list pipeline**: decode/establish asOf, fetch public change pages, k-way merge, hydrate batches of at most 100, evaluate filters, advance only evaluated source checkpoints and encode next cursor only when ordering is trustworthy.
+- [ ] **Step 3: Implement the minimal list pipeline**: decode/establish asOf, fetch one bounded public change page per requested base source, k-way merge, hydrate batches of at most 100, evaluate filters, advance only evaluated source checkpoints and encode next cursor only when ordering is trustworthy.
 - [ ] **Step 4: Add failing detail tests** for Reservation and Waiting success, check-in/no-show history, primary unavailable 503, successful absence 404, ancillary PARTIAL and payment ledger/refund truncation preservation.
 - [ ] **Step 5: Implement detail composition** and call `requireDetail` only after the primary source yields the current caseVersion.
 - [ ] **Step 6: Re-run the query service test** and confirm all list/detail cases pass.

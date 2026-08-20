@@ -199,6 +199,28 @@ class AdminMonitoringQueryServiceTest {
     }
 
     @Test
+    void reservationOnlyCheckInLookupFailureCannotMasqueradeAsAnEmptyPartialPage() {
+        willReturn(new ReservationMonitoringContracts.ReferencePage(
+                List.of(new ReservationMonitoringContracts.CaseReference(
+                        "reservation-hold:12", "7", CHANGED)), NOW, NOW))
+                .given(reservations).findChangedCases(any());
+        var stalePrimary = new ReservationMonitoringContracts.CaseSnapshot(
+                "reservation-hold:12", "7", 2, NOW.plusSeconds(3600), NOW.plusSeconds(7200),
+                List.of(new ReservationMonitoringContracts.LedgerCell(
+                        "RESERVATION", "CONFIRMED", 0L, CHANGED.minusSeconds(1),
+                        NOW, NOW, ReservationMonitoringContracts.Completeness.COMPLETE,
+                        ReservationMonitoringContracts.ReconciliationStatus.MATCHED)));
+        willReturn(new ReservationMonitoringContracts.BatchResult(List.of(stalePrimary), NOW, NOW))
+                .given(reservations).findCases(any());
+        willThrow(new ServiceException(ReservationErrorCode.RESERVATION_MONITORING_UNAVAILABLE))
+                .given(reservations).findCase(any());
+
+        assertError(
+                () -> service.list(PRINCIPAL, reservationQuery()),
+                AdminMonitoringErrorCode.MONITORING_SOURCES_UNAVAILABLE);
+    }
+
+    @Test
     void composesAssignedReservationDetailWithCheckInMenuAndBoundedPaymentHistory() {
         var snapshot = reservationSnapshot("reservation-hold:12");
         willReturn(Optional.of(new ReservationMonitoringContracts.Detail(

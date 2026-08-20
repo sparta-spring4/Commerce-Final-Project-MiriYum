@@ -42,11 +42,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 
 @Service
-@ConditionalOnProperty(prefix = "miriyum.admin-monitoring", name = "enabled", havingValue = "true")
+@ConditionalOnExpression("'${miriyum.platform-operator.enabled:false}' == 'true' and "
+        + "'${miriyum.admin-monitoring.enabled:false}' == 'true'")
 public class AdminMonitoringQueryService {
 
     private static final int SOURCE_PAGE_SIZE = 100;
@@ -163,6 +164,11 @@ public class AdminMonitoringQueryService {
                 items.add(built.summary());
                 if (items.size() == query.size()) break;
             }
+        }
+
+        if (!(wantsReservation && !failures.containsKey(Source.RESERVATION))
+                && !(wantsWaiting && !failures.containsKey(Source.WAITING))) {
+            throw unavailable();
         }
 
         boolean trustworthy = failures.isEmpty();
