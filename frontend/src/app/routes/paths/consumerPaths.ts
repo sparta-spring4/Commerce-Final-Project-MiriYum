@@ -5,6 +5,7 @@ export const CONSUMER_PATHS = {
   kakaoSignUp: '/auth/kakao/sign-up',
   myPage: '/mypage',
   myReservations: '/mypage/reservations',
+  myPickups: '/mypage/pickups',
   notificationHistory: '/mypage/notifications',
   reservationCreate: '/stores/:storeId/reserve',
   reservationDetail: '/reservations/:reservationId',

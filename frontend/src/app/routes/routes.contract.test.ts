@@ -26,6 +26,7 @@ describe('사용자별 route 계약', () => {
       kakaoSignUp: '/auth/kakao/sign-up',
       myPage: '/mypage',
       myReservations: '/mypage/reservations',
+      myPickups: '/mypage/pickups',
       notificationHistory: '/mypage/notifications',
       reservationCreate: '/stores/:storeId/reserve',
       reservationDetail: '/reservations/:reservationId',

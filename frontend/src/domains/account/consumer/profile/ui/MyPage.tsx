@@ -127,10 +127,6 @@ export function MyPage() {
         </div>
       </section>
 
-      {/*
-        시안은 이동 카드를 둘(예약 내역·픽업 내역) 놓는다. 1차 MVP에 픽업
-        내역 목록 화면이 없어 두 번째 카드는 갈 곳이 없으므로 만들지 않는다.
-      */}
       <section className="mypage__links" aria-label="바로 가기">
         <Link className="mypage__link-card" to={CONSUMER_PATHS.myReservations}>
           <span className="mypage__link-art" aria-hidden="true">
@@ -140,6 +136,21 @@ export function MyPage() {
             <span className="mypage__link-title">내 예약 내역</span>
             <span className="mypage__link-text">
               다가오는 다이닝 일정과 지난 방문 기록을 확인하세요.
+            </span>
+          </span>
+          <span className="mypage__link-go">
+            자세히 보기
+            <Icon name="arrowRight" className="mi-icon--sm" />
+          </span>
+        </Link>
+        <Link className="mypage__link-card" to={CONSUMER_PATHS.myPickups}>
+          <span className="mypage__link-art" aria-hidden="true">
+            <Icon name="bag" />
+          </span>
+          <span className="mypage__link-body">
+            <span className="mypage__link-title">내 픽업 내역</span>
+            <span className="mypage__link-text">
+              예정된 픽업과 지난 수령 기록을 확인하세요.
             </span>
           </span>
           <span className="mypage__link-go">

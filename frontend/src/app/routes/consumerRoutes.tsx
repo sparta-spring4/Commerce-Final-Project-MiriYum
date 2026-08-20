@@ -11,6 +11,7 @@ import {
   PickupCompletePage,
   PickupCreatePage,
   PickupDetailPage,
+  MyPickupsPage,
 } from '../../domains/pickup/consumer'
 import {
   ReservationCompletePage,
@@ -59,6 +60,7 @@ export const consumerRoutes = (
     <Route element={<RequireConsumerAuth />}>
       <Route path={CONSUMER_PATHS.myPage} element={<MyPage />} />
       <Route path={CONSUMER_PATHS.myReservations} element={<MyReservationsPage />} />
+      <Route path={CONSUMER_PATHS.myPickups} element={<MyPickupsPage />} />
       <Route
         path={CONSUMER_PATHS.notificationHistory}
         element={<ConsumerNotificationHistoryRoute />}
