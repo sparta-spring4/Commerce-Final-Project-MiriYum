@@ -96,9 +96,9 @@ or `.max`.
 
 Do not treat a high Linux `used` value alone as an out-of-memory incident.
 Check `available` memory, container RSS, and kernel OOM history before deciding
-whether to deploy. On 2026-08-20, the staging host had 1.8 GiB total memory,
-only 105 MiB available memory, and no swap. The backend Java process used about
-714 MiB RSS and MySQL used about 538 MiB RSS; no kernel OOM event was recorded.
+whether to deploy. Record a non-sensitive timestamp, instance shape, memory
+summary, and private health result in the owning Issue or PR evidence; do not
+turn one host observation into a permanent runbook threshold.
 
 ```sh
 free -h
@@ -111,20 +111,20 @@ ps -eo pid,comm,%mem,%cpu,rss --sort=-%mem | head -n 15
 sudo dmesg -T | grep -Ei 'out of memory|oom|killed process' | tail -n 20
 ```
 
-The observed backend JVM had a 462 MiB maximum heap (`MaxRAMPercentage=25`)
-but a larger RSS because native memory, metaspace, JIT code cache, and thread
-stacks are outside the Java heap. MySQL did not show a connection surge
-(`Threads_connected=11`, `Max_used_connections=14`); its 128 MiB InnoDB buffer
-pool alone therefore does not explain the full MySQL RSS. Record that remaining
-breakdown as an investigation item rather than claiming an unverified cause.
+Java RSS can exceed its maximum heap because native memory, metaspace, JIT code
+cache, and thread stacks are outside the Java heap. Record unexplained MySQL
+RSS as an investigation item rather than claiming a cause without evidence.
 
 ### Deployment decision
 
-When available memory is about 105 MiB on this host, do not start staging CD.
-Backend container replacement and JVM initialization can need additional memory,
-which risks an OOM termination or a failed health check. Because a `dev` merge
-triggers staging CD, defer both the merge and manual staging deployment until
-the memory issue is addressed.
+Do not start staging CD when available-memory headroom is too small for backend
+container replacement and JVM initialization, or when a recent kernel OOM is
+present. Either condition risks an OOM termination or failed health check.
+Only a `dev` merge that changes deployment inputs (`backend/`, `frontend/`,
+`deploy/`, or the deployment workflow) starts staging CD automatically. A
+documentation-only merge does not deploy; a manual workflow dispatch remains
+an explicit deployment path. Defer only the affected deployment, then address
+the memory issue before resuming it.
 
 The 85% memory-use threshold is an operational guardrail, not an AWS guarantee.
 Use it together with a meaningful available-memory margin, no OOM history, and
@@ -140,10 +140,10 @@ falls below the threshold.
 3. Keep the deployment blocked until one of the options restores headroom and a
    controlled health check succeeds.
 
-### Applied recovery evidence
+### Evidence location
 
-On 2026-08-20, the staging instance type was changed from `t4g.small` (2 GiB)
-to `t4g.medium` (4 GiB). After restart, `free -h` reported 2.4 GiB available
-memory and `http://127.0.0.1:8080/actuator/health` returned `UP`. This restores
-enough headroom to resume controlled staging CD; continue to collect container
-memory evidence during later load tests.
+Keep one-off instance changes, measured memory values, and health results in
+the owning Issue or PR evidence. The current staging memory recovery evidence
+is tracked in Issue #521. Continue to collect container-memory evidence during
+later load tests without printing secrets, account identifiers, or `.env`
+contents.
