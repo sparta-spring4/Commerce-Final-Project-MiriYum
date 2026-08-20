@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { http } from 'msw'
+import { StrictMode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { ConsumerAuthProvider } from '../../../../app/shells/consumer/ConsumerAuthProvider'
 import { ApiError } from '../../../../shared/api/apiError'
@@ -120,6 +121,37 @@ describe('웨이팅 일행 패널 API 컨테이너', () => {
     expect(writeText).toHaveBeenCalledWith('JOIN-4821')
     expect(JSON.stringify(localStorage)).not.toContain('JOIN-4821')
     expect(JSON.stringify(sessionStorage)).not.toContain('JOIN-4821')
+  })
+
+  /*
+   * 앱은 StrictMode로 렌더된다. 살아 있는지 표시하는 ref를 cleanup에서만 끄면
+   * mount→unmount→mount의 두 번째 mount가 꺼진 값을 물려받아 명령 결과를
+   * 조용히 버린다. 성공 응답이 왔는데 화면이 그대로인 실패라 눈에 잘 띄지 않는다.
+   */
+  it('StrictMode 재mount 뒤에도 초대 발급 결과를 표시한다', async () => {
+    server.use(
+      authenticatedConsumer(),
+      http.post(
+        `/api/v1/consumers/me/waiting-teams/${TEAM_ID}/invitations`,
+        () => successResponse(invitation),
+      ),
+    )
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+
+    render(
+      <StrictMode>
+        <QueryClientProvider client={queryClient}>
+          <ConsumerAuthProvider>
+            <WaitingPartyPanelContainer snapshot={representativeSnapshot()} />
+          </ConsumerAuthProvider>
+        </QueryClientProvider>
+      </StrictMode>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '일행 초대' }))
+
+    expect(await screen.findByText('JOIN-4821')).toBeInTheDocument()
   })
 
   it('멱등 replay에서 코드가 null이면 원문을 추측하지 않는다', async () => {

@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { Link } from 'react-router'
+import { CONSUMER_PATHS } from '../../../../app/routes/paths/consumerPaths'
 import { Button } from '../../../../shared/ui/Button'
 import { TextField } from '../../../../shared/ui/Field'
 import { Alert } from '../../../../shared/ui/Feedback'
@@ -74,7 +76,18 @@ export function WaitingInvitationAcceptPage({
       </header>
 
       {succeeded ? (
-        <Alert tone="info" title="일행으로 합류했습니다.">
+        <Alert
+          tone="info"
+          title="일행으로 합류했습니다."
+          actions={
+            <Link
+              className="mi-button mi-button--primary mi-button--sm"
+              to={CONSUMER_PATHS.waitingCurrent}
+            >
+              현재 웨이팅 보기
+            </Link>
+          }
+        >
           <p>
             현재 웨이팅 화면에서 순번과 일행 목록을 확인할 수 있습니다.
           </p>

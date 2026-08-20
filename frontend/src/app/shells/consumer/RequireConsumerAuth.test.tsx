@@ -30,6 +30,10 @@ function renderGuardedAt(route: string) {
                 path={CONSUMER_PATHS.waitingRegister}
                 element={<p>웨이팅 등록 내용</p>}
               />
+              <Route
+                path={CONSUMER_PATHS.waitingCurrent}
+                element={<p>현재 웨이팅 내용</p>}
+              />
             </Route>
             <Route path={CONSUMER_PATHS.signIn} element={<SignInProbe />} />
           </Routes>
@@ -88,6 +92,17 @@ describe('일반 사용자 보호 route 가드', () => {
     expect(readReturnTo(search, 'http://localhost')).toBe(
       '/stores/store%2F12/waiting',
     )
+  })
+
+  it('현재 웨이팅 상세도 로그인 후 같은 자리로 복귀시킨다', async () => {
+    server.use(unauthenticatedConsumer)
+
+    renderGuardedAt(CONSUMER_PATHS.waitingCurrent)
+
+    await waitFor(() => expect(screen.getByTestId('sign-in')).toBeInTheDocument())
+    const shown = screen.getByTestId('sign-in').textContent ?? ''
+    const search = shown.slice(shown.indexOf('?'))
+    expect(readReturnTo(search, 'http://localhost')).toBe('/waiting/current')
   })
 
   it('보존한 목적지가 외부 오리진이면 복귀 대상으로 인정하지 않는다', () => {
