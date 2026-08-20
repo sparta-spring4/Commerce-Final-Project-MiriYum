@@ -75,6 +75,7 @@ public class WaitingReservationConversionService {
                 payments.prepareWaitingReservationDeposit(
                         new PrepareWaitingReservationDepositCommand(
                                 Long.toString(preflight.waitingTeamId()),
+                                preflight.storeId(),
                                 preflight.consumerAccountId(),
                                 command.amountMinor(),
                                 command.currency(),
@@ -102,7 +103,7 @@ public class WaitingReservationConversionService {
                 .orElseThrow(() -> new ServiceException(
                         ReservationErrorCode.WAITING_TEAM_NOT_FOUND));
         requireWaitingVersionAndStatus(team, command.expectedVersion());
-        return new BeginPreflight(team.getId(), team.getConsumerAccountId());
+        return new BeginPreflight(team.getId(), team.getStoreId(), team.getConsumerAccountId());
     }
 
     private PaymentPreparation startLocked(
@@ -334,5 +335,5 @@ public class WaitingReservationConversionService {
         }
     }
 
-    private record BeginPreflight(long waitingTeamId, Long consumerAccountId) { }
+    private record BeginPreflight(long waitingTeamId, long storeId, Long consumerAccountId) { }
 }

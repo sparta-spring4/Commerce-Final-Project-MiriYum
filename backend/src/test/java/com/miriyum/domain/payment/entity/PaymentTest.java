@@ -23,6 +23,7 @@ class PaymentTest {
         assertThat(payment.getPaymentId()).isEqualTo("900000000000000001");
         assertThat(payment.getSourceType()).isEqualTo("RESERVATION_DEPOSIT");
         assertThat(payment.getSourceReferenceId()).isEqualTo("123");
+        assertThat(payment.getStoreId()).isEqualTo(12L);
         assertThat(payment.getSourcePolicyVersion()).isEqualTo(7L);
         assertThat(payment.getConsumerAccountId()).isEqualTo(11L);
         assertThat(payment.getAmountMinor()).isEqualTo(30_000L);
@@ -113,19 +114,30 @@ class PaymentTest {
     @DisplayName("금액과 소유자 식별자는 양수이고 통화는 ISO 대문자 3자리여야 한다")
     void rejectsInvalidPreparationSnapshot() {
         assertThatIllegalArgumentException().isThrownBy(() -> Payment.prepare(
-                "900000000000000001", "RESERVATION_DEPOSIT", "123", 7L,
+                "900000000000000001", "RESERVATION_DEPOSIT", "123", 12L, 7L,
                 CREATED_AT.plusSeconds(600), "550e8400-e29b-41d4-a716-446655440000",
                 "a".repeat(64), 0L, 30_000L, "KRW",
                 "payment-reservation-900000000000000001", "MiriYum 예약금 123", CREATED_AT));
         assertThatIllegalArgumentException().isThrownBy(() -> Payment.prepare(
-                "900000000000000001", "RESERVATION_DEPOSIT", "123", 7L,
+                "900000000000000001", "RESERVATION_DEPOSIT", "123", 12L, 7L,
                 CREATED_AT.plusSeconds(600), "550e8400-e29b-41d4-a716-446655440000",
                 "a".repeat(64), 11L, 0L, "KRW",
                 "payment-reservation-900000000000000001", "MiriYum 예약금 123", CREATED_AT));
         assertThatIllegalArgumentException().isThrownBy(() -> Payment.prepare(
-                "900000000000000001", "RESERVATION_DEPOSIT", "123", 7L,
+                "900000000000000001", "RESERVATION_DEPOSIT", "123", 12L, 7L,
                 CREATED_AT.plusSeconds(600), "550e8400-e29b-41d4-a716-446655440000",
                 "a".repeat(64), 11L, 30_000L, "krw",
+                "payment-reservation-900000000000000001", "MiriYum 예약금 123", CREATED_AT));
+    }
+
+    @Test
+    @DisplayName("결제 source와 모니터링 사건 유형의 조합이 다르면 준비하지 않는다")
+    void rejectsMonitoringCaseTypeThatContradictsPaymentSource() {
+        assertThatIllegalArgumentException().isThrownBy(() -> Payment.prepare(
+                "900000000000000001", "WAITING_RESERVATION_DEPOSIT", "123",
+                "RESERVATION", "123", 12L, 7L,
+                CREATED_AT.plusSeconds(600), "550e8400-e29b-41d4-a716-446655440000",
+                "a".repeat(64), 11L, 30_000L, "KRW",
                 "payment-reservation-900000000000000001", "MiriYum 예약금 123", CREATED_AT));
     }
 
@@ -134,6 +146,7 @@ class PaymentTest {
                 "900000000000000001",
                 "RESERVATION_DEPOSIT",
                 "123",
+                12L,
                 7L,
                 CREATED_AT.plusSeconds(600),
                 "550e8400-e29b-41d4-a716-446655440000",

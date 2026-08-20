@@ -31,7 +31,7 @@ class ReservationErrorCodeTest {
     @DisplayName("예약 오류 외부 코드는 중복되지 않는다")
     void doesNotContainDuplicateExternalCodes() {
         // when & then
-        assertThat(ReservationErrorCode.values()).hasSize(30);
+        assertThat(ReservationErrorCode.values()).hasSize(32);
         assertThat(ReservationErrorCode.values())
                 .extracting(ReservationErrorCode::getCode)
                 .doesNotHaveDuplicates();
@@ -69,6 +69,9 @@ class ReservationErrorCodeTest {
                 Arguments.of(ReservationErrorCode.NO_SHOW_TOO_EARLY,
                         HttpStatus.CONFLICT, "RESERVATION_013",
                         "아직 노쇼를 확정할 수 없습니다."),
+                Arguments.of(ReservationErrorCode.RESERVATION_MONITORING_UNAVAILABLE,
+                        HttpStatus.SERVICE_UNAVAILABLE, "RESERVATION_014",
+                        "예약 모니터링 원장을 조회할 수 없습니다."),
                 Arguments.of(ReservationErrorCode.WAITING_SETTING_VERSION_CONFLICT,
                         HttpStatus.CONFLICT, "WAITING_001",
                         "조회 후 웨이팅 설정 버전이 변경되었습니다."),
@@ -119,7 +122,10 @@ class ReservationErrorCodeTest {
                         "사용할 수 없는 대표자 이전 제안입니다."),
                 Arguments.of(ReservationErrorCode.PARTY_CAPACITY_EXCEEDED,
                         HttpStatus.CONFLICT, "WAITING_017",
-                        "일행 참여 인원이 등록 인원을 초과합니다.")
+                        "일행 참여 인원이 등록 인원을 초과합니다."),
+                Arguments.of(ReservationErrorCode.WAITING_MONITORING_UNAVAILABLE,
+                        HttpStatus.SERVICE_UNAVAILABLE, "WAITING_018",
+                        "웨이팅 모니터링 원장을 조회할 수 없습니다.")
         );
     }
 }
