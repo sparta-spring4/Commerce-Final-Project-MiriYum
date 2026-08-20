@@ -8,7 +8,7 @@ import subprocess
 import time
 import unittest
 import uuid
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -111,12 +111,16 @@ class DockerSseSmoke:
         for _ in range(30):
             connection = http.client.HTTPConnection("127.0.0.1", port, timeout=0.2)
             try:
-                connection.connect()
-                return port
-            except OSError:
-                time.sleep(0.1)
+                connection.request("GET", "/")
+                response = connection.getresponse()
+                response.read()
+                if response.status == 404:
+                    return port
+            except (OSError, http.client.HTTPException):
+                pass
             finally:
                 connection.close()
+            time.sleep(0.1)
         raise AssertionError("Nginx SSE contract proxy did not become ready")
 
 
@@ -215,6 +219,33 @@ class SseDeploymentContractTest(unittest.TestCase):
         self.assertIn("} finally {", runbook)
         self.assertIn("throw 'slow-client validation failed'", runbook)
         self.assertIn("throw 'SSE loadtest timing restoration failed'", runbook)
+
+    def test_nginx_readiness_requires_an_http_response(self) -> None:
+        smoke = DockerSseSmoke()
+        reset_connection = MagicMock()
+        reset_connection.getresponse.side_effect = ConnectionResetError
+        ready_response = MagicMock(status=404)
+        ready_response.read.return_value = b""
+        ready_connection = MagicMock()
+        ready_connection.getresponse.return_value = ready_response
+
+        with (
+            patch.object(smoke, "host_port", return_value=18080),
+            patch.object(
+                http.client,
+                "HTTPConnection",
+                side_effect=[reset_connection, ready_connection],
+            ) as connection_factory,
+            patch.object(time, "sleep") as sleep,
+        ):
+            port = smoke.wait_until_ready()
+
+        self.assertEqual(18080, port)
+        self.assertEqual(2, connection_factory.call_count)
+        reset_connection.request.assert_called_once_with("GET", "/")
+        ready_connection.request.assert_called_once_with("GET", "/")
+        ready_response.read.assert_called_once_with()
+        sleep.assert_called_once_with(0.1)
 
     def test_nginx_flushes_first_sse_frame_before_upstream_close(self) -> None:
         frame, elapsed, status, content_type = first_sse_frame()
