@@ -74,7 +74,7 @@ CI는 자체 실행 출력을 소유한다. 이를 영구 저장소 로그에 �
 
 동작이나 지속적인 결정이 바뀌면 정본 제품, 정책, 아키텍처, 기능 또는 품질 문서를 갱신한다. 해당 규칙을 Issue, Pull Request 또는 AI 작업 흐름(workflow) 문서에 복사하지 말고 소유자 문서로 링크한다.
 
-`README.md`, 이 문서와 `ai/`는 사람·AI의 진입, 라우팅, 명령·증거 경계를 소유하며 제품 사실을 소유하지 않는다. 제품 사실의 활성 정본 allowlist는 `docs/00-index.md`부터 `docs/09-quality-operations-and-rules.md`, 현재 승인 기준과 정렬된 서비스 정책, 현재 유효 ADR, `docs/05` 또는 소유 정책이 연결한 활성 `docs/specs/<feature>/spec.md`로 제한한다. 기능 명세 템플릿, `docs/superpowers/specs/`, `docs/superpowers/plans/`, `miriyum-service-blueprint.md`, `miriyum-service-decisions.md`, `.superpowers/sdd/`의 artifact와 상태가 `Superseded` 또는 `Deprecated`인 ADR은 활성 정본이나 ADR이 링크해도 기본 라우팅에서 절대 제외한다. 사용자가 과거 감사·결정 이력 검토를 명시적으로 요구한 경우에만 읽고 현재 결정·완료 증거로 사용하지 않는다.
+`README.md`, 이 문서와 `ai/`는 사람·AI의 진입, 라우팅, 명령·증거 경계를 소유하며 제품 사실을 소유하지 않는다. 제품 사실의 활성 정본 allowlist는 `docs/00-index.md`부터 `docs/09-quality-operations-and-rules.md`, 현재 승인 기준과 정렬된 서비스 정책, 현재 유효 ADR, `docs/05` 또는 소유 정책이 연결한 활성 `docs/specs/<feature>/spec.md`, 현재 `dev` Flyway 기준 전체 테이블 색인과 주요 업무·논리 관계를 소유하는 `docs/erd/`로 제한한다. 기능 명세 템플릿, `docs/superpowers/specs/`, `docs/superpowers/plans/`, `miriyum-service-blueprint.md`, `miriyum-service-decisions.md`, `.superpowers/sdd/`의 artifact와 상태가 `Superseded` 또는 `Deprecated`인 ADR은 활성 정본이나 ADR이 링크해도 기본 라우팅에서 절대 제외한다. 사용자가 과거 감사·결정 이력 검토를 명시적으로 요구한 경우에만 읽고 현재 결정·완료 증거로 사용하지 않는다.
 
 ## 단계 표기
 

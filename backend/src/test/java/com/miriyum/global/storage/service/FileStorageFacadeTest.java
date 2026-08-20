@@ -365,7 +365,7 @@ class FileStorageFacadeTest {
                 RuntimeException failedStatusFailure,
                 List<String> events
         ) {
-            super(null);
+            super(null, List.of());
             this.confirmationFailure = confirmationFailure;
             this.failedStatusFailure = failedStatusFailure;
             this.events = events;

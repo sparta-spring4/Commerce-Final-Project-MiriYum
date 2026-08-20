@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
@@ -7,6 +7,10 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import { createApiClient } from '../../../shared/api/client'
 import { server } from '../../../test/msw/server'
+import type {
+  NotificationEventConnectionState,
+  NotificationEventStreamClient,
+} from './notificationEventStream'
 
 const NOTIFICATION_HISTORY_PATH = '/api/v1/consumers/me/notifications'
 
@@ -49,11 +53,43 @@ function createTestQueryClient() {
   })
 }
 
+function eventStreamHarness() {
+  const subscriptions: Array<
+    Parameters<NotificationEventStreamClient['subscribe']>[0]
+  > = []
+  const client: NotificationEventStreamClient = {
+    subscribe: async (subscription) => {
+      subscriptions.push(subscription)
+      if (subscription.signal.aborted) {
+        return
+      }
+      await new Promise<void>((resolve) => {
+        subscription.signal.addEventListener('abort', () => resolve(), {
+          once: true,
+        })
+      })
+    },
+  }
+
+  return {
+    client,
+    subscriptions,
+    emitChanged() {
+      subscriptions.at(-1)?.onChanged()
+    },
+    emitState(state: NotificationEventConnectionState) {
+      subscriptions.at(-1)?.onConnectionStateChange(state)
+    },
+  }
+}
+
 async function renderPage(
   queryClient = createTestQueryClient(),
   sessionKey = 0,
+  eventStream = eventStreamHarness().client,
 ) {
   const { NotificationHistoryPage } = await import('./NotificationHistoryPage')
+  const apiClient = createApiClient()
 
   function Wrapper({ children }: { children: ReactNode }) {
     return (
@@ -63,25 +99,182 @@ async function renderPage(
     )
   }
 
-  return render(
+  const rendered = render(
     <NotificationHistoryPage
-      apiClient={createApiClient()}
+      apiClient={apiClient}
+      eventStream={eventStream}
       sessionKey={sessionKey}
     />,
     { wrapper: Wrapper },
   )
+  return {
+    ...rendered,
+    rerenderSession(nextSessionKey: number) {
+      rendered.rerender(
+        <NotificationHistoryPage
+          apiClient={apiClient}
+          eventStream={eventStream}
+          sessionKey={nextSessionKey}
+        />,
+      )
+    },
+  }
 }
 
 describe('NotificationHistoryPage', () => {
-  test('renders delivered history without an unsupported action control', async () => {
+  test('refetches the current MySQL-backed history after a changed signal', async () => {
+    let title = '변경 전 알림'
+    let requests = 0
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () => {
+        requests += 1
+        return HttpResponse.json(successResponse([historyItem({ title })]))
+      }),
+    )
+    const events = eventStreamHarness()
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(
+      ['consumer', 'notification-history', 8],
+      '다른 세션 캐시',
+    )
+
+    await renderPage(queryClient, 7, events.client)
+    expect(await screen.findByText('변경 전 알림')).toBeVisible()
+
+    title = 'MySQL에서 다시 읽은 알림'
+    events.emitChanged()
+
+    expect(await screen.findByText('MySQL에서 다시 읽은 알림')).toBeVisible()
+    expect(requests).toBe(2)
+    expect(
+      queryClient.getQueryState(['consumer', 'notification-history', 8])
+        ?.isInvalidated,
+    ).toBe(false)
+  })
+
+  test('coalesces changed signals during the initial request into a fresh history fetch', async () => {
+    let releaseInitialRequest: (() => void) | undefined
+    const initialRequestGate = new Promise<void>((resolve) => {
+      releaseInitialRequest = resolve
+    })
+    let requests = 0
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, async () => {
+        requests += 1
+        if (requests === 1) {
+          await initialRequestGate
+          return HttpResponse.json(
+            successResponse([
+              historyItem({ title: '신호 전에 조회한 오래된 알림' }),
+            ]),
+          )
+        }
+
+        return HttpResponse.json(
+          successResponse([
+            historyItem({ title: '신호 이후 다시 조회한 최신 알림' }),
+          ]),
+        )
+      }),
+    )
+    const events = eventStreamHarness()
+
+    await renderPage(createTestQueryClient(), 7, events.client)
+    await waitFor(() => expect(requests).toBe(1))
+    await waitFor(() => expect(events.subscriptions).toHaveLength(1))
+
+    events.emitChanged()
+    events.emitChanged()
+    releaseInitialRequest?.()
+
+    expect(
+      await screen.findByText('신호 이후 다시 조회한 최신 알림'),
+    ).toBeVisible()
+    expect(requests).toBe(2)
+    expect(
+      screen.queryByText('신호 전에 조회한 오래된 알림'),
+    ).not.toBeInTheDocument()
+  })
+
+  test('announces that realtime updates are recovering', async () => {
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(successResponse([])),
+      ),
+    )
+    const events = eventStreamHarness()
+
+    await renderPage(createTestQueryClient(), 0, events.client)
+    await screen.findByText('아직 받은 알림이 없습니다.')
+    events.emitState('reconnecting')
+
+    expect(
+      await screen.findByRole('status', {
+        name: '실시간 알림 연결을 복구하는 중입니다.',
+      }),
+    ).toBeVisible()
+  })
+
+  test('announces when realtime updates are unavailable', async () => {
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(successResponse([])),
+      ),
+    )
+    const events = eventStreamHarness()
+
+    await renderPage(createTestQueryClient(), 0, events.client)
+    await screen.findByText('아직 받은 알림이 없습니다.')
+    events.emitState('unavailable')
+
+    expect(
+      await screen.findByText('실시간 알림 연결을 사용할 수 없습니다.'),
+    ).toHaveAttribute('role', 'status')
+  })
+
+  test('aborts the previous stream before subscribing for a new session', async () => {
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(successResponse([])),
+      ),
+    )
+    const events = eventStreamHarness()
+    const page = await renderPage(createTestQueryClient(), 1, events.client)
+    await waitFor(() => expect(events.subscriptions).toHaveLength(1))
+    const previousSignal = events.subscriptions[0]?.signal
+
+    page.rerenderSession(2)
+
+    await waitFor(() => expect(events.subscriptions).toHaveLength(2))
+    expect(previousSignal?.aborted).toBe(true)
+    expect(events.subscriptions[1]?.signal.aborted).toBe(false)
+  })
+
+  test('links available reservation and pickup actions to their protected details', async () => {
     server.use(
       http.get(NOTIFICATION_HISTORY_PATH, () =>
         HttpResponse.json(
           successResponse([
             historyItem({
+              notificationId: '1001',
               action: {
                 type: 'RESERVATION_DETAIL',
                 resource: { type: 'RESERVATION', id: '501' },
+                availability: 'AVAILABLE',
+                expiresAt: null,
+              },
+            }),
+            historyItem({
+              notificationId: '1002',
+              purpose: 'PICKUP_RESERVATION_CONFIRMED',
+              title: '픽업 예약이 확정되었습니다.',
+              resource: { type: 'PICKUP_RESERVATION', id: 'pickup/701' },
+              action: {
+                type: 'PICKUP_RESERVATION_DETAIL',
+                resource: {
+                  type: 'PICKUP_RESERVATION',
+                  id: 'pickup/701',
+                },
                 availability: 'AVAILABLE',
                 expiresAt: null,
               },
@@ -101,6 +294,91 @@ describe('NotificationHistoryPage', () => {
       'dateTime',
       '2026-08-13T10:00:02+09:00',
     )
+    expect(screen.getByRole('link', { name: '예약 상세 보기' })).toHaveAttribute(
+      'href',
+      '/reservations/501',
+    )
+    expect(
+      screen.getByRole('link', { name: '픽업 상세 보기' }),
+    ).toHaveAttribute('href', '/pickup-reservations/pickup%2F701')
+  })
+
+  test.each(['EXPIRED', 'SUPERSEDED', 'UNAVAILABLE'])(
+    'disables a %s detail action instead of navigating',
+    async (availability) => {
+      server.use(
+        http.get(NOTIFICATION_HISTORY_PATH, () =>
+          HttpResponse.json(
+            successResponse([
+              historyItem({
+                action: {
+                  type: 'RESERVATION_DETAIL',
+                  resource: { type: 'RESERVATION', id: '501' },
+                  availability,
+                  expiresAt: null,
+                },
+              }),
+            ]),
+          ),
+        ),
+      )
+
+      await renderPage()
+
+      expect(
+        await screen.findByRole('button', { name: '예약 상세 보기' }),
+      ).toBeDisabled()
+      expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    },
+  )
+
+  test.each([
+    {
+      name: 'menu substitution review',
+      action: {
+        type: 'MENU_SUBSTITUTION_REVIEW',
+        resource: { type: 'MENU_SUBSTITUTION_PROPOSAL', id: '801' },
+        availability: 'AVAILABLE',
+        expiresAt: null,
+      },
+    },
+    {
+      name: 'crossed action and resource types',
+      action: {
+        type: 'RESERVATION_DETAIL',
+        resource: { type: 'PICKUP_RESERVATION', id: '701' },
+        availability: 'AVAILABLE',
+        expiresAt: null,
+      },
+    },
+    {
+      name: 'unknown action type',
+      action: {
+        type: 'UNKNOWN_DETAIL',
+        resource: { type: 'RESERVATION', id: '501' },
+        availability: 'AVAILABLE',
+        expiresAt: null,
+      },
+    },
+    {
+      name: 'blank resource id',
+      action: {
+        type: 'RESERVATION_DETAIL',
+        resource: { type: 'RESERVATION', id: '   ' },
+        availability: 'AVAILABLE',
+        expiresAt: null,
+      },
+    },
+  ])('does not execute $name', async ({ action }) => {
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(successResponse([historyItem({ action })])),
+      ),
+    )
+
+    await renderPage()
+
+    expect(await screen.findByText('예약이 확정되었습니다.')).toBeVisible()
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
