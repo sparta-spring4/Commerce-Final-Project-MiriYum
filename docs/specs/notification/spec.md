@@ -238,12 +238,13 @@ Notification 내부 작업은 `PENDING`, `DELIVERED`, `FAILED`, `CANCELLED`를 �
 
 ```http
 GET /api/v1/consumers/me/notifications/unread-count
-PUT /api/v1/consumers/me/notifications/{notificationId}/read
-PUT /api/v1/consumers/me/notifications/read-all
+POST /api/v1/consumers/me/notifications/{notificationId}/reads
+POST /api/v1/consumers/me/notifications/reads
 Authorization: Bearer {consumerAccessToken}
 ```
 
 - 세 endpoint는 활성 consumer 본인에게 공개된 `IN_APP DELIVERED` 알림만 대상으로 한다. account ID를 path·query·body로 받지 않고 인증 principal에 결속한다.
+- `unread-count`는 계산된 단일 값을 반환하므로 `ApiUrlConvention.SINGLETON_SEGMENTS`에 명시적으로 승인한다. 두 읽음 명령은 신규 명령형 단수 segment를 만들지 않고 `reads` 복수 사건 리소스와 `POST`를 사용한다.
 - `GET .../unread-count`와 두 읽음 명령의 성공 응답 data는 `{ "unreadCount": 0 이상의 정수 }`다. client가 보낸 개수나 읽음 시각은 받지 않는다.
 - 개별 읽음은 `notificationId`가 본인 공개 이력에 속하고 `readAt=null`일 때 DB 현재 시각을 최초 `readAt`으로 기록한다. 이미 읽은 같은 알림의 반복 요청은 최초 시각을 바꾸지 않고 현재 개수로 `200`을 반환하는 멱등 no-op이다.
 - 다른 계정, 미전달, 실패, 취소, title이 없어 공개되지 않는 알림과 존재하지 않는 ID는 모두 `404 NOTIFICATION_003`으로 응답해 존재 여부를 구분하지 않는다.
@@ -260,8 +261,8 @@ Authorization: Bearer {consumerAccessToken}
 - migration은 기존 공개 전달 완료 알림의 `readAt`을 `deliveredAt`으로 backfill하고 account state의 `changeVersion`을 기존 공개 최대 `notificationId`로 초기화한다. 따라서 기능 배포 전 알림은 갑자기 미확인 배지에 포함되지 않는다.
 - `changeVersion`과 `notificationId`는 독립적으로 증가하므로 두 값을 `max`로 합친 scalar는 두 종류 변경이 동시에 허용되면 작은 쪽 증가를 숨길 수 있다. 따라서 `max(account changeVersion, 현재 공개 최대 notificationId)` fallback은 읽음·미확인 개수 production route가 아직 없는 호환 기반 배포에서만 사용한다.
 - 호환 기반 PR 1A는 migration, account state, version-aware 전달 writer와 legacy 전달 fallback을 먼저 배포하되 세 읽음·미확인 개수 OpenAPI path를 `contract-only`로 유지하고 production Controller route를 등록하지 않는다. 이 단계에는 읽음 변경이 없으므로 구 worker의 새 공개 전달은 더 큰 `notificationId`로 correction이 회수한다.
-- 배포 gate는 PR 1A revision이 모든 Backend·Notification worker에 적용되고 이전 revision의 instance·worker·진행 중 transaction이 0임을 배포 증거로 확인해야 통과한다. gate 뒤 PR 1B에서만 `contract-only`를 제거하고 production route를 활성화한다.
-- PR 1B 활성화 뒤에는 모든 전달이 account 잠금과 `changeVersion` 증가를 수행하므로 읽음 증가 뒤의 새 전달도 더 큰 version을 만든다. 이후 rollback은 version-aware 전달 writer를 유지하는 호환 image로만 수행하고 구 worker revision을 다시 실행하지 않는다. Frontend는 PR 1B 전체 배포 뒤 활성화한다.
+- 배포 gate는 #518이 staging 구 container 종료·DB connection closure와 production 이전 revision running·pending task 0건·target deregistration 완료를 관측 가능한 증거로 확인해야 통과한다. 관측할 수 없는 별도 “진행 중 transaction 0” 지표를 요구하지 않으며 gate 뒤 PR 1B에서만 `contract-only`를 제거하고 production route를 활성화한다.
+- PR 1B 활성화 뒤에는 모든 전달이 account 잠금과 `changeVersion` 증가를 수행하므로 읽음 증가 뒤의 새 전달도 더 큰 version을 만든다. #518의 staging·production CD는 최소 호환 writer revision보다 오래된 image를 배포 전에 거절하고 version-aware writer를 유지하는 forward rollback만 허용한다. Frontend는 PR 1B 전체 배포 뒤 활성화한다.
 - 실제 공개 상태가 바뀌지 않은 반복 읽음은 `changeVersion`을 증가시키거나 SSE wake-up을 만들지 않는다. transaction commit 뒤 wake-up 실패는 읽음·전달을 되돌리지 않고 MySQL correction이 최신 version을 회수한다.
 
 ### 행동 계약
@@ -326,7 +327,7 @@ Waiting consumer·store-operator SSE endpoint와 `waiting.changed`의 영향 범
 - `NOTI-009` 확정 전에도 보관 만료를 적용할 수 있는 구조를 갖추되 영구 보존이나 임의 삭제 기간을 기본값으로 넣지 않는다.
 - 외부 채널 추가는 논리 알림과 `IN_APP` 이력이 공유하는 `notificationId`를 바꾸지 않고 같은 논리 알림 아래 내부 채널 시도만 추가한다.
 - #250 SSE 계약 PR #442와 Runtime PR #474가 세 변경 신호 path·재연결 cursor·HTTP 수렴 및 production Java Runtime을 제공한다. 환경 기본 활성화, proxy·부하·장애 증거는 #250 배포 검증이 소유하고, frontend 생성 타입과 소비 구현은 #251·#410·#411이 각각 소유한다.
-- `#500` contract-first PR 뒤 Backend 구현은 PR 1A 호환 기반과 배포 gate, PR 1B route 활성화로 분리한다. PR #495 병합 조건은 충족됐으며 Frontend 전역 배지는 PR 1B 전체 배포 뒤 생성 타입만 소비한다.
+- `#500` contract-first PR 뒤 Backend 구현은 PR 1A 호환 기반, #518의 관측 가능한 배포 gate·rollback floor, PR 1B route 활성화로 분리한다. PR #495 병합 조건은 충족됐으며 Frontend 전역 배지는 PR 1B 전체 배포 뒤 생성 타입만 소비한다.
 - PR #489가 병합되어 `V67__create_store_business_registration_evidences.sql`이 `dev`에 확정됐고 현재 다음 미점유 migration version은 `V68`이다. 후속 구현 PR은 `V68`을 사용하되 병합 직전 최신 `dev`에서 번호 점유를 다시 확인하고, 새 점유가 생겼으면 다음 미점유 version으로 파일명과 migration 검증을 함께 재정렬한다.
 
 ## 인수 조건
@@ -346,8 +347,8 @@ Waiting consumer·store-operator SSE endpoint와 `waiting.changed`의 영향 범
 - 본인 알림 이력은 `IN_APP` 전달 성공 항목만 고정 정렬·20/50 cursor 계약으로 조회되고 타인 이력, 내부 작업 상태와 금지 필드가 노출되지 않는다.
 - 기능 배포 전 공개 전달 완료 알림은 읽음으로 backfill되고 이후 새 전달만 미확인 개수에 포함된다. 개별·전체 읽음은 본인 공개 알림에만 멱등하게 적용되며 page cache가 아니라 MySQL 집합에서 개수를 계산한다.
 - 새 전달, 개별 읽음과 전체 읽음 경합은 account 변경 상태 잠금과 조건부 `readAt` 갱신으로 직렬화되고 알림별 상태·미확인 집계·단조 `changeVersion`이 일치한다.
-- PR 1A에는 production 읽음·미확인 개수 route가 없고 legacy 전달은 `notificationId` 증가로 correction이 회수된다. 이전 revision의 instance·worker·진행 중 transaction 0건을 확인하기 전에는 PR 1B route를 활성화하지 않는다.
-- PR 1B 활성화 뒤 `읽음 version 증가 → 새 전달` 순서에서도 version-aware writer가 더 큰 `changeVersion`을 만들며, 구 worker revision은 rollback으로 재진입하지 않는다.
+- PR 1A에는 production 읽음·미확인 개수 route가 없고 legacy 전달은 `notificationId` 증가로 correction이 회수된다. #518의 구 process/task 종료·DB connection closure·target deregistration 증거와 최소 호환 writer floor 전에는 PR 1B route를 활성화하지 않는다.
+- PR 1B 활성화 뒤 `읽음 version 증가 → 새 전달` 순서에서도 version-aware writer가 더 큰 `changeVersion`을 만들며, #518의 CD guard는 구 worker image가 rollback으로 재진입하는 것을 실패 폐쇄한다.
 - 알림 SSE 최초 연결·재연결은 `notifications.changed` 뒤 본인 HTTP 이력 재조회로 MySQL 최신 상태에 수렴하고, 다른 audience·계정 cursor를 재사용할 수 없다.
 - 읽음 변경 SSE도 `data: {}`를 유지하고 client가 알림 이력과 미확인 개수를 다시 조회한다. 반복 읽음 no-op과 내부 작업 상태는 공개 신호가 아니다.
 - SSE 신호 유실·중복·역순과 Valkey 중단은 알림 작업이나 원 거래 상태를 변경하지 않으며, keepalive와 내부 작업 상태는 공개 업무 event가 아니다.
@@ -361,7 +362,7 @@ Waiting consumer·store-operator SSE endpoint와 `waiting.changed`의 영향 범
 - Pickup 소유자는 픽업 확정·취소 사건, `PickupNotificationSource`의 버전·수신자 결속과 MenuHold 역방향 의존 금지를 검토한다.
 - Waiting 소유자는 상태 사건의 `eventSequence = version + 1`, 팀별 입장 임박 유일성, 예약 전환 실패 복귀 시 최초 사건 유지, 상태 사건 `PUBLISHED` 전 재판정과 `WaitingNotificationSource`의 수신자·목적별 상태 재검증·호출 제한 시각을 검토한다.
 - Consumer/API 검토자는 `/api/v1/consumers/me/notifications`와 `/api/v1/consumers/me/notification-events`, fetch streaming Bearer 인증, 공통 오류 envelope와 두 cursor의 서로 다른 실패 의미를 검토한다.
-- Consumer/API 검토자는 미확인 개수·개별 읽음·전체 읽음의 principal 결속, `NOTIFICATION_003` 비열거 오류, 멱등 응답과 PR 1A route 부재·구 worker 0건 증거·PR 1B 활성화 순서를 함께 검토한다.
+- Consumer/API 검토자는 미확인 개수·개별 읽음·전체 읽음의 principal 결속, `NOTIFICATION_003` 비열거 오류, 멱등 응답, `unread-count` singleton 승인·`reads` 복수 사건 URL과 PR 1A route 부재·#518 gate·PR 1B 활성화 순서를 함께 검토한다.
 - Frontend 검토자는 목적·필수 `deliveredAt`·nullable action과 `availability`만으로 전달 성공 이력을 표시하고 오래된 행동을 안전하게 비활성화할 수 있는지 검토한다.
 - Frontend 검토자는 consumer shell의 탭당 단일 SSE 연결, 세션별 query 격리, 배지 0·1·99·100+ 접근성, 행동 없는 Waiting 읽음과 읽음 실패 시 상세 이동 비차단을 검토한다.
 - 리뷰는 Notification 목적과 MenuHold·Waiting 정책을 다시 소유하지 않는다. 각 소비·제공 경계의 구현 가능성과 기존 계약 충돌만 확인한다.

@@ -50,7 +50,7 @@
 - Valkey Pub/Sub은 여러 인스턴스의 wake-up hint일 뿐 재생 원장이나 전달 성공의 근거가 아니다. 신호 중복·역순·유실과 재연결 뒤에도 MySQL 이력 조회로 수렴하며, SSE 실패가 알림 작업이나 원 거래 상태를 변경하지 않는다.
 - 형식이 잘못됐거나 다른 audience·계정에 결속된 `Last-Event-ID`는 공통 `400` JSON 오류 envelope로 거절한다. 연결 한도·heartbeat·timeout·correction interval의 운영 수치는 Runtime과 배포 부하 증거에서 별도로 확정한다.
 - `changeVersion`과 `notificationId`의 `max` fallback은 읽음 변경이 없는 Backend 호환 기반 배포에서만 허용한다. 이 단계에는 읽음·미확인 개수 production route를 등록하지 않아 구 worker 전달과 읽음 version이 서로 가려지는 상태를 만들지 않는다.
-- 읽음·미확인 개수 route는 version-aware 전달 writer가 모든 Backend·Notification worker에 배포되고 이전 revision instance·worker·진행 중 transaction이 0임을 확인한 뒤에만 활성화한다. 이후 rollback은 같은 version 갱신 계약을 유지하는 호환 image만 허용하며 구 worker revision을 다시 실행하지 않는다.
+- 읽음·미확인 개수 route는 #518이 staging 구 container 종료·DB connection closure와 production 이전 revision running·pending task 0건·target deregistration 완료를 확인한 뒤에만 활성화한다. 활성화 뒤에는 staging·production CD가 최소 호환 writer revision보다 오래된 image를 거절하고 같은 version 갱신 계약을 유지하는 forward rollback만 허용한다.
 - 로컬 배포 검증은 timeout 30초, heartbeat 5초, correction 2초, batch 100, 전체 연결 200, 계정별 연결 6을 시험 입력으로만 사용한다. 이 값은 운영 기본값이나 SLO가 아니며 [SSE Runtime 검증 기록](../performance/sse-runtime-validation.md)의 부하·장애 증거 없이는 승격하지 않는다.
 
 ## IN_APP Reservation·MenuHold·Pickup·Waiting 알림 목적 카탈로그
@@ -332,4 +332,4 @@ Reservation·MenuHold·Pickup 기본 목적은 `#247`, 예약 방문 완료·노
 | 2026-08-16 | NOTI-004·NOTI-006·NOTI-007 | 예약 전환 중 입장 임박 보류를 작업 version fencing, 상태 사건 기반 재판정과 유한한 주기 재조회로 수렴 | 검토 중 | PR #384 lost-wakeup 리뷰와 Issue #250 보완 설계 승인 |
 | 2026-08-18 | NOTI-004·NOTI-006 | `notifications.changed`를 MySQL 이력 재조회용 최소 SSE 신호로 확정하고 account-bound opaque 재연결 cursor와 Valkey 비원장 경계를 추가 | 검토 중 | Issue #250 SSE 3단계 설계 승인 |
 | 2026-08-20 | NOTI-004·NOTI-006·NOTI-008 | 일반 사용자 알림의 서버 읽음 시각·전체 미확인 집계·웹 헤더 배지와 읽음 변경 SSE 수렴 계약 추가 | 검토 중 | Issue #500 사용자 동작·동시성 설계 승인 |
-| 2026-08-20 | NOTI-004·NOTI-006 | 독립적인 `changeVersion`·`notificationId`의 scalar 충돌을 막기 위해 읽음 route 부재 기반 배포 gate와 version-aware forward rollback 확정 | 검토 중 | PR #502 rolling 호환성 리뷰 반영 |
+| 2026-08-20 | NOTI-004·NOTI-006 | 독립적인 `changeVersion`·`notificationId`의 scalar 충돌을 막기 위해 읽음 route 부재, #518의 관측 가능한 배포 gate와 최소 호환 writer rollback floor 확정 | 검토 중 | PR #502 rolling·배포 표면 리뷰 반영 |
