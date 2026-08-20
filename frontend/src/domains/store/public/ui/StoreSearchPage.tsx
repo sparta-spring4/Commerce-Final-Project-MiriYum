@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { EmptyState, ErrorState, Loading } from '../../../../shared/ui/Feedback'
 import { Icon, type IconName } from '../../../../shared/ui/Icon'
@@ -5,7 +6,15 @@ import { Pagination } from '../../../../shared/ui/Pagination'
 import { hasErrorCode } from '../../../../shared/api/apiError'
 import { CommonErrorCode } from '../../../../shared/api/envelope'
 import { toDisplayNameMap, useCatalog, useStoreSearch } from '../api/queries'
+import { KakaoMap } from '../map/KakaoMap'
+import { MapFallback } from '../map/MapFallback'
+import type { MapStore } from '../map/map.types'
 import { REGION_LABEL, catalogLabel } from '../model/labels'
+import {
+  readMapOpenPreference,
+  writeMapOpenPreference,
+} from '../model/mapPreference'
+import { mapStoreOrdinal, toMapStores } from '../model/mapStores'
 import {
   SORT_OPTIONS,
   readFilters,
@@ -17,11 +26,21 @@ import {
 import { SearchFilterForm } from './SearchFilterForm'
 import { StoreCard } from './StoreCard'
 
+/** 지도 칸의 id. 여는 버튼이 `aria-controls`로 가리킨다. */
+const MAP_PANEL_ID = 'store-search-map'
+
 /**
  * 매장 찾기 결과 화면.
  *
  * URL search params가 필터의 유일한 원본이다. 컴포넌트 state로 따로 들고 있으면
  * 뒤로가기와 링크 공유가 화면 상태와 어긋난다.
+ *
+ * 반대로 지도를 열어 뒀는지와 지도에서 짚고 있는 매장은 URL에 두지 않는다.
+ * 공유한 링크가 상대에게 남의 보기 방식을 강요할 이유가 없고, 뒤로가기가
+ * 검색 조건이 아니라 카드 선택을 되돌리게 된다.
+ *
+ * 지도는 기본으로 열지 않는다. 검색 결과는 목록이 본체이고 지도는 위치가
+ * 궁금할 때 여는 도구다. 다만 열어 둔 선택은 기억한다(`mapPreference`).
  */
 export function StoreSearchPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -33,8 +52,54 @@ export function StoreSearchPage() {
   const query = toSearchQuery(filters)
   const search = useStoreSearch(query)
 
+  // 저장된 기본값은 첫 렌더에서 한 번만 읽는다.
+  const [isMapOpen, setIsMapOpen] = useState(readMapOpenPreference)
+  const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null)
+
+  const items = search.data?.items
+  /*
+   * 지도가 매장에 대해 아는 전부. 검색 응답을 지도에 직접 넘기지 않고 이
+   * 경계 하나만 지난다. 좌표가 실제로 들어오는 지점도 여기다.
+   */
+  const mapStores = useMemo(() => toMapStores(items ?? []), [items])
+
+  /*
+   * 선택은 지금 화면에 있는 매장에 대해서만 뜻이 있다. 조건을 바꾸거나 다음
+   * 페이지로 넘어가 사라진 매장의 id를 그대로 들고 있으면 지도는 아무 데도
+   * 없는 매장을 선택됐다고 말하게 된다. 새 결과가 확정되기 전에는 파생값으로
+   * 숨기고, 확정된 결과에 없으면 원본 state도 지워 이후 재등장을 선택으로
+   * 오인하지 않게 한다.
+   */
+  const selectedInResults =
+    selectedStoreId !== null &&
+    mapStores.some((store: MapStore) => store.storeId === selectedStoreId)
+      ? selectedStoreId
+      : null
+
+  useEffect(() => {
+    if (search.isSuccess && selectedStoreId !== selectedInResults) {
+      setSelectedStoreId(null)
+    }
+  }, [search.isSuccess, selectedInResults, selectedStoreId])
+
   function applyFilters(next: StoreSearchFilters) {
     setSearchParams(writeFilters(next))
+  }
+
+  /**
+   * 지도를 열고 닫는 유일한 통로.
+   *
+   * 화면 상태와 저장된 기본값이 어긋나지 않도록 한자리에서 함께 바꾼다.
+   */
+  function setMapOpen(next: boolean) {
+    setIsMapOpen(next)
+    writeMapOpenPreference(next)
+  }
+
+  /** 목록 카드에서 올라온 요청. 지도가 닫혀 있으면 함께 연다. */
+  function showOnMap(storeId: string) {
+    setSelectedStoreId(storeId)
+    setMapOpen(true)
   }
 
   function goToPage(page: number) {
@@ -108,19 +173,139 @@ export function StoreSearchPage() {
               </select>
               <Icon name="chevronRight" className="mi-icon--sm" />
             </label>
+
+            <MapToggle isOpen={isMapOpen} onToggle={setMapOpen} />
           </div>
 
-          <SearchResults
-            conditionState={conditionState}
-            search={search}
-            categoryNames={categoryNames}
-            detailSearch={detailSearch}
-            onRetry={() => void search.refetch()}
-            onPageChange={goToPage}
-          />
+          {/*
+            지도가 닫혀 있으면 아예 그리지 않는다. 감춰 두기만 하면 보지도 않을
+            지도 때문에 Kakao SDK를 내려받는다.
+
+            넓은 화면은 지도가 열리면 목록 옆에 붙고, 좁은 화면은 지도가 자리를
+            다 쓰도록 목록을 CSS로 감춘다. 감춘 쪽은 display:none이라 접근성
+            트리에서도 함께 빠진다.
+          */}
+          <div
+            className="store-search__panes"
+            data-map-open={isMapOpen ? 'true' : 'false'}
+          >
+            <div className="store-search__pane store-search__pane--list">
+              <SearchResults
+                conditionState={conditionState}
+                search={search}
+                categoryNames={categoryNames}
+                detailSearch={detailSearch}
+                selectedStoreId={selectedInResults}
+                onShowOnMap={showOnMap}
+                onRetry={() => void search.refetch()}
+                onPageChange={goToPage}
+              />
+            </div>
+
+            {isMapOpen && (
+              <div
+                className="store-search__pane store-search__pane--map"
+                id={MAP_PANEL_ID}
+              >
+                <div className="store-search__map-head">
+                  <h2 className="store-search__map-title">지도</h2>
+                  {/*
+                    지도는 sticky라 목록을 내리면 위쪽 여닫기 버튼이 화면 밖으로
+                    나간다. 지도 옆에도 닫을 길을 둔다. 위 버튼과 이름이 겹치면
+                    화면 낭독기에서 두 버튼을 구분할 수 없어 다르게 부른다.
+                  */}
+                  <button
+                    type="button"
+                    className="store-search__map-close"
+                    onClick={() => setMapOpen(false)}
+                  >
+                    <Icon name="close" className="mi-icon--sm" />
+                    지도 영역 닫기
+                  </button>
+                </div>
+                <MapPane
+                  search={search}
+                  stores={mapStores}
+                  selectedStoreId={selectedInResults}
+                  onSelectStore={setSelectedStoreId}
+                />
+              </div>
+            )}
+          </div>
         </section>
       </div>
     </div>
+  )
+}
+
+/**
+ * 지도를 여닫는 버튼.
+ *
+ * 눌림(`aria-pressed`)이 아니라 펼침(`aria-expanded`)이다. 이 버튼은 두 보기
+ * 중 하나를 고르는 것이 아니라 지도라는 칸을 열고 닫는다. `aria-controls`가
+ * 무엇이 열리는지 가리키므로 두 화면 폭 모두에서 사실이다.
+ *
+ * 다시 누르면 닫히고, 그 선택은 다음 방문까지 기억된다.
+ */
+function MapToggle({
+  isOpen,
+  onToggle,
+}: {
+  isOpen: boolean
+  onToggle: (next: boolean) => void
+}) {
+  return (
+    <button
+      type="button"
+      className="store-search__map-toggle"
+      aria-expanded={isOpen}
+      aria-controls={MAP_PANEL_ID}
+      onClick={() => onToggle(!isOpen)}
+    >
+      <Icon name="pin" className="mi-icon--sm" />
+      {isOpen ? '지도 닫기' : '지도 보기'}
+    </button>
+  )
+}
+
+/**
+ * 지도 자리.
+ *
+ * 지도 자체의 상태(키 미설정·SDK 실패·좌표 없음·결과 없음)는 `KakaoMap`이
+ * 이미 `MapFallback`으로 구분해 알린다. 여기서는 그 앞 단계, 곧 검색이 아직
+ * 끝나지 않았거나 실패한 구간만 가린다. 그 구간을 그대로 넘기면 지도가 아직
+ * 오지 않은 결과를 "검색 결과가 없습니다"로 잘못 단정한다.
+ */
+function MapPane({
+  search,
+  stores,
+  selectedStoreId,
+  onSelectStore,
+}: {
+  search: ReturnType<typeof useStoreSearch>
+  stores: MapStore[]
+  selectedStoreId: string | null
+  onSelectStore: (storeId: string) => void
+}) {
+  if (search.isPending) {
+    return <Loading label="지도를 준비하는 중입니다." />
+  }
+
+  if (search.isError) {
+    return (
+      <MapFallback
+        reason="검색 결과를 불러오지 못했습니다."
+        guidance="검색을 다시 시도하면 지도도 함께 표시됩니다."
+      />
+    )
+  }
+
+  return (
+    <KakaoMap
+      stores={stores}
+      selectedStoreId={selectedStoreId}
+      onSelectStore={onSelectStore}
+    />
   )
 }
 
@@ -231,6 +416,9 @@ interface ResultsProps {
   search: ReturnType<typeof useStoreSearch>
   categoryNames: ReadonlyMap<string, string>
   detailSearch: string
+  /** 지도에서 짚고 있는 매장. 목록에도 같은 사실을 표시한다. */
+  selectedStoreId: string | null
+  onShowOnMap: (storeId: string) => void
   onRetry: () => void
   onPageChange: (page: number) => void
 }
@@ -240,6 +428,8 @@ function SearchResults({
   search,
   categoryNames,
   detailSearch,
+  selectedStoreId,
+  onShowOnMap,
   onRetry,
   onPageChange,
 }: ResultsProps) {
@@ -278,12 +468,16 @@ function SearchResults({
       {/* 총 개수는 결과 머리말이 이미 알린다. 여기서는 이 페이지 분량만 밝힌다. */}
       <p className="visually-hidden">{`이 페이지에 ${items.length}곳을 표시합니다.`}</p>
       <ul className="store-search__list">
-        {items.map((store) => (
+        {items.map((store, index) => (
           <StoreCard
             key={store.storeId}
             store={store}
             categoryNames={categoryNames}
             detailSearch={detailSearch}
+            /* 마커 이름도 같은 번호로 시작한다(`toMapStores`). */
+            ordinal={mapStoreOrdinal(index)}
+            isSelected={store.storeId === selectedStoreId}
+            onShowOnMap={onShowOnMap}
           />
         ))}
       </ul>

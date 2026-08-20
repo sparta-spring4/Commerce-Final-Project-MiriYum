@@ -229,6 +229,166 @@
   gap: var(--space-3);
 }
 
+/* ── 목록과 지도 ──────────────────────────────────────────────────────── */
+
+/*
+ * 좁은 화면에서 지도를 열면 지도가 자리를 다 쓴다.
+ *
+ * 목록과 지도를 세로로 쌓으면 지도를 보려고 매번 스크롤해야 하고, 지도가
+ * 짧아져 위치를 알아보기 어렵다. 감추는 방식은 `display: none`이라 접근성
+ * 트리에서도 함께 빠진다. 화면에 없는 카드가 화면 낭독기에만 남아 있으면
+ * "총 20개"라고 말해 놓고 지도만 보이는 상태가 된다.
+ */
+.store-search__panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.store-search__panes[data-map-open='true'] > .store-search__pane--list {
+  display: none;
+}
+
+.store-search__pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/*
+ * 지도 자리는 지도가 뜨지 않아도 자리를 지킨다.
+ *
+ * 안내 문구만 남으면 목록 옆에 두 줄짜리 글이 떠 있는 꼴이 되어, 여기가 지도
+ * 자리라는 사실이 사라진다. 판을 깔고 최소 높이를 줘 폴백이든 지도든 같은
+ * 자리를 차지하게 한다.
+ */
+.store-search__pane--map {
+  justify-content: center;
+  min-height: min(65vh, 26rem);
+  padding: var(--space-2);
+  background-color: var(--color-surface-container-low);
+  border-radius: var(--radius-lg);
+}
+
+/*
+ * 넓은 화면은 지도를 열면 목록 옆에 붙인다.
+ *
+ * 64rem에서 이미 20rem짜리 필터 사이드바가 붙는다. 거기서 결과 칸을 다시
+ * 둘로 쪼개면 카드 열이 20rem 아래로 내려가 카드가 깨진다. 그래서 세 열이
+ * 모두 제 폭을 갖는 80rem부터 나란히 두고, 그 아래에서는 지도가 열리면
+ * 목록 대신 화면을 다 쓴다.
+ */
+@media (min-width: 80rem) {
+  .store-search__panes[data-map-open='true'] {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 24rem);
+    align-items: start;
+  }
+
+  /* 넓은 화면에서는 지도가 열려도 목록이 그대로 남는다. */
+  .store-search__panes[data-map-open='true'] > .store-search__pane--list {
+    display: flex;
+  }
+
+  /* 목록을 훑는 동안 지도가 따라온다. */
+  .store-search__pane--map {
+    position: sticky;
+    top: var(--space-2);
+    min-height: min(72vh, 40rem);
+  }
+}
+
+/*
+ * 지도 컨테이너 높이.
+ *
+ * `KakaoMap`이 그리는 지도 칸은 인라인 `min-height: 320px`만 갖는다. Kakao SDK는
+ * 컨테이너에 확정된 높이가 있어야 타일을 그리므로, 이 화면에서 원하는 높이는
+ * 이 화면이 준다. 다른 컴포넌트의 DOM을 고르는 유일한 자리이며, 고르는 기준은
+ * `KakaoMap`이 스스로 붙이는 접근성 이름이다.
+ */
+.store-search__pane--map [aria-label='검색 결과 지도'] {
+  height: min(65vh, 26rem);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+@media (min-width: 80rem) {
+  .store-search__pane--map [aria-label='검색 결과 지도'] {
+    height: min(72vh, 40rem);
+  }
+}
+
+/* ── 지도 여닫기 ──────────────────────────────────────────────────────── */
+
+/* 결과 머리말에서 정렬 옆에 선다. 결과를 다루는 조작을 한 줄에 모은다. */
+.store-search__map-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  /* 손가락 표적. */
+  min-height: 2.5rem;
+  padding: 0 var(--space-2);
+  background-color: var(--color-surface-container);
+  border: 0;
+  border-radius: var(--radius-full);
+  font-family: inherit;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+}
+
+/*
+ * 열린 상태를 색만으로 구분하지 않는다. 판이 진해지고 글자가 굵어지며,
+ * 무엇보다 버튼 글자 자체가 "지도 보기"에서 "지도 닫기"로 바뀐다.
+ */
+.store-search__map-toggle[aria-expanded='true'] {
+  background-color: var(--color-primary);
+  font-weight: 700;
+  color: var(--color-on-primary);
+}
+
+.store-search__map-toggle:not([aria-expanded='true']):hover {
+  background-color: var(--color-surface-variant);
+  color: var(--color-on-surface);
+}
+
+/* 지도 칸 머리말. 지도가 무엇인지 알리고 닫을 길을 지도 옆에 둔다. */
+.store-search__map-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+.store-search__map-title {
+  font-size: var(--font-size-label-lg);
+  font-weight: 700;
+  color: var(--color-on-surface-variant);
+}
+
+.store-search__map-close {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  /* 여닫기 버튼과 같은 표적 크기로 맞춘다. 좁은 화면에서 둘 다 손가락을 받는다. */
+  min-height: 2.5rem;
+  padding: 0 var(--space-1);
+  background-color: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+}
+
+.store-search__map-close:hover {
+  background-color: var(--color-surface-container);
+  color: var(--color-on-surface);
+}
+
 /* ── 적용한 조건 알약 ─────────────────────────────────────────────────── */
 
 /*
@@ -356,10 +516,33 @@
   }
 }
 
-/* 시안은 넓은 화면에서 결과를 3열로 놓는다. */
+/* 시안은 넓은 화면에서 결과를 3열로 놓는다. 지도를 닫아 둔 기본 상태다. */
 @media (min-width: 80rem) {
   .store-search__list {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/*
+ * 지도를 열면 결과 칸을 지도와 나눠 쓴다.
+ *
+ * 남는 폭이 절반이라 열을 그대로 두면 카드가 좁아져 깨진다. 목록을 한 열로
+ * 되돌려 카드를 넓게 쓴다. 목록 옆에 지도를 두는 화면들이 대체로 택하는
+ * 배치이기도 하다.
+ *
+ * 이 규칙은 위 3열 규칙보다 **뒤에** 와야 한다. 특정도를 media query가
+ * 올려 주지 않으므로, 앞에 두면 조건이 맞아도 3열이 이긴다.
+ */
+@media (min-width: 80rem) {
+  .store-search__panes[data-map-open='true'] .store-search__list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 필터·목록·지도가 제 폭을 갖고도 남는 폭에서만 두 열로 돌아간다. */
+@media (min-width: 100rem) {
+  .store-search__panes[data-map-open='true'] .store-search__list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -417,9 +600,39 @@
   gap: 0.375rem;
 }
 
+/*
+ * 지도에서 짚고 있는 카드.
+ *
+ * 목록이 길어 카드가 화면 밖에 있을 수 있으므로 테두리 하나로 눈에 띄게 한다.
+ * 색을 구분하지 못해도 알 수 있도록 `aria-current`가 같은 사실을 문장으로 말한다.
+ */
+.store-card--selected {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .store-card__name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
   font-size: var(--font-size-headline-md);
   line-height: var(--line-height-headline-md);
+}
+
+/* 지도 마커와 짝을 이루는 번호. 이름이 길어져도 번호 칸은 줄지 않는다. */
+.store-card__ordinal {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  background-color: var(--color-primary);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-on-primary);
 }
 
 .store-card__name a {
@@ -471,8 +684,25 @@
  * 감싸는 줄을 하나 둔다.
  */
 .store-card__foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
   margin-top: auto;
   padding-top: var(--space-2);
+}
+
+/*
+ * 다음 행동 버튼은 남는 폭을 다 쓴다. 지도 버튼만 있을 때도, 지도 버튼과
+ * 나란히 놓일 때도 줄이 어색하게 비지 않는다.
+ */
+.store-card__foot > .mi-button--block {
+  flex: 1 1 8rem;
+  width: auto;
+}
+
+.store-card__map-button {
+  flex: 0 0 auto;
+  gap: 0.375rem;
 }
 
 /* ── 매장 상세 ────────────────────────────────────────────────────────── */
