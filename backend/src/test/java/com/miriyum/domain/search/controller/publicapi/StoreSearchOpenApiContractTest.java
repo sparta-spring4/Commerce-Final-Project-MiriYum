@@ -98,7 +98,13 @@ class StoreSearchOpenApiContractTest {
         assertThat(list(map(schemas.get("StoreSummary")).get("required")))
                 .containsExactlyInAnyOrder(
                         "storeId", "name", "region", "address", "storeCategoryCode",
-                        "operationStatus", "modes", "reservationAvailability");
+                        "operationStatus", "modes", "reservationAvailability", "coordinates");
+        Map<String, Object> summaryCoordinates = map(map(
+                schemas.get("StoreSummary")).get("properties"));
+        assertThat(listOfMaps(map(summaryCoordinates.get("coordinates")).get("oneOf")))
+                .containsExactly(
+                        Map.of("$ref", "#/components/schemas/PublicStoreCoordinates"),
+                        Map.of("type", "null"));
         assertThat(list(map(schemas.get("PublicMenu")).get("required")))
                 .contains("menuId", "name", "description", "price", "representative",
                         "primaryCategoryCode", "secondaryCategoryCodes", "localTags",

@@ -25,6 +25,7 @@ import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.global.exception.ServiceException;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -79,7 +80,9 @@ class StoreSearchCoreServiceTest {
                 true,
                 false,
                 true,
-                LocalDateTime.of(2026, 8, 2, 9, 0));
+                LocalDateTime.of(2026, 8, 2, 9, 0),
+                new BigDecimal("37.566500000000000"),
+                new BigDecimal("126.978000000000000"));
         given(catalogService.isActiveCode(CatalogKind.STORE_CATEGORY, "KOREAN"))
                 .willReturn(true);
         given(repository.search(query)).willReturn(new PageImpl<>(
@@ -106,6 +109,11 @@ class StoreSearchCoreServiceTest {
             assertThat(summary.modes().pickupEnabled()).isTrue();
             assertThat(summary.reservationAvailability())
                     .isEqualTo(ReservationAvailability.NOT_REQUESTED);
+            assertThat(summary.coordinates()).isNotNull();
+            assertThat(summary.coordinates().latitude())
+                    .isEqualByComparingTo("37.566500000000000");
+            assertThat(summary.coordinates().longitude())
+                    .isEqualByComparingTo("126.978000000000000");
         });
     }
 

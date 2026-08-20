@@ -282,6 +282,8 @@ export interface components {
       operationStatus: components["schemas"]["OperationStatus"];
       modes: components["schemas"]["StoreModes"];
       reservationAvailability: components["schemas"]["ReservationAvailability"];
+      /** @description 현재 주소 버전에 결합된 VERIFIED 저장 좌표. 없으면 null이다. */
+      coordinates: components["schemas"]["PublicStoreCoordinates"] | null;
     };
     PublicStoreCoordinates: {
       latitude: number;

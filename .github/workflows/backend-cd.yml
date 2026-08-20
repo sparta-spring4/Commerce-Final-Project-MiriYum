@@ -327,6 +327,7 @@ jobs:
           compose_base64=$(base64 --wrap=0 deploy/docker-compose.prod.yml)
           nginx_http_base64=$(base64 --wrap=0 deploy/nginx/templates/http.conf.template)
           nginx_https_base64=$(base64 --wrap=0 deploy/nginx/templates/https.conf.template)
+          nginx_sse_base64=$(base64 --wrap=0 deploy/nginx/templates/snippets/sse-location.conf)
           nginx_entrypoint_base64=$(base64 --wrap=0 deploy/nginx/entrypoint/40-select-server-config.sh)
           script_base64=$(base64 --wrap=0 deploy/deploy.sh)
           certbot_script_base64=$(base64 --wrap=0 deploy/certbot.sh)
@@ -345,10 +346,11 @@ jobs:
             "Parameters": {
               "commands": [
                 "set -Eeuo pipefail",
-                "install -d -m 0755 /opt/miriyum/nginx/templates /opt/miriyum/nginx/entrypoint",
+                "install -d -m 0755 /opt/miriyum/nginx/templates/snippets /opt/miriyum/nginx/entrypoint",
                 "echo '$compose_base64' | base64 --decode > /opt/miriyum/docker-compose.prod.yml",
                 "echo '$nginx_http_base64' | base64 --decode > /opt/miriyum/nginx/templates/http.conf.template",
                 "echo '$nginx_https_base64' | base64 --decode > /opt/miriyum/nginx/templates/https.conf.template",
+                "echo '$nginx_sse_base64' | base64 --decode > /opt/miriyum/nginx/templates/snippets/sse-location.conf",
                 "echo '$nginx_entrypoint_base64' | base64 --decode > /opt/miriyum/nginx/entrypoint/40-select-server-config.sh",
                 "echo '$script_base64' | base64 --decode > /opt/miriyum/deploy.sh",
                 "echo '$certbot_script_base64' | base64 --decode > /opt/miriyum/certbot.sh",
