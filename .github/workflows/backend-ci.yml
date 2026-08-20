@@ -257,6 +257,9 @@ jobs:
       - name: Verify production compute lifecycle contract
         run: python3 scripts/test-production-terraform-lifecycle-contract.py
 
+      - name: Verify production S3 storage contract
+        run: python3 scripts/test-production-storage-s3-contract.py
+
       - name: Verify staging LLM deploy script contract
         run: python3 scripts/test-deploy-llm-runtime-contract.py
 
