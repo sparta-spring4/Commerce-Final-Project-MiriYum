@@ -64,9 +64,15 @@ MIRIYUM_PORTONE_CHANNEL_KEY=<토스페이먼츠 V2 테스트 Channel Key>
 
 첫 로컬 검증은 frontend의 결제 확인·최종화 호출을 사용하므로 공개 HTTPS tunnel과
 webhook 등록이 필요 없다. `MIRIYUM_PORTONE_WEBHOOK_SECRET`은 비워 둘 수 있다.
-`MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED=true`는 예약 취소 뒤 생성된 환불 처분
-의무를 비동기로 처리할 때 필요하다. 기본값은 `false`이므로 환불 검증을 하지 않는
-로컬 환경에서는 작업기가 실행되지 않는다.
+결제창 성공 뒤 confirmation 중단·새로고침이 발생하면 결제 화면의
+`이미 결제했다면 상태 확인`으로 backend confirmation을 다시 호출한다. 이 호출 또는
+webhook이 PortOne 조회 결과를 Payment 원장에 반영한다.
+
+예약금 process worker는 PortOne을 직접 조회하지 않고 저장된 Payment 원장을 기준으로
+예약 최종화·만료·보상 상태를 수렴한다. 따라서 중단 뒤 Payment 원장에 반영된 결제를
+서버에서 계속 조정하거나 예약 취소 뒤 생성된 환불 처분 의무를 비동기로 처리하려면
+`MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED=true`가 필요하다. 기본값은 `false`이므로
+해당 복구·환불 검증을 하지 않는 로컬 환경에서는 작업기가 실행되지 않는다.
 
 예약금이 필요한 202 응답을 만들려면 테스트할 매장에 대표 메뉴가 `CONFIGURED`로
 설정돼 있어야 한다. 매장 ID를 확인한 뒤 Docker MySQL에서 그 매장의 예약금 정책만

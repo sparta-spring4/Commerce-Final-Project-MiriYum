@@ -215,6 +215,37 @@ describe('예약금 결제 화면', () => {
     expect(confirmationKeys[1]).toBe(confirmationKeys[0])
   })
 
+  it('재진입한 사용자는 결제창 없이 기존 결제를 확인하고 최종화한다', async () => {
+    const commandOrder: string[] = []
+    server.use(
+      authenticatedConsumer(),
+      http.get(REQUEST_PATH, () => successResponse(reservationRequest())),
+      http.post(CONFIRM_PATH, () => {
+        commandOrder.push('confirm')
+        return successResponse(payment('PAID'))
+      }),
+      http.post(FINALIZE_PATH, () => {
+        commandOrder.push('finalize')
+        return successResponse(reservationDetail())
+      }),
+    )
+
+    renderPayment()
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: '이미 결제했다면 상태 확인',
+      }),
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(
+        '/reservations/01JBQ8Z4T7K2N9V6M3P5R8W1R1/complete',
+      ),
+    )
+    expect(commandOrder).toEqual(['confirm', 'finalize'])
+    expect(requestDepositPaymentMock).not.toHaveBeenCalled()
+  })
+
   it('결제 확인이 202이면 예약을 최종화하지 않는다', async () => {
     let finalizationCalls = 0
     requestDepositPaymentMock.mockResolvedValue({

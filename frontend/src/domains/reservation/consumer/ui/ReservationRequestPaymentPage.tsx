@@ -213,6 +213,16 @@ export function ReservationRequestPaymentPage() {
             ? '결제 상태 다시 확인'
             : '예약금 결제하기'}
         </Button>
+        {canPay && !paymentCompletedInBrowser && (
+          <Button
+            variant="ghost"
+            block
+            disabled={isWorking}
+            onClick={() => void confirmAndFinalize()}
+          >
+            이미 결제했다면 상태 확인
+          </Button>
+        )}
         {canPay && (
           <Button
             variant="ghost"
