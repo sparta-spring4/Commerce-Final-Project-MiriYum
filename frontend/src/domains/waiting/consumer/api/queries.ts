@@ -8,6 +8,8 @@ import { useConsumerAuth } from '../../../../app/shells/consumer/ConsumerAuthPro
 import type { WaitingLocationMeasurement } from '../model/locationMeasurement'
 
 export type ConsumerWaitingSnapshot = components['schemas']['WaitingConsumerSnapshot']
+export type WaitingInvitation = components['schemas']['WaitingInvitation']
+export type WaitingTransferOffer = components['schemas']['WaitingTransferOffer']
 export type ConsumerWaitingAvailability =
   components['schemas']['WaitingReceptionAvailability']
 export type WaitingLocationProofRequest =
@@ -17,6 +19,14 @@ export type WaitingLocationProofSnapshot =
 export type ConsumerWaitingCreateRequest =
   components['schemas']['WaitingConsumerCreateRequest']
 
+interface IdempotentCommand {
+  idempotencyKey: string
+}
+
+interface VersionedTeamCommand extends IdempotentCommand {
+  teamId: string
+  expectedVersion: number
+}
 export const consumerWaitingKeys = {
   current: [...CONSUMER_PROTECTED_QUERY_ROOTS.account, 'me', 'waiting-teams', 'current'] as const,
   availability: (storeId: string) =>
@@ -73,6 +83,113 @@ export function useConsumerWaitingAvailability(storeId: string) {
       return response.data
     },
   })
+}
+
+export function issueWaitingPartyInvitation(
+  apiClient: ApiClient,
+  input: VersionedTeamCommand,
+): Promise<WaitingInvitation> {
+  return apiClient('/api/v1/consumers/me/waiting-teams/{teamId}/invitations', {
+    method: 'post',
+    pathParams: { teamId: input.teamId },
+    body: { expectedVersion: input.expectedVersion },
+    idempotencyKey: input.idempotencyKey,
+  }).then((response) => response.data)
+}
+
+export function revokeWaitingPartyInvitation(
+  apiClient: ApiClient,
+  input: VersionedTeamCommand & { invitationId: string },
+): Promise<WaitingInvitation> {
+  return apiClient(
+    '/api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations',
+    {
+      method: 'post',
+      pathParams: {
+        teamId: input.teamId,
+        invitationId: input.invitationId,
+      },
+      body: { expectedVersion: input.expectedVersion },
+      idempotencyKey: input.idempotencyKey,
+    },
+  ).then((response) => response.data)
+}
+
+export function acceptWaitingPartyInvitation(
+  apiClient: ApiClient,
+  input: IdempotentCommand & { invitationCode: string },
+): Promise<ConsumerWaitingSnapshot> {
+  return apiClient('/api/v1/consumers/me/waiting-invitation-acceptances', {
+    method: 'post',
+    body: { invitationCode: input.invitationCode },
+    idempotencyKey: input.idempotencyKey,
+  }).then((response) => response.data)
+}
+
+export function departWaitingPartyMembership(
+  apiClient: ApiClient,
+  input: VersionedTeamCommand,
+): Promise<ConsumerWaitingSnapshot> {
+  return apiClient(
+    '/api/v1/consumers/me/waiting-teams/{teamId}/membership-departures',
+    {
+      method: 'post',
+      pathParams: { teamId: input.teamId },
+      body: { expectedVersion: input.expectedVersion },
+      idempotencyKey: input.idempotencyKey,
+    },
+  ).then((response) => response.data)
+}
+
+export function removeWaitingPartyMembership(
+  apiClient: ApiClient,
+  input: VersionedTeamCommand & { membershipId: string },
+): Promise<ConsumerWaitingSnapshot> {
+  return apiClient(
+    '/api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals',
+    {
+      method: 'post',
+      pathParams: {
+        teamId: input.teamId,
+        membershipId: input.membershipId,
+      },
+      body: { expectedVersion: input.expectedVersion },
+      idempotencyKey: input.idempotencyKey,
+    },
+  ).then((response) => response.data)
+}
+
+export function proposeWaitingRepresentativeTransfer(
+  apiClient: ApiClient,
+  input: VersionedTeamCommand & { targetMembershipId: string },
+): Promise<WaitingTransferOffer> {
+  return apiClient(
+    '/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers',
+    {
+      method: 'post',
+      pathParams: { teamId: input.teamId },
+      body: {
+        targetMembershipId: input.targetMembershipId,
+        expectedVersion: input.expectedVersion,
+      },
+      idempotencyKey: input.idempotencyKey,
+    },
+  ).then((response) => response.data)
+}
+
+export function revokeWaitingRepresentativeTransfer(
+  apiClient: ApiClient,
+  input: VersionedTeamCommand & { offerId: string },
+): Promise<WaitingTransferOffer> {
+  return apiClient(
+    '/api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations',
+    {
+      method: 'post',
+      pathParams: { teamId: input.teamId, offerId: input.offerId },
+      body: { expectedVersion: input.expectedVersion },
+      idempotencyKey: input.idempotencyKey,
+    },
+  ).then((response) => response.data)
 }
 
 export async function issueConsumerWaitingLocationProof(
