@@ -131,7 +131,7 @@ docker compose --env-file deploy/local/.env `
   /scripts/main.js
 ```
 
-`SCENARIOS`는 `authRefresh`, `storeSearch`, `reservationCreate`, `notificationHistory`의 쉼표 목록이며 생략하면 네 시나리오를 조합 실행한다. 조합 실행에서는 전체 `MAX_VUS`와 `ARRIVAL_RATE`를 시나리오 수에 정수 배분한다. `ARRIVAL_RATE`는 HTTP 요청 수가 아니라 iteration/s이다. 인증 iteration은 login·refresh 두 측정 요청 뒤 logout 정리 요청을 보내며 client cookie jar에 CSRF 토큰이 없을 때만 준비 요청을 한 번 추가한다. k6는 `noCookiesReset=true`로 같은 VU의 cookie jar를 iteration 사이에 유지해 VU runtime의 CSRF 토큰 캐시와 수명을 맞추며, VU별 cookie jar 격리는 그대로 유지한다. 이 option을 제거하면 두 번째 iteration부터 CSRF header만 남아 logout cleanup이 403으로 실패한다. 알림 iteration은 두 페이지를 측정한다. `dropped_iterations`가 하나라도 생기면 해당 실행은 실패한다. 같은 입력으로 최소 두 번 실행하고 `results/{RUN_ID}.json`과 `.md`의 편차만 기록하되, 아래 IP rate-limit 창을 공유하는 반복 실행은 새 창에서 시작해야 한다.
+`SCENARIOS`는 `authRefresh`, `storeSearch`, `reservationCreate`, `notificationHistory`의 쉼표 목록이며 생략하면 네 시나리오를 조합 실행한다. 조합 실행에서는 전체 `MAX_VUS`와 `ARRIVAL_RATE`를 시나리오 수에 정수 배분한다. `ARRIVAL_RATE`는 HTTP 요청 수가 아니라 iteration/s이다. 인증 iteration은 login·refresh 두 측정 요청 뒤 logout 정리 요청을 보내며 client cookie jar에 CSRF 토큰이 없을 때만 준비 요청을 한 번 추가한다. 예약 iteration은 생성 요청만 측정하고, 201 응답으로 생성된 합성 예약을 같은 iteration의 `phase=cleanup` 취소 요청으로 정리한다. k6는 `noCookiesReset=true`로 같은 VU의 cookie jar를 iteration 사이에 유지해 VU runtime의 CSRF 토큰 캐시와 수명을 맞추며, VU별 cookie jar 격리는 그대로 유지한다. 이 option을 제거하면 두 번째 iteration부터 CSRF header만 남아 logout cleanup이 403으로 실패한다. 알림 iteration은 두 페이지를 측정한다. `dropped_iterations`가 하나라도 생기면 해당 실행은 실패한다. 같은 입력으로 최소 두 번 실행하고 `results/{RUN_ID}.json`과 `.md`의 편차만 기록하되, 아래 IP rate-limit 창을 공유하는 반복 실행은 새 창에서 시작해야 한다.
 
 backend 기본 IP rate limit은 login 성공 표본을 단일 source IP 기준 5회/600초로 제한한다. `docker-compose.loadtest.yml`은 local baseline에서만 login `600,000회/600초`, refresh `60,000회/60초`를 주입해 하네스 최대 `1,000 iterations/s × 600초`가 보호 기본값 때문에 잘리지 않게 한다. CSRF preparation은 별도 값을 주입하지 않고 backend 기본 예산을 상속하며, 이 예산이 `authRefresh`의 `AUTH_MAX_VUS` 상한을 정한다. 이 override를 사용한 결과는 순수 인증 지연시간·처리량 기준선이며 기본 rate-limit 보호 동작의 검증 결과가 아니다. override 없이 실행해 429가 섞인 `authRefresh` 결과는 p50/p95/p99 또는 #286 최적화 근거로 사용하지 않는다.
 
@@ -204,6 +204,8 @@ docker compose --env-file deploy/local/.env `
 기존 MySQL 개발 데이터를 임의로 지우지 않도록 `down -v`는 사용하지 않는다. 결과 문서에는 환경 사양, commit SHA, 입력 부하, scenario별 p50/p95/p99·RPS·expected 4xx·unexpected 4xx·5xx와 실행하지 못한 항목만 남긴다. raw HTTP output과 식별 가능한 생성 자원은 보관하지 않는다.
 
 인증 시나리오는 성공한 로그인마다 같은 cookie jar에서 CSRF 토큰을 준비하고 현재 session을 logout한다. CSRF 토큰과 쿠키는 client별로 재사용해 IP당 준비 요청 제한을 iteration 수만큼 소비하지 않는다. setup에서 Reservation·Notification용 Access Token을 준비하는 로그인도 Access Token을 반환하기 전에 Refresh Token family를 같은 방식으로 회수한다. 정리 요청은 `phase=cleanup`으로 태그되어 측정 threshold와 summary에서 제외되지만, CSRF 준비나 logout이 실패하면 해당 iteration 또는 setup은 실패한다. 따라서 정상 종료한 실행은 k6가 만든 Refresh Token family를 Valkey에 남기지 않는다. 강제 중단·프로세스 종료처럼 cleanup 요청 자체가 실행되지 못한 경우에는 합성 계정의 전체 로그인 종료 또는 해당 환경 소유자가 승인한 Valkey 정리 절차로 잔존 family를 회수한 뒤 다시 실행한다.
+
+예약 시나리오는 생성된 `reservationId`를 결과 artifact에 노출하지 않고 같은 Access Token과 별도 deterministic idempotency key로 소비자 취소를 수행한다. 취소 응답은 HTTP 200, `status=CANCELLED`, `cancelledBy=CONSUMER` 계약을 모두 만족해야 하며 실패하면 해당 iteration을 실패시킨다. 생성 응답의 전체 계약이 잘못됐더라도 공개 ID를 안전하게 추출할 수 있으면 먼저 취소한 뒤 계약 실패를 보고한다. 강제 중단처럼 취소 요청이 실행되지 못한 경우에는 합성 fixture 소유자가 잔존 예약을 정리한 뒤 재실행한다.
 
 ## SSE 변경 신호 부하 하네스
 
