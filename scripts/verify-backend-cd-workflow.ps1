@@ -91,10 +91,12 @@ $publicPortOneNames = @(
     'MIRIYUM_PORTONE_CHANNEL_KEY'
 )
 $serverPortOneSecretNames = @(
-    'MIRIYUM_PORTONE_API_SECRET',
-    'MIRIYUM_PORTONE_WEBHOOK_SECRET'
+    'MIRIYUM_PORTONE_API_SECRET'
 )
 $allPortOneNames = @($publicPortOneNames + $serverPortOneSecretNames)
+$excludedPortOneNames = @(
+    'MIRIYUM_PORTONE_WEBHOOK_SECRET'
+)
 
 foreach ($name in $publicPortOneNames) {
     $escapedName = [regex]::Escape($name)
@@ -119,6 +121,17 @@ foreach ($name in $serverPortOneSecretNames) {
         $frontendDockerfile.Contains($name)
     ) {
         throw "$name must not be a Frontend build argument."
+    }
+}
+
+foreach ($name in $excludedPortOneNames) {
+    if (
+        $workflow.Contains($name) -or
+        $frontendDockerfile.Contains($name) -or
+        $composeSource.Contains($name) -or
+        $composeEnvironmentExample.Contains($name)
+    ) {
+        throw "$name is outside the #520 deployment contract."
     }
 }
 
@@ -151,12 +164,10 @@ $cursorSecretName = "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET"
 $cursorSecret = "test-only-notification-history-cursor-secret"
 $portOneStoreId = 'test-only-portone-store-id'
 $portOneApiSecret = 'test-only-portone-api-secret'
-$portOneWebhookSecret = 'test-only-portone-webhook-secret'
 $testEnvironment = @{
     $cursorSecretName = $cursorSecret
     MIRIYUM_PORTONE_STORE_ID = $portOneStoreId
     MIRIYUM_PORTONE_API_SECRET = $portOneApiSecret
-    MIRIYUM_PORTONE_WEBHOOK_SECRET = $portOneWebhookSecret
 }
 $previousEnvironment = @{}
 
@@ -185,10 +196,6 @@ try {
     if ($compose.services.backend.environment.MIRIYUM_PORTONE_API_SECRET -ne $portOneApiSecret) {
         throw "Production backend does not receive MIRIYUM_PORTONE_API_SECRET."
     }
-    if ($compose.services.backend.environment.MIRIYUM_PORTONE_WEBHOOK_SECRET -ne $portOneWebhookSecret) {
-        throw "Production backend does not receive MIRIYUM_PORTONE_WEBHOOK_SECRET."
-    }
-
     foreach ($serviceProperty in $compose.services.PSObject.Properties) {
         if ($serviceProperty.Name -eq 'backend') {
             continue
