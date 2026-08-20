@@ -326,8 +326,8 @@ Waiting consumer·store-operator SSE endpoint와 `waiting.changed`의 영향 범
 - `NOTI-009` 확정 전에도 보관 만료를 적용할 수 있는 구조를 갖추되 영구 보존이나 임의 삭제 기간을 기본값으로 넣지 않는다.
 - 외부 채널 추가는 논리 알림과 `IN_APP` 이력이 공유하는 `notificationId`를 바꾸지 않고 같은 논리 알림 아래 내부 채널 시도만 추가한다.
 - #250 SSE 계약 PR #442와 Runtime PR #474가 세 변경 신호 path·재연결 cursor·HTTP 수렴 및 production Java Runtime을 제공한다. 환경 기본 활성화, proxy·부하·장애 증거는 #250 배포 검증이 소유하고, frontend 생성 타입과 소비 구현은 #251·#410·#411이 각각 소유한다.
-- `#500` contract-first PR 뒤 Backend 구현은 PR 1A 호환 기반과 배포 gate, PR 1B route 활성화로 분리한다. Frontend 전역 배지는 PR 1B 전체 배포와 PR #495 병합 뒤 생성 타입만 소비한다.
-- `V68`은 열린 PR #489의 `V67` 병합을 선행 조건으로 한다. 병합 순서가 달라지면 구현 PR을 병합하기 전에 최신 `dev` 기준의 다음 미점유 version으로 파일명과 migration 검증을 함께 재정렬한다.
+- `#500` contract-first PR 뒤 Backend 구현은 PR 1A 호환 기반과 배포 gate, PR 1B route 활성화로 분리한다. PR #495 병합 조건은 충족됐으며 Frontend 전역 배지는 PR 1B 전체 배포 뒤 생성 타입만 소비한다.
+- PR #489가 병합되어 `V67__create_store_business_registration_evidences.sql`이 `dev`에 확정됐고 현재 다음 미점유 migration version은 `V68`이다. 후속 구현 PR은 `V68`을 사용하되 병합 직전 최신 `dev`에서 번호 점유를 다시 확인하고, 새 점유가 생겼으면 다음 미점유 version으로 파일명과 migration 검증을 함께 재정렬한다.
 
 ## 인수 조건
 
