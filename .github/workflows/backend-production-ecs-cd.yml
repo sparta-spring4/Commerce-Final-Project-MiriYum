@@ -28,6 +28,7 @@ env:
   ECS_SERVICE: ${{ vars.AWS_ECS_SERVICE }}
   ECS_CONTAINER_NAME: backend
   RUNTIME_CONFIG_SECRET_NAME: miriyum/production/backend-runtime-config
+  QR_STORAGE_GENERATION: ${{ vars.MIRIYUM_QR_STORAGE_GENERATION }}
 
 jobs:
   verify-source:
@@ -151,6 +152,11 @@ jobs:
               exit 1
             fi
           done
+
+          if ! [[ "$QR_STORAGE_GENERATION" =~ ^[A-Za-z0-9._-]{1,64}$ ]]; then
+            echo "::error::MIRIYUM_QR_STORAGE_GENERATION must be a non-empty generation identifier."
+            exit 1
+          fi
 
       - name: Checkout successful CI revision
         if: github.event_name == 'workflow_run'
@@ -303,6 +309,7 @@ jobs:
           jq --arg image "$IMAGE_URI" --arg container "$ECS_CONTAINER_NAME" \
             --arg runtime_config_secret_arn "$runtime_config_secret_arn" \
             --arg openai_parameter_arn "$openai_parameter_arn" --arg llm_enabled "$llm_enabled" \
+            --arg qr_storage_generation "$QR_STORAGE_GENERATION" \
             --arg runtime_config_enabled "$runtime_config_enabled" \
             --arg storage_s3_enabled "$storage_s3_enabled" \
             --arg storage_s3_reconciliation_enabled "$storage_s3_reconciliation_enabled" \
@@ -313,6 +320,7 @@ jobs:
                 .image = $image
                 | .environment = ((.environment // [] | map(select(
                     .name != "MIRIYUM_STORE_SEARCH_LLM_ENABLED"
+                    and .name != "MIRIYUM_QR_STORAGE_GENERATION"
                     and .name != "MIRIYUM_RUNTIME_CONFIG_ENABLED"
                     and .name != "MIRIYUM_STORE_SEARCH_LLM_MODEL"
                     and .name != "MIRIYUM_CLOUDWATCH_METRICS_ENABLED"
@@ -322,6 +330,7 @@ jobs:
                     and .name != "MIRIYUM_STORAGE_S3_REGION"
                   ))) + [
                     {name: "MIRIYUM_STORE_SEARCH_LLM_ENABLED", value: $llm_enabled},
+                    {name: "MIRIYUM_QR_STORAGE_GENERATION", value: $qr_storage_generation},
                     {name: "MIRIYUM_RUNTIME_CONFIG_ENABLED", value: $runtime_config_enabled},
                     {name: "MIRIYUM_STORE_SEARCH_LLM_MODEL", value: "gpt-4o-mini"},
                     {name: "MIRIYUM_CLOUDWATCH_METRICS_ENABLED", value: "true"},
