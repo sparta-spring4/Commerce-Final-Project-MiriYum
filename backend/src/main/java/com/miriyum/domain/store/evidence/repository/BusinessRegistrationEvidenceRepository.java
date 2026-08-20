@@ -27,4 +27,6 @@ public interface BusinessRegistrationEvidenceRepository extends JpaRepository<Bu
             long onboardingApplicationId,
             long applicationVersion,
             Integer currentMarker);
+
+    boolean existsByFileIdAndCurrentMarker(String fileId, Integer currentMarker);
 }

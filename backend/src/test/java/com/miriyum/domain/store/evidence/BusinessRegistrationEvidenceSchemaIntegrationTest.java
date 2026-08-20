@@ -7,6 +7,8 @@ import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.store.evidence.dto.BusinessRegistrationEvidenceCommand;
 import com.miriyum.global.storage.entity.FileMetadata;
 import com.miriyum.global.storage.repository.FileMetadataRepository;
+import com.miriyum.global.storage.service.FileMetadataConflictException;
+import com.miriyum.global.storage.service.FileMetadataTransactionExecutor;
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -61,6 +63,9 @@ class BusinessRegistrationEvidenceSchemaIntegrationTest {
     private FileMetadataRepository fileMetadataRepository;
 
     @Autowired
+    private FileMetadataTransactionExecutor fileMetadataTransactionExecutor;
+
+    @Autowired
     private StoreBusinessRegistrationEvidenceService evidenceService;
 
     @Autowired
@@ -107,8 +112,8 @@ class BusinessRegistrationEvidenceSchemaIntegrationTest {
     }
 
     @Test
-    @DisplayName("파일 삭제 전이는 잠긴 파일 검증과 증빙 연결이 커밋된 뒤에만 진행한다")
-    void serializesFileDeletionAfterEvidenceLinkCommit() throws Exception {
+    @DisplayName("현재 증빙 연결과 경합한 파일 삭제는 잠금 해제 후에도 거절한다")
+    void rejectsFileDeletionAfterCurrentEvidenceLinkCommit() throws Exception {
         long applicationId = 902L;
         UUID fileId = UUID.randomUUID();
         Instant now = Instant.parse("2026-08-20T00:00:00Z");
@@ -116,7 +121,7 @@ class BusinessRegistrationEvidenceSchemaIntegrationTest {
 
         CountDownLatch metadataLocked = new CountDownLatch(1);
         CountDownLatch releaseEvidenceCommit = new CountDownLatch(1);
-        CountDownLatch deletionAttempted = new CountDownLatch(1);
+        CountDownLatch deletionStarted = new CountDownLatch(1);
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             Future<?> evidenceLink = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
                 FileMetadata metadata = fileMetadataRepository.findByFileIdForUpdate(fileId.toString()).orElseThrow();
@@ -127,19 +132,18 @@ class BusinessRegistrationEvidenceSchemaIntegrationTest {
             }));
 
             assertThat(metadataLocked.await(5, TimeUnit.SECONDS)).isTrue();
-            Future<?> deletion = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
-                deletionAttempted.countDown();
-                jdbcTemplate.update(
-                        "UPDATE file_metadata SET storage_status = 'DELETED', deleted_at = ? WHERE file_id = ?",
-                        now, fileId.toString());
-            }));
-            assertThat(deletionAttempted.await(5, TimeUnit.SECONDS)).isTrue();
-            Thread.sleep(200);
-            assertThat(deletion.isDone()).isFalse();
+            Future<FileMetadata> deletion = executor.submit(() -> {
+                deletionStarted.countDown();
+                return fileMetadataTransactionExecutor.deleteOrGetDeleted(fileId.toString(), now);
+            });
+            assertThat(deletionStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> deletion.get(250, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
 
             releaseEvidenceCommit.countDown();
             evidenceLink.get(5, TimeUnit.SECONDS);
-            deletion.get(5, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> deletion.get(5, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(FileMetadataConflictException.class);
         }
 
         Integer evidenceCount = jdbcTemplate.queryForObject(
@@ -149,7 +153,7 @@ class BusinessRegistrationEvidenceSchemaIntegrationTest {
                 "SELECT storage_status FROM file_metadata WHERE file_id = ?",
                 String.class, fileId.toString());
         assertThat(evidenceCount).isEqualTo(1);
-        assertThat(status).isEqualTo("DELETED");
+        assertThat(status).isEqualTo("CONFIRMED");
     }
 
     @Test
