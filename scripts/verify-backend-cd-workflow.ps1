@@ -1,10 +1,14 @@
 param(
     [string]$WorkflowPath = (Join-Path $PSScriptRoot "..\.github\workflows\backend-cd.yml"),
+    [string]$FrontendDockerfilePath = (Join-Path $PSScriptRoot "..\frontend\Dockerfile"),
     [string]$ComposePath = (Join-Path $PSScriptRoot "..\deploy\docker-compose.prod.yml"),
     [string]$ComposeEnvPath = (Join-Path $PSScriptRoot "..\deploy\.env.example")
 )
 
 $workflow = Get-Content -Raw -Path $WorkflowPath
+$frontendDockerfile = Get-Content -Raw -Path $FrontendDockerfilePath
+$composeSource = Get-Content -Raw -Path $ComposePath
+$composeEnvironmentExample = Get-Content -Raw -Path $ComposeEnvPath
 
 $requiredFragments = @(
     "- name: Check immutable ECR image exists",
@@ -54,12 +58,107 @@ foreach ($fragment in $requiredFragments) {
     }
 }
 
+$frontendBuildArgumentsMatch = [regex]::Match(
+    $workflow,
+    '(?m)^[ ]{10}build-args:[ ]*\|[ ]*\r?\n(?<arguments>(?:^[ ]{12}\S.*\r?\n)+)'
+)
+if (-not $frontendBuildArgumentsMatch.Success) {
+    throw "Frontend Docker build arguments were not found."
+}
+
+$frontendBuildArguments = @(
+    $frontendBuildArgumentsMatch.Groups['arguments'].Value -split '\r?\n' |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ }
+)
+$allowedFrontendBuildArguments = @(
+    'VITE_KAKAO_MAP_APP_KEY=${{ vars.STAGING_KAKAO_MAP_APP_KEY }}',
+    'MIRIYUM_PORTONE_STORE_ID=${{ vars.MIRIYUM_PORTONE_STORE_ID }}',
+    'MIRIYUM_PORTONE_CHANNEL_KEY=${{ vars.MIRIYUM_PORTONE_CHANNEL_KEY }}'
+)
+$unexpectedFrontendBuildArguments = @(
+    Compare-Object $allowedFrontendBuildArguments $frontendBuildArguments
+)
+if (
+    $frontendBuildArguments.Count -ne $allowedFrontendBuildArguments.Count -or
+    $unexpectedFrontendBuildArguments.Count -ne 0
+) {
+    throw "Frontend Docker build arguments do not match the public-value allowlist."
+}
+
+$publicPortOneNames = @(
+    'MIRIYUM_PORTONE_STORE_ID',
+    'MIRIYUM_PORTONE_CHANNEL_KEY'
+)
+$serverPortOneSecretName = 'MIRIYUM_PORTONE_API_SECRET'
+$allPortOneNames = @($publicPortOneNames + $serverPortOneSecretName)
+
+foreach ($name in $publicPortOneNames) {
+    $escapedName = [regex]::Escape($name)
+    $environmentPattern = '(?m)^ENV ' + $escapedName + '=\$\{' + $escapedName + '\}\r?$'
+    $argumentCount = [regex]::Matches(
+        $frontendDockerfile,
+        "(?m)^ARG $escapedName\r?$"
+    ).Count
+    $environmentCount = [regex]::Matches(
+        $frontendDockerfile,
+        $environmentPattern
+    ).Count
+
+    if ($argumentCount -ne 1 -or $environmentCount -ne 1) {
+        throw "Frontend Dockerfile must expose $name exactly once as ARG and ENV."
+    }
+}
+
+if (
+    $workflow.Contains($serverPortOneSecretName) -or
+    $frontendDockerfile.Contains($serverPortOneSecretName)
+) {
+    throw "PortOne API Secret must not be a Frontend build argument."
+}
+
+foreach ($name in @('MIRIYUM_PORTONE_STORE_ID', $serverPortOneSecretName)) {
+    $composeKeyCount = [regex]::Matches(
+        $composeSource,
+        "(?m)^\s+$([regex]::Escape($name)):\s*"
+    ).Count
+    if ($composeKeyCount -ne 1) {
+        throw "Production Compose must declare $name exactly once."
+    }
+
+    $emptyExampleCount = [regex]::Matches(
+        $composeEnvironmentExample,
+        "(?m)^$([regex]::Escape($name))=\r?$"
+    ).Count
+    if ($emptyExampleCount -ne 1) {
+        throw "Production environment example must declare $name exactly once with an empty value."
+    }
+}
+
+if (
+    $composeSource.Contains('MIRIYUM_PORTONE_CHANNEL_KEY') -or
+    $composeEnvironmentExample.Contains('MIRIYUM_PORTONE_CHANNEL_KEY')
+) {
+    throw "PortOne Channel Key must not be passed to a Compose service."
+}
+
 $cursorSecretName = "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET"
 $cursorSecret = "test-only-notification-history-cursor-secret"
-$previousCursorSecret = [Environment]::GetEnvironmentVariable($cursorSecretName, "Process")
+$portOneStoreId = 'test-only-portone-store-id'
+$portOneApiSecret = 'test-only-portone-api-secret'
+$testEnvironment = @{
+    $cursorSecretName = $cursorSecret
+    MIRIYUM_PORTONE_STORE_ID = $portOneStoreId
+    MIRIYUM_PORTONE_API_SECRET = $portOneApiSecret
+}
+$previousEnvironment = @{}
 
 try {
-    [Environment]::SetEnvironmentVariable($cursorSecretName, $cursorSecret, "Process")
+    foreach ($entry in $testEnvironment.GetEnumerator()) {
+        $previousEnvironment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, "Process")
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+    }
+
     $composeJson = & docker compose --env-file $ComposeEnvPath -f $ComposePath config --format json
 
     if ($LASTEXITCODE -ne 0) {
@@ -72,9 +171,31 @@ try {
     if ($renderedCursorSecret -ne $cursorSecret) {
         throw "Production backend does not receive $cursorSecretName."
     }
+
+    if ($compose.services.backend.environment.MIRIYUM_PORTONE_STORE_ID -ne $portOneStoreId) {
+        throw "Production backend does not receive MIRIYUM_PORTONE_STORE_ID."
+    }
+    if ($compose.services.backend.environment.MIRIYUM_PORTONE_API_SECRET -ne $portOneApiSecret) {
+        throw "Production backend does not receive MIRIYUM_PORTONE_API_SECRET."
+    }
+
+    foreach ($serviceProperty in $compose.services.PSObject.Properties) {
+        if ($serviceProperty.Name -eq 'backend') {
+            continue
+        }
+
+        $serviceEnvironment = $serviceProperty.Value.environment
+        foreach ($name in $allPortOneNames) {
+            if ($null -ne $serviceEnvironment -and $null -ne $serviceEnvironment.PSObject.Properties[$name]) {
+                throw "Compose service $($serviceProperty.Name) must not receive $name."
+            }
+        }
+    }
 }
 finally {
-    [Environment]::SetEnvironmentVariable($cursorSecretName, $previousCursorSecret, "Process")
+    foreach ($entry in $previousEnvironment.GetEnumerator()) {
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+    }
 }
 
 Write-Output "Backend CD and production Compose safeguards are configured."
