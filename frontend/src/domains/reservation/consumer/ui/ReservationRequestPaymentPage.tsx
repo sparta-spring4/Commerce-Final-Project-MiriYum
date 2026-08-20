@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { CONSUMER_PATHS } from '../../../../app/routes/paths/consumerPaths'
-import { createIdempotencyKeyCache } from '../../../../shared/api/idempotencyKey'
+import {
+  createIdempotencyKey,
+  createIdempotencyKeyCache,
+} from '../../../../shared/api/idempotencyKey'
 import { Button } from '../../../../shared/ui/Button'
 import { Alert, ErrorState, Loading } from '../../../../shared/ui/Feedback'
 import { useConfirmCurrentConsumerPayment } from '../../../payment/consumer/api/queries'
@@ -25,6 +28,73 @@ const STATUS_MESSAGE: Record<ReservationRequest['status'], string> = {
   RECOVERY_REQUIRED: '복구가 필요한 상태입니다. 현재 상태를 확인하고 있습니다.',
 }
 
+const CONFIRMATION_HINT_STORAGE_PREFIX =
+  'MIRIYUM_RESERVATION_PAYMENT_CONFIRMATION:'
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const TERMINAL_REQUEST_STATUSES: ReadonlySet<ReservationRequest['status']> =
+  new Set(['COMPLETED', 'ABANDONED', 'EXPIRED', 'COMPENSATED'])
+
+type LastAction = 'pay' | 'confirm' | 'abandon'
+
+function confirmationHintStorageKey(reservationRequestId: string): string {
+  return `${CONFIRMATION_HINT_STORAGE_PREFIX}${reservationRequestId}`
+}
+
+function readConfirmationHint(reservationRequestId: string): string | null {
+  if (reservationRequestId.length === 0 || typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    const storageKey = confirmationHintStorageKey(reservationRequestId)
+    const value = window.localStorage.getItem(storageKey)
+    if (value === null || UUID_PATTERN.test(value)) {
+      return value
+    }
+    window.localStorage.removeItem(storageKey)
+  } catch {
+    // 브라우저 정책이나 저장 공간 오류가 결제 화면 자체를 막아서는 안 된다.
+  }
+  return null
+}
+
+function writeConfirmationHint(
+  reservationRequestId: string,
+  confirmationKey: string,
+): void {
+  if (
+    reservationRequestId.length === 0 ||
+    !UUID_PATTERN.test(confirmationKey) ||
+    typeof window === 'undefined'
+  ) {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(
+      confirmationHintStorageKey(reservationRequestId),
+      confirmationKey,
+    )
+  } catch {
+    // 저장할 수 없는 환경에서도 현재 탭의 확인 흐름은 계속한다.
+  }
+}
+
+function clearConfirmationHint(reservationRequestId: string): void {
+  if (reservationRequestId.length === 0 || typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.removeItem(
+      confirmationHintStorageKey(reservationRequestId),
+    )
+  } catch {
+    // 정리 실패가 서버의 종결 결과를 가리지 않게 한다.
+  }
+}
+
 export function ReservationRequestPaymentPage() {
   const { reservationRequestId = '' } = useParams()
   const navigate = useNavigate()
@@ -34,15 +104,20 @@ export function ReservationRequestPaymentPage() {
   const confirmation = useConfirmCurrentConsumerPayment(paymentId)
   const finalization = useFinalizeReservationRequest(reservationRequestId)
   const abandonment = useAbandonReservationRequest(reservationRequestId)
-  const confirmationKeys = useMemo(createIdempotencyKeyCache, [])
   const finalizationKeys = useMemo(createIdempotencyKeyCache, [])
   const abandonmentKeys = useMemo(createIdempotencyKeyCache, [])
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<unknown>(null)
-  const [paymentCompletedInBrowser, setPaymentCompletedInBrowser] =
-    useState(false)
+  const [confirmationKey, setConfirmationKey] = useState<string | null>(() =>
+    readConfirmationHint(reservationRequestId),
+  )
+  const [lastAction, setLastAction] = useState<LastAction | null>(null)
 
   useEffect(() => {
+    if (request !== undefined && TERMINAL_REQUEST_STATUSES.has(request.status)) {
+      clearConfirmationHint(reservationRequestId)
+      setConfirmationKey(null)
+    }
     if (
       request?.status === 'COMPLETED' &&
       request.reservation?.status === 'CONFIRMED'
@@ -52,7 +127,7 @@ export function ReservationRequestPaymentPage() {
         { replace: true },
       )
     }
-  }, [navigate, request])
+  }, [navigate, request, reservationRequestId])
 
   if (requestQuery.isPending) {
     return (
@@ -78,16 +153,15 @@ export function ReservationRequestPaymentPage() {
   const isWorking =
     confirmation.isPending || finalization.isPending || abandonment.isPending
 
-  async function confirmAndFinalize() {
+  async function confirmAndFinalize(idempotencyKey: string) {
+    setLastAction('confirm')
     setActionMessage(null)
     setActionError(null)
 
     try {
       const confirmedPayment = await confirmation.mutateAsync({
         portOnePaymentId: paymentPreparation.portOnePaymentId,
-        idempotencyKey: confirmationKeys.keyFor(
-          `${reservationRequestId}:${paymentPreparation.portOnePaymentId}`,
-        ),
+        idempotencyKey,
       })
       if (confirmedPayment.status !== 'PAID') {
         setActionMessage(
@@ -110,6 +184,8 @@ export function ReservationRequestPaymentPage() {
         setActionMessage('예약 확정 결과를 확인하지 못했습니다.')
         return
       }
+      clearConfirmationHint(reservationRequestId)
+      setConfirmationKey(null)
       void navigate(`/reservations/${result.reservationId}/complete`, {
         replace: true,
       })
@@ -119,6 +195,7 @@ export function ReservationRequestPaymentPage() {
   }
 
   async function pay() {
+    setLastAction('pay')
     setActionMessage(null)
     setActionError(null)
 
@@ -135,23 +212,44 @@ export function ReservationRequestPaymentPage() {
         return
       }
 
-      setPaymentCompletedInBrowser(true)
-      await confirmAndFinalize()
+      const nextConfirmationKey = createIdempotencyKey()
+      writeConfirmationHint(reservationRequestId, nextConfirmationKey)
+      setConfirmationKey(nextConfirmationKey)
+      await confirmAndFinalize(nextConfirmationKey)
     } catch (error) {
       setActionError(error)
     }
   }
 
   async function abandon() {
+    setLastAction('abandon')
     setActionMessage(null)
     setActionError(null)
     try {
       await abandonment.mutateAsync({
         idempotencyKey: abandonmentKeys.keyFor(reservationRequestId),
       })
+      clearConfirmationHint(reservationRequestId)
+      setConfirmationKey(null)
     } catch (error) {
       setActionError(error)
     }
+  }
+
+  async function retryLastAction() {
+    if (lastAction === 'pay') {
+      await pay()
+      return
+    }
+    if (lastAction === 'confirm' && confirmationKey !== null) {
+      await confirmAndFinalize(confirmationKey)
+      return
+    }
+    if (lastAction === 'abandon') {
+      await abandon()
+      return
+    }
+    await requestQuery.refetch()
   }
 
   return (
@@ -191,11 +289,7 @@ export function ReservationRequestPaymentPage() {
         <ErrorState
           error={actionError}
           message="결제 처리 중 문제가 발생했습니다. 서버 상태를 다시 확인해 주세요."
-          onRetry={() =>
-            void (paymentCompletedInBrowser
-              ? confirmAndFinalize()
-              : requestQuery.refetch())
-          }
+          onRetry={() => void retryLastAction()}
         />
       )}
 
@@ -206,23 +300,13 @@ export function ReservationRequestPaymentPage() {
           disabled={!canPay}
           loading={isWorking}
           onClick={() =>
-            void (paymentCompletedInBrowser ? confirmAndFinalize() : pay())
+            void (confirmationKey !== null
+              ? confirmAndFinalize(confirmationKey)
+              : pay())
           }
         >
-          {paymentCompletedInBrowser
-            ? '결제 상태 다시 확인'
-            : '예약금 결제하기'}
+          {confirmationKey !== null ? '결제 상태 다시 확인' : '예약금 결제하기'}
         </Button>
-        {canPay && !paymentCompletedInBrowser && (
-          <Button
-            variant="ghost"
-            block
-            disabled={isWorking}
-            onClick={() => void confirmAndFinalize()}
-          >
-            이미 결제했다면 상태 확인
-          </Button>
-        )}
         {canPay && (
           <Button
             variant="ghost"

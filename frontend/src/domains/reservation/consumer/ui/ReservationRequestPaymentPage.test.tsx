@@ -30,6 +30,9 @@ const FINALIZE_PATH =
   '/api/v1/consumers/me/reservation-requests/:reservationRequestId/finalizations'
 const ABANDON_PATH =
   '/api/v1/consumers/me/reservation-requests/:reservationRequestId/abandonments'
+const CONFIRMATION_HINT_STORAGE_KEY =
+  `MIRIYUM_RESERVATION_PAYMENT_CONFIRMATION:${RESERVATION_REQUEST_ID}`
+const PERSISTED_CONFIRMATION_KEY = '11111111-1111-4111-8111-111111111111'
 const BACKEND_UUID_PATTERN =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/
 
@@ -86,6 +89,7 @@ function payment(status: 'PAID' | 'READY' | 'RECONCILIATION_REQUIRED') {
 
 beforeEach(() => {
   requestDepositPaymentMock.mockReset()
+  window.localStorage.clear()
 })
 
 describe('예약금 결제 화면', () => {
@@ -118,6 +122,7 @@ describe('예약금 결제 화면', () => {
       }),
     )
 
+    window.localStorage.setItem('unrelated', 'keep')
     renderPayment()
     fireEvent.click(
       await screen.findByRole('button', { name: '예약금 결제하기' }),
@@ -132,6 +137,44 @@ describe('예약금 결제 화면', () => {
     expect(confirmationKey).toMatch(BACKEND_UUID_PATTERN)
     expect(finalizationKey).toMatch(BACKEND_UUID_PATTERN)
     expect(finalizationKey).not.toBe(confirmationKey)
+    expect(localStorage.getItem(CONFIRMATION_HINT_STORAGE_KEY)).toBeNull()
+    expect(localStorage.getItem('unrelated')).toBe('keep')
+  })
+
+  it('최초 미결제 진입에서는 SDK 성공 전에 confirmation 경로를 열지 않는다', async () => {
+    let confirmationCalls = 0
+    let resolvePayment: ((value: undefined) => void) | undefined
+    requestDepositPaymentMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolvePayment = resolve
+      }),
+    )
+    server.use(
+      authenticatedConsumer(),
+      http.get(REQUEST_PATH, () => successResponse(reservationRequest())),
+      http.post(CONFIRM_PATH, () => {
+        confirmationCalls += 1
+        return successResponse(payment('READY'))
+      }),
+    )
+
+    renderPayment()
+    const payButton = await screen.findByRole('button', {
+      name: '예약금 결제하기',
+    })
+
+    expect(
+      screen.queryByRole('button', { name: '결제 상태 다시 확인' }),
+    ).not.toBeInTheDocument()
+    fireEvent.click(payButton)
+    await waitFor(() => expect(requestDepositPaymentMock).toHaveBeenCalledOnce())
+    expect(confirmationCalls).toBe(0)
+
+    resolvePayment?.(undefined)
+    expect(
+      await screen.findByText('결제창이 닫혔습니다. 결제를 다시 시도할 수 있습니다.'),
+    ).toBeInTheDocument()
+    expect(confirmationCalls).toBe(0)
   })
 
   it('SDK 취소는 요청을 포기하지 않고 다시 결제할 수 있게 한다', async () => {
@@ -166,7 +209,7 @@ describe('예약금 결제 화면', () => {
     ).toBeEnabled()
   })
 
-  it('결제창 성공 뒤 확인 실패를 같은 키로 재시도하며 결제창을 다시 열지 않는다', async () => {
+  it('결제창 성공 뒤 확인 실패와 새로고침 후에도 같은 키로 복구한다', async () => {
     const confirmationKeys: string[] = []
     let confirmationCalls = 0
 
@@ -195,10 +238,24 @@ describe('예약금 결제 화면', () => {
       http.post(FINALIZE_PATH, () => successResponse(reservationDetail())),
     )
 
-    renderPayment()
+    const firstRender = renderPayment()
     fireEvent.click(
       await screen.findByRole('button', { name: '예약금 결제하기' }),
     )
+
+    expect(
+      await screen.findByText(
+        '결제 처리 중 문제가 발생했습니다. 서버 상태를 다시 확인해 주세요.',
+      ),
+    ).toBeInTheDocument()
+    expect(confirmationKeys).toHaveLength(1)
+    expect(confirmationKeys[0]).toMatch(BACKEND_UUID_PATTERN)
+    expect(localStorage.getItem(CONFIRMATION_HINT_STORAGE_KEY)).toBe(
+      confirmationKeys[0],
+    )
+
+    firstRender.unmount()
+    renderPayment()
 
     fireEvent.click(
       await screen.findByRole('button', { name: '결제 상태 다시 확인' }),
@@ -211,30 +268,47 @@ describe('예약금 결제 화면', () => {
     )
     expect(requestDepositPaymentMock).toHaveBeenCalledTimes(1)
     expect(confirmationKeys).toHaveLength(2)
-    expect(confirmationKeys[0]).toMatch(BACKEND_UUID_PATTERN)
     expect(confirmationKeys[1]).toBe(confirmationKeys[0])
+    expect(localStorage.getItem(CONFIRMATION_HINT_STORAGE_KEY)).toBeNull()
   })
 
-  it('재진입한 사용자는 결제창 없이 기존 결제를 확인하고 최종화한다', async () => {
-    const commandOrder: string[] = []
+  it('복구 confirmation 오류의 다시 시도는 같은 confirmation과 키를 반복한다', async () => {
+    const confirmationKeys: string[] = []
+    let confirmationCalls = 0
+    let requestCalls = 0
+    localStorage.setItem(
+      CONFIRMATION_HINT_STORAGE_KEY,
+      PERSISTED_CONFIRMATION_KEY,
+    )
     server.use(
       authenticatedConsumer(),
-      http.get(REQUEST_PATH, () => successResponse(reservationRequest())),
-      http.post(CONFIRM_PATH, () => {
-        commandOrder.push('confirm')
+      http.get(REQUEST_PATH, () => {
+        requestCalls += 1
+        return successResponse(reservationRequest())
+      }),
+      http.post(CONFIRM_PATH, ({ request }) => {
+        confirmationCalls += 1
+        confirmationKeys.push(request.headers.get('Idempotency-Key') ?? '')
+        if (confirmationCalls === 1) {
+          return HttpResponse.json(
+            {
+              code: 'COMMON_011',
+              message: '결제 확인 처리 중 오류가 발생했습니다.',
+            },
+            { status: 500 },
+          )
+        }
         return successResponse(payment('PAID'))
       }),
-      http.post(FINALIZE_PATH, () => {
-        commandOrder.push('finalize')
-        return successResponse(reservationDetail())
-      }),
+      http.post(FINALIZE_PATH, () => successResponse(reservationDetail())),
     )
 
     renderPayment()
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: '이미 결제했다면 상태 확인',
-      }),
+      await screen.findByRole('button', { name: '결제 상태 다시 확인' }),
+    )
+    fireEvent.click(
+      await screen.findByRole('button', { name: '다시 시도' }),
     )
 
     await waitFor(() =>
@@ -242,8 +316,30 @@ describe('예약금 결제 화면', () => {
         '/reservations/01JBQ8Z4T7K2N9V6M3P5R8W1R1/complete',
       ),
     )
-    expect(commandOrder).toEqual(['confirm', 'finalize'])
     expect(requestDepositPaymentMock).not.toHaveBeenCalled()
+    expect(confirmationKeys).toEqual([
+      PERSISTED_CONFIRMATION_KEY,
+      PERSISTED_CONFIRMATION_KEY,
+    ])
+    expect(requestCalls).toBe(1)
+  })
+
+  it('유효한 UUID가 아닌 복구 힌트는 제거하고 결제부터 다시 시작한다', async () => {
+    localStorage.setItem(CONFIRMATION_HINT_STORAGE_KEY, 'not-a-uuid')
+    server.use(
+      authenticatedConsumer(),
+      http.get(REQUEST_PATH, () => successResponse(reservationRequest())),
+    )
+
+    renderPayment()
+
+    expect(
+      await screen.findByRole('button', { name: '예약금 결제하기' }),
+    ).toBeEnabled()
+    expect(
+      screen.queryByRole('button', { name: '결제 상태 다시 확인' }),
+    ).not.toBeInTheDocument()
+    expect(localStorage.getItem(CONFIRMATION_HINT_STORAGE_KEY)).toBeNull()
   })
 
   it('결제 확인이 202이면 예약을 최종화하지 않는다', async () => {
@@ -326,6 +422,10 @@ describe('예약금 결제 화면', () => {
 
   it('사용자가 직접 포기한 경우에만 abandonment 명령을 보낸다', async () => {
     let abandonmentKey: string | null = null
+    localStorage.setItem(
+      CONFIRMATION_HINT_STORAGE_KEY,
+      PERSISTED_CONFIRMATION_KEY,
+    )
     server.use(
       authenticatedConsumer(),
       http.get(REQUEST_PATH, () => successResponse(reservationRequest())),
@@ -339,7 +439,7 @@ describe('예약금 결제 화면', () => {
     )
 
     renderPayment()
-    await screen.findByRole('button', { name: '예약금 결제하기' })
+    await screen.findByRole('button', { name: '결제 상태 다시 확인' })
     expect(abandonmentKey).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '예약 요청 포기' }))
@@ -349,9 +449,14 @@ describe('예약금 결제 화면', () => {
     )
     expect(await screen.findByText(/포기된 예약 요청/)).toBeInTheDocument()
     expect(requestDepositPaymentMock).not.toHaveBeenCalled()
+    expect(localStorage.getItem(CONFIRMATION_HINT_STORAGE_KEY)).toBeNull()
   })
 
   it('종결된 요청에서는 결제창을 열지 않는다', async () => {
+    localStorage.setItem(
+      CONFIRMATION_HINT_STORAGE_KEY,
+      PERSISTED_CONFIRMATION_KEY,
+    )
     server.use(
       authenticatedConsumer(),
       http.get(REQUEST_PATH, () =>
@@ -368,5 +473,8 @@ describe('예약금 결제 화면', () => {
     ).toBeDisabled()
     expect(screen.getByText(/포기된 예약 요청/)).toBeInTheDocument()
     expect(requestDepositPaymentMock).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect(localStorage.getItem(CONFIRMATION_HINT_STORAGE_KEY)).toBeNull(),
+    )
   })
 })
