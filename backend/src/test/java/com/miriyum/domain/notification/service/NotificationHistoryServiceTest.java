@@ -61,6 +61,9 @@ class NotificationHistoryServiceTest {
 
         assertThat(page.items()).extracting(item -> item.notificationId())
                 .containsExactly("103", "102");
+        assertThat(page.items()).allSatisfy(item ->
+                assertThat(item.readAt()).isEqualTo(OffsetDateTime.ofInstant(
+                        item.deliveredAt().toInstant().plusSeconds(1), ZoneOffset.UTC)));
         assertThat(page.hasNext()).isTrue();
         assertThat(page.nextCursor()).isEqualTo("next_cursor");
         assertThat(page.items()).allSatisfy(item -> {
@@ -197,7 +200,8 @@ class NotificationHistoryServiceTest {
                 "픽업 예약이 확정되었습니다.",
                 occurredAt,
                 occurredAt.plusSeconds(1),
-                occurredAt.plusSeconds(2)
+                occurredAt.plusSeconds(2),
+                occurredAt.plusSeconds(3)
         );
     }
 
