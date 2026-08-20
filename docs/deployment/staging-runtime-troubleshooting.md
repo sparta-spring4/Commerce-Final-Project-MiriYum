@@ -91,3 +91,51 @@ or `.max`.
 - Lack of `cloudwatch:ListMetrics` on the EC2 instance role does not prevent the
   application from publishing metrics. Inspect with an approved read-only IAM
   principal or the CloudWatch console instead of widening the runtime role.
+
+## Staging CD is blocked by EC2 memory pressure
+
+Do not treat a high Linux `used` value alone as an out-of-memory incident.
+Check `available` memory, container RSS, and kernel OOM history before deciding
+whether to deploy. On 2026-08-20, the staging host had 1.8 GiB total memory,
+only 105 MiB available memory, and no swap. The backend Java process used about
+714 MiB RSS and MySQL used about 538 MiB RSS; no kernel OOM event was recorded.
+
+```sh
+free -h
+
+sudo docker stats --no-stream \
+  --format 'table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.CPUPerc}}'
+
+ps -eo pid,comm,%mem,%cpu,rss --sort=-%mem | head -n 15
+
+sudo dmesg -T | grep -Ei 'out of memory|oom|killed process' | tail -n 20
+```
+
+The observed backend JVM had a 462 MiB maximum heap (`MaxRAMPercentage=25`)
+but a larger RSS because native memory, metaspace, JIT code cache, and thread
+stacks are outside the Java heap. MySQL did not show a connection surge
+(`Threads_connected=11`, `Max_used_connections=14`); its 128 MiB InnoDB buffer
+pool alone therefore does not explain the full MySQL RSS. Record that remaining
+breakdown as an investigation item rather than claiming an unverified cause.
+
+### Deployment decision
+
+When available memory is about 105 MiB on this host, do not start staging CD.
+Backend container replacement and JVM initialization can need additional memory,
+which risks an OOM termination or a failed health check. Because a `dev` merge
+triggers staging CD, defer both the merge and manual staging deployment until
+the memory issue is addressed.
+
+The 85% memory-use threshold is an operational guardrail, not an AWS guarantee.
+Use it together with a meaningful available-memory margin, no OOM history, and
+backend health `UP`; do not resume merely because a single percentage sample
+falls below the threshold.
+
+### Follow-up options
+
+1. Increase staging EC2 memory capacity for the combined backend, MySQL, and
+   Valkey Compose workload.
+2. Measure and tune JVM heap/native memory and MySQL table/cache settings, then
+   repeat the commands above before resuming CD.
+3. Keep the deployment blocked until one of the options restores headroom and a
+   controlled health check succeeds.
