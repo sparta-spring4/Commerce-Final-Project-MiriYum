@@ -4,6 +4,8 @@
 
 사업자등록증은 공개 매장·메뉴 이미지와 분리한 비공개 증빙이다. 이 정본은 #344의 Store 공개 Service/DTO와 #277 심사 workflow 사이의 최소 경계를 정의한다.
 
+물리 테이블 관계와 DB 제약은 [사업자등록증 증빙 ERD](erd.md)에서 확인한다. 신청·심사 workflow 테이블은 #277의 소유 범위이므로, 현재 원장과의 연결은 논리 관계로만 표시한다.
+
 ## Public Service Contract
 
 - 신청 식별자는 양의 정수 `onboardingApplicationId`, 신청 자료 version은 양의 정수 `applicationVersion`이다.
