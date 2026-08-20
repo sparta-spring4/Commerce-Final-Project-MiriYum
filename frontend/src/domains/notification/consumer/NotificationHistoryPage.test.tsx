@@ -152,6 +152,50 @@ describe('NotificationHistoryPage', () => {
     ).toBe(false)
   })
 
+  test('coalesces changed signals during the initial request into a fresh history fetch', async () => {
+    let releaseInitialRequest: (() => void) | undefined
+    const initialRequestGate = new Promise<void>((resolve) => {
+      releaseInitialRequest = resolve
+    })
+    let requests = 0
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, async () => {
+        requests += 1
+        if (requests === 1) {
+          await initialRequestGate
+          return HttpResponse.json(
+            successResponse([
+              historyItem({ title: '신호 전에 조회한 오래된 알림' }),
+            ]),
+          )
+        }
+
+        return HttpResponse.json(
+          successResponse([
+            historyItem({ title: '신호 이후 다시 조회한 최신 알림' }),
+          ]),
+        )
+      }),
+    )
+    const events = eventStreamHarness()
+
+    await renderPage(createTestQueryClient(), 7, events.client)
+    await waitFor(() => expect(requests).toBe(1))
+    await waitFor(() => expect(events.subscriptions).toHaveLength(1))
+
+    events.emitChanged()
+    events.emitChanged()
+    releaseInitialRequest?.()
+
+    expect(
+      await screen.findByText('신호 이후 다시 조회한 최신 알림'),
+    ).toBeVisible()
+    expect(requests).toBe(2)
+    expect(
+      screen.queryByText('신호 전에 조회한 오래된 알림'),
+    ).not.toBeInTheDocument()
+  })
+
   test('announces that realtime updates are recovering', async () => {
     server.use(
       http.get(NOTIFICATION_HISTORY_PATH, () =>

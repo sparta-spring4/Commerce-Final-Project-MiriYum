@@ -217,19 +217,61 @@ export function NotificationHistoryPage({
 
   useEffect(() => {
     const controller = new AbortController()
+    let refreshRequested = false
+    let refreshRunning = false
+
+    const refreshHistory = async () => {
+      if (refreshRunning) {
+        return
+      }
+
+      refreshRunning = true
+      try {
+        while (refreshRequested && !controller.signal.aborted) {
+          const queryState = queryClient.getQueryState(queryKey)
+          if (
+            queryState?.fetchStatus === 'fetching' &&
+            queryState.data === undefined
+          ) {
+            await queryClient.cancelQueries({
+              queryKey,
+              exact: true,
+            })
+          }
+
+          if (controller.signal.aborted) {
+            return
+          }
+
+          refreshRequested = false
+          await queryClient.invalidateQueries({
+            queryKey,
+            exact: true,
+          })
+        }
+      } finally {
+        refreshRunning = false
+      }
+    }
+
     setEventConnectionState(null)
     void eventStream.subscribe({
       signal: controller.signal,
       onChanged: () => {
-        void queryClient.invalidateQueries({
-          queryKey,
-          exact: true,
-        })
+        if (controller.signal.aborted) {
+          return
+        }
+
+        refreshRequested = true
+        void refreshHistory()
       },
       onConnectionStateChange: setEventConnectionState,
     })
 
-    return () => controller.abort()
+    return () => {
+      refreshRequested = false
+      controller.abort()
+    }
   }, [eventStream, queryClient, queryKey])
 
   useEffect(
