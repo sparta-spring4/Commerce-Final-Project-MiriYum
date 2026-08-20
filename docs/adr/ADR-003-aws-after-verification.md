@@ -78,13 +78,13 @@ AWS 배포와 Terraform 구현은 정의된 테스트 게이트를 통과한 뒤
 - 운영 비용 절감 절차는 ECS `miriyum-prod-cluster`의 `miriyum-prod-backend-service` desired count를 `2 ↔ 0`으로 전환하고 RDS `miriyum-prod-mysql`을 `available ↔ stopped`로 전환하는 AWS CLI 절차로 한정한다.
 - 이 절차는 예상 AWS 계정 `579750808837`과 리전 `ap-northeast-2`를 먼저 확인한다. 계정·리전·정확한 ECS task family `miriyum-production-backend`가 일치하지 않으면 중단한다.
 - VPC, subnet, route table, NAT Gateway, Elastic IP, security group, ALB, listener, target group, Route 53, RDS 데이터·백업, ElastiCache Valkey, ECR, Secrets Manager, S3는 조회 전용 영속 리소스다. OFF/ON 절차와 Terraform state에서 수정·삭제·재생성 대상으로 삼지 않는다.
-- Terraform 전체 전환, import, apply, Blue/Green, ECS service 재생성은 계속 제외 범위다. 실제 OFF/ON은 비용·중단 영향이 있으므로 별도 운영 승인 뒤 수동 실행하고, 실행 전후 service 안정화와 RDS 상태를 기록한다.
+- Terraform 전체 전환, apply, Blue/Green, ECS service 재생성은 계속 제외 범위다. OFF/ON lifecycle 자체는 resource import와 state 변경을 포함하지 않으며, runtime state import 경계는 #532의 별도 계약에서만 관리한다. 실제 OFF/ON은 비용·중단 영향이 있으므로 별도 운영 승인 뒤 수동 실행하고, 실행 전후 service 안정화와 RDS 상태를 기록한다.
 
 ### Auto Scaling과 OFF/ON 공존 경계
 
 - ECS Auto Scaling은 기존 service의 desired count만 `2..3` 범위에서 조절하며, VPC·ALB·DNS·RDS·Valkey 같은 영속 리소스를 Terraform state에 편입하거나 변경하지 않는다.
-- Auto Scaling과 파일 저장 runtime Terraform은 `production/runtime-resources.tfstate`를 사용한다. 기존 전체 인프라 state(`production/terraform.tfstate`)와 분리해, 좁은 runtime 구성으로 영속 인프라 삭제 계획이 생성되지 않게 한다.
-- runtime Terraform 적용 전에는 `terraform plan`에서 기존 인프라의 `destroy = 0`을 확인한다. 콘솔에서 먼저 만든 Auto Scaling target·policy는 import block으로 runtime state에 편입한다.
+- #532가 소유하는 runtime Terraform은 `production/runtime-resources.tfstate`만 사용하며, 기존 전체 인프라 state(`production/terraform.tfstate`)를 이동하거나 수정하지 않는다. 초기화는 `terraform init -reconfigure`만 허용하고 `-migrate-state`는 금지한다.
+- #532의 runtime plan은 기존 인프라의 `destroy = 0`을 확인한 뒤, 콘솔에서 먼저 만든 정확한 ECS Auto Scaling target·CPU target-tracking policy만 import block으로 runtime state에 편입한다.
 - 운영 OFF는 Auto Scaling의 동적·예약 scaling을 먼저 중지하고 최소 용량을 `0`으로 내린 다음 desired count를 `0`으로 전환한다.
 - 운영 ON은 RDS가 `available`이 된 뒤 Auto Scaling 최소 용량을 `2`로 복구하고 desired count `2`를 확인한 다음 동적·예약 scaling을 재개한다.
 - `scale_in_cooldown=300`은 첫 축소 전 관찰 시간이 아니라 축소 완료 뒤 다음 축소를 막는 시간이다.
