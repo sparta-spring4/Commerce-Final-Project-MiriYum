@@ -86,6 +86,35 @@ class AdminCaseAssignmentServiceTest {
     }
 
     @Test
+    void renewsAnExpiredExactVersionAssignmentForTheNextOperator() {
+        AdminCaseAssignment expired = AdminCaseAssignment.assign(
+                ONBOARDING_REVIEW, "case-1", 3L, 7L, NOW, NOW.minusSeconds(60));
+        when(assignments.findByCaseForUpdate(ONBOARDING_REVIEW, "case-1", 3L))
+                .thenReturn(Optional.of(expired));
+
+        service.assign(new AdminCaseAssignmentCommand(
+                ONBOARDING_REVIEW, "case-1", 3L, 9L, NOW.plusSeconds(60)));
+
+        assertThat(expired.getPlatformOperatorAccountId()).isEqualTo(9L);
+        assertThat(expired.isActiveAt(NOW)).isTrue();
+    }
+
+    @Test
+    void rejectsTakingOverAnActiveExactVersionAssignment() {
+        AdminCaseAssignment active = AdminCaseAssignment.assign(
+                ONBOARDING_REVIEW, "case-1", 3L, 7L, NOW.plusSeconds(60), NOW);
+        when(assignments.findByCaseForUpdate(ONBOARDING_REVIEW, "case-1", 3L))
+                .thenReturn(Optional.of(active));
+
+        assertThatThrownBy(() -> service.assign(new AdminCaseAssignmentCommand(
+                ONBOARDING_REVIEW, "case-1", 3L, 9L, NOW.plusSeconds(120))))
+                .isInstanceOf(ServiceException.class)
+                .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                        .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION));
+        assertThat(active.getPlatformOperatorAccountId()).isEqualTo(7L);
+    }
+
+    @Test
     void closesOnlyTheExactCurrentAssignment() {
         AdminCaseAssignment assignment = AdminCaseAssignment.assign(
                 ONBOARDING_REVIEW, "case-1", 3L, 7L, NOW.plusSeconds(60), NOW);

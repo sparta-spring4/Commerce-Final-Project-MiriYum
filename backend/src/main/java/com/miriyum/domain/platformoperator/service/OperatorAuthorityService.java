@@ -77,7 +77,7 @@ public class OperatorAuthorityService implements OperatorAuthorityReader {
 
     /** 요청 principal의 권한 version이 현재 중앙 version과 정확히 일치하는 snapshot만 반환한다. */
     @Override
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, noRollbackFor = ServiceException.class)
     public OperatorAuthority requireCurrentAuthority(long operatorId, long expectedAuthorityVersion) {
         OperatorAuthority authority = currentAuthority(operatorId);
         if (authority.authorityVersion() != expectedAuthorityVersion) {

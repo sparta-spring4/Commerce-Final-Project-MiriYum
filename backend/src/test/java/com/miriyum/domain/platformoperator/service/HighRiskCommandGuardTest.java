@@ -3,6 +3,7 @@ package com.miriyum.domain.platformoperator.service;
 import static com.miriyum.domain.platformoperator.enums.AdminCommandPurpose.PAYMENT_RECOVERY;
 import static com.miriyum.domain.platformoperator.enums.AdminTargetType.PAYMENT_RECOVERY_CASE;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE;
+import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.PAYMENT_RECOVERY_HIGH_VALUE_APPROVE;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -11,6 +12,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.miriyum.domain.platformoperator.dto.authorization.AdminAuditContext;
 import com.miriyum.domain.platformoperator.dto.authorization.HighRiskCommandRequest;
@@ -81,6 +83,60 @@ class HighRiskCommandGuardTest {
             assertThat(context.approvalFingerprint()).hasSize(64).doesNotContain("approval-raw");
             assertThat(context.toString()).doesNotContain("approval-raw", "session-raw");
         }
+    }
+
+    @Test
+    void initialPaymentRecoverySelfAssignmentConsumesReauthenticationWithoutCircularAssignmentCheck() {
+        when(authorities.requireCurrentAuthority(7L, 3L)).thenReturn(new OperatorAuthority(
+                7L, 3L, Set.of(PAYMENT_RECOVERY_OPERATOR), Set.of(PAYMENT_RECOVERY_EXECUTE)));
+        when(approvals.consumeBoundApproval(any(), any(Long.class), any(), any(), any(), any(), any(Long.class), any()))
+                .thenReturn(1);
+        HighRiskCommandRequest assignmentRequest = new HighRiskCommandRequest(
+                request.principal(), request.requiredPermission(), request.caseType(),
+                request.caseId(), request.caseVersion(), request.purpose(), request.targetType(),
+                request.caseId(), "approval-raw", request.correlationId());
+
+        try (MockedStatic<TransactionSynchronizationManager> tx = mockStatic(TransactionSynchronizationManager.class)) {
+            tx.when(TransactionSynchronizationManager::isActualTransactionActive).thenReturn(true);
+            AdminAuditContext context = guard.authorizeInitialPaymentRecoveryAssignment(assignmentRequest);
+            assertThat(context.operatorId()).isEqualTo(7L);
+            verifyNoInteractions(assignments);
+        }
+    }
+
+    @Test
+    void secondaryPaymentRecoveryApprovalUsesExactCaseBoundTargetWithoutAssignmentCheck() {
+        when(authorities.requireCurrentAuthority(7L, 3L)).thenReturn(new OperatorAuthority(
+                7L, 3L, Set.of(), Set.of(PAYMENT_RECOVERY_HIGH_VALUE_APPROVE)));
+        when(approvals.consumeBoundApproval(any(), any(Long.class), any(), any(), any(), any(), any(Long.class), any()))
+                .thenReturn(1);
+        HighRiskCommandRequest secondary = new HighRiskCommandRequest(
+                request.principal(), PAYMENT_RECOVERY_HIGH_VALUE_APPROVE, request.caseType(),
+                request.caseId(), request.caseVersion(), request.purpose(), request.targetType(),
+                request.caseId() + ":proposal:1", "approval-raw", request.correlationId());
+
+        try (MockedStatic<TransactionSynchronizationManager> tx = mockStatic(TransactionSynchronizationManager.class)) {
+            tx.when(TransactionSynchronizationManager::isActualTransactionActive).thenReturn(true);
+            assertThat(guard.authorizeSecondaryPaymentRecoveryCommand(secondary).operatorId()).isEqualTo(7L);
+            verifyNoInteractions(assignments);
+        }
+    }
+
+    @Test
+    void secondaryPaymentRecoveryApprovalRejectsCasePrefixCollision() {
+        HighRiskCommandRequest collision = new HighRiskCommandRequest(
+                request.principal(), PAYMENT_RECOVERY_HIGH_VALUE_APPROVE, request.caseType(),
+                request.caseId(), request.caseVersion(), request.purpose(), request.targetType(),
+                request.caseId() + "-other:proposal:1", "approval-raw", request.correlationId());
+
+        try (MockedStatic<TransactionSynchronizationManager> tx = mockStatic(TransactionSynchronizationManager.class)) {
+            tx.when(TransactionSynchronizationManager::isActualTransactionActive).thenReturn(true);
+            assertThatThrownBy(() -> guard.authorizeSecondaryPaymentRecoveryCommand(collision))
+                    .isInstanceOf(ServiceException.class)
+                    .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                            .isEqualTo(AdminAuthorizationErrorCode.AUTHORIZATION_DENIED));
+        }
+        verifyNoInteractions(accounts, authorities, assignments, approvals);
     }
 
     @Test

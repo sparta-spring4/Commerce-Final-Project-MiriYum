@@ -78,6 +78,20 @@ paths:
     $ref: "./admin-monitoring/openapi.yaml#/paths/~1api~1v1~1platform-operators~1monitoring-cases"
   /api/v1/platform-operators/monitoring-cases/{caseType}/{caseId}:
     $ref: "./admin-monitoring/openapi.yaml#/paths/~1api~1v1~1platform-operators~1monitoring-cases~1{caseType}~1{caseId}"
+  /api/v1/platform-operators/payment-recovery-cases:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases"
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}"
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/assignments:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}~1assignments"
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/requeries:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}~1requeries"
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}~1proposals"
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals/{proposalVersion}/approvals:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}~1proposals~1{proposalVersion}~1approvals"
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/failed-unresolved-closures:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}~1failed-unresolved-closures"
 components:
   securitySchemes:
     platformOperatorBearerAuth:
