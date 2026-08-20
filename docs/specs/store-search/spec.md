@@ -6,7 +6,7 @@
 > 협업 검토: 3번 팀원 — 예약 가용성, 4번 팀원 — 메뉴 수량 가용성
 > 관련 정책 ID: STORE-002~STORE-007, STORE-014, OPER-002~OPER-010, S-005, S-007, E-002, C-001~C-013
 > OpenAPI: `docs/specs/store-search/openapi.yaml`
-> 최종 승인일: 2026-08-14
+> 최종 승인일: 2026-08-20
 
 ## 범위
 
@@ -137,6 +137,13 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 
 ## 매장 등록과 상태
 
+- `GET /api/v1/store-operators/stores`는 인증된 매장 운영자 계정이 현재 소유한
+  매장을 `storeId` 오름차순으로 모두 반환한다. 소유 관계의 원본은
+  `stores.store_operator_account_id`이며 JWT, 계정 행 또는 클라이언트 저장소에
+  관리 매장 목록을 복제하지 않는다.
+- 소유 매장이 없으면 `200`과 빈 배열을 반환한다. 다른 운영자의 매장은 목록에
+  포함하지 않으며, 이 collection 조회는 검색 조건·페이지네이션·운영자 ID 입력을
+  받지 않는다.
 - `POST /api/v1/store-operators/stores`는 인증된 매장 운영자 계정으로 새 매장 신청을 만든다.
 - 요청의 운영자 ID나 역할 값은 받지 않고 JWT subject를 사용한다.
 - 사업자등록번호와 업종 구분 `CAFE`, `BAKERY`, `OTHER`를 구조화 입력한다.

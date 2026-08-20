@@ -44,6 +44,11 @@ export interface paths {
     get: operations["getPublicImageFile"];
   };
   "/api/v1/store-operators/stores": {
+    /**
+     * 현재 운영자의 소유 매장 목록 조회
+     * @description 현재 인증 계정이 소유한 매장만 storeId 오름차순으로 반환하며, 소유 매장이 없으면 빈 배열을 반환한다.
+     */
+    get: operations["listManagedStores"];
     /** 매장 등록 */
     post: operations["createStore"];
   };
@@ -735,6 +740,11 @@ export interface components {
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["ManagedStore"];
     };
+    ManagedStoreListSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["ManagedStore"][];
+    };
     OperatingHoursSuccessResponse: {
       code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
@@ -1171,6 +1181,22 @@ export interface operations {
       };
       404: components["responses"]["PublicImageNotFound"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /**
+   * 현재 운영자의 소유 매장 목록 조회
+   * @description 현재 인증 계정이 소유한 매장만 storeId 오름차순으로 반환하며, 소유 매장이 없으면 빈 배열을 반환한다.
+   */
+  listManagedStores: {
+    responses: {
+      /** @description 현재 운영자의 소유 매장 목록 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ManagedStoreListSuccessResponse"];
+        };
+      };
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
     };
   };
   /** 매장 등록 */
