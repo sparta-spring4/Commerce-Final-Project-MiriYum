@@ -41,5 +41,6 @@ erDiagram
 | V35 | `representative_menu_settings`, `representative_menu_entries`, `representative_menu_audits` |
 | V41 | `store_reservation_deposit_policies` |
 | V53 | `store_enforcement_states`, `store_sanction_cases`, `store_sanction_impact_previews`, `store_sanctions`, `store_sanction_approvals` |
+| V67 | `store_business_registration_evidences` |
 
-일정·재고·대표 메뉴·제재 감사는 대상 매장 또는 업무 ID를 보관하는 원장이다. 상세 FK와 상태 제약은 해당 migration을 우선한다.
+일정·재고·대표 메뉴·제재 감사는 대상 매장 또는 업무 ID를 보관하는 원장이다. 사업자등록증 증빙은 파일 메타데이터의 `file_id`를 물리 FK로 참조하고, 신청·버전과 운영자 식별자는 업무 경계에서 검증한다. 상세 FK와 상태 제약은 해당 migration을 우선한다.
