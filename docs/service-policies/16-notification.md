@@ -2,14 +2,14 @@
 
 > 문서 상태: 세부 정책 확정(TODO 혼재)
 > 정책 범위: `NOTI-001`~`NOTI-010`
-> 최종 변경일: 2026-08-18
+> 최종 변경일: 2026-08-20
 > 기능 명세: [`docs/specs/notification/spec.md`](../specs/notification/spec.md)
 
 필수·선택 알림, 채널, 수신 동의, 발송 시점, 중복 방지, 재시도, 대체 채널 및 공급자 장애를 다룬다. 알림은 원 도메인의 확정 상태를 전달하는 파생 기능이며 상태 전이나 권리의 성립 조건이 아니다.
 
 ## 단계 적용 기준
 
-- 사용자·매장·플랫폼 운영자 대상 거래·웨이팅·결제·체크인·운영 알림과 마이페이지 알림 이력은 `고도화`에서 활성화한다.
+- 사용자·매장·플랫폼 운영자 대상 거래·웨이팅·결제·체크인·운영 알림, 마이페이지 알림 이력과 일반 사용자 웹 헤더의 미확인 배지는 `고도화`에서 활성화한다.
 - 1차 MVP와 2차 MVP에는 알림 작업·채널 발송·알림 이력 UI·API를 제공하지 않으며, 원 도메인의 중앙 상태 조회가 성공·실패 결과의 원본이다.
 - 코스·구독·리뷰·광고 등 향후 고도화 목적은 원 기능과 승인된 알림 목적이 모두 활성화되기 전에는 작업을 생성하지 않는다.
 - 정책 결정 상태와 적용 단계는 별도 축이며, 아래 확정 분류·멱등성·실패 처리·개인정보 기준은 고도화 도입 시 적용한다.
@@ -37,12 +37,16 @@
 - 사용자는 자신의 알림만 최신 발생 시각 내림차순, 동률이면 `notificationId` 내림차순으로 조회한다. 커서 페이징은 기본 20개·최대 50개이며 다른 방문자·매장 내부 수신자의 이력을 결합하지 않는다.
 - 이 화면은 보관 중인 기록만 표시하며 새 보관기간을 만들지 않는다. 정확한 보관 항목·기간과 파기는 `NOTI-009`, `PRIV-005`·`PRIV-006`의 기존 `TODO`가 확정된 뒤 그 버전을 따른다.
 - 표시 이력의 유실·지연은 원 거래 상태를 바꾸지 않고, 보관 정책을 확인할 수 없으면 과거 기록이 영구 보존되는 것으로 추정하지 않는다.
+- 일반 사용자 웹 헤더의 종은 본인 공개 이력 중 미확인 개수를 표시하고 기존 마이페이지 알림 이력으로 이동한다. `0`은 숫자를 숨기고 `1`~`99`는 숫자, `100` 이상은 `99+`로 표현하되 보조 기술에는 실제 개수를 전달한다. 별도 dropdown·전역 toast·브라우저 push는 이 계약에 포함하지 않는다.
+- 목록 진입·스크롤은 읽음이 아니다. 사용자가 개별 알림을 선택하거나 `모두 읽음`을 명시한 때만 서버가 최초 읽음 시각을 기록한다. 행동 없는 Waiting 알림도 개별 선택으로 읽을 수 있고, 예약·픽업 행동의 읽음 기록 실패는 중앙 상세 화면 이동과 원 거래 확인을 막지 않는다.
+- `모두 읽음`은 client가 불러온 page가 아니라 명령이 직렬화된 시점까지 본인에게 공개된 전체 미확인 알림을 처리한다. 반복 개별·전체 읽음은 최초 읽음 시각을 바꾸지 않는 멱등 no-op이다.
+- 읽음 시각은 전달 완료 알림에만 존재하며 보관·삭제 기한, 전달 성공, 행동 가용성이나 원 거래 상태를 바꾸지 않는다. 기능 배포 전에 이미 공개된 알림은 읽음으로 초기화하고 배포 이후 새 전달부터 미확인 개수에 포함한다.
 
 ## 알림 이력 SSE 변경 신호
 
-- 로그인한 일반 사용자는 `GET /api/v1/consumers/me/notification-events`를 consumer Bearer JWT와 Authorization header를 전달할 수 있는 fetch streaming으로 연결한다. `notifications.changed`는 상태 본문이 아니라 본인 알림 이력 HTTP API를 다시 조회하라는 최소 변경 신호다.
+- 로그인한 일반 사용자는 `GET /api/v1/consumers/me/notification-events`를 consumer Bearer JWT와 Authorization header를 전달할 수 있는 fetch streaming으로 연결한다. `notifications.changed`는 상태 본문이 아니라 본인 알림 이력과 미확인 개수 HTTP API를 다시 조회하라는 최소 변경 신호다.
 - 연결 직후와 유효한 `Last-Event-ID` 재연결 뒤 현재 MySQL high-watermark에 결속된 신호를 한 번 보낸다. `id`는 consumer audience·인증 계정·계약 version에 결속된 무결성 보호 opaque cursor이며 client가 해석하거나 수정하지 않는다.
-- 최초 연결·재연결 수렴 신호 뒤의 high-watermark 신호는 새 `IN_APP DELIVERED`가 공개 이력에 보이게 된 경우만 나타낸다. wire frame은 `event: notifications.changed`, opaque `id`, 고정 `data: {}`만 포함하고 계정·알림·목적·상태를 싣지 않으며 필수 빈 줄을 두어 `\n\n`으로 종료한다. 내부 `PENDING`·`FAILED`·`CANCELLED`, provider 상태와 재시도는 공개 신호가 아니다. keepalive comment도 업무 event나 성공 근거가 아니며 cursor를 전진시키지 않는다.
+- 최초 연결·재연결 수렴 신호 뒤의 high-watermark 신호는 새 `IN_APP DELIVERED`가 공개 이력에 보이거나 실제 개별·전체 읽음으로 공개 상태가 바뀐 경우 나타낸다. 반복 읽음 no-op은 신호가 아니다. wire frame은 `event: notifications.changed`, opaque `id`, 고정 `data: {}`만 포함하고 계정·알림·개수·목적·상태를 싣지 않으며 필수 빈 줄을 두어 `\n\n`으로 종료한다. 내부 `PENDING`·`FAILED`·`CANCELLED`, provider 상태와 재시도는 공개 신호가 아니다. keepalive comment도 업무 event나 성공 근거가 아니며 cursor를 전진시키지 않는다.
 - Valkey Pub/Sub은 여러 인스턴스의 wake-up hint일 뿐 재생 원장이나 전달 성공의 근거가 아니다. 신호 중복·역순·유실과 재연결 뒤에도 MySQL 이력 조회로 수렴하며, SSE 실패가 알림 작업이나 원 거래 상태를 변경하지 않는다.
 - 형식이 잘못됐거나 다른 audience·계정에 결속된 `Last-Event-ID`는 공통 `400` JSON 오류 envelope로 거절한다. 연결 한도·heartbeat·timeout·correction interval의 운영 수치는 Runtime과 배포 부하 증거에서 별도로 확정한다.
 - 로컬 배포 검증은 timeout 30초, heartbeat 5초, correction 2초, batch 100, 전체 연결 200, 계정별 연결 6을 시험 입력으로만 사용한다. 이 값은 운영 기본값이나 SLO가 아니며 [SSE Runtime 검증 기록](../performance/sse-runtime-validation.md)의 부하·장애 증거 없이는 승격하지 않는다.
@@ -325,3 +329,4 @@ Reservation·MenuHold·Pickup 기본 목적은 `#247`, 예약 방문 완료·노
 | 2026-08-16 | NOTI-001·NOTI-004·NOTI-006 | Waiting 입장 임박·호출·취소·미응답·입장 완료·매장 마감 종료를 IN_APP 목적에 추가하고 SSE를 후속으로 분리 | 검토 중 | Issue #250 설계 승인, #271·#272 Runtime 병합 확인 |
 | 2026-08-16 | NOTI-004·NOTI-006·NOTI-007 | 예약 전환 중 입장 임박 보류를 작업 version fencing, 상태 사건 기반 재판정과 유한한 주기 재조회로 수렴 | 검토 중 | PR #384 lost-wakeup 리뷰와 Issue #250 보완 설계 승인 |
 | 2026-08-18 | NOTI-004·NOTI-006 | `notifications.changed`를 MySQL 이력 재조회용 최소 SSE 신호로 확정하고 account-bound opaque 재연결 cursor와 Valkey 비원장 경계를 추가 | 검토 중 | Issue #250 SSE 3단계 설계 승인 |
+| 2026-08-20 | NOTI-004·NOTI-006·NOTI-008 | 일반 사용자 알림의 서버 읽음 시각·전체 미확인 집계·웹 헤더 배지와 읽음 변경 SSE 수렴 계약 추가 | 검토 중 | Issue #500 사용자 동작·동시성 설계 승인 |
