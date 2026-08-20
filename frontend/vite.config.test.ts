@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { rewriteKakaoStateCookies } from './vite.config'
+import {
+  portOneBrowserDefines,
+  rewriteKakaoStateCookies,
+} from './vite.config'
 
 describe('rewriteKakaoStateCookies', () => {
   it.each([
@@ -23,5 +26,23 @@ describe('rewriteKakaoStateCookies', () => {
     ]
 
     expect(rewriteKakaoStateCookies(cookies)).toEqual(cookies)
+  })
+})
+
+describe('PortOne browser environment', () => {
+  it('Store ID와 Channel Key만 브라우저 코드에 공개한다', () => {
+    const defines = portOneBrowserDefines({
+      MIRIYUM_PORTONE_STORE_ID: 'store-visible',
+      MIRIYUM_PORTONE_CHANNEL_KEY: 'channel-visible',
+      MIRIYUM_PORTONE_API_SECRET: 'must-not-be-exposed',
+      MIRIYUM_PORTONE_WEBHOOK_SECRET: 'must-not-be-exposed-either',
+    })
+
+    expect(defines).toEqual({
+      'import.meta.env.MIRIYUM_PORTONE_STORE_ID': JSON.stringify('store-visible'),
+      'import.meta.env.MIRIYUM_PORTONE_CHANNEL_KEY':
+        JSON.stringify('channel-visible'),
+    })
+    expect(JSON.stringify(defines)).not.toContain('must-not-be-exposed')
   })
 })

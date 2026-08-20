@@ -20,6 +20,8 @@ import {
   withoutMenus,
   writeDraft,
   type ReservationDraft,
+  type ReservationCreateResult,
+  isReservationRequest,
 } from '../model/draft'
 import { toCreateRecovery, type CreateRecovery } from '../model/errors'
 import { MenuSelectionStep } from './MenuSelectionStep'
@@ -97,20 +99,7 @@ export function ReservationCreatePage() {
     mutation.mutate(
       { body: toCreateRequest(storeId, target), idempotencyKey: attemptKey },
       {
-        onSuccess: (reservation) => {
-          // 계약이 즉시 확정을 정의한다. 다른 상태를 성공으로 표시하지 않는다.
-          if (reservation.status !== 'CONFIRMED') {
-            setRecovery({
-              kind: 'none',
-              message:
-                '예약 결과를 확인하지 못했습니다. 내 예약에서 상태를 확인해 주세요.',
-            })
-            return
-          }
-          void navigate(`/reservations/${reservation.reservationId}/complete`, {
-            replace: true,
-          })
-        },
+        onSuccess: handleCreateSuccess,
         /*
          * 실패해도 멱등 키를 바꾸지 않는다.
          *
@@ -134,13 +123,36 @@ export function ReservationCreatePage() {
     mutation.mutate(
       { body: toCreateRequest(storeId, next), idempotencyKey: key },
       {
-        onSuccess: (reservation) =>
-          void navigate(`/reservations/${reservation.reservationId}/complete`, {
-            replace: true,
-          }),
+        onSuccess: handleCreateSuccess,
         onError: (error) => setRecovery(toCreateRecovery(error)),
       },
     )
+  }
+
+  function handleCreateSuccess(result: ReservationCreateResult) {
+    if (isReservationRequest(result)) {
+      void navigate(
+        CONSUMER_PATHS.reservationRequestPayment.replace(
+          ':reservationRequestId',
+          encodeURIComponent(result.reservationRequestId),
+        ),
+        { replace: true },
+      )
+      return
+    }
+
+    // 계약이 즉시 확정을 정의한다. 다른 상태를 성공으로 표시하지 않는다.
+    if (result.status !== 'CONFIRMED') {
+      setRecovery({
+        kind: 'none',
+        message:
+          '예약 결과를 확인하지 못했습니다. 내 예약에서 상태를 확인해 주세요.',
+      })
+      return
+    }
+    void navigate(`/reservations/${result.reservationId}/complete`, {
+      replace: true,
+    })
   }
 
   const currentDestination = `/stores/${storeId}/reserve?${writeDraft(draft).toString()}`
