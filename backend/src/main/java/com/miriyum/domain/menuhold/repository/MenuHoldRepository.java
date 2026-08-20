@@ -15,6 +15,9 @@ public interface MenuHoldRepository extends JpaRepository<MenuHold, Long> {
     boolean existsByAcquireOperationId(String acquireOperationId);
 
     Optional<MenuHold> findByReservationHoldId(Long reservationHoldId);
+    Optional<MenuHold> findByReservationIdAndReservationHoldIdIsNull(long reservationId);
+    List<MenuHold> findAllByReservationHoldIdIn(List<Long> reservationHoldIds);
+    List<MenuHold> findAllByReservationIdInAndReservationHoldIdIsNull(List<Long> reservationIds);
 
     /** ReservationHold 종결 뒤 임시 MenuHold 루트 행만 비관적 잠금으로 조회한다. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)

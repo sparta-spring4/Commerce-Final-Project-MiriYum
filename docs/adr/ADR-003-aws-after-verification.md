@@ -70,3 +70,12 @@ AWS 배포와 Terraform 구현은 정의된 테스트 게이트를 통과한 뒤
 
 - 운영 토폴로지와 CD source 검증의 상세는 [시스템 아키텍처](../06-system-architecture.md)를 따른다.
 - 승인 gate·비용 태그·종료 체크리스트의 상세는 [품질·운영·규칙](../09-quality-operations-and-rules.md)을 따른다.
+
+## 2026-08-20 날짜별 개정
+
+### 운영 OFF/ON 경계
+
+- 운영 비용 절감 절차는 ECS `miriyum-prod-cluster`의 `miriyum-prod-backend-service` desired count를 `2 ↔ 0`으로 전환하고 RDS `miriyum-prod-mysql`을 `available ↔ stopped`로 전환하는 AWS CLI 절차로 한정한다.
+- 이 절차는 예상 AWS 계정 `579750808837`과 리전 `ap-northeast-2`를 먼저 확인한다. 계정·리전·정확한 ECS task family `miriyum-production-backend`가 일치하지 않으면 중단한다.
+- VPC, subnet, route table, NAT Gateway, Elastic IP, security group, ALB, listener, target group, Route 53, RDS 데이터·백업, ElastiCache Valkey, ECR, Secrets Manager, S3는 조회 전용 영속 리소스다. OFF/ON 절차와 Terraform state에서 수정·삭제·재생성 대상으로 삼지 않는다.
+- Terraform 전체 전환, import, apply, Blue/Green, ECS service 재생성은 계속 제외 범위다. 실제 OFF/ON은 비용·중단 영향이 있으므로 별도 운영 승인 뒤 수동 실행하고, 실행 전후 service 안정화와 RDS 상태를 기록한다.

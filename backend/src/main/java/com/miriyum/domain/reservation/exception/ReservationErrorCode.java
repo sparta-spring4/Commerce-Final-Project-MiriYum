@@ -69,6 +69,11 @@ public enum ReservationErrorCode implements ErrorCode {
             "RESERVATION_013",
             "아직 노쇼를 확정할 수 없습니다."
     ),
+    RESERVATION_MONITORING_UNAVAILABLE(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "RESERVATION_014",
+            "예약 모니터링 원장을 조회할 수 없습니다."
+    ),
     WAITING_SETTING_VERSION_CONFLICT(
             HttpStatus.CONFLICT,
             "WAITING_001",
@@ -153,6 +158,11 @@ public enum ReservationErrorCode implements ErrorCode {
             HttpStatus.CONFLICT,
             "WAITING_017",
             "일행 참여 인원이 등록 인원을 초과합니다."
+    ),
+    WAITING_MONITORING_UNAVAILABLE(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "WAITING_018",
+            "웨이팅 모니터링 원장을 조회할 수 없습니다."
     );
 
     private final HttpStatus httpStatus;

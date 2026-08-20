@@ -8,8 +8,53 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class MenuHoldTest {
+
+    @Test
+    void newHoldStartsAtSourceStatusVersionZero() {
+        assertThat(confirmedHold().getStatusVersion()).isZero();
+        assertThat(temporaryHold().getStatusVersion()).isZero();
+    }
+
+    @Test
+    void transitionAuditSnapshotsLineageAndNextSourceVersion() {
+        MenuHold hold = temporaryHold();
+        ReflectionTestUtils.setField(hold, "id", 99L);
+        MenuHoldStatus before = hold.getStatus();
+        hold.confirmTemporary(101L);
+
+        MenuHoldTransitionAudit audit = MenuHoldTransitionAudit.transition(
+                hold, before, Instant.parse("2026-08-10T03:11:00Z"));
+
+        assertThat(audit.getMenuHold()).isSameAs(hold);
+        assertThat(audit.getMenuHoldId()).isEqualTo(99L);
+        assertThat(audit.getStoreId()).isEqualTo(20L);
+        assertThat(audit.getReservationId()).isEqualTo(101L);
+        assertThat(audit.getReservationHoldId()).isEqualTo(11L);
+        assertThat(audit.getEventType())
+                .isEqualTo(MenuHoldTransitionAudit.EventType.TRANSITION);
+        assertThat(audit.getBeforeStatus()).isEqualTo(MenuHoldStatus.ACTIVE);
+        assertThat(audit.getAfterStatus()).isEqualTo(MenuHoldStatus.CONFIRMED);
+        assertThat(audit.getResultVersion()).isEqualTo(1L);
+        assertThat(audit.getOccurredAt()).isEqualTo(Instant.parse("2026-08-10T03:11:00Z"));
+        assertThat(audit.getItemSnapshots()).containsExactly(
+                new MenuHoldTransitionAudit.ItemSnapshot(40L, "아메리카노", 4));
+    }
+
+    @Test
+    void createdAuditUsesVersionZeroAndHasNoBeforeStatus() {
+        MenuHold hold = confirmedHold();
+
+        MenuHoldTransitionAudit audit = MenuHoldTransitionAudit.created(
+                hold, Instant.parse("2026-08-10T03:00:00Z"));
+
+        assertThat(audit.getEventType()).isEqualTo(MenuHoldTransitionAudit.EventType.CREATED);
+        assertThat(audit.getBeforeStatus()).isNull();
+        assertThat(audit.getAfterStatus()).isEqualTo(MenuHoldStatus.CONFIRMED);
+        assertThat(audit.getResultVersion()).isZero();
+    }
 
     @Test
     void confirmsOneItemPerSelectedMenu() {

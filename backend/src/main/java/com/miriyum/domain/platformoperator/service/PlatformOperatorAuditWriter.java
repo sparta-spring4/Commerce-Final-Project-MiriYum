@@ -75,6 +75,17 @@ public class PlatformOperatorAuditWriter {
                 event.beforeSnapshot(), event.afterSnapshot(), event.correlationId(), clock.instant()));
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    public PlatformOperatorAuditEvent appendRecovery(RecoveryEvent event) {
+        return repository.append(PlatformOperatorAuditEvent.createRecovery(
+                event.context().operatorId(), event.context().authorityVersion(),
+                event.context().roles(), event.context().permissions(), event.action(),
+                event.outcome(), event.reason(), event.targetType(), event.targetId(),
+                event.context().caseType(), event.context().caseId(), event.context().caseVersion(),
+                event.idempotencyKey(), event.beforeSnapshot(), event.afterSnapshot(),
+                event.context().correlationId(), clock.instant()));
+    }
+
     public record StoreEvent(long operatorId, long authorityVersion, Set<PlatformOperatorRole> roles,
                              Set<PlatformOperatorPermission> permissions,
                              PlatformOperatorAuditAction action, PlatformOperatorAuditOutcome outcome,
@@ -85,6 +96,21 @@ public class PlatformOperatorAuditWriter {
                              String correlationId) {
         public StoreEvent { roles=Set.copyOf(roles); permissions=Set.copyOf(permissions);
             beforeSnapshot=Map.copyOf(beforeSnapshot); afterSnapshot=Map.copyOf(afterSnapshot); }
+    }
+
+    public record RecoveryEvent(
+            AdminAuditContext context, PlatformOperatorAuditAction action,
+            PlatformOperatorAuditOutcome outcome, PlatformOperatorAuditReason reason,
+            String targetType, String targetId, String idempotencyKey,
+            Map<String, Object> beforeSnapshot, Map<String, Object> afterSnapshot) {
+        public RecoveryEvent {
+            Objects.requireNonNull(context);
+            Objects.requireNonNull(action);
+            Objects.requireNonNull(outcome);
+            Objects.requireNonNull(reason);
+            beforeSnapshot = Map.copyOf(beforeSnapshot);
+            afterSnapshot = Map.copyOf(afterSnapshot);
+        }
     }
 
     public record ManagementEvent(

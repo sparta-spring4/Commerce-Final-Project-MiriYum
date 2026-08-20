@@ -14,6 +14,14 @@ V40의 역할·직접 권한 grant, 사건 배정과 재인증 승인 원장이 
 
 `GET /api/v1/platform-operators/me`는 JWT claims가 아니라 현재 MySQL role grant와 직접 permission grant를 중앙 `authority_version`으로 다시 검증해 합산한다. 응답은 version·활성 역할·최종 유효 권한만 포함하며 `SUPER_ADMIN`을 전체 catalog 보유자로 확장하지 않는다. 상세 계약은 [현재 플랫폼 운영자 capabilities 명세](specs/platform-operator-capabilities/spec.md)를 따른다.
 
+## 예약·웨이팅 통합 모니터링 공개 경계
+
+Reservation, MenuHold, Payment, Waiting은 각자 변경 참조·제한된 batch·단일 상세를 제공하는 불변 공개 DTO와 읽기 Service를 소유한다. 모든 호출은 통합 계층이 확정한 같은 `asOf`를 받고 `dataThrough`, 원본 `statusVersion`, 완전성, 대사 상태와 이력 경계를 반환한다. 통합 계층은 이 공개 경계만 소비하며 다른 도메인의 Entity·Repository를 직접 참조하지 않는다.
+
+Reservation·Waiting은 사건의 주 원장이고 MenuHold·Payment는 연결 원장이다. 한 원장의 조회 예외는 다른 원장의 결과나 정상 0건으로 변환하지 않는다. 저장 이력으로 요청 시점 상태를 복원할 수 없으면 현재 행으로 추측하지 않고 `UNAVAILABLE` 또는 `DELAYED`로 공개한다. Payment 조회는 저장된 결제·환불·원장만 사용하며 provider를 재호출하지 않고 PG 식별자·거래 ID·결제 키·승인 토큰·결제수단 원문을 노출하지 않는다.
+
+관리자 전용 snapshot이나 projection 테이블은 두지 않는다. #472가 예약한 V64의 MenuHold `status_version`·append-only 전이 원장과 V65의 Payment·Refund store snapshot·append-only monitoring 원장은 원 도메인 이력 보강이다. MenuHold 전이 원장은 부모 aggregate 조인 없이 읽을 수 있는 hold·store·예약 연결·생성 시각·최소 item snapshot을 사건마다 보존하므로 부모 lifecycle이 끝난 뒤에도 요청 `asOf`의 변경·cell·상세를 복원한다. 기존 행의 baseline 이전 시점은 복원 불가 경계로 유지하며, `UNAVAILABLE` cell은 확인되지 않은 원본 상태·version·시각을 null state로 구분한다. 목록에는 민감 주체 정보를 포함하지 않고 상세도 내부 사용자·행위자·감사 사유 원문 없이 최소 상관 ID만 제공한다. HTTP 권한·부분 실패·cursor 계약은 [예약·웨이팅 통합 모니터링 명세](specs/admin-monitoring/spec.md)를 따른다.
+
 ## 회원지원 데이터·API 계약
 
 V44의 복구·제재·이의·추가 승인·감사·mock 확인 원장이 회원지원 사건의 정본이다. 소비자와 식당 운영자 계정의 `support_version` CAS가 복구와 제재의 동시 전이를 직렬화하며, 패자의 사건·일회 승인·감사는 같은 transaction에서 rollback한다. 연락처와 인증 비밀 원문은 신규 원장에 저장하지 않는다. 상세 계약은 [회원지원 기능 명세](specs/member-support/spec.md)와 [OpenAPI](specs/member-support/openapi.yaml)를 따른다.
