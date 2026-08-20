@@ -26,6 +26,10 @@ function renderGuardedAt(route: string) {
           <Routes>
             <Route element={<RequireConsumerAuth />}>
               <Route path="/mypage" element={<p>마이페이지 내용</p>} />
+              <Route
+                path={CONSUMER_PATHS.waitingRegister}
+                element={<p>웨이팅 등록 내용</p>}
+              />
             </Route>
             <Route path={CONSUMER_PATHS.signIn} element={<SignInProbe />} />
           </Routes>
@@ -70,6 +74,19 @@ describe('일반 사용자 보호 route 가드', () => {
     const search = shown.slice(shown.indexOf('?'))
     expect(readReturnTo(search, 'http://localhost')).toBe(
       '/mypage?tab=reservations',
+    )
+  })
+
+  it('웨이팅 등록의 storeId를 로그인 후 복귀 경로에 보존한다', async () => {
+    server.use(unauthenticatedConsumer)
+
+    renderGuardedAt('/stores/store%2F12/waiting')
+
+    await waitFor(() => expect(screen.getByTestId('sign-in')).toBeInTheDocument())
+    const shown = screen.getByTestId('sign-in').textContent ?? ''
+    const search = shown.slice(shown.indexOf('?'))
+    expect(readReturnTo(search, 'http://localhost')).toBe(
+      '/stores/store%2F12/waiting',
     )
   })
 
