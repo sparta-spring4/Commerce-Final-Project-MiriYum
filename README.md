@@ -25,7 +25,7 @@ MiriYum은 일반 사용자가 실제로 이용 가능한 매장과 메뉴를 �
 | `@easyhyeon3232` | 인증·인가와 계정, 마이페이지, 파일 업로드·S3, CI/CD와 AWS 배포·운영 |
 | `@116Lv` | 매장, 메뉴, 운영시간, 검색·추천, 웨이팅 |
 | `@usersy628` | 예약, 결제·예약금·환불, 거래 상태와 데이터 정합성 |
-| `@kera9960` | 메뉴 홀드, 픽업, 메뉴 수량·재고 상태 |
+| `@kera9960` | Kakao 지도 연동, 메뉴 홀드·픽업·메뉴 수량, 알림, k6·성능 검증 |
 
 ## 아키텍처
 
@@ -52,7 +52,7 @@ flowchart LR
 
 ## 핵심 ERD
 
-전체 물리 테이블과 도메인별 ERD는 [전체 스키마 색인과 주요 관계 ERD](docs/erd/README.md)에서 확인할 수 있습니다. 아래는 예약 확정에 필요한 핵심 관계만 축약한 다이어그램입니다.
+아래는 예약 확정에 필요한 핵심 관계를 Flyway 스키마 기준으로 축약한 다이어그램입니다. 전체 물리 ERD 문서는 별도 문서 PR에서 관리합니다.
 
 ```mermaid
 erDiagram
@@ -63,7 +63,7 @@ erDiagram
     STORES ||--o{ RESERVATIONS : receives
     RESERVATIONS ||--o{ RESERVATION_CAPACITY_ALLOCATIONS : allocates
     RESERVATION_CAPACITY_BUCKETS ||--o{ RESERVATION_CAPACITY_ALLOCATIONS : consumed_by
-    RESERVATIONS ||--o{ MENU_HOLDS : may_have
+    RESERVATIONS ||--o| MENU_HOLDS : may_have
     MENU_HOLDS ||--o{ MENU_HOLD_ITEMS : contains
     MENUS ||--o{ MENU_HOLD_ITEMS : selected
 ```
@@ -131,7 +131,7 @@ erDiagram
 ├── backend/                 # Spring Boot API, 도메인, Flyway migration, backend test
 ├── frontend/                # React 화면, OpenAPI 생성 타입, frontend test
 ├── deploy/                  # local Compose, staging CD, Nginx와 운영 배포 구성
-├── infra/terraform/         # AWS VPC, ECS, ALB, RDS, Valkey, DNS 인프라 정의
+├── infra/terraform/         # 승인된 운영 인프라의 시작·종료 보조 스크립트
 ├── docs/
 │   ├── specs/               # 기능별 OpenAPI와 인수 조건
 │   ├── service-policies/    # 서비스 정책 정본
@@ -178,7 +178,7 @@ pnpm run dev
 | --- | --- | --- |
 | 인증 | `POST /api/v1/consumers/auth/sessions`<br>`POST /api/v1/consumers/auth/token-refreshes` | 일반 사용자 로그인과 Refresh Token 회전 |
 | 매장 탐색 | `GET /api/v1/stores`<br>`GET /api/v1/stores/{storeId}/menus` | 공개 매장·메뉴 목록, 검색 조건과 노출 정보 조회 |
-| 예약 | `POST /api/v1/consumers/me/reservation-requests`<br>`POST /api/v1/consumers/me/reservation-requests/{reservationRequestId}/finalizations` | 예약 요청 후 수용량·메뉴 홀드를 확인해 최종 확정 |
+| 예약 | `POST /api/v1/consumers/me/reservations`<br>`POST /api/v1/consumers/me/reservation-requests/{reservationRequestId}/finalizations` | 예약을 생성하고, 예약금이 필요한 경우 생성 응답의 request를 결제 확인 뒤 최종 확정 |
 | 매장 운영 | `POST /api/v1/store-operators/stores`<br>`POST /api/v1/store-operators/stores/{storeId}/menus` | 운영자 본인 매장 등록과 메뉴 관리 |
 | 웨이팅 | `GET /api/v1/store-operators/stores/{storeId}/waiting-teams`<br>`POST /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/calls` | 매장 운영자의 웨이팅 대기열 조회와 호출 상태 전이 |
 
@@ -190,7 +190,6 @@ pnpm run dev
 - [서비스 정책](docs/service-policies/README.md)
 - [아키텍처 결정 기록](docs/adr/)
 - [기능별 OpenAPI와 인수 조건](docs/specs/)
-- [전체 스키마 색인과 주요 관계 ERD](docs/erd/README.md)
 - [배포 및 운영 런북](docs/deployment/)
 - [기여 가이드](CONTRIBUTING.md)
 
