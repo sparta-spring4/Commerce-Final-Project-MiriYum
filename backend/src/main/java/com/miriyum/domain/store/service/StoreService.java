@@ -118,6 +118,16 @@ public class StoreService {
         return ManagedStoreResponse.from(loadManagedStore(operatorAccountId, storeId));
     }
 
+    @Transactional(readOnly = true)
+    public List<ManagedStoreResponse> getManagedStores(long operatorAccountId) {
+        operatorAccountService.getMe(operatorAccountId);
+        return storeRepository
+                .findAllByStoreOperatorAccountIdOrderByIdAsc(operatorAccountId)
+                .stream()
+                .map(ManagedStoreResponse::from)
+                .toList();
+    }
+
     public StoreCommandResult update(
             long operatorAccountId,
             long storeId,

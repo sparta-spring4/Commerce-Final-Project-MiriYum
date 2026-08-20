@@ -63,4 +63,3 @@ class RefreshTokenRiskEventSchedulingConfigTest {
                         assertThat(context).doesNotHaveBean("refreshTokenRiskEventTaskScheduler"));
     }
 }
-
