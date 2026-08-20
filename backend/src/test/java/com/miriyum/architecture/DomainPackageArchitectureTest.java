@@ -101,6 +101,21 @@ class DomainPackageArchitectureTest {
     }
 
     @Test
+    void adminMonitoringUsesOnlyPublishedForeignMonitoringContracts() {
+        List<SourceFile> monitoring = javaSources().stream()
+                .filter(source -> source.relativePath().startsWith("platformoperator/adminmonitoring/"))
+                .toList();
+
+        assertThat(monitoring).isNotEmpty();
+        assertThat(monitoring.stream()
+                .flatMap(source -> source.imports().stream())
+                .filter(imported -> imported.startsWith(DOMAIN_PREFIX))
+                .filter(imported -> !topLevelDomain(imported).equals("platformoperator")))
+                .allMatch(imported -> imported.endsWith("MonitoringContracts")
+                        || imported.endsWith("MonitoringQueryService"));
+    }
+
+    @Test
     void persistentTypesAreDetectedFromDeclarations() {
         assertThat(persistentTypeNames(javaSources()))
                 .contains(

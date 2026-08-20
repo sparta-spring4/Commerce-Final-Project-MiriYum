@@ -125,6 +125,25 @@ class StoreRepositoryIT {
     }
 
     @Test
+    @DisplayName("현재 운영자가 소유한 매장만 ID 오름차순으로 조회한다")
+    void findsOwnedStoresInIdOrder() {
+        long ownerId = createOperator("owner@example.com");
+        long otherId = createOperator("other@example.com");
+        Store first = storeRepository.saveAndFlush(
+                store(ownerId, "1234567890", Set.of()));
+        Store second = storeRepository.saveAndFlush(
+                store(ownerId, "1234567891", Set.of()));
+        storeRepository.saveAndFlush(
+                store(otherId, "1234567892", Set.of()));
+
+        List<Store> stores =
+                storeRepository.findAllByStoreOperatorAccountIdOrderByIdAsc(ownerId);
+
+        assertThat(stores).extracting(Store::getId)
+                .containsExactly(first.getId(), second.getId());
+    }
+
+    @Test
     @DisplayName("같은 활성 사업자등록번호는 DB 유일 제약으로 한 건만 저장된다")
     void duplicateActiveBusinessNumberIsRejected() {
         long firstOperator = createOperator("first@example.com");

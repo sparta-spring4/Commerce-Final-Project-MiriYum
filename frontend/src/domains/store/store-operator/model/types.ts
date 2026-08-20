@@ -18,6 +18,7 @@ export type EditableOperationStatus =
   components['schemas']['EditableOperationStatus']
 export type CatalogItem = components['schemas']['CatalogItem']
 export type CatalogCode = components['schemas']['CatalogCode']
+export type PublicImage = components['schemas']['PublicImage']
 
 export type DayOfWeek = components['schemas']['DailySchedule']['dayOfWeek']
 export type TimeRange = components['schemas']['TimeRange']

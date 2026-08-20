@@ -28,7 +28,10 @@ ReservationHold가 최종 Reservation으로 전환돼도 공개 case ID는 바�
 - 선택 필터: `storeId`, `caseTypes`, `lifecycleStatuses`, 원장-qualified `sourceStatuses`, `reconciliationStatuses`
 - 크기: 기본 20, 1~100
 - 고정 정렬: `statusChangedAt DESC`, `caseType ASC`, `caseId DESC`
-- cursor: 계약 version, key ID, 첫 페이지 `asOf`, 정규화 필터 지문과 마지막 평가 후보의 seek tuple을 HMAC으로 보호한다.
+- 변경 후보는 Reservation·Waiting·MenuHold·Payment 네 공개 change stream을 병합하며, 연결 원장만 변경된 사건도 포함한다.
+- 첫 페이지 `asOf`는 `changedTo`로 고정한다. 따라서 네 원장의 batch snapshot은 조회 구간 끝의 동일 상태를 사용하고, 사건의 조회 구간 내 최신 변경 tuple을 재구성할 수 있다.
+- cursor: 계약 version, key ID, 첫 페이지 `asOf`, 정규화 필터 지문, 마지막 전역 tuple과 네 원장별 seek tuple만 HMAC으로 보호한다. 이전 페이지의 사건 ID 집합을 누적하지 않는다.
+- source page가 현재 출력 경계와 같은 `statusChangedAt`에서 끝나면 다음 source page를 보충한 뒤 전역 `caseType ASC` 경계를 확정한다. 원장별 최대 10 page·1,000 reference까지만 읽으며 그 안에서 경계를 확정하지 못하면 해당 원장을 명시적 failure로 표시하고 cursor를 발급하지 않는다.
 
 ### 상세
 
@@ -38,11 +41,11 @@ ReservationHold가 최종 Reservation으로 전환돼도 공개 case ID는 바�
 
 ## 상태와 기준 시각
 
-- 통합 계층은 첫 페이지에서 `asOf` 하나를 확정하고 모든 공개 원 도메인 Service에 그대로 전달한다.
+- 통합 계층은 첫 페이지에서 `asOf=changedTo` 하나를 확정하고 모든 공개 원 도메인 Service에 그대로 전달한다.
 - 후속 페이지는 cursor에 포함된 같은 `asOf`를 사용한다.
 - 각 원장 cell은 `source`, 원본 `sourceStatus`, 원본 `statusVersion`, `statusChangedAt`, `asOf`, `dataThrough`, `completeness`, `reconciliationStatus`를 독립적으로 보존한다.
 - `dataThrough < asOf`이면 `DELAYED`다. 이를 최신 확정 상태로 승격하지 않는다.
-- 사건 배정용 `caseVersion`은 주 원장의 원본 version에 1을 더한 양수다.
+- 응답 `caseVersion`은 요청한 `asOf` 주 원장의 원본 version에 1을 더한 양수다. 상세 배정 검증은 이 snapshot version과 분리해 현재 시점 주 원장의 version을 사용한다.
 - lifecycle과 reconciliation은 별도 축이다. 한 원장의 실패·대사 필요가 다른 원장의 lifecycle을 덮어쓰지 않는다.
 
 ## 부분 실패
@@ -68,7 +71,7 @@ ReservationHold가 최종 Reservation으로 전환돼도 공개 case ID는 바�
 - 상세 사건 배정 없음·만료·version 불일치: 403
 - 별도 비밀번호 재인증과 업무 감사 event 쓰기는 하지 않는다.
 - 목록에는 이름, 전화번호, 이메일, 결제수단, 내부 사용자 ID가 없다.
-- 상세도 `maskingLevel=MINIMIZED`이며 원 도메인이 제공한 마스킹 값만 사용한다.
+- 상세도 `maskingLevel=MINIMIZED`이며 현재 공개 source 계약에 identity 표시값이 없으므로 subject를 반환하지 않는다.
 - PG 원문, 승인 토큰, 결제 키, provider transaction ID와 마스킹 해제 옵션은 없다.
 
 ## 저장과 의존성 경계
@@ -81,9 +84,9 @@ ReservationHold가 최종 Reservation으로 전환돼도 공개 case ID는 바�
 - V65 baseline 이전 `asOf`는 현재 Payment·Refund 행으로 역추정하지 않으며, 확인된 상태가 없는 ledger cell의 `state`는 null이다.
 - Payment detail의 ledger·refund 이력은 각각 최대 100건이며 초과 여부를 truncation metadata로 보존한다.
 
-## 선행 계약 단계
+## 런타임 활성화
 
-현재 OpenAPI의 두 path item은 `x-miriyum-runtime-status: contract-only`다. 네 원 도메인의 공개 조회 계약 PR이 `dev`에 병합된 후 runtime PR에서 Controller·권한·부분 실패 테스트를 구현하고 이 표식을 제거한다.
+네 원 도메인의 공개 조회 계약이 `dev`에 병합되어 두 path는 runtime-active다. Controller와 조합 service는 플랫폼 운영자와 admin-monitoring feature flag가 모두 켜진 경우에만 등록된다.
 
 ## 인수 조건
 
