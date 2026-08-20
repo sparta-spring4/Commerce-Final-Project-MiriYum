@@ -38,7 +38,19 @@ function Wait-ForRdsStatus([string]$ExpectedStatus) {
   throw "RDS did not reach $ExpectedStatus within $TimeoutSeconds seconds."
 }
 
-function Restore-BackendAutoScaling {
+function Restore-BackendAutoScalingCapacity {
+  aws application-autoscaling register-scalable-target `
+    --service-namespace ecs `
+    --resource-id "service/$Cluster/$Service" `
+    --scalable-dimension ecs:service:DesiredCount `
+    --min-capacity $AutoscalingMinCapacity `
+    --max-capacity $AutoscalingMaxCapacity `
+    --suspended-state DynamicScalingInSuspended=true,DynamicScalingOutSuspended=true,ScheduledScalingSuspended=true `
+    --region $Region | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "ECS Auto Scaling capacity restoration failed." }
+}
+
+function Resume-BackendAutoScaling {
   aws application-autoscaling register-scalable-target `
     --service-namespace ecs `
     --resource-id "service/$Cluster/$Service" `
@@ -47,7 +59,7 @@ function Restore-BackendAutoScaling {
     --max-capacity $AutoscalingMaxCapacity `
     --suspended-state DynamicScalingInSuspended=false,DynamicScalingOutSuspended=false,ScheduledScalingSuspended=false `
     --region $Region | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "ECS Auto Scaling restoration failed." }
+  if ($LASTEXITCODE -ne 0) { throw "ECS Auto Scaling resume failed." }
 }
 
 Assert-AwsContext
@@ -67,10 +79,11 @@ elseif ($rdsStatus -notin @("available", "starting")) {
 }
 Wait-ForRdsStatus "available"
 
-Restore-BackendAutoScaling
+Restore-BackendAutoScalingCapacity
 aws ecs update-service --cluster $Cluster --service $Service --desired-count 2 --region $Region | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "ECS desired count update failed." }
 aws ecs wait services-stable --cluster $Cluster --services $Service --region $Region
 if ($LASTEXITCODE -ne 0) { throw "ECS service did not stabilize." }
+Resume-BackendAutoScaling
 
 Write-Host "Production compute is up. Confirm ALB target health before accepting traffic." -ForegroundColor Green

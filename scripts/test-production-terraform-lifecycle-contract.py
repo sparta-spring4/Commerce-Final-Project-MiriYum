@@ -67,12 +67,25 @@ class ProductionTerraformLifecycleContractTest(unittest.TestCase):
 
         self.assertIn("Suspend-BackendAutoScaling\naws ecs update-service", source)
 
-    def test_up_restores_scaling_after_database_is_available(self) -> None:
+    def test_up_restores_capacity_before_service_then_resumes_scaling(self) -> None:
         source = UP_SCRIPT.read_text(encoding="utf-8")
+        execution = source.split('Wait-ForRdsStatus "available"\n\n', 1)[1]
 
         self.assertIn(
-            'Wait-ForRdsStatus "available"\n\nRestore-BackendAutoScaling\naws ecs update-service',
-            source,
+            'Restore-BackendAutoScalingCapacity\naws ecs update-service',
+            execution,
+        )
+        self.assertLess(
+            execution.index("Restore-BackendAutoScalingCapacity"),
+            execution.index("aws ecs update-service"),
+        )
+        self.assertLess(
+            execution.index("aws ecs update-service"),
+            execution.index("Resume-BackendAutoScaling"),
+        )
+        self.assertLess(
+            execution.index("Resume-BackendAutoScaling"),
+            execution.index('Write-Host "Production compute is up.'),
         )
 
     def test_autoscaling_does_not_take_persistent_infrastructure_ownership(self) -> None:
