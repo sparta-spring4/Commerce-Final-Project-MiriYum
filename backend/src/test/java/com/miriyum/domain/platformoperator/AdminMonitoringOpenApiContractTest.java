@@ -18,7 +18,7 @@ class AdminMonitoringOpenApiContractTest {
             "/api/v1/platform-operators/monitoring-cases/{caseType}/{caseId}";
 
     @Test
-    void monitoringPathsAreContractOnlyPlatformOperatorRoutes() throws Exception {
+    void monitoringPathsAreRuntimeActivePlatformOperatorRoutes() throws Exception {
         Map<String, Object> featurePaths = paths("admin-monitoring/openapi.yaml");
         Map<String, Object> audiencePaths = paths("platform-operator-openapi.yaml");
 
@@ -33,8 +33,8 @@ class AdminMonitoringOpenApiContractTest {
 
         for (String path : List.of(LIST, DETAIL)) {
             Map<String, Object> pathItem = map(featurePaths.get(path));
-            assertThat(pathItem).containsEntry("x-miriyum-runtime-status", "contract-only")
-                    .containsEntry("x-miriyum-owner-issue", 280);
+            assertThat(pathItem).doesNotContainKeys(
+                    "x-miriyum-runtime-status", "x-miriyum-owner-issue");
             Map<String, Object> get = map(pathItem.get("get"));
             assertThat(map(get.get("responses")).keySet())
                     .contains("200", "400", "401", "403", "404", "503");
@@ -81,10 +81,17 @@ class AdminMonitoringOpenApiContractTest {
         assertThat(list(map(map(ledger.get("properties")).get("state")).get("oneOf")))
                 .anySatisfy(candidate -> assertThat(map(candidate))
                         .containsEntry("type", "null"));
+        assertThat(map(ledgerState.get("properties")).keySet())
+                .contains("amountMinor", "refundedAmountMinor", "currency")
+                .doesNotContain("paymentId", "paymentKey", "providerTransactionId");
 
         Map<String, Object> failure = map(schemas.get("AdminMonitoringDependencyFailure"));
         assertThat(list(failure.get("required")))
                 .containsExactlyInAnyOrder("source", "errorCode", "retryable");
+
+        Map<String, Object> transition = map(schemas.get("AdminMonitoringTransition"));
+        assertThat(list(transition.get("required"))).contains("eventType");
+        assertThat(map(transition.get("properties"))).containsKey("eventType");
 
         Map<String, Object> detail = map(schemas.get("AdminMonitoringCaseDetail"));
         assertThat(list(detail.get("required")))
@@ -92,7 +99,9 @@ class AdminMonitoringOpenApiContractTest {
         assertThat(map(map(detail.get("properties")).get("maskingLevel")))
                 .containsEntry("enum", List.of("MINIMIZED"));
         assertThat(map(detail.get("properties")).keySet())
-                .doesNotContain("rawName", "rawPhone", "rawEmail", "paymentKey", "providerTransactionId");
+                .contains("menuItems", "paymentLedger", "paymentLedgerTruncated", "refunds", "refundsTruncated")
+                .doesNotContain("rawName", "rawPhone", "rawEmail", "paymentId", "paymentKey",
+                        "providerTransactionId");
     }
 
     @Test
@@ -127,6 +136,11 @@ class AdminMonitoringOpenApiContractTest {
             assertThat(map(map(example).get("value")).keySet())
                     .containsExactlyInAnyOrder("code", "message");
         }
+        assertThat(examples.values().stream()
+                .map(AdminMonitoringOpenApiContractTest::map)
+                .map(example -> map(example.get("value")))
+                .map(value -> value.get("code")))
+                .containsExactlyInAnyOrder("MONITORING_001", "MONITORING_002", "MONITORING_003");
     }
 
     private static String reference(Map<String, Object> paths, String path) {

@@ -10,6 +10,7 @@ import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -51,6 +52,15 @@ public class StoreController {
         return ApiResponse.success(
                 "조회되었습니다.",
                 storeService.getManagedStore(principal.accountId(), storeId));
+    }
+
+    @GetMapping
+    public ApiResponse<List<ManagedStoreResponse>> list(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal
+    ) {
+        return ApiResponse.success(
+                "조회되었습니다.",
+                storeService.getManagedStores(principal.accountId()));
     }
 
     @PatchMapping("/{storeId}")

@@ -40,7 +40,10 @@ public class PortOnePaymentClient implements PaymentProviderClient {
     public ProviderPayment getPayment(String portOnePaymentId) {
         try {
             String body = restClient.get()
-                    .uri("/payments/{paymentId}", portOnePaymentId)
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/payments/{paymentId}")
+                            .queryParam("storeId", settings.getPortone().requireStoreId())
+                            .build(portOnePaymentId))
                     .header(HttpHeaders.AUTHORIZATION,
                             "PortOne " + settings.getPortone().requireApiSecret())
                     .retrieve()

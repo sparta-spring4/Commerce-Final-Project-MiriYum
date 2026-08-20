@@ -51,10 +51,11 @@ class PortOnePaymentClientTest {
     }
 
     @Test
-    @DisplayName("PortOne V2 결제 단건 조회는 취소 marker와 상태·금액을 core snapshot으로 반환한다")
+    @DisplayName("PortOne V2 결제 단건 조회는 configured 상점에서 core snapshot을 반환한다")
     void getsVerifiedPaymentSnapshot() {
         server.expect(requestTo(
-                        "https://api.portone.test/payments/payment-reservation-900000000000000001"))
+                        "https://api.portone.test/payments/payment-reservation-900000000000000001"
+                                + "?storeId=store-1"))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header("Authorization", "PortOne test-api-secret"))
                 .andRespond(withSuccess("""
@@ -139,7 +140,8 @@ class PortOnePaymentClientTest {
     @DisplayName("PortOne 5xx는 성공이나 실패로 단정하지 않고 불명확 결과로 전달한다")
     void mapsProvider5xxToUnavailableResult() {
         server.expect(requestTo(
-                        "https://api.portone.test/payments/payment-reservation-900000000000000001"))
+                        "https://api.portone.test/payments/payment-reservation-900000000000000001"
+                                + "?storeId=store-1"))
                 .andRespond(withServerError());
 
         assertThatThrownBy(() -> client.getPayment(
@@ -152,7 +154,8 @@ class PortOnePaymentClientTest {
     @DisplayName("PortOne 결제 조회의 malformed 또는 빈 2xx 응답은 결과 불명으로 변환한다")
     void mapsInvalidPaymentResponseToUnavailableResult(String responseBody) {
         server.expect(requestTo(
-                        "https://api.portone.test/payments/payment-reservation-900000000000000001"))
+                        "https://api.portone.test/payments/payment-reservation-900000000000000001"
+                                + "?storeId=store-1"))
                 .andRespond(withSuccess(responseBody, MediaType.APPLICATION_JSON));
 
         assertThatThrownBy(() -> client.getPayment(
@@ -184,7 +187,8 @@ class PortOnePaymentClientTest {
     @DisplayName("PAID 응답의 transactionId 누락 또는 공백은 결과 불명으로 변환한다")
     void requiresTransactionIdForPaidPayment(String transactionField) {
         server.expect(requestTo(
-                        "https://api.portone.test/payments/payment-reservation-900000000000000001"))
+                        "https://api.portone.test/payments/payment-reservation-900000000000000001"
+                                + "?storeId=store-1"))
                 .andRespond(withSuccess("""
                         {
                           "status": "PAID",
@@ -205,7 +209,8 @@ class PortOnePaymentClientTest {
     @DisplayName("PortOne 취소 이력의 marker reason 누락은 추정하지 않고 결과 불명으로 변환한다")
     void rejectsCancellationSnapshotWithoutReasonMarker() {
         server.expect(requestTo(
-                        "https://api.portone.test/payments/payment-reservation-900000000000000001"))
+                        "https://api.portone.test/payments/payment-reservation-900000000000000001"
+                                + "?storeId=store-1"))
                 .andRespond(withSuccess("""
                         {
                           "status": "PARTIAL_CANCELLED",
@@ -254,6 +259,7 @@ class PortOnePaymentClientTest {
             String baseUrl = "http://127.0.0.1:" + hangingServer.getAddress().getPort();
             PaymentSettings timeoutSettings = new PaymentSettings();
             timeoutSettings.getPortone().setApiSecret("test-api-secret");
+            timeoutSettings.getPortone().setStoreId("store-1");
             timeoutSettings.getPortone().setBaseUrl(baseUrl);
             timeoutSettings.getPortone().setTimeoutPolicyVersion("portone-v2-v1");
             timeoutSettings.getPortone().setConnectTimeout(Duration.ofMillis(100));
