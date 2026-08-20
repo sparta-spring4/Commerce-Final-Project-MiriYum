@@ -167,7 +167,10 @@ components:
       name: cursor
       in: query
       required: false
-      description: asOf, 필터 지문과 Reservation·Waiting·MenuHold·Payment별 seek를 HMAC으로 보호한 문자열
+      description: >-
+        asOf=changedTo, 필터 지문, 마지막 전역 정렬 tuple과
+        Reservation·Waiting·MenuHold·Payment별 seek만 HMAC으로 보호한 고정 크기 문자열.
+        이전 페이지 사건 ID는 누적하지 않는다.
       schema:
         type: string
         minLength: 1
@@ -238,6 +241,7 @@ components:
         asOf:
           type: string
           format: date-time
+          description: 첫 페이지 changedTo로 고정되어 후속 cursor 페이지까지 유지되는 기준 시각
         dataThrough:
           type: string
           format: date-time

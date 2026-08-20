@@ -29,7 +29,9 @@ ReservationHold가 최종 Reservation으로 전환돼도 공개 case ID는 바�
 - 크기: 기본 20, 1~100
 - 고정 정렬: `statusChangedAt DESC`, `caseType ASC`, `caseId DESC`
 - 변경 후보는 Reservation·Waiting·MenuHold·Payment 네 공개 change stream을 병합하며, 연결 원장만 변경된 사건도 포함한다.
-- cursor: 계약 version, key ID, 첫 페이지 `asOf`, 정규화 필터 지문과 네 원장별 seek tuple을 HMAC으로 보호한다.
+- 첫 페이지 `asOf`는 `changedTo`로 고정한다. 따라서 네 원장의 batch snapshot은 조회 구간 끝의 동일 상태를 사용하고, 사건의 조회 구간 내 최신 변경 tuple을 재구성할 수 있다.
+- cursor: 계약 version, key ID, 첫 페이지 `asOf`, 정규화 필터 지문, 마지막 전역 tuple과 네 원장별 seek tuple만 HMAC으로 보호한다. 이전 페이지의 사건 ID 집합을 누적하지 않는다.
+- source page가 현재 출력 경계와 같은 `statusChangedAt`에서 끝나면 다음 source page를 보충한 뒤 전역 `caseType ASC` 경계를 확정한다. 원장별 최대 10 page·1,000 reference까지만 읽으며 그 안에서 경계를 확정하지 못하면 해당 원장을 명시적 failure로 표시하고 cursor를 발급하지 않는다.
 
 ### 상세
 
@@ -39,7 +41,7 @@ ReservationHold가 최종 Reservation으로 전환돼도 공개 case ID는 바�
 
 ## 상태와 기준 시각
 
-- 통합 계층은 첫 페이지에서 `asOf` 하나를 확정하고 모든 공개 원 도메인 Service에 그대로 전달한다.
+- 통합 계층은 첫 페이지에서 `asOf=changedTo` 하나를 확정하고 모든 공개 원 도메인 Service에 그대로 전달한다.
 - 후속 페이지는 cursor에 포함된 같은 `asOf`를 사용한다.
 - 각 원장 cell은 `source`, 원본 `sourceStatus`, 원본 `statusVersion`, `statusChangedAt`, `asOf`, `dataThrough`, `completeness`, `reconciliationStatus`를 독립적으로 보존한다.
 - `dataThrough < asOf`이면 `DELAYED`다. 이를 최신 확정 상태로 승격하지 않는다.

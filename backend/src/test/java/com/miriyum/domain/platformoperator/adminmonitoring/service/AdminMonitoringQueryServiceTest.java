@@ -12,6 +12,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.willAnswer;
 import static org.mockito.BDDMockito.willReturn;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.mock;
@@ -41,6 +42,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -121,6 +123,168 @@ class AdminMonitoringQueryServiceTest {
     }
 
     @Test
+    void fixesTheFirstPageSnapshotAtChangedToInsteadOfRequestTime() {
+        Instant changedTo = NOW.minusSeconds(60);
+        ListQuery query = new ListQuery(
+                "7", Set.of(RESERVATION, WAITING), Set.of(), Set.of(), Set.of(),
+                NOW.minus(Duration.ofDays(1)), changedTo, 20, null);
+
+        CasePage page = service.list(PRINCIPAL, query);
+
+        assertThat(page.asOf()).isEqualTo(changedTo);
+        ArgumentCaptor<ReservationMonitoringContracts.ChangeQuery> reservation =
+                ArgumentCaptor.forClass(ReservationMonitoringContracts.ChangeQuery.class);
+        ArgumentCaptor<WaitingMonitoringContracts.ChangeQuery> waiting =
+                ArgumentCaptor.forClass(WaitingMonitoringContracts.ChangeQuery.class);
+        ArgumentCaptor<MenuHoldMonitoringContracts.ChangeQuery> menu =
+                ArgumentCaptor.forClass(MenuHoldMonitoringContracts.ChangeQuery.class);
+        ArgumentCaptor<PaymentMonitoringContracts.ChangeQuery> payment =
+                ArgumentCaptor.forClass(PaymentMonitoringContracts.ChangeQuery.class);
+        then(reservations).should().findChangedCases(reservation.capture());
+        then(waitings).should().findChangedCases(waiting.capture());
+        then(menuHolds).should().findChangedCases(menu.capture());
+        then(payments).should().findChangedCases(payment.capture());
+        assertThat(List.of(
+                reservation.getValue().asOf(), waiting.getValue().asOf(),
+                menu.getValue().asOf(), payment.getValue().asOf()))
+                .containsOnly(changedTo);
+    }
+
+    @Test
+    void refillsAFullPaymentTieBeforeChoosingTheGlobalCaseTypeBoundary() {
+        List<PaymentMonitoringContracts.CaseReference> firstPaymentPage =
+                IntStream.rangeClosed(101, 200)
+                        .mapToObj(index -> new PaymentMonitoringContracts.CaseReference(
+                                "waiting:" + index, CHANGED))
+                        .toList();
+        willAnswer(invocation -> {
+            var change = invocation.getArgument(0, PaymentMonitoringContracts.ChangeQuery.class);
+            return change.after() == null
+                    ? new PaymentMonitoringContracts.ReferencePage(firstPaymentPage, NOW, NOW)
+                    : new PaymentMonitoringContracts.ReferencePage(
+                            List.of(new PaymentMonitoringContracts.CaseReference(
+                                    "reservation:999", CHANGED)), NOW, NOW);
+        }).given(payments).findChangedCases(any());
+        willAnswer(invocation -> {
+            var batch = invocation.getArgument(0, ReservationMonitoringContracts.BatchQuery.class);
+            return new ReservationMonitoringContracts.BatchResult(
+                    batch.caseIds().stream().map(AdminMonitoringQueryServiceTest::reservationSnapshot).toList(),
+                    NOW, NOW);
+        }).given(reservations).findCases(any());
+        willAnswer(invocation -> {
+            var batch = invocation.getArgument(0, WaitingMonitoringContracts.BatchQuery.class);
+            return new WaitingMonitoringContracts.BatchResult(
+                    batch.caseIds().stream().map(AdminMonitoringQueryServiceTest::waitingCell).toList(),
+                    NOW, NOW);
+        }).given(waitings).findCases(any());
+        willAnswer(invocation -> {
+            var batch = invocation.getArgument(0, PaymentMonitoringContracts.BatchQuery.class);
+            return paymentBatch(batch.caseIds(), CHANGED);
+        }).given(payments).findCases(any());
+
+        CasePage page = service.list(PRINCIPAL, query(1));
+
+        assertThat(page.items()).extracting(item -> item.caseId())
+                .containsExactly("reservation:999");
+        then(payments).should(times(2)).findChangedCases(any());
+    }
+
+    @Test
+    void reportsPartialWithoutCursorWhenTheTieExceedsTheBoundedSourceScan() {
+        AtomicInteger pages = new AtomicInteger();
+        willAnswer(invocation -> {
+            int page = pages.getAndIncrement();
+            List<PaymentMonitoringContracts.CaseReference> references =
+                    IntStream.rangeClosed(1, 100)
+                            .mapToObj(index -> new PaymentMonitoringContracts.CaseReference(
+                                    "waiting:" + (page * 100 + index), CHANGED))
+                            .toList();
+            return new PaymentMonitoringContracts.ReferencePage(references, NOW, NOW);
+        }).given(payments).findChangedCases(any());
+        willAnswer(invocation -> {
+            var batch = invocation.getArgument(0, WaitingMonitoringContracts.BatchQuery.class);
+            return new WaitingMonitoringContracts.BatchResult(
+                    batch.caseIds().stream().map(AdminMonitoringQueryServiceTest::waitingCell).toList(),
+                    NOW, NOW);
+        }).given(waitings).findCases(any());
+        willAnswer(invocation -> {
+            var batch = invocation.getArgument(0, PaymentMonitoringContracts.BatchQuery.class);
+            return paymentBatch(batch.caseIds(), CHANGED);
+        }).given(payments).findCases(any());
+
+        ListQuery filtered = new ListQuery(
+                "7", Set.of(RESERVATION, WAITING), Set.of(), Set.of("PAYMENT:PAID"), Set.of(),
+                NOW.minus(Duration.ofDays(1)), NOW, 1, null);
+
+        CasePage page = service.list(PRINCIPAL, filtered);
+
+        assertThat(page.items()).singleElement().satisfies(item ->
+                assertThat(item.ledgers()).filteredOn(ledger -> ledger.source().name().equals("PAYMENT"))
+                        .singleElement().satisfies(ledger -> {
+                            assertThat(ledger.present()).isTrue();
+                            assertThat(ledger.completeness().name()).isEqualTo("COMPLETE");
+                        }));
+        assertThat(page.completeness()).isEqualTo(PARTIAL);
+        assertThat(page.nextCursor()).isNull();
+        assertThat(page.failures()).singleElement().satisfies(failure -> {
+            assertThat(failure.source().name()).isEqualTo("PAYMENT");
+            assertThat(failure.errorCode()).isEqualTo("MONITORING_005");
+        });
+        then(payments).should(times(10)).findChangedCases(any());
+    }
+
+    @Test
+    void suppressesAnOlderCrossSourceDuplicateWithoutCursorIdHistory() {
+        Instant paymentChanged = NOW.minusSeconds(5);
+        Instant secondReservationChanged = NOW.minusSeconds(10);
+        Instant duplicateReservationChanged = NOW.minusSeconds(20);
+        willReturn(new ReservationMonitoringContracts.ReferencePage(
+                List.of(
+                        new ReservationMonitoringContracts.CaseReference(
+                                "reservation:2", "7", secondReservationChanged),
+                        new ReservationMonitoringContracts.CaseReference(
+                                "reservation:1", "7", duplicateReservationChanged)),
+                NOW, NOW)).given(reservations).findChangedCases(any());
+        willAnswer(invocation -> {
+            var change = invocation.getArgument(0, PaymentMonitoringContracts.ChangeQuery.class);
+            return new PaymentMonitoringContracts.ReferencePage(
+                    change.after() == null
+                            ? List.of(new PaymentMonitoringContracts.CaseReference(
+                                    "reservation:1", paymentChanged))
+                            : List.of(),
+                    NOW, NOW);
+        }).given(payments).findChangedCases(any());
+        willAnswer(invocation -> {
+            var batch = invocation.getArgument(0, ReservationMonitoringContracts.BatchQuery.class);
+            return new ReservationMonitoringContracts.BatchResult(
+                    batch.caseIds().stream().map(AdminMonitoringQueryServiceTest::reservationSnapshot).toList(),
+                    NOW, NOW);
+        }).given(reservations).findCases(any());
+        willReturn(paymentBatch("reservation:1", paymentChanged))
+                .given(payments).findCases(any());
+        ListQuery firstQuery = new ListQuery(
+                "7", Set.of(RESERVATION), Set.of(), Set.of(), Set.of(),
+                NOW.minus(Duration.ofDays(1)), NOW, 1, null);
+        willReturn("cursor").given(cursors).encode(any(), eq(firstQuery));
+
+        CasePage first = service.list(PRINCIPAL, firstQuery);
+        ArgumentCaptor<CursorState> encoded = ArgumentCaptor.forClass(CursorState.class);
+        then(cursors).should().encode(encoded.capture(), eq(firstQuery));
+        ListQuery secondQuery = new ListQuery(
+                "7", Set.of(RESERVATION), Set.of(), Set.of(), Set.of(),
+                NOW.minus(Duration.ofDays(1)), NOW, 1, "cursor");
+        willReturn(encoded.getValue()).given(cursors).decode("cursor", secondQuery);
+
+        CasePage second = service.list(PRINCIPAL, secondQuery);
+
+        assertThat(first.items()).extracting(item -> item.caseId())
+                .containsExactly("reservation:1");
+        assertThat(second.items()).extracting(item -> item.caseId())
+                .containsExactly("reservation:2");
+        assertThat(second.nextCursor()).isNull();
+    }
+
+    @Test
     void discoversCasesWhoseOnlyWindowChangeComesFromMenuHoldOrPayment() {
         Instant menuChanged = NOW.minusSeconds(10);
         Instant paymentChanged = NOW.minusSeconds(20);
@@ -177,7 +341,7 @@ class AdminMonitoringQueryServiceTest {
         var menuAfter = new SourceSeek(NOW.minusSeconds(13), "reservation-hold:13");
         var paymentAfter = new SourceSeek(NOW.minusSeconds(14), "waiting:14");
         willReturn(new CursorState(
-                NOW, null, reservationAfter, waitingAfter, menuAfter, paymentAfter, Set.of()))
+                NOW, null, reservationAfter, waitingAfter, menuAfter, paymentAfter))
                 .given(cursors).decode("cursor", query);
 
         service.list(PRINCIPAL, query);
@@ -233,27 +397,26 @@ class AdminMonitoringQueryServiceTest {
         then(cursors).should().encode(cursor.capture(), eq(query));
         assertThat(cursor.getValue().paymentAfter().caseId()).isEqualTo("reservation:1");
         assertThat(cursor.getValue().reservationAfter()).isNull();
-        assertThat(cursor.getValue().emittedCaseIds()).containsExactly("reservation:1");
     }
 
     @Test
-    void advancesPastAFullPageOfUnrequestedPaymentCaseTypesWithoutFalseExhaustion() {
+    void internallyExhaustsAFullPageOfUnrequestedPaymentCaseTypes() {
         List<PaymentMonitoringContracts.CaseReference> waitingPayments = IntStream.rangeClosed(1, 100)
                 .mapToObj(index -> new PaymentMonitoringContracts.CaseReference(
                         "waiting:" + index, NOW.minusSeconds(index)))
                 .toList();
-        willReturn(new PaymentMonitoringContracts.ReferencePage(waitingPayments, NOW, NOW))
-                .given(payments).findChangedCases(any());
+        willAnswer(invocation -> {
+            var change = invocation.getArgument(0, PaymentMonitoringContracts.ChangeQuery.class);
+            return new PaymentMonitoringContracts.ReferencePage(
+                    change.after() == null ? waitingPayments : List.of(), NOW, NOW);
+        }).given(payments).findChangedCases(any());
         ListQuery query = reservationQuery();
-        willReturn("next").given(cursors).encode(any(), eq(query));
 
         CasePage page = service.list(PRINCIPAL, query);
 
         assertThat(page.items()).isEmpty();
-        assertThat(page.nextCursor()).isEqualTo("next");
-        ArgumentCaptor<CursorState> cursor = ArgumentCaptor.forClass(CursorState.class);
-        then(cursors).should().encode(cursor.capture(), eq(query));
-        assertThat(cursor.getValue().paymentAfter()).isNotNull();
+        assertThat(page.nextCursor()).isNull();
+        then(payments).should(times(2)).findChangedCases(any());
     }
 
     @Test
@@ -526,13 +689,17 @@ class AdminMonitoringQueryServiceTest {
     }
 
     private static WaitingMonitoringContracts.BatchResult waitingBatch(String caseId) {
-        return new WaitingMonitoringContracts.BatchResult(List.of(new WaitingMonitoringContracts.SourceCell(
+        return new WaitingMonitoringContracts.BatchResult(List.of(waitingCell(caseId)), NOW, NOW);
+    }
+
+    private static WaitingMonitoringContracts.SourceCell waitingCell(String caseId) {
+        return new WaitingMonitoringContracts.SourceCell(
                 caseId,
                 new WaitingMonitoringContracts.ConfirmedState(
                         "7", "WAITING", 2L, CHANGED, 3, 8L,
                         new WaitingMonitoringContracts.Links(null, null)),
                 NOW, NOW, WaitingMonitoringContracts.Completeness.COMPLETE,
-                WaitingMonitoringContracts.ReconciliationStatus.MATCHED, CHANGED)), NOW, NOW);
+                WaitingMonitoringContracts.ReconciliationStatus.MATCHED, CHANGED);
     }
 
     private static WaitingMonitoringContracts.Detail waitingDetailAt(
@@ -567,13 +734,21 @@ class AdminMonitoringQueryServiceTest {
             String caseId,
             Instant changedAt
     ) {
-        var cell = new PaymentMonitoringContracts.SourceCell(
-                caseId,
-                new PaymentMonitoringContracts.ConfirmedState(
-                        "81", "PAID", 1L, changedAt, 10_000L, 0L, "KRW"),
-                NOW, NOW, PaymentMonitoringContracts.Completeness.COMPLETE,
-                PaymentMonitoringContracts.ReconciliationStatus.MATCHED, changedAt);
-        return new PaymentMonitoringContracts.BatchResult(List.of(cell), NOW, NOW);
+        return paymentBatch(List.of(caseId), changedAt);
+    }
+
+    private static PaymentMonitoringContracts.BatchResult paymentBatch(
+            List<String> caseIds,
+            Instant changedAt
+    ) {
+        var cells = caseIds.stream().map(caseId -> new PaymentMonitoringContracts.SourceCell(
+                        caseId,
+                        new PaymentMonitoringContracts.ConfirmedState(
+                                "81", "PAID", 1L, changedAt, 10_000L, 0L, "KRW"),
+                        NOW, NOW, PaymentMonitoringContracts.Completeness.COMPLETE,
+                        PaymentMonitoringContracts.ReconciliationStatus.MATCHED, changedAt))
+                .toList();
+        return new PaymentMonitoringContracts.BatchResult(cells, NOW, NOW);
     }
 
     private static MenuHoldMonitoringContracts.Detail menuDetail(String caseId) {

@@ -1,5 +1,6 @@
 package com.miriyum.domain.platformoperator.adminmonitoring.service;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringRequests.ListQuery;
 import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringResponses.CaseType;
 import com.miriyum.domain.platformoperator.adminmonitoring.exception.AdminMonitoringErrorCode;
@@ -10,9 +11,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
-import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,7 +24,7 @@ import tools.jackson.databind.ObjectMapper;
         + "'${miriyum.admin-monitoring.enabled:false}' == 'true'")
 public class AdminMonitoringCursorCodec {
 
-    private static final int CONTRACT_VERSION = 2;
+    private static final int CONTRACT_VERSION = 3;
     private static final String HMAC_ALGORITHM = "HmacSHA256";
 
     private final String activeKeyId;
@@ -75,8 +74,7 @@ public class AdminMonitoringCursorCodec {
                     seek(state.reservationAfter()),
                     seek(state.waitingAfter()),
                     seek(state.menuHoldAfter()),
-                    seek(state.paymentAfter()),
-                    state.emittedCaseIds().stream().sorted().toList());
+                    seek(state.paymentAfter()));
             String body = base64(objectMapper.writeValueAsBytes(payload));
             String signed = activeKeyId + "." + body;
             return signed + "." + base64(sign(signed));
@@ -133,8 +131,7 @@ public class AdminMonitoringCursorCodec {
                     sourceSeek(payload.reservationAfter()),
                     sourceSeek(payload.waitingAfter()),
                     sourceSeek(payload.menuHoldAfter()),
-                    sourceSeek(payload.paymentAfter()),
-                    Set.copyOf(payload.emittedCaseIds()));
+                    sourceSeek(payload.paymentAfter()));
         } catch (ServiceException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -198,13 +195,10 @@ public class AdminMonitoringCursorCodec {
             SourceSeek reservationAfter,
             SourceSeek waitingAfter,
             SourceSeek menuHoldAfter,
-            SourceSeek paymentAfter,
-            Set<String> emittedCaseIds
+            SourceSeek paymentAfter
     ) {
         public CursorState {
             Objects.requireNonNull(asOf, "asOf must not be null");
-            emittedCaseIds = emittedCaseIds == null ? Set.of() : Set.copyOf(emittedCaseIds);
-            emittedCaseIds.forEach(AdminMonitoringCursorCodec::requireCaseId);
         }
     }
 
@@ -223,6 +217,7 @@ public class AdminMonitoringCursorCodec {
         }
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private record Payload(
             int contractVersion,
             String keyId,
@@ -233,8 +228,7 @@ public class AdminMonitoringCursorCodec {
             SeekPayload reservationAfter,
             SeekPayload waitingAfter,
             SeekPayload menuHoldAfter,
-            SeekPayload paymentAfter,
-            List<String> emittedCaseIds
+            SeekPayload paymentAfter
     ) {
     }
 

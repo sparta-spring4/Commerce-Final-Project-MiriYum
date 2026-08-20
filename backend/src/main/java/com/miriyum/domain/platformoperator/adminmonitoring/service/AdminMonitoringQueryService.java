@@ -37,7 +37,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,6 +51,7 @@ import org.springframework.stereotype.Service;
 public class AdminMonitoringQueryService {
 
     private static final int SOURCE_PAGE_SIZE = 100;
+    private static final int MAX_SOURCE_PAGES = 10;
     private static final Comparator<Candidate> CANDIDATE_ORDER =
             Comparator.comparing(Candidate::statusChangedAt).reversed()
                     .thenComparing(Candidate::caseType)
@@ -88,131 +88,94 @@ public class AdminMonitoringQueryService {
 
     public CasePage list(PlatformOperatorPrincipal principal, ListQuery query) {
         authorization.requireRead(principal);
-        CursorState start = query.cursor() == null
-                ? new CursorState(clock.instant(), null, null, null, null, null, Set.of())
-                : cursors.decode(query.cursor(), query);
-        Instant asOf = start.asOf();
-        if (query.changedTo().isAfter(asOf)) {
+        Instant requestedAt = clock.instant();
+        if (query.changedTo().isAfter(requestedAt)) {
             throw new ServiceException(AdminMonitoringErrorCode.INVALID_MONITORING_FILTER);
         }
+        CursorState start = query.cursor() == null
+                ? new CursorState(query.changedTo(), null, null, null, null, null)
+                : cursors.decode(query.cursor(), query);
+        Instant asOf = start.asOf();
 
         boolean wantsReservation = query.includes(CaseType.RESERVATION);
         boolean wantsWaiting = query.includes(CaseType.WAITING);
         Map<Source, DependencyFailure> failures = new LinkedHashMap<>();
         List<Instant> dataThrough = new ArrayList<>();
-        Map<String, Candidate> candidateIndex = new LinkedHashMap<>();
-        boolean reservationSucceeded = false;
-        boolean waitingSucceeded = false;
-        boolean reservationHasMore = false;
-        boolean waitingHasMore = false;
-        boolean menuHoldHasMore = false;
-        boolean paymentHasMore = false;
-
-        if (wantsReservation) {
-            try {
+        List<ChangeScan> scans = new ArrayList<>();
+        ChangeScan reservationScan = wantsReservation ? new ChangeScan(
+                Source.RESERVATION, start.reservationAfter(), after -> {
                 var page = reservations.findChangedCases(new ReservationMonitoringContracts.ChangeQuery(
                         asOf, query.changedFrom(), query.changedTo(), query.storeId(),
-                        reservationStatuses(query), reservationSeek(start.reservationAfter()), SOURCE_PAGE_SIZE));
-                reservationSucceeded = true;
-                reservationHasMore = page.items().size() == SOURCE_PAGE_SIZE;
-                dataThrough.add(page.dataThrough());
-                page.items().forEach(item -> addCandidate(candidateIndex, candidate(
+                        reservationStatuses(query), reservationSeek(after), SOURCE_PAGE_SIZE));
+                return new ChangePage(page.items().stream().map(item -> candidate(
                         Source.RESERVATION, CaseType.RESERVATION,
-                        item.caseId(), item.storeId(), item.statusChangedAt())));
-            } catch (ServiceException failure) {
-                failures.put(Source.RESERVATION, failure(Source.RESERVATION, failure));
-            }
-        }
-        if (wantsWaiting) {
-            try {
+                        item.caseId(), item.storeId(), item.statusChangedAt())).toList(), page.dataThrough());
+            }) : null;
+        ChangeScan waitingScan = wantsWaiting ? new ChangeScan(
+                Source.WAITING, start.waitingAfter(), after -> {
                 var page = waitings.findChangedCases(new WaitingMonitoringContracts.ChangeQuery(
                         asOf, query.changedFrom(), query.changedTo(), query.storeId(),
-                        query.statusesFor(Source.WAITING), waitingSeek(start.waitingAfter()), SOURCE_PAGE_SIZE));
-                waitingSucceeded = true;
-                waitingHasMore = page.items().size() == SOURCE_PAGE_SIZE;
-                dataThrough.add(page.dataThrough());
-                page.items().forEach(item -> addCandidate(candidateIndex, candidate(
+                        query.statusesFor(Source.WAITING), waitingSeek(after), SOURCE_PAGE_SIZE));
+                return new ChangePage(page.items().stream().map(item -> candidate(
                         Source.WAITING, CaseType.WAITING,
-                        item.caseId(), item.storeId(), item.statusChangedAt())));
-            } catch (ServiceException failure) {
-                failures.put(Source.WAITING, failure(Source.WAITING, failure));
-            }
-        }
-        if (wantsReservation) {
-            try {
+                        item.caseId(), item.storeId(), item.statusChangedAt())).toList(), page.dataThrough());
+            }) : null;
+        ChangeScan menuHoldScan = wantsReservation ? new ChangeScan(
+                Source.MENU_HOLD, start.menuHoldAfter(), after -> {
                 var page = menuHolds.findChangedCases(new MenuHoldMonitoringContracts.ChangeQuery(
                         asOf, query.changedFrom(), query.changedTo(), query.storeId(),
-                        query.statusesFor(Source.MENU_HOLD), menuHoldSeek(start.menuHoldAfter()),
+                        query.statusesFor(Source.MENU_HOLD), menuHoldSeek(after),
                         SOURCE_PAGE_SIZE));
-                menuHoldHasMore = page.items().size() == SOURCE_PAGE_SIZE;
-                dataThrough.add(page.dataThrough());
-                page.items().forEach(item -> addCandidate(candidateIndex, candidate(
+                return new ChangePage(page.items().stream().map(item -> candidate(
                         Source.MENU_HOLD, CaseType.RESERVATION,
-                        item.caseId(), item.storeId(), item.statusChangedAt())));
-            } catch (ServiceException failure) {
-                failures.put(Source.MENU_HOLD, failure(Source.MENU_HOLD, failure));
-            }
-        }
-        try {
+                        item.caseId(), item.storeId(), item.statusChangedAt())).toList(), page.dataThrough());
+            }) : null;
+        ChangeScan paymentScan = new ChangeScan(
+                Source.PAYMENT, start.paymentAfter(), after -> {
             var page = payments.findChangedCases(new PaymentMonitoringContracts.ChangeQuery(
                     asOf, query.changedFrom(), query.changedTo(), query.storeId(),
-                    query.statusesFor(Source.PAYMENT), paymentSeek(start.paymentAfter()),
+                    query.statusesFor(Source.PAYMENT), paymentSeek(after),
                     SOURCE_PAGE_SIZE));
-            paymentHasMore = page.items().size() == SOURCE_PAGE_SIZE;
-            dataThrough.add(page.dataThrough());
-            page.items().forEach(item -> {
+            return new ChangePage(page.items().stream().map(item -> {
                 CaseType itemType = caseType(item.caseId());
-                addCandidate(candidateIndex, candidate(
+                return candidate(
                         Source.PAYMENT, itemType, item.caseId(), null,
-                        item.statusChangedAt(), query.includes(itemType)));
-            });
-        } catch (ServiceException failure) {
-            failures.put(Source.PAYMENT, failure(Source.PAYMENT, failure));
-        }
-        if (!(wantsReservation && reservationSucceeded)
-                && !(wantsWaiting && waitingSucceeded)) {
+                        item.statusChangedAt(), query.includes(itemType));
+            }).toList(), page.dataThrough());
+        });
+        if (reservationScan != null) scans.add(reservationScan);
+        if (waitingScan != null) scans.add(waitingScan);
+        if (menuHoldScan != null) scans.add(menuHoldScan);
+        scans.add(paymentScan);
+        scans.forEach(scan -> scan.fetch(failures, dataThrough));
+
+        if (!(wantsReservation && reservationScan != null && reservationScan.readSucceeded())
+                && !(wantsWaiting && waitingScan != null && waitingScan.readSucceeded())) {
             throw unavailable();
         }
+        refillUnresolvedRawBoundary(scans, query.size(), failures, dataThrough);
 
-        List<Candidate> candidates = new ArrayList<>(candidateIndex.values());
-        candidates.sort(CANDIDATE_ORDER);
-        Hydrated hydrated = hydrate(asOf, candidates, failures, dataThrough);
-        if (!(wantsReservation && hydrated.reservationAvailable())
-                && !(wantsWaiting && hydrated.waitingAvailable())) {
-            throw unavailable();
-        }
-
-        List<CaseSummary> items = new ArrayList<>();
-        SourceSeek reservationAfter = start.reservationAfter();
-        SourceSeek waitingAfter = start.waitingAfter();
-        SourceSeek menuHoldAfter = start.menuHoldAfter();
-        SourceSeek paymentAfter = start.paymentAfter();
-        Set<String> emittedCaseIds = new HashSet<>(start.emittedCaseIds());
-        GlobalSeek lastEvaluated = start.lastEvaluated();
-        int evaluated = 0;
-        for (Candidate candidate : candidates) {
-            BuiltSummary built = emittedCaseIds.contains(candidate.caseId())
-                    ? null
-                    : summary(candidate, asOf, hydrated, failures);
-            evaluated++;
-            lastEvaluated = new GlobalSeek(
-                    candidate.statusChangedAt(), candidate.caseType(), candidate.caseId());
-            for (Map.Entry<Source, SourceSeek> seek : candidate.sourceSeeks().entrySet()) {
-                if (!seek.getValue().statusChangedAt().equals(candidate.statusChangedAt())) {
-                    continue;
-                }
-                switch (seek.getKey()) {
-                    case RESERVATION -> reservationAfter = seek.getValue();
-                    case WAITING -> waitingAfter = seek.getValue();
-                    case MENU_HOLD -> menuHoldAfter = seek.getValue();
-                    case PAYMENT -> paymentAfter = seek.getValue();
-                    default -> throw new IllegalStateException("unsupported change source");
-                }
+        PageAssembly assembly;
+        while (true) {
+            Map<String, Candidate> candidateIndex = new LinkedHashMap<>();
+            scans.stream().flatMap(scan -> scan.occurrences().stream())
+                    .forEach(candidate -> addCandidate(candidateIndex, candidate));
+            List<Candidate> candidates = new ArrayList<>(candidateIndex.values());
+            Hydrated hydrated = hydrate(asOf, candidates, failures, dataThrough);
+            if (!(wantsReservation && hydrated.reservationAvailable())
+                    && !(wantsWaiting && hydrated.waitingAvailable())) {
+                throw unavailable();
             }
-            if (built != null && matches(query, built) && emittedCaseIds.add(candidate.caseId())) {
-                items.add(built.summary());
-                if (items.size() == query.size()) break;
-            }
+            assembly = assemble(query, start.lastEvaluated(), candidates, asOf, hydrated, failures);
+            PageAssembly currentAssembly = assembly;
+            List<ChangeScan> refill = scans.stream()
+                    .filter(ChangeScan::hasMore)
+                    .filter(scan -> currentAssembly.items().size() < query.size()
+                            || scan.lastFetchedAt().compareTo(
+                                    currentAssembly.lastEvaluated().statusChangedAt()) >= 0)
+                    .toList();
+            if (refill.isEmpty()) break;
+            refill.forEach(scan -> scan.fetch(failures, dataThrough));
         }
 
         if (!(wantsReservation && !failures.containsKey(Source.RESERVATION))
@@ -221,23 +184,112 @@ public class AdminMonitoringQueryService {
         }
 
         boolean trustworthy = failures.isEmpty();
-        boolean hasMore = evaluated < candidates.size()
-                || reservationHasMore || waitingHasMore || menuHoldHasMore || paymentHasMore;
-        String nextCursor = trustworthy && hasMore && lastEvaluated != null
+        boolean hasMore = assembly.hasBufferedAfter() || scans.stream().anyMatch(ChangeScan::hasMore);
+        SourceSeek reservationAfter = safeCheckpoint(reservationScan, assembly);
+        SourceSeek waitingAfter = safeCheckpoint(waitingScan, assembly);
+        SourceSeek menuHoldAfter = safeCheckpoint(menuHoldScan, assembly);
+        SourceSeek paymentAfter = safeCheckpoint(paymentScan, assembly);
+        String nextCursor = trustworthy && hasMore && assembly.lastEvaluated() != null
                 ? cursors.encode(new CursorState(
-                        asOf, lastEvaluated, reservationAfter, waitingAfter,
-                        menuHoldAfter, paymentAfter, emittedCaseIds), query)
+                        asOf, assembly.lastEvaluated(), reservationAfter, waitingAfter,
+                        menuHoldAfter, paymentAfter), query)
                 : null;
         Completeness completeness = failures.isEmpty()
-                ? pageCompleteness(items, asOf, dataThrough)
+                ? pageCompleteness(assembly.items(), asOf, dataThrough)
                 : Completeness.PARTIAL;
         return new CasePage(
-                items,
+                assembly.items(),
                 asOf,
                 minimum(dataThrough, asOf),
                 completeness,
                 List.copyOf(failures.values()),
                 nextCursor);
+    }
+
+    private static void refillUnresolvedRawBoundary(
+            List<ChangeScan> scans,
+            int requestedSize,
+            Map<Source, DependencyFailure> failures,
+            List<Instant> dataThrough
+    ) {
+        while (true) {
+            Map<String, Candidate> candidateIndex = new LinkedHashMap<>();
+            scans.stream().flatMap(scan -> scan.occurrences().stream())
+                    .forEach(candidate -> addCandidate(candidateIndex, candidate));
+            List<Candidate> eligible = candidateIndex.values().stream()
+                    .filter(Candidate::eligible)
+                    .sorted(CANDIDATE_ORDER)
+                    .toList();
+            Instant boundary = eligible.size() < requestedSize
+                    ? null : eligible.get(requestedSize - 1).statusChangedAt();
+            List<ChangeScan> refill = scans.stream()
+                    .filter(ChangeScan::hasMore)
+                    .filter(scan -> boundary == null
+                            || !scan.lastFetchedAt().isBefore(boundary))
+                    .toList();
+            if (refill.isEmpty()) return;
+            refill.forEach(scan -> scan.fetch(failures, dataThrough));
+        }
+    }
+
+    private PageAssembly assemble(
+            ListQuery query,
+            GlobalSeek start,
+            List<Candidate> candidates,
+            Instant asOf,
+            Hydrated hydrated,
+            Map<Source, DependencyFailure> failures
+    ) {
+        List<PreparedCandidate> prepared = candidates.stream().map(candidate -> {
+            BuiltSummary built = summary(candidate, asOf, hydrated, failures);
+            Candidate ordered = built == null ? candidate
+                    : candidate.withStatusChangedAt(built.summary().statusChangedAt());
+            return new PreparedCandidate(ordered, built);
+        }).sorted(Comparator.comparing(PreparedCandidate::ordered, CANDIDATE_ORDER)).toList();
+        Map<String, Candidate> orderByCase = new LinkedHashMap<>();
+        prepared.forEach(value -> orderByCase.put(value.ordered().caseId(), value.ordered()));
+
+        List<CaseSummary> items = new ArrayList<>();
+        GlobalSeek lastEvaluated = start;
+        int remaining = 0;
+        int evaluated = 0;
+        for (PreparedCandidate candidate : prepared) {
+            if (start != null && compare(candidate.ordered(), start) <= 0) {
+                continue;
+            }
+            remaining++;
+            if (items.size() == query.size()) continue;
+            evaluated++;
+            lastEvaluated = seek(candidate.ordered());
+            if (candidate.built() != null && matches(query, candidate.built())) {
+                items.add(candidate.built().summary());
+            }
+        }
+        return new PageAssembly(
+                List.copyOf(items), lastEvaluated, evaluated < remaining, Map.copyOf(orderByCase));
+    }
+
+    private static SourceSeek safeCheckpoint(ChangeScan scan, PageAssembly assembly) {
+        if (scan == null) return null;
+        SourceSeek checkpoint = scan.startAfter();
+        GlobalSeek boundary = assembly.lastEvaluated();
+        if (boundary == null) return checkpoint;
+        for (Candidate occurrence : scan.occurrences()) {
+            Candidate ordered = assembly.orderByCase().getOrDefault(occurrence.caseId(), occurrence);
+            if (ordered.eligible() && compare(ordered, boundary) > 0) break;
+            checkpoint = occurrence.sourceSeeks().get(scan.source());
+        }
+        return checkpoint;
+    }
+
+    private static GlobalSeek seek(Candidate candidate) {
+        return new GlobalSeek(
+                candidate.statusChangedAt(), candidate.caseType(), candidate.caseId());
+    }
+
+    private static int compare(Candidate candidate, GlobalSeek seek) {
+        return CANDIDATE_ORDER.compare(candidate, new Candidate(
+                seek.caseType(), seek.caseId(), null, seek.statusChangedAt(), Map.of(), true));
     }
 
     public CaseDetail get(
@@ -459,42 +511,54 @@ public class AdminMonitoringQueryService {
                 .filter(Candidate::eligible)
                 .filter(candidate -> candidate.caseType() == CaseType.WAITING)
                 .map(Candidate::caseId).toList();
-        Map<String, ReservationMonitoringContracts.CaseSnapshot> reservationCases = Map.of();
-        Map<String, WaitingMonitoringContracts.SourceCell> waitingCases = Map.of();
+        Map<String, ReservationMonitoringContracts.CaseSnapshot> reservationCases = new LinkedHashMap<>();
+        Map<String, WaitingMonitoringContracts.SourceCell> waitingCases = new LinkedHashMap<>();
         boolean reservationAvailable = true;
         boolean waitingAvailable = true;
-        if (!reservationIds.isEmpty()) {
+        for (int start = 0; start < reservationIds.size(); start += SOURCE_PAGE_SIZE) {
+            List<String> ids = reservationIds.subList(
+                    start, Math.min(start + SOURCE_PAGE_SIZE, reservationIds.size()));
             try {
-                var result = reservations.findCases(new ReservationMonitoringContracts.BatchQuery(asOf, reservationIds));
-                reservationCases = index(result.cases(), ReservationMonitoringContracts.CaseSnapshot::caseId);
+                var result = reservations.findCases(new ReservationMonitoringContracts.BatchQuery(asOf, ids));
+                result.cases().forEach(value -> reservationCases.put(value.caseId(), value));
                 dataThrough.add(result.dataThrough());
             } catch (ServiceException failure) {
                 reservationAvailable = false;
                 failures.put(Source.RESERVATION, failure(Source.RESERVATION, failure));
+                break;
             }
         }
-        if (!waitingIds.isEmpty()) {
+        for (int start = 0; start < waitingIds.size(); start += SOURCE_PAGE_SIZE) {
+            List<String> ids = waitingIds.subList(
+                    start, Math.min(start + SOURCE_PAGE_SIZE, waitingIds.size()));
             try {
-                var result = waitings.findCases(new WaitingMonitoringContracts.BatchQuery(asOf, waitingIds));
-                waitingCases = index(result.cells(), WaitingMonitoringContracts.SourceCell::caseId);
+                var result = waitings.findCases(new WaitingMonitoringContracts.BatchQuery(asOf, ids));
+                result.cells().forEach(value -> waitingCases.put(value.caseId(), value));
                 dataThrough.add(result.dataThrough());
             } catch (ServiceException failure) {
                 waitingAvailable = false;
                 failures.put(Source.WAITING, failure(Source.WAITING, failure));
+                break;
             }
         }
 
-        Map<String, MenuHoldMonitoringContracts.SourceCell> menus = Map.of();
-        if (!reservationIds.isEmpty()) {
+        Map<String, MenuHoldMonitoringContracts.SourceCell> menus = new LinkedHashMap<>();
+        boolean menuBatchAvailable = true;
+        for (int start = 0; start < reservationIds.size(); start += SOURCE_PAGE_SIZE) {
+            List<String> ids = reservationIds.subList(
+                    start, Math.min(start + SOURCE_PAGE_SIZE, reservationIds.size()));
             try {
-                var result = menuHolds.findCases(new MenuHoldMonitoringContracts.BatchQuery(asOf, reservationIds));
-                menus = index(result.cells(), MenuHoldMonitoringContracts.SourceCell::caseId);
+                var result = menuHolds.findCases(new MenuHoldMonitoringContracts.BatchQuery(asOf, ids));
+                result.cells().forEach(value -> menus.put(value.caseId(), value));
                 dataThrough.add(result.dataThrough());
             } catch (ServiceException failure) {
+                menuBatchAvailable = false;
                 failures.put(Source.MENU_HOLD, failure(Source.MENU_HOLD, failure));
+                break;
             }
         }
         Map<String, PaymentMonitoringContracts.SourceCell> paymentCases = new LinkedHashMap<>();
+        boolean paymentBatchAvailable = true;
         for (int start = 0; start < candidates.size(); start += SOURCE_PAGE_SIZE) {
             List<String> ids = candidates.subList(start, Math.min(start + SOURCE_PAGE_SIZE, candidates.size()))
                     .stream().map(Candidate::caseId).toList();
@@ -503,13 +567,15 @@ public class AdminMonitoringQueryService {
                 result.cells().forEach(cell -> paymentCases.put(cell.caseId(), cell));
                 dataThrough.add(result.dataThrough());
             } catch (ServiceException failure) {
+                paymentBatchAvailable = false;
                 failures.put(Source.PAYMENT, failure(Source.PAYMENT, failure));
                 break;
             }
         }
         return new Hydrated(
-                reservationCases, waitingCases, menus, Map.copyOf(paymentCases),
-                reservationAvailable, waitingAvailable);
+                Map.copyOf(reservationCases), Map.copyOf(waitingCases), Map.copyOf(menus),
+                Map.copyOf(paymentCases),
+                reservationAvailable, waitingAvailable, menuBatchAvailable, paymentBatchAvailable);
     }
 
     private BuiltSummary summary(
@@ -543,8 +609,8 @@ public class AdminMonitoringQueryService {
                     .map(AdminMonitoringQueryService::summary).toList());
             Map<Source, String> states = new EnumMap<>(Source.class);
             snapshot.ledgers().forEach(cell -> states.put(Source.valueOf(cell.source()), cell.sourceStatus()));
-            addMenuSummary(candidate.caseId(), hydrated, failures, ledgers, states);
-            addPaymentSummary(candidate.caseId(), hydrated, failures, ledgers, states);
+            addMenuSummary(candidate.caseId(), hydrated, ledgers, states);
+            addPaymentSummary(candidate.caseId(), hydrated, ledgers, states);
             Completeness completeness = summaryCompleteness(ledgers);
             ReconciliationStatus reconciliation = reconciliation(ledgers);
             List<Instant> throughValues = new ArrayList<>(snapshot.ledgers().stream()
@@ -556,9 +622,21 @@ public class AdminMonitoringQueryService {
                     .map(PaymentMonitoringContracts.SourceCell::dataThrough)
                     .ifPresent(throughValues::add);
             Instant through = minimum(throughValues, asOf);
+            List<Instant> changedValues = new ArrayList<>(snapshot.ledgers().stream()
+                    .map(ReservationMonitoringContracts.LedgerCell::statusChangedAt).toList());
+            changedValues.add(candidate.statusChangedAt());
+            Optional.ofNullable(hydrated.menus().get(candidate.caseId()))
+                    .map(MenuHoldMonitoringContracts.SourceCell::state)
+                    .map(MenuHoldMonitoringContracts.ConfirmedState::statusChangedAt)
+                    .ifPresent(changedValues::add);
+            Optional.ofNullable(hydrated.payments().get(candidate.caseId()))
+                    .map(PaymentMonitoringContracts.SourceCell::state)
+                    .map(PaymentMonitoringContracts.ConfirmedState::statusChangedAt)
+                    .ifPresent(changedValues::add);
             return new BuiltSummary(new CaseSummary(
                     CaseType.RESERVATION, candidate.caseId(), snapshot.storeId(), lifecycle,
-                    primary.sourceStatus(), candidate.statusChangedAt(), primary.statusVersion() + 1L,
+                    primary.sourceStatus(), maximum(changedValues, candidate.statusChangedAt()),
+                    primary.statusVersion() + 1L,
                     asOf, through, completeness, reconciliation, ledgers), states);
         }
         var cell = hydrated.waitings().get(candidate.caseId());
@@ -568,15 +646,21 @@ public class AdminMonitoringQueryService {
         ledgers.add(summary(cell));
         Map<Source, String> states = new EnumMap<>(Source.class);
         states.put(Source.WAITING, state.sourceStatus());
-        addPaymentSummary(candidate.caseId(), hydrated, failures, ledgers, states);
+        addPaymentSummary(candidate.caseId(), hydrated, ledgers, states);
         List<Instant> throughValues = new ArrayList<>(List.of(cell.dataThrough()));
         Optional.ofNullable(hydrated.payments().get(candidate.caseId()))
                 .map(PaymentMonitoringContracts.SourceCell::dataThrough)
                 .ifPresent(throughValues::add);
+        List<Instant> changedValues = new ArrayList<>(List.of(
+                candidate.statusChangedAt(), state.statusChangedAt()));
+        Optional.ofNullable(hydrated.payments().get(candidate.caseId()))
+                .map(PaymentMonitoringContracts.SourceCell::state)
+                .map(PaymentMonitoringContracts.ConfirmedState::statusChangedAt)
+                .ifPresent(changedValues::add);
         return new BuiltSummary(new CaseSummary(
                 CaseType.WAITING, candidate.caseId(), state.storeId(),
                 mapper.lifecycle(Source.WAITING, state.sourceStatus()), state.sourceStatus(),
-                candidate.statusChangedAt(), state.statusVersion() + 1L,
+                maximum(changedValues, candidate.statusChangedAt()), state.statusVersion() + 1L,
                 asOf, minimum(throughValues, asOf), summaryCompleteness(ledgers), reconciliation(ledgers), ledgers), states);
     }
 
@@ -589,7 +673,8 @@ public class AdminMonitoringQueryService {
                 && !query.reconciliationStatuses().contains(summary.reconciliationStatus())) return false;
         for (Source source : Source.values()) {
             Set<String> required = query.statusesFor(source);
-            if (!required.isEmpty() && !required.contains(built.states().get(source))) return false;
+            String actual = built.states().get(source);
+            if (!required.isEmpty() && (actual == null || !required.contains(actual))) return false;
         }
         return true;
     }
@@ -597,19 +682,16 @@ public class AdminMonitoringQueryService {
     private static void addMenuSummary(
             String caseId,
             Hydrated hydrated,
-            Map<Source, DependencyFailure> failures,
             List<LinkedLedgerSummary> ledgers,
             Map<Source, String> states
     ) {
-        if (failures.containsKey(Source.MENU_HOLD)) {
-            ledgers.add(new LinkedLedgerSummary(
-                    Source.MENU_HOLD, false, Completeness.UNAVAILABLE, ReconciliationStatus.UNKNOWN));
-            return;
-        }
         var cell = hydrated.menus().get(caseId);
         if (cell == null) {
-            ledgers.add(new LinkedLedgerSummary(
-                    Source.MENU_HOLD, false, Completeness.COMPLETE, ReconciliationStatus.MATCHED));
+            ledgers.add(hydrated.menuBatchAvailable()
+                    ? new LinkedLedgerSummary(
+                            Source.MENU_HOLD, false, Completeness.COMPLETE, ReconciliationStatus.MATCHED)
+                    : new LinkedLedgerSummary(
+                            Source.MENU_HOLD, false, Completeness.UNAVAILABLE, ReconciliationStatus.UNKNOWN));
         } else {
             ledgers.add(summary(cell));
             if (cell.state() != null) states.put(Source.MENU_HOLD, cell.state().sourceStatus());
@@ -619,19 +701,16 @@ public class AdminMonitoringQueryService {
     private static void addPaymentSummary(
             String caseId,
             Hydrated hydrated,
-            Map<Source, DependencyFailure> failures,
             List<LinkedLedgerSummary> ledgers,
             Map<Source, String> states
     ) {
-        if (failures.containsKey(Source.PAYMENT)) {
-            ledgers.add(new LinkedLedgerSummary(
-                    Source.PAYMENT, false, Completeness.UNAVAILABLE, ReconciliationStatus.UNKNOWN));
-            return;
-        }
         var cell = hydrated.payments().get(caseId);
         if (cell == null) {
-            ledgers.add(new LinkedLedgerSummary(
-                    Source.PAYMENT, false, Completeness.COMPLETE, ReconciliationStatus.MATCHED));
+            ledgers.add(hydrated.paymentBatchAvailable()
+                    ? new LinkedLedgerSummary(
+                            Source.PAYMENT, false, Completeness.COMPLETE, ReconciliationStatus.MATCHED)
+                    : new LinkedLedgerSummary(
+                            Source.PAYMENT, false, Completeness.UNAVAILABLE, ReconciliationStatus.UNKNOWN));
         } else {
             ledgers.add(summary(cell));
             if (cell.state() != null) states.put(Source.PAYMENT, cell.state().sourceStatus());
@@ -814,6 +893,11 @@ public class AdminMonitoringQueryService {
         return values.stream().min(Comparator.naturalOrder()).orElse(fallback);
     }
 
+    private static Instant maximum(List<Instant> values, Instant fallback) {
+        return values.stream().filter(java.util.Objects::nonNull)
+                .max(Comparator.naturalOrder()).orElse(fallback);
+    }
+
     private static DependencyFailure failure(Source source, ServiceException failure) {
         return new DependencyFailure(source, failure.getErrorCode().getCode(), true);
     }
@@ -831,15 +915,6 @@ public class AdminMonitoringQueryService {
 
     private static ServiceException notFound() {
         return new ServiceException(AdminMonitoringErrorCode.MONITORING_CASE_NOT_FOUND);
-    }
-
-    private static <T> Map<String, T> index(
-            List<T> values,
-            java.util.function.Function<T, String> key
-    ) {
-        Map<String, T> result = new LinkedHashMap<>();
-        values.forEach(value -> result.put(key.apply(value), value));
-        return Map.copyOf(result);
     }
 
     private static Candidate candidate(
@@ -903,6 +978,106 @@ public class AdminMonitoringQueryService {
                     Map.copyOf(mergedSeeks),
                     eligible || other.eligible);
         }
+
+        private Candidate withStatusChangedAt(Instant changedAt) {
+            return new Candidate(caseType, caseId, storeId, changedAt, sourceSeeks, eligible);
+        }
+    }
+
+    @FunctionalInterface
+    private interface ChangePageReader {
+        ChangePage read(SourceSeek after);
+    }
+
+    private record ChangePage(List<Candidate> items, Instant dataThrough) {
+    }
+
+    private static final class ChangeScan {
+        private final Source source;
+        private final SourceSeek startAfter;
+        private final ChangePageReader reader;
+        private final List<Candidate> occurrences = new ArrayList<>();
+        private SourceSeek fetchAfter;
+        private boolean hasMore = true;
+        private int pages;
+        private boolean readSucceeded;
+
+        private ChangeScan(Source source, SourceSeek startAfter, ChangePageReader reader) {
+            this.source = source;
+            this.startAfter = startAfter;
+            this.fetchAfter = startAfter;
+            this.reader = reader;
+        }
+
+        private void fetch(
+                Map<Source, DependencyFailure> failures,
+                List<Instant> dataThrough
+        ) {
+            if (!hasMore) return;
+            if (pages >= MAX_SOURCE_PAGES) {
+                failures.put(source, new DependencyFailure(
+                        source, AdminMonitoringErrorCode.MONITORING_SOURCES_UNAVAILABLE.getCode(), true));
+                hasMore = false;
+                return;
+            }
+            try {
+                ChangePage page = reader.read(fetchAfter);
+                pages++;
+                readSucceeded = true;
+                dataThrough.add(page.dataThrough());
+                occurrences.addAll(page.items());
+                hasMore = page.items().size() == SOURCE_PAGE_SIZE;
+                if (!page.items().isEmpty()) {
+                    Candidate last = page.items().getLast();
+                    SourceSeek next = last.sourceSeeks().get(source);
+                    if (hasMore && next.equals(fetchAfter)) {
+                        failures.put(source, new DependencyFailure(
+                                source, AdminMonitoringErrorCode.MONITORING_SOURCES_UNAVAILABLE.getCode(), true));
+                        hasMore = false;
+                    } else {
+                        fetchAfter = next;
+                    }
+                }
+            } catch (ServiceException failure) {
+                failures.put(source, failure(source, failure));
+                hasMore = false;
+            }
+        }
+
+        private Source source() {
+            return source;
+        }
+
+        private SourceSeek startAfter() {
+            return startAfter;
+        }
+
+        private List<Candidate> occurrences() {
+            return occurrences;
+        }
+
+        private boolean hasMore() {
+            return hasMore;
+        }
+
+        private boolean readSucceeded() {
+            return readSucceeded;
+        }
+
+        private Instant lastFetchedAt() {
+            return occurrences.getLast().statusChangedAt();
+        }
+    }
+
+    private record PreparedCandidate(Candidate ordered, BuiltSummary built) {
+    }
+
+    private record PageAssembly(
+            List<CaseSummary> items,
+            GlobalSeek lastEvaluated,
+            boolean hasBufferedAfter,
+            Map<String, Candidate> orderByCase
+    ) {
     }
 
     private record BuiltSummary(CaseSummary summary, Map<Source, String> states) {
@@ -914,7 +1089,9 @@ public class AdminMonitoringQueryService {
             Map<String, MenuHoldMonitoringContracts.SourceCell> menus,
             Map<String, PaymentMonitoringContracts.SourceCell> payments,
             boolean reservationAvailable,
-            boolean waitingAvailable
+            boolean waitingAvailable,
+            boolean menuBatchAvailable,
+            boolean paymentBatchAvailable
     ) {
     }
 }

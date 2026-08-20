@@ -11,10 +11,12 @@ import com.miriyum.domain.platformoperator.adminmonitoring.service.AdminMonitori
 import com.miriyum.domain.platformoperator.adminmonitoring.service.AdminMonitoringCursorCodec.GlobalSeek;
 import com.miriyum.domain.platformoperator.adminmonitoring.service.AdminMonitoringCursorCodec.SourceSeek;
 import com.miriyum.global.exception.ServiceException;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Base64;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
@@ -33,8 +35,7 @@ class AdminMonitoringCursorCodecTest {
                 new SourceSeek(NOW.minusSeconds(5), "reservation:12"),
                 new SourceSeek(NOW.minusSeconds(7), "waiting:9"),
                 new SourceSeek(NOW.minusSeconds(6), "reservation-hold:12"),
-                new SourceSeek(NOW.minusSeconds(8), "waiting:9"),
-                Set.of("reservation:12", "waiting:9"));
+                new SourceSeek(NOW.minusSeconds(8), "waiting:9"));
 
         assertThat(codec.decode(codec.encode(state, query(20)), query(20)))
                 .isEqualTo(state);
@@ -74,12 +75,28 @@ class AdminMonitoringCursorCodecTest {
                         state().reservationAfter(),
                         state().waitingAfter(),
                         state().menuHoldAfter(),
-                        state().paymentAfter(),
-                        state().emittedCaseIds()),
+                        state().paymentAfter()),
                 query(20));
 
         assertError(() -> codec("key-1", NOW).decode(token, query(20)),
                 AdminMonitoringErrorCode.INVALID_CURSOR);
+    }
+
+    @Test
+    void serializesOnlyTheGlobalAndFourPerSourceSeekTuples() {
+        CursorState state = new CursorState(
+                NOW,
+                new GlobalSeek(NOW.minusSeconds(5), RESERVATION, "reservation:1000"),
+                new SourceSeek(NOW.minusSeconds(5), "reservation:1000"),
+                null, null, null);
+
+        String token = codec("key-1", NOW).encode(state, query(20));
+        String payload = new String(
+                Base64.getUrlDecoder().decode(token.split("\\.")[1]), StandardCharsets.UTF_8);
+
+        assertThat(token).hasSizeLessThan(1_000);
+        assertThat(payload).doesNotContain("emittedCaseIds");
+        assertThat(codec("key-1", NOW).decode(token, query(20))).isEqualTo(state);
     }
 
     private static CursorState state() {
@@ -89,8 +106,7 @@ class AdminMonitoringCursorCodecTest {
                 new SourceSeek(NOW.minusSeconds(6), "reservation:12"),
                 new SourceSeek(NOW.minusSeconds(5), "waiting:9"),
                 new SourceSeek(NOW.minusSeconds(7), "reservation-hold:12"),
-                new SourceSeek(NOW.minusSeconds(8), "waiting:9"),
-                Set.of("waiting:9"));
+                new SourceSeek(NOW.minusSeconds(8), "waiting:9"));
     }
 
     private static ListQuery query(int size) {
