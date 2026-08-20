@@ -4,6 +4,10 @@
 
 이 문서는 MiriYum의 기준 문서로 들어가는 순서와 문서별 소유 책임을 안내한다. 제품·정책·설계의 상세 내용은 각 정본에 두고, 이 문서는 그 내용을 복제하지 않는다.
 
+## 데이터 모델
+
+- [전체 스키마 색인과 주요 관계 ERD](erd/README.md): 현재 `dev` Flyway V1~V67 기준 전체 MySQL 테이블 색인과 도메인별 주요 관계
+
 ## 활성 정본 allowlist
 
 현재 제품·정책·아키텍처 사실의 정본은 다음으로 제한한다.
@@ -12,6 +16,7 @@
 - 현재 승인 기준과 `1차 MVP`, `2차 MVP`, `고도화`, `향후 고도화` 단계가 정렬된 `service-policies/`
 - 상태와 날짜별 개정 이력상 현재 유효한 `adr/`
 - `05-functional-requirements.md` 또는 소유 정책이 명시적으로 연결한 실제 `specs/<feature>/spec.md`
+- 현재 `dev` Flyway 기준 전체 테이블 색인과 주요 업무·논리 관계를 소유하는 `erd/`
 
 `specs/_template/`은 작성 형식이며 정본이 아니다. `README.md`, `CONTRIBUTING.md`, `AGENTS.md`와 `ai/`는 사람·AI의 진입, 라우팅, 명령과 증거 경계를 소유하며 제품 사실을 소유하지 않는다.
 
