@@ -3,9 +3,13 @@
 - Status: approved in brainstorming on 2026-08-19
 - Prerequisite issue: #457
 - Consumer issue: #281
-- Base: `origin/dev` at `a663d6189afa0a96686bedab4d8fbec3769bc275`
+- Stacked base: PR #468 Head `fc15ce6568321dd8acc33b7275b2e6c5a3c41995`
 - Prerequisite branch: `feature/457-payment-recovery-contract`
-- Consumer branch after #457 merges: `feature/281-payment-recovery`
+- Consumer branch: `feature/281-payment-recovery`
+- Selected consumer migration: `V66__create_payment_recovery_workflow.sql`
+- Active HTTP contract: `docs/specs/payment-recovery/openapi.yaml`
+
+Issue #281 started as a stacked branch because approved prerequisite PR #468 could not merge while deployment load testing changed the Docker image. PR #468 is now included in `dev`. PR #475, which owns V64 and V65, merged to `dev` at `69d29b81`; #281 owns V66 and has merged that latest `dev`. The shared Platform Operator OpenAPI conflict was resolved by preserving both admin-monitoring and payment-recovery path sets, and the collision checks are repeated immediately before merge.
 
 ## 1. Purpose
 
@@ -85,9 +89,11 @@ HOLD -> INVESTIGATING | FAILED_UNRESOLVED
 FAILED -> INVESTIGATING                (new proposal version required)
 ```
 
-`FAILED_UNRESOLVED` is terminal for that case. New evidence cannot reopen or rewrite it; the system creates a new linked case in the same lineage with a new case sequence and version.
+`FAILED_UNRESOLVED` is terminal for that case and cannot be reopened or rewritten. Issue #281 does not let an operator create a successor case and does not infer lineage from masked Payment data. A linked successor is deferred until Payment publishes a scalar correlation from a newly eligible automatic handoff to the prior recovery lineage; without that public contract, new Payment evidence remains in automatic reconciliation and cannot create an Admin case.
 
 Every transition checks the expected case version. Assignment is keyed by `PAYMENT_RECOVERY`, public case ID, and case version. A version change invalidates stale assignment and command attempts until the assignment is renewed for the new version.
+
+The assignment command has three explicit state-dependent behaviors. `RECONCILIATION_PENDING` starts the first investigation and creates the assignment for the incremented case version. `HOLD` or `FAILED` resumes investigation and creates the assignment for the incremented version. `INVESTIGATING` does not advance the case version; it may renew or transfer only an expired assignment row for that exact version under a pessimistic lock. An active assignment cannot be taken over, and all other case states reject assignment as a state conflict.
 
 ## 6. Roles, reauthentication, and separation of duties
 
@@ -137,7 +143,7 @@ Issue #457 owns a Payment-side handoff table with:
 
 Issue #281 owns:
 
-- `payment_recovery_cases`: public case ID, handoff ID, lineage and sequence, status, case version, current proposal version, active-lineage marker, timestamps;
+- `payment_recovery_cases`: public case ID, handoff ID, lineage and sequence, status, case version, current proposal version, active-lineage marker, timestamps. The current intake opens each independently eligible Payment handoff as sequence 1; lineage and sequence columns reserve the future linked-successor contract without granting Admin access to Payment internals;
 - `payment_recovery_proposals`: immutable proposal version, action, exact amount, Payment snapshot/version, fingerprint, approval tier, requester authority snapshot;
 - `payment_recovery_approvals`: immutable approver, authority snapshot, approval tier and timestamp, with duplicate and separation constraints;
 - `payment_recovery_executions`: stable execution key, status, lease owner/token/expiry, attempt metadata, masked outcome, timestamps, and row version.
@@ -148,7 +154,7 @@ Assignments reuse `admin_case_assignments`; no payment-recovery assignment table
 
 The #281 API provides only:
 
-- list and detail recovery cases;
+- list and detail recovery cases, including `caseVersion`, `handoffVersion`, `paymentVersion`, and `recoveryVersion` required by follow-up commands;
 - request an exact provider-result requery;
 - create a recovery proposal;
 - approve a proposal when the additional tier is required;
@@ -157,7 +163,7 @@ The #281 API provides only:
 
 There is no operator-facing execute endpoint. Approval queues the durable execution, and the worker executes it.
 
-All mutating endpoints require an idempotency key and expected case/proposal version. Conflicts return the repository's canonical concurrent-modification response. Payment recovery business failures map from the public Payment error contract rather than leaking provider errors.
+All mutating endpoints require an idempotency key and expected case/proposal version. Requery and proposal requests use the source versions returned by the public list, detail, or assignment response; clients do not infer or obtain those values from Payment internals. Conflicts return the repository's canonical concurrent-modification response. Payment recovery business failures map from the public Payment error contract rather than leaking provider errors.
 
 ## 10. Masking, logs, and audit
 
@@ -169,7 +175,7 @@ Application logging uses public case/execution IDs and correlation IDs. Exceptio
 
 ## 11. OpenAPI, migrations, and exact allowlists
 
-Migration numbers are assigned only after fetching the latest `origin/dev` for each PR. #457 receives the then-next migration. #281 receives a new number only after #457 is merged and `origin/dev` is fetched again.
+Migration numbers are assigned only after fetching the latest `origin/dev` and inspecting open PRs for each PR. PR #475 owns V64 and V65 and merged first at `69d29b81`. #281 is the later migration owner and uses V66, preserving Flyway deployment order.
 
 The shared Admin OpenAPI and migration directory are checked:
 
