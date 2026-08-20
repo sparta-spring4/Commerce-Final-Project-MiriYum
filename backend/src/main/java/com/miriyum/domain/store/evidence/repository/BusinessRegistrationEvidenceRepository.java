@@ -28,13 +28,17 @@ public interface BusinessRegistrationEvidenceRepository extends JpaRepository<Bu
             long applicationVersion,
             Integer currentMarker);
 
-    /** REPEATABLE READ 스냅샷과 무관하게 최신 CURRENT 증빙을 확인하기 위한 locking current read다. */
+    /**
+     * 공통 파일 삭제 경로가 보존 중인 증빙을 우회하지 못하게 하는 locking current read다.
+     *
+     * <p>보존 기한·분쟁 예외를 확인하는 전용 파기 worker가 구현되기 전에는 CURRENT와 REPLACED 모두
+     * 일반 삭제를 막는다.</p>
+     */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select evidence
             from BusinessRegistrationEvidence evidence
             where evidence.fileId = :fileId
-              and evidence.currentMarker = 1
             """)
-    Optional<BusinessRegistrationEvidence> findCurrentByFileIdForUpdate(@Param("fileId") String fileId);
+    Optional<BusinessRegistrationEvidence> findByFileIdForUpdate(@Param("fileId") String fileId);
 }

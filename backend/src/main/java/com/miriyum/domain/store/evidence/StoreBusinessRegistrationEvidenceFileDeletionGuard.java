@@ -5,7 +5,7 @@ import com.miriyum.global.storage.service.FileMetadataDeletionGuard;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
-/** 현재 사업자등록증 증빙이 참조하는 파일의 논리 삭제를 차단한다. */
+/** 전용 파기 worker가 처리하기 전 사업자등록증 증빙 파일의 일반 논리 삭제를 차단한다. */
 @Component
 @RequiredArgsConstructor
 public class StoreBusinessRegistrationEvidenceFileDeletionGuard implements FileMetadataDeletionGuard {
@@ -14,6 +14,6 @@ public class StoreBusinessRegistrationEvidenceFileDeletionGuard implements FileM
 
     @Override
     public boolean blocksDeletion(String fileId) {
-        return evidenceRepository.findCurrentByFileIdForUpdate(fileId).isPresent();
+        return evidenceRepository.findByFileIdForUpdate(fileId).isPresent();
     }
 }

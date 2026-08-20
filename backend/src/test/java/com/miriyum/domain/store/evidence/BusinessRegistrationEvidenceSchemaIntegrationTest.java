@@ -263,6 +263,38 @@ class BusinessRegistrationEvidenceSchemaIntegrationTest {
         assertThat(currentFileId).isEqualTo(replacementFileId.toString());
     }
 
+    @Test
+    @DisplayName("교체된 구버전 증빙 파일도 전용 파기 작업 전에는 일반 삭제를 거절한다")
+    void rejectsDeletionOfReplacedEvidenceFile() {
+        long applicationId = 905L;
+        long applicationVersion = 1L;
+        long storeOperatorAccountId = 55L;
+        UUID replacedFileId = UUID.randomUUID();
+        UUID currentFileId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-20T00:00:00Z");
+        insertPrivateLicenseMetadata(replacedFileId, applicationId, now);
+        insertPrivateLicenseMetadata(currentFileId, applicationId, now);
+
+        evidenceService.replaceCurrentEvidence(new BusinessRegistrationEvidenceCommand(
+                applicationId, applicationVersion, storeOperatorAccountId, replacedFileId));
+        evidenceService.replaceCurrentEvidence(new BusinessRegistrationEvidenceCommand(
+                applicationId, applicationVersion, storeOperatorAccountId, currentFileId));
+
+        assertThatThrownBy(() -> fileMetadataTransactionExecutor.deleteOrGetDeleted(replacedFileId.toString(), now))
+                .isInstanceOf(FileMetadataConflictException.class);
+
+        String evidenceStatus = jdbcTemplate.queryForObject(
+                "SELECT evidence_status FROM store_business_registration_evidences WHERE file_id = ?",
+                String.class,
+                replacedFileId.toString());
+        String storageStatus = jdbcTemplate.queryForObject(
+                "SELECT storage_status FROM file_metadata WHERE file_id = ?",
+                String.class,
+                replacedFileId.toString());
+        assertThat(evidenceStatus).isEqualTo("REPLACED");
+        assertThat(storageStatus).isEqualTo("CONFIRMED");
+    }
+
     private void insertEvidence(long applicationId, long applicationVersion, String status, Integer currentMarker) {
         UUID fileId = UUID.randomUUID();
         Instant now = Instant.parse("2026-08-20T00:00:00Z");
