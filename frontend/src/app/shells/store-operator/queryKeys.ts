@@ -11,6 +11,8 @@ export const storeOperatorKeys = {
     [...storeOperatorKeys.store(storeId), 'managed-store'] as const,
   publishedStore: (storeId: string) =>
     [...storeOperatorKeys.store(storeId), 'published-store'] as const,
+  images: (storeId: string) =>
+    [...storeOperatorKeys.store(storeId), 'images'] as const,
   menus: (storeId: string) =>
     [...storeOperatorKeys.store(storeId), 'menus'] as const,
   menu: (storeId: string, menuId: string) =>
