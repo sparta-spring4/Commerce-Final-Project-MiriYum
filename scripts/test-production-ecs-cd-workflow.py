@@ -77,6 +77,15 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertNotIn('| .value][0] // "true"', self.workflow)
         self.assertNotIn('{name: "MIRIYUM_STORE_SEARCH_LLM_ENABLED", value: "true"}', self.workflow)
 
+    def test_cd_replaces_the_live_llm_timeout_with_the_approved_production_value(self):
+        self.assertIn(
+            '.name != "MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS"', self.workflow
+        )
+        self.assertIn(
+            '{name: "MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS", value: "5000"}',
+            self.workflow,
+        )
+
     def test_openai_secret_is_added_only_when_llm_is_enabled(self):
         self.assertIn('if $llm_enabled == "true" then', self.workflow)
         self.assertIn('{name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}', self.workflow)
