@@ -136,7 +136,6 @@ erDiagram
 │   ├── specs/               # 기능별 OpenAPI와 인수 조건
 │   ├── service-policies/    # 서비스 정책 정본
 │   ├── adr/                 # 아키텍처 결정 기록
-│   ├── erd/                 # Flyway 기준 ERD와 테이블 색인
 │   └── deployment/          # 배포·관측·장애 대응 런북
 └── scripts/                 # 검증, 관측, 성능 측정 스크립트
 ```
