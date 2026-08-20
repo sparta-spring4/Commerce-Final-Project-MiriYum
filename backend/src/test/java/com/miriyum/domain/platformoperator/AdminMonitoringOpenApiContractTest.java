@@ -18,7 +18,7 @@ class AdminMonitoringOpenApiContractTest {
             "/api/v1/platform-operators/monitoring-cases/{caseType}/{caseId}";
 
     @Test
-    void monitoringPathsAreContractOnlyPlatformOperatorRoutes() throws Exception {
+    void monitoringPathsAreRuntimeActivePlatformOperatorRoutes() throws Exception {
         Map<String, Object> featurePaths = paths("admin-monitoring/openapi.yaml");
         Map<String, Object> audiencePaths = paths("platform-operator-openapi.yaml");
 
@@ -33,7 +33,7 @@ class AdminMonitoringOpenApiContractTest {
 
         for (String path : List.of(LIST, DETAIL)) {
             Map<String, Object> pathItem = map(featurePaths.get(path));
-            assertThat(pathItem).containsEntry("x-miriyum-runtime-status", "contract-only")
+            assertThat(pathItem).doesNotContainKey("x-miriyum-runtime-status")
                     .containsEntry("x-miriyum-owner-issue", 280);
             Map<String, Object> get = map(pathItem.get("get"));
             assertThat(map(get.get("responses")).keySet())
@@ -81,6 +81,9 @@ class AdminMonitoringOpenApiContractTest {
         assertThat(list(map(map(ledger.get("properties")).get("state")).get("oneOf")))
                 .anySatisfy(candidate -> assertThat(map(candidate))
                         .containsEntry("type", "null"));
+        assertThat(map(ledgerState.get("properties")).keySet())
+                .contains("amountMinor", "refundedAmountMinor", "currency")
+                .doesNotContain("paymentId", "paymentKey", "providerTransactionId");
 
         Map<String, Object> failure = map(schemas.get("AdminMonitoringDependencyFailure"));
         assertThat(list(failure.get("required")))
@@ -92,7 +95,9 @@ class AdminMonitoringOpenApiContractTest {
         assertThat(map(map(detail.get("properties")).get("maskingLevel")))
                 .containsEntry("enum", List.of("MINIMIZED"));
         assertThat(map(detail.get("properties")).keySet())
-                .doesNotContain("rawName", "rawPhone", "rawEmail", "paymentKey", "providerTransactionId");
+                .contains("menuItems", "paymentLedger", "paymentLedgerTruncated", "refunds", "refundsTruncated")
+                .doesNotContain("rawName", "rawPhone", "rawEmail", "paymentId", "paymentKey",
+                        "providerTransactionId");
     }
 
     @Test
@@ -127,6 +132,11 @@ class AdminMonitoringOpenApiContractTest {
             assertThat(map(map(example).get("value")).keySet())
                     .containsExactlyInAnyOrder("code", "message");
         }
+        assertThat(examples.values().stream()
+                .map(AdminMonitoringOpenApiContractTest::map)
+                .map(example -> map(example.get("value")))
+                .map(value -> value.get("code")))
+                .containsExactlyInAnyOrder("MONITORING_001", "MONITORING_002", "MONITORING_003");
     }
 
     private static String reference(Map<String, Object> paths, String path) {

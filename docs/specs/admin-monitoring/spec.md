@@ -68,7 +68,7 @@ ReservationHold가 최종 Reservation으로 전환돼도 공개 case ID는 바�
 - 상세 사건 배정 없음·만료·version 불일치: 403
 - 별도 비밀번호 재인증과 업무 감사 event 쓰기는 하지 않는다.
 - 목록에는 이름, 전화번호, 이메일, 결제수단, 내부 사용자 ID가 없다.
-- 상세도 `maskingLevel=MINIMIZED`이며 원 도메인이 제공한 마스킹 값만 사용한다.
+- 상세도 `maskingLevel=MINIMIZED`이며 현재 공개 source 계약에 identity 표시값이 없으므로 subject를 반환하지 않는다.
 - PG 원문, 승인 토큰, 결제 키, provider transaction ID와 마스킹 해제 옵션은 없다.
 
 ## 저장과 의존성 경계
@@ -81,9 +81,9 @@ ReservationHold가 최종 Reservation으로 전환돼도 공개 case ID는 바�
 - V65 baseline 이전 `asOf`는 현재 Payment·Refund 행으로 역추정하지 않으며, 확인된 상태가 없는 ledger cell의 `state`는 null이다.
 - Payment detail의 ledger·refund 이력은 각각 최대 100건이며 초과 여부를 truncation metadata로 보존한다.
 
-## 선행 계약 단계
+## 런타임 활성화
 
-현재 OpenAPI의 두 path item은 `x-miriyum-runtime-status: contract-only`다. 네 원 도메인의 공개 조회 계약 PR이 `dev`에 병합된 후 runtime PR에서 Controller·권한·부분 실패 테스트를 구현하고 이 표식을 제거한다.
+네 원 도메인의 공개 조회 계약이 `dev`에 병합되어 두 path는 runtime-active다. Controller와 조합 service는 플랫폼 운영자와 admin-monitoring feature flag가 모두 켜진 경우에만 등록된다.
 
 ## 인수 조건
 
