@@ -37,6 +37,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -88,7 +89,7 @@ public class AdminMonitoringQueryService {
     public CasePage list(PlatformOperatorPrincipal principal, ListQuery query) {
         authorization.requireRead(principal);
         CursorState start = query.cursor() == null
-                ? new CursorState(clock.instant(), null, null, null)
+                ? new CursorState(clock.instant(), null, null, null, null, null, Set.of())
                 : cursors.decode(query.cursor(), query);
         Instant asOf = start.asOf();
         if (query.changedTo().isAfter(asOf)) {
@@ -99,11 +100,13 @@ public class AdminMonitoringQueryService {
         boolean wantsWaiting = query.includes(CaseType.WAITING);
         Map<Source, DependencyFailure> failures = new LinkedHashMap<>();
         List<Instant> dataThrough = new ArrayList<>();
-        List<Candidate> candidates = new ArrayList<>();
+        Map<String, Candidate> candidateIndex = new LinkedHashMap<>();
         boolean reservationSucceeded = false;
         boolean waitingSucceeded = false;
         boolean reservationHasMore = false;
         boolean waitingHasMore = false;
+        boolean menuHoldHasMore = false;
+        boolean paymentHasMore = false;
 
         if (wantsReservation) {
             try {
@@ -113,8 +116,9 @@ public class AdminMonitoringQueryService {
                 reservationSucceeded = true;
                 reservationHasMore = page.items().size() == SOURCE_PAGE_SIZE;
                 dataThrough.add(page.dataThrough());
-                page.items().forEach(item -> candidates.add(new Candidate(
-                        CaseType.RESERVATION, item.caseId(), item.storeId(), item.statusChangedAt())));
+                page.items().forEach(item -> addCandidate(candidateIndex, candidate(
+                        Source.RESERVATION, CaseType.RESERVATION,
+                        item.caseId(), item.storeId(), item.statusChangedAt())));
             } catch (ServiceException failure) {
                 failures.put(Source.RESERVATION, failure(Source.RESERVATION, failure));
             }
@@ -127,17 +131,50 @@ public class AdminMonitoringQueryService {
                 waitingSucceeded = true;
                 waitingHasMore = page.items().size() == SOURCE_PAGE_SIZE;
                 dataThrough.add(page.dataThrough());
-                page.items().forEach(item -> candidates.add(new Candidate(
-                        CaseType.WAITING, item.caseId(), item.storeId(), item.statusChangedAt())));
+                page.items().forEach(item -> addCandidate(candidateIndex, candidate(
+                        Source.WAITING, CaseType.WAITING,
+                        item.caseId(), item.storeId(), item.statusChangedAt())));
             } catch (ServiceException failure) {
                 failures.put(Source.WAITING, failure(Source.WAITING, failure));
             }
+        }
+        if (wantsReservation) {
+            try {
+                var page = menuHolds.findChangedCases(new MenuHoldMonitoringContracts.ChangeQuery(
+                        asOf, query.changedFrom(), query.changedTo(), query.storeId(),
+                        query.statusesFor(Source.MENU_HOLD), menuHoldSeek(start.menuHoldAfter()),
+                        SOURCE_PAGE_SIZE));
+                menuHoldHasMore = page.items().size() == SOURCE_PAGE_SIZE;
+                dataThrough.add(page.dataThrough());
+                page.items().forEach(item -> addCandidate(candidateIndex, candidate(
+                        Source.MENU_HOLD, CaseType.RESERVATION,
+                        item.caseId(), item.storeId(), item.statusChangedAt())));
+            } catch (ServiceException failure) {
+                failures.put(Source.MENU_HOLD, failure(Source.MENU_HOLD, failure));
+            }
+        }
+        try {
+            var page = payments.findChangedCases(new PaymentMonitoringContracts.ChangeQuery(
+                    asOf, query.changedFrom(), query.changedTo(), query.storeId(),
+                    query.statusesFor(Source.PAYMENT), paymentSeek(start.paymentAfter()),
+                    SOURCE_PAGE_SIZE));
+            paymentHasMore = page.items().size() == SOURCE_PAGE_SIZE;
+            dataThrough.add(page.dataThrough());
+            page.items().forEach(item -> {
+                CaseType itemType = caseType(item.caseId());
+                addCandidate(candidateIndex, candidate(
+                        Source.PAYMENT, itemType, item.caseId(), null,
+                        item.statusChangedAt(), query.includes(itemType)));
+            });
+        } catch (ServiceException failure) {
+            failures.put(Source.PAYMENT, failure(Source.PAYMENT, failure));
         }
         if (!(wantsReservation && reservationSucceeded)
                 && !(wantsWaiting && waitingSucceeded)) {
             throw unavailable();
         }
 
+        List<Candidate> candidates = new ArrayList<>(candidateIndex.values());
         candidates.sort(CANDIDATE_ORDER);
         Hydrated hydrated = hydrate(asOf, candidates, failures, dataThrough);
         if (!(wantsReservation && hydrated.reservationAvailable())
@@ -148,19 +185,31 @@ public class AdminMonitoringQueryService {
         List<CaseSummary> items = new ArrayList<>();
         SourceSeek reservationAfter = start.reservationAfter();
         SourceSeek waitingAfter = start.waitingAfter();
+        SourceSeek menuHoldAfter = start.menuHoldAfter();
+        SourceSeek paymentAfter = start.paymentAfter();
+        Set<String> emittedCaseIds = new HashSet<>(start.emittedCaseIds());
         GlobalSeek lastEvaluated = start.lastEvaluated();
         int evaluated = 0;
         for (Candidate candidate : candidates) {
-            BuiltSummary built = summary(candidate, asOf, hydrated, failures);
+            BuiltSummary built = emittedCaseIds.contains(candidate.caseId())
+                    ? null
+                    : summary(candidate, asOf, hydrated, failures);
             evaluated++;
             lastEvaluated = new GlobalSeek(
                     candidate.statusChangedAt(), candidate.caseType(), candidate.caseId());
-            if (candidate.caseType() == CaseType.RESERVATION) {
-                reservationAfter = new SourceSeek(candidate.statusChangedAt(), candidate.caseId());
-            } else {
-                waitingAfter = new SourceSeek(candidate.statusChangedAt(), candidate.caseId());
+            for (Map.Entry<Source, SourceSeek> seek : candidate.sourceSeeks().entrySet()) {
+                if (!seek.getValue().statusChangedAt().equals(candidate.statusChangedAt())) {
+                    continue;
+                }
+                switch (seek.getKey()) {
+                    case RESERVATION -> reservationAfter = seek.getValue();
+                    case WAITING -> waitingAfter = seek.getValue();
+                    case MENU_HOLD -> menuHoldAfter = seek.getValue();
+                    case PAYMENT -> paymentAfter = seek.getValue();
+                    default -> throw new IllegalStateException("unsupported change source");
+                }
             }
-            if (built != null && matches(query, built)) {
+            if (built != null && matches(query, built) && emittedCaseIds.add(candidate.caseId())) {
                 items.add(built.summary());
                 if (items.size() == query.size()) break;
             }
@@ -172,10 +221,12 @@ public class AdminMonitoringQueryService {
         }
 
         boolean trustworthy = failures.isEmpty();
-        boolean hasMore = evaluated < candidates.size() || reservationHasMore || waitingHasMore;
+        boolean hasMore = evaluated < candidates.size()
+                || reservationHasMore || waitingHasMore || menuHoldHasMore || paymentHasMore;
         String nextCursor = trustworthy && hasMore && lastEvaluated != null
                 ? cursors.encode(new CursorState(
-                        asOf, lastEvaluated, reservationAfter, waitingAfter), query)
+                        asOf, lastEvaluated, reservationAfter, waitingAfter,
+                        menuHoldAfter, paymentAfter, emittedCaseIds), query)
                 : null;
         Completeness completeness = failures.isEmpty()
                 ? pageCompleteness(items, asOf, dataThrough)
@@ -196,19 +247,21 @@ public class AdminMonitoringQueryService {
             Instant requestedAsOf
     ) {
         authorization.requireRead(principal);
-        Instant asOf = requestedAsOf == null ? clock.instant() : requestedAsOf;
-        if (asOf.isAfter(clock.instant()) || !validCaseId(caseType, caseId)) {
+        Instant currentAsOf = clock.instant();
+        Instant asOf = requestedAsOf == null ? currentAsOf : requestedAsOf;
+        if (asOf.isAfter(currentAsOf) || !validCaseId(caseType, caseId)) {
             throw new ServiceException(AdminMonitoringErrorCode.INVALID_MONITORING_FILTER);
         }
         return caseType == CaseType.RESERVATION
-                ? reservationDetail(principal, caseId, asOf)
-                : waitingDetail(principal, caseId, asOf);
+                ? reservationDetail(principal, caseId, asOf, currentAsOf)
+                : waitingDetail(principal, caseId, asOf, currentAsOf);
     }
 
     private CaseDetail reservationDetail(
             PlatformOperatorPrincipal principal,
             String caseId,
-            Instant asOf
+            Instant asOf,
+            Instant currentAsOf
     ) {
         ReservationMonitoringContracts.Detail primary;
         try {
@@ -220,7 +273,10 @@ public class AdminMonitoringQueryService {
         }
         ReservationMonitoringContracts.LedgerCell primaryCell = primaryLedger(primary.snapshot().ledgers());
         long caseVersion = primaryCell.statusVersion() + 1L;
-        authorization.requireDetail(principal, caseId, caseVersion);
+        long assignmentVersion = asOf.equals(currentAsOf)
+                ? caseVersion
+                : currentReservationVersion(caseId, currentAsOf);
+        authorization.requireDetail(principal, caseId, assignmentVersion);
 
         Map<Source, DependencyFailure> failures = new LinkedHashMap<>();
         List<LedgerCell> ledgers = primary.snapshot().ledgers().stream()
@@ -297,7 +353,8 @@ public class AdminMonitoringQueryService {
     private CaseDetail waitingDetail(
             PlatformOperatorPrincipal principal,
             String caseId,
-            Instant asOf
+            Instant asOf,
+            Instant currentAsOf
     ) {
         WaitingMonitoringContracts.Detail primary;
         try {
@@ -309,7 +366,10 @@ public class AdminMonitoringQueryService {
         }
         if (primary.cell().state() == null) throw unavailable();
         long caseVersion = primary.cell().state().statusVersion() + 1L;
-        authorization.requireDetail(principal, caseId, caseVersion);
+        long assignmentVersion = asOf.equals(currentAsOf)
+                ? caseVersion
+                : currentWaitingVersion(caseId, currentAsOf);
+        authorization.requireDetail(principal, caseId, assignmentVersion);
         Map<Source, DependencyFailure> failures = new LinkedHashMap<>();
         List<LedgerCell> ledgers = new ArrayList<>(List.of(ledger(primary.cell())));
         List<PaymentLedgerEvent> paymentLedger = List.of();
@@ -362,6 +422,29 @@ public class AdminMonitoringQueryService {
                 List.copyOf(failures.values()));
     }
 
+    private long currentReservationVersion(String caseId, Instant currentAsOf) {
+        try {
+            return reservations.findCase(new ReservationMonitoringContracts.DetailQuery(
+                            currentAsOf, caseId))
+                    .map(detail -> primaryLedger(detail.snapshot().ledgers()).statusVersion() + 1L)
+                    .orElseThrow(AdminMonitoringQueryService::unavailable);
+        } catch (ServiceException failure) {
+            throw unavailable();
+        }
+    }
+
+    private long currentWaitingVersion(String caseId, Instant currentAsOf) {
+        try {
+            return waitings.findCase(new WaitingMonitoringContracts.DetailQuery(currentAsOf, caseId))
+                    .map(WaitingMonitoringContracts.Detail::cell)
+                    .map(WaitingMonitoringContracts.SourceCell::state)
+                    .map(state -> state.statusVersion() + 1L)
+                    .orElseThrow(AdminMonitoringQueryService::unavailable);
+        } catch (ServiceException failure) {
+            throw unavailable();
+        }
+    }
+
     private Hydrated hydrate(
             Instant asOf,
             List<Candidate> candidates,
@@ -369,9 +452,11 @@ public class AdminMonitoringQueryService {
             List<Instant> dataThrough
     ) {
         List<String> reservationIds = candidates.stream()
+                .filter(Candidate::eligible)
                 .filter(candidate -> candidate.caseType() == CaseType.RESERVATION)
                 .map(Candidate::caseId).toList();
         List<String> waitingIds = candidates.stream()
+                .filter(Candidate::eligible)
                 .filter(candidate -> candidate.caseType() == CaseType.WAITING)
                 .map(Candidate::caseId).toList();
         Map<String, ReservationMonitoringContracts.CaseSnapshot> reservationCases = Map.of();
@@ -433,6 +518,7 @@ public class AdminMonitoringQueryService {
             Hydrated hydrated,
             Map<Source, DependencyFailure> failures
     ) {
+        if (!candidate.eligible()) return null;
         if (candidate.caseType() == CaseType.RESERVATION) {
             var snapshot = hydrated.reservations().get(candidate.caseId());
             if (snapshot == null) return null;
@@ -665,6 +751,16 @@ public class AdminMonitoringQueryService {
                 seek.statusChangedAt(), seek.caseId());
     }
 
+    private static MenuHoldMonitoringContracts.Seek menuHoldSeek(SourceSeek seek) {
+        return seek == null ? null : new MenuHoldMonitoringContracts.Seek(
+                seek.statusChangedAt(), seek.caseId());
+    }
+
+    private static PaymentMonitoringContracts.Seek paymentSeek(SourceSeek seek) {
+        return seek == null ? null : new PaymentMonitoringContracts.Seek(
+                seek.statusChangedAt(), seek.caseId());
+    }
+
     private static Completeness pageCompleteness(
             List<CaseSummary> items,
             Instant asOf,
@@ -746,7 +842,67 @@ public class AdminMonitoringQueryService {
         return Map.copyOf(result);
     }
 
-    private record Candidate(CaseType caseType, String caseId, String storeId, Instant statusChangedAt) {
+    private static Candidate candidate(
+            Source source,
+            CaseType caseType,
+            String caseId,
+            String storeId,
+            Instant statusChangedAt
+    ) {
+        return candidate(source, caseType, caseId, storeId, statusChangedAt, true);
+    }
+
+    private static Candidate candidate(
+            Source source,
+            CaseType caseType,
+            String caseId,
+            String storeId,
+            Instant statusChangedAt,
+            boolean eligible
+    ) {
+        return new Candidate(
+                caseType,
+                caseId,
+                storeId,
+                statusChangedAt,
+                Map.of(source, new SourceSeek(statusChangedAt, caseId)),
+                eligible);
+    }
+
+    private static void addCandidate(Map<String, Candidate> candidates, Candidate candidate) {
+        candidates.merge(candidate.caseId(), candidate, Candidate::merge);
+    }
+
+    private static CaseType caseType(String caseId) {
+        return caseId.startsWith("waiting:") ? CaseType.WAITING : CaseType.RESERVATION;
+    }
+
+    private record Candidate(
+            CaseType caseType,
+            String caseId,
+            String storeId,
+            Instant statusChangedAt,
+            Map<Source, SourceSeek> sourceSeeks,
+            boolean eligible
+    ) {
+        private Candidate merge(Candidate other) {
+            if (caseType != other.caseType || !caseId.equals(other.caseId)) {
+                throw new IllegalArgumentException("cannot merge different monitoring cases");
+            }
+            Map<Source, SourceSeek> mergedSeeks = new EnumMap<>(Source.class);
+            mergedSeeks.putAll(sourceSeeks);
+            mergedSeeks.putAll(other.sourceSeeks);
+            Candidate latest = CANDIDATE_ORDER.compare(this, other) <= 0 ? this : other;
+            String mergedStoreId = latest.storeId != null ? latest.storeId
+                    : (storeId != null ? storeId : other.storeId);
+            return new Candidate(
+                    caseType,
+                    caseId,
+                    mergedStoreId,
+                    latest.statusChangedAt,
+                    Map.copyOf(mergedSeeks),
+                    eligible || other.eligible);
+        }
     }
 
     private record BuiltSummary(CaseSummary summary, Map<Source, String> states) {

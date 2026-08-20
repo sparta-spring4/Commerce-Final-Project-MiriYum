@@ -11,9 +11,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringRequests.ListQuery;
+import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringResponses.CaseDetail;
 import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringResponses.CasePage;
 import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringResponses.CaseType;
 import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringResponses.Completeness;
+import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringResponses.LifecycleStatus;
+import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringResponses.MaskingLevel;
+import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringResponses.Source;
+import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringResponses.Transition;
 import com.miriyum.domain.platformoperator.adminmonitoring.service.AdminMonitoringQueryService;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.global.exception.GlobalExceptionHandler;
@@ -97,6 +102,44 @@ class AdminMonitoringControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"));
 
         then(queries).should().get(PRINCIPAL, CaseType.RESERVATION, "reservation-hold:12", AS_OF);
+    }
+
+    @Test
+    void serializesTransitionEventTypeDeclaredByThePublicContract() throws Exception {
+        given(queries.get(any(), any(), any(), any())).willReturn(new CaseDetail(
+                CaseType.RESERVATION,
+                "reservation-hold:12",
+                "7",
+                LifecycleStatus.CHECKED_IN,
+                2L,
+                AS_OF,
+                AS_OF,
+                Completeness.COMPLETE,
+                MaskingLevel.MINIMIZED,
+                2,
+                AS_OF.plusSeconds(3600),
+                AS_OF.plusSeconds(7200),
+                null,
+                List.of(),
+                List.of(new Transition(
+                        Source.RESERVATION,
+                        "CHECKED_IN",
+                        1L,
+                        "CONFIRMED",
+                        "CONFIRMED",
+                        AS_OF.minusSeconds(1))),
+                List.of(),
+                List.of(),
+                false,
+                List.of(),
+                false,
+                List.of()));
+
+        mvc.perform(get("/api/v1/platform-operators/monitoring-cases/{caseType}/{caseId}",
+                        "RESERVATION", "reservation-hold:12")
+                        .queryParam("asOf", AS_OF.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.history[0].eventType").value("CHECKED_IN"));
     }
 
     private static class PrincipalResolver implements HandlerMethodArgumentResolver {

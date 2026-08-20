@@ -167,7 +167,7 @@ components:
       name: cursor
       in: query
       required: false
-      description: asOf, 필터 지문과 마지막 평가 후보 seek tuple을 HMAC으로 보호한 문자열
+      description: asOf, 필터 지문과 Reservation·Waiting·MenuHold·Payment별 seek를 HMAC으로 보호한 문자열
       schema:
         type: string
         minLength: 1
@@ -346,10 +346,12 @@ components:
     AdminMonitoringTransition:
       type: object
       additionalProperties: false
-      required: [source, resultVersion, afterStatus, occurredAt]
+      required: [source, eventType, resultVersion, afterStatus, occurredAt]
       properties:
         source:
           $ref: "#/components/schemas/AdminMonitoringSource"
+        eventType:
+          type: string
         resultVersion:
           type: integer
           format: int64

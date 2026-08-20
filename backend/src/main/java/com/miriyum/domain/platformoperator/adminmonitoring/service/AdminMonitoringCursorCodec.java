@@ -10,7 +10,9 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,7 +25,7 @@ import tools.jackson.databind.ObjectMapper;
         + "'${miriyum.admin-monitoring.enabled:false}' == 'true'")
 public class AdminMonitoringCursorCodec {
 
-    private static final int CONTRACT_VERSION = 1;
+    private static final int CONTRACT_VERSION = 2;
     private static final String HMAC_ALGORITHM = "HmacSHA256";
 
     private final String activeKeyId;
@@ -71,7 +73,10 @@ public class AdminMonitoringCursorCodec {
                     fingerprint(query),
                     seek(state.lastEvaluated()),
                     seek(state.reservationAfter()),
-                    seek(state.waitingAfter()));
+                    seek(state.waitingAfter()),
+                    seek(state.menuHoldAfter()),
+                    seek(state.paymentAfter()),
+                    state.emittedCaseIds().stream().sorted().toList());
             String body = base64(objectMapper.writeValueAsBytes(payload));
             String signed = activeKeyId + "." + body;
             return signed + "." + base64(sign(signed));
@@ -126,7 +131,10 @@ public class AdminMonitoringCursorCodec {
                     asOf,
                     globalSeek(payload.lastEvaluated()),
                     sourceSeek(payload.reservationAfter()),
-                    sourceSeek(payload.waitingAfter()));
+                    sourceSeek(payload.waitingAfter()),
+                    sourceSeek(payload.menuHoldAfter()),
+                    sourceSeek(payload.paymentAfter()),
+                    Set.copyOf(payload.emittedCaseIds()));
         } catch (ServiceException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -188,10 +196,15 @@ public class AdminMonitoringCursorCodec {
             Instant asOf,
             GlobalSeek lastEvaluated,
             SourceSeek reservationAfter,
-            SourceSeek waitingAfter
+            SourceSeek waitingAfter,
+            SourceSeek menuHoldAfter,
+            SourceSeek paymentAfter,
+            Set<String> emittedCaseIds
     ) {
         public CursorState {
             Objects.requireNonNull(asOf, "asOf must not be null");
+            emittedCaseIds = emittedCaseIds == null ? Set.of() : Set.copyOf(emittedCaseIds);
+            emittedCaseIds.forEach(AdminMonitoringCursorCodec::requireCaseId);
         }
     }
 
@@ -218,7 +231,10 @@ public class AdminMonitoringCursorCodec {
             String filterFingerprint,
             SeekPayload lastEvaluated,
             SeekPayload reservationAfter,
-            SeekPayload waitingAfter
+            SeekPayload waitingAfter,
+            SeekPayload menuHoldAfter,
+            SeekPayload paymentAfter,
+            List<String> emittedCaseIds
     ) {
     }
 

@@ -9,11 +9,13 @@ import static com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonit
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.BDDMockito.willReturn;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 
 import com.miriyum.domain.menuhold.dto.MenuHoldMonitoringContracts;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
@@ -23,6 +25,8 @@ import com.miriyum.domain.payment.service.PaymentMonitoringQueryService;
 import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringRequests.ListQuery;
 import com.miriyum.domain.platformoperator.adminmonitoring.dto.AdminMonitoringResponses.CasePage;
 import com.miriyum.domain.platformoperator.adminmonitoring.exception.AdminMonitoringErrorCode;
+import com.miriyum.domain.platformoperator.adminmonitoring.service.AdminMonitoringCursorCodec.CursorState;
+import com.miriyum.domain.platformoperator.adminmonitoring.service.AdminMonitoringCursorCodec.SourceSeek;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.domain.reservation.dto.contract.ReservationMonitoringContracts;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
@@ -37,6 +41,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -94,18 +99,161 @@ class AdminMonitoringQueryServiceTest {
                 ArgumentCaptor.forClass(ReservationMonitoringContracts.ChangeQuery.class);
         ArgumentCaptor<WaitingMonitoringContracts.ChangeQuery> waitingChange =
                 ArgumentCaptor.forClass(WaitingMonitoringContracts.ChangeQuery.class);
+        ArgumentCaptor<MenuHoldMonitoringContracts.ChangeQuery> menuChange =
+                ArgumentCaptor.forClass(MenuHoldMonitoringContracts.ChangeQuery.class);
+        ArgumentCaptor<PaymentMonitoringContracts.ChangeQuery> paymentChange =
+                ArgumentCaptor.forClass(PaymentMonitoringContracts.ChangeQuery.class);
         ArgumentCaptor<MenuHoldMonitoringContracts.BatchQuery> menuBatch =
                 ArgumentCaptor.forClass(MenuHoldMonitoringContracts.BatchQuery.class);
         ArgumentCaptor<PaymentMonitoringContracts.BatchQuery> paymentBatch =
                 ArgumentCaptor.forClass(PaymentMonitoringContracts.BatchQuery.class);
         then(reservations).should().findChangedCases(reservationChange.capture());
         then(waitings).should().findChangedCases(waitingChange.capture());
+        then(menuHolds).should().findChangedCases(menuChange.capture());
+        then(payments).should().findChangedCases(paymentChange.capture());
         then(menuHolds).should().findCases(menuBatch.capture());
         then(payments).should().findCases(paymentBatch.capture());
         assertThat(List.of(
                 reservationChange.getValue().asOf(), waitingChange.getValue().asOf(),
+                menuChange.getValue().asOf(), paymentChange.getValue().asOf(),
                 menuBatch.getValue().asOf(), paymentBatch.getValue().asOf()))
                 .containsOnly(NOW);
+    }
+
+    @Test
+    void discoversCasesWhoseOnlyWindowChangeComesFromMenuHoldOrPayment() {
+        Instant menuChanged = NOW.minusSeconds(10);
+        Instant paymentChanged = NOW.minusSeconds(20);
+        willReturn(new MenuHoldMonitoringContracts.ReferencePage(
+                List.of(new MenuHoldMonitoringContracts.CaseReference(
+                        "reservation-hold:12", "7", menuChanged)), NOW, NOW))
+                .given(menuHolds).findChangedCases(any());
+        willReturn(new PaymentMonitoringContracts.ReferencePage(
+                List.of(new PaymentMonitoringContracts.CaseReference(
+                        "waiting:9", paymentChanged)), NOW, NOW))
+                .given(payments).findChangedCases(any());
+        willReturn(reservationBatch("reservation-hold:12")).given(reservations).findCases(any());
+        willReturn(waitingBatch("waiting:9")).given(waitings).findCases(any());
+        willReturn(menuBatch("reservation-hold:12", menuChanged)).given(menuHolds).findCases(any());
+        willReturn(paymentBatch("waiting:9", paymentChanged)).given(payments).findCases(any());
+
+        CasePage page = service.list(PRINCIPAL, query(20));
+
+        assertThat(page.items()).extracting(item -> item.caseId())
+                .containsExactly("reservation-hold:12", "waiting:9");
+        assertThat(page.items()).extracting(item -> item.statusChangedAt())
+                .containsExactly(menuChanged, paymentChanged);
+    }
+
+    @Test
+    void emitsOneCaseAtTheLatestChangeAcrossPrimaryAndLinkedStreams() {
+        Instant menuChanged = NOW.minusSeconds(10);
+        willReturn(new ReservationMonitoringContracts.ReferencePage(
+                List.of(new ReservationMonitoringContracts.CaseReference(
+                        "reservation-hold:12", "7", CHANGED)), NOW, NOW))
+                .given(reservations).findChangedCases(any());
+        willReturn(new MenuHoldMonitoringContracts.ReferencePage(
+                List.of(new MenuHoldMonitoringContracts.CaseReference(
+                        "reservation-hold:12", "7", menuChanged)), NOW, NOW))
+                .given(menuHolds).findChangedCases(any());
+        willReturn(reservationBatch("reservation-hold:12")).given(reservations).findCases(any());
+        willReturn(menuBatch("reservation-hold:12", menuChanged)).given(menuHolds).findCases(any());
+
+        CasePage page = service.list(PRINCIPAL, reservationQuery());
+
+        assertThat(page.items()).singleElement().satisfies(item -> {
+            assertThat(item.caseId()).isEqualTo("reservation-hold:12");
+            assertThat(item.statusChangedAt()).isEqualTo(menuChanged);
+        });
+    }
+
+    @Test
+    void resumesAllFourChangeStreamsFromTheirOwnCursorCheckpoint() {
+        ListQuery query = new ListQuery(
+                "7", Set.of(RESERVATION, WAITING), Set.of(), Set.of(), Set.of(),
+                NOW.minus(Duration.ofDays(1)), NOW, 20, "cursor");
+        var reservationAfter = new SourceSeek(NOW.minusSeconds(11), "reservation:11");
+        var waitingAfter = new SourceSeek(NOW.minusSeconds(12), "waiting:12");
+        var menuAfter = new SourceSeek(NOW.minusSeconds(13), "reservation-hold:13");
+        var paymentAfter = new SourceSeek(NOW.minusSeconds(14), "waiting:14");
+        willReturn(new CursorState(
+                NOW, null, reservationAfter, waitingAfter, menuAfter, paymentAfter, Set.of()))
+                .given(cursors).decode("cursor", query);
+
+        service.list(PRINCIPAL, query);
+
+        ArgumentCaptor<ReservationMonitoringContracts.ChangeQuery> reservation =
+                ArgumentCaptor.forClass(ReservationMonitoringContracts.ChangeQuery.class);
+        ArgumentCaptor<WaitingMonitoringContracts.ChangeQuery> waiting =
+                ArgumentCaptor.forClass(WaitingMonitoringContracts.ChangeQuery.class);
+        ArgumentCaptor<MenuHoldMonitoringContracts.ChangeQuery> menu =
+                ArgumentCaptor.forClass(MenuHoldMonitoringContracts.ChangeQuery.class);
+        ArgumentCaptor<PaymentMonitoringContracts.ChangeQuery> payment =
+                ArgumentCaptor.forClass(PaymentMonitoringContracts.ChangeQuery.class);
+        then(reservations).should().findChangedCases(reservation.capture());
+        then(waitings).should().findChangedCases(waiting.capture());
+        then(menuHolds).should().findChangedCases(menu.capture());
+        then(payments).should().findChangedCases(payment.capture());
+        assertThat(reservation.getValue().after().caseId()).isEqualTo("reservation:11");
+        assertThat(waiting.getValue().after().caseId()).isEqualTo("waiting:12");
+        assertThat(menu.getValue().after().caseId()).isEqualTo("reservation-hold:13");
+        assertThat(payment.getValue().after().caseId()).isEqualTo("waiting:14");
+    }
+
+    @Test
+    void doesNotAdvanceAnOlderDuplicatePastUnevaluatedPrimaryCases() {
+        Instant paymentChanged = NOW.minusSeconds(5);
+        Instant secondReservationChanged = NOW.minusSeconds(10);
+        Instant duplicatePrimaryChanged = NOW.minusSeconds(20);
+        ListQuery query = new ListQuery(
+                "7", Set.of(RESERVATION), Set.of(), Set.of(), Set.of(),
+                NOW.minus(Duration.ofDays(1)), NOW, 1, null);
+        willReturn(new ReservationMonitoringContracts.ReferencePage(
+                List.of(
+                        new ReservationMonitoringContracts.CaseReference(
+                                "reservation:2", "7", secondReservationChanged),
+                        new ReservationMonitoringContracts.CaseReference(
+                                "reservation:1", "7", duplicatePrimaryChanged)),
+                NOW, NOW)).given(reservations).findChangedCases(any());
+        willReturn(new PaymentMonitoringContracts.ReferencePage(
+                List.of(new PaymentMonitoringContracts.CaseReference(
+                        "reservation:1", paymentChanged)), NOW, NOW))
+                .given(payments).findChangedCases(any());
+        willReturn(new ReservationMonitoringContracts.BatchResult(
+                List.of(reservationSnapshot("reservation:1"), reservationSnapshot("reservation:2")),
+                NOW, NOW)).given(reservations).findCases(any());
+        willReturn(paymentBatch("reservation:1", paymentChanged)).given(payments).findCases(any());
+        willReturn("next").given(cursors).encode(any(), eq(query));
+
+        CasePage page = service.list(PRINCIPAL, query);
+
+        assertThat(page.items()).extracting(item -> item.caseId())
+                .containsExactly("reservation:1");
+        ArgumentCaptor<CursorState> cursor = ArgumentCaptor.forClass(CursorState.class);
+        then(cursors).should().encode(cursor.capture(), eq(query));
+        assertThat(cursor.getValue().paymentAfter().caseId()).isEqualTo("reservation:1");
+        assertThat(cursor.getValue().reservationAfter()).isNull();
+        assertThat(cursor.getValue().emittedCaseIds()).containsExactly("reservation:1");
+    }
+
+    @Test
+    void advancesPastAFullPageOfUnrequestedPaymentCaseTypesWithoutFalseExhaustion() {
+        List<PaymentMonitoringContracts.CaseReference> waitingPayments = IntStream.rangeClosed(1, 100)
+                .mapToObj(index -> new PaymentMonitoringContracts.CaseReference(
+                        "waiting:" + index, NOW.minusSeconds(index)))
+                .toList();
+        willReturn(new PaymentMonitoringContracts.ReferencePage(waitingPayments, NOW, NOW))
+                .given(payments).findChangedCases(any());
+        ListQuery query = reservationQuery();
+        willReturn("next").given(cursors).encode(any(), eq(query));
+
+        CasePage page = service.list(PRINCIPAL, query);
+
+        assertThat(page.items()).isEmpty();
+        assertThat(page.nextCursor()).isEqualTo("next");
+        ArgumentCaptor<CursorState> cursor = ArgumentCaptor.forClass(CursorState.class);
+        then(cursors).should().encode(cursor.capture(), eq(query));
+        assertThat(cursor.getValue().paymentAfter()).isNotNull();
     }
 
     @Test
@@ -248,6 +396,42 @@ class AdminMonitoringQueryServiceTest {
     }
 
     @Test
+    void authorizesHistoricalReservationDetailWithTheCurrentPrimaryVersion() {
+        Instant historicalAsOf = NOW.minusSeconds(120);
+        var historical = reservationDetailAt("reservation:12", historicalAsOf, 0L);
+        var current = reservationDetailAt("reservation:12", NOW, 5L);
+        given(reservations.findCase(any())).willAnswer(invocation -> {
+            var query = invocation.getArgument(0, ReservationMonitoringContracts.DetailQuery.class);
+            return Optional.of(query.asOf().equals(NOW) ? current : historical);
+        });
+
+        var detail = service.get(PRINCIPAL, RESERVATION, "reservation:12", historicalAsOf);
+
+        assertThat(detail.asOf()).isEqualTo(historicalAsOf);
+        assertThat(detail.caseVersion()).isEqualTo(1L);
+        then(authorization).should().requireDetail(PRINCIPAL, "reservation:12", 6L);
+        then(reservations).should(times(2)).findCase(any());
+    }
+
+    @Test
+    void authorizesHistoricalWaitingDetailWithTheCurrentPrimaryVersion() {
+        Instant historicalAsOf = NOW.minusSeconds(120);
+        var historical = waitingDetailAt("waiting:9", historicalAsOf, 2L);
+        var current = waitingDetailAt("waiting:9", NOW, 7L);
+        given(waitings.findCase(any())).willAnswer(invocation -> {
+            var query = invocation.getArgument(0, WaitingMonitoringContracts.DetailQuery.class);
+            return Optional.of(query.asOf().equals(NOW) ? current : historical);
+        });
+
+        var detail = service.get(PRINCIPAL, WAITING, "waiting:9", historicalAsOf);
+
+        assertThat(detail.asOf()).isEqualTo(historicalAsOf);
+        assertThat(detail.caseVersion()).isEqualTo(3L);
+        then(authorization).should().requireDetail(PRINCIPAL, "waiting:9", 8L);
+        then(waitings).should(times(2)).findCase(any());
+    }
+
+    @Test
     void distinguishesPrimarySourceFailureFromConfirmedAbsence() {
         willThrow(new ServiceException(ReservationErrorCode.RESERVATION_MONITORING_UNAVAILABLE))
                 .given(reservations).findCase(any());
@@ -269,6 +453,14 @@ class AdminMonitoringQueryServiceTest {
         given(waitings.findChangedCases(any())).willAnswer(invocation -> {
             var query = invocation.getArgument(0, WaitingMonitoringContracts.ChangeQuery.class);
             return new WaitingMonitoringContracts.ReferencePage(List.of(), query.asOf(), query.asOf());
+        });
+        given(menuHolds.findChangedCases(any())).willAnswer(invocation -> {
+            var query = invocation.getArgument(0, MenuHoldMonitoringContracts.ChangeQuery.class);
+            return new MenuHoldMonitoringContracts.ReferencePage(List.of(), query.asOf(), query.asOf());
+        });
+        given(payments.findChangedCases(any())).willAnswer(invocation -> {
+            var query = invocation.getArgument(0, PaymentMonitoringContracts.ChangeQuery.class);
+            return new PaymentMonitoringContracts.ReferencePage(List.of(), query.asOf(), query.asOf());
         });
         given(reservations.findCases(any())).willAnswer(invocation -> {
             var query = invocation.getArgument(0, ReservationMonitoringContracts.BatchQuery.class);
@@ -319,6 +511,20 @@ class AdminMonitoringQueryServiceTest {
                                 ReservationMonitoringContracts.ReconciliationStatus.MATCHED)));
     }
 
+    private static ReservationMonitoringContracts.Detail reservationDetailAt(
+            String caseId,
+            Instant asOf,
+            long version
+    ) {
+        var snapshot = new ReservationMonitoringContracts.CaseSnapshot(
+                caseId, "7", 2, NOW.plusSeconds(3600), NOW.plusSeconds(7200),
+                List.of(new ReservationMonitoringContracts.LedgerCell(
+                        "RESERVATION", "CONFIRMED", version, asOf.minusSeconds(1),
+                        asOf, asOf, ReservationMonitoringContracts.Completeness.COMPLETE,
+                        ReservationMonitoringContracts.ReconciliationStatus.MATCHED)));
+        return new ReservationMonitoringContracts.Detail(snapshot, List.of());
+    }
+
     private static WaitingMonitoringContracts.BatchResult waitingBatch(String caseId) {
         return new WaitingMonitoringContracts.BatchResult(List.of(new WaitingMonitoringContracts.SourceCell(
                 caseId,
@@ -327,6 +533,47 @@ class AdminMonitoringQueryServiceTest {
                         new WaitingMonitoringContracts.Links(null, null)),
                 NOW, NOW, WaitingMonitoringContracts.Completeness.COMPLETE,
                 WaitingMonitoringContracts.ReconciliationStatus.MATCHED, CHANGED)), NOW, NOW);
+    }
+
+    private static WaitingMonitoringContracts.Detail waitingDetailAt(
+            String caseId,
+            Instant asOf,
+            long version
+    ) {
+        var cell = new WaitingMonitoringContracts.SourceCell(
+                caseId,
+                new WaitingMonitoringContracts.ConfirmedState(
+                        "7", "WAITING", version, asOf.minusSeconds(1), 3, 8L,
+                        new WaitingMonitoringContracts.Links(null, null)),
+                asOf, asOf, WaitingMonitoringContracts.Completeness.COMPLETE,
+                WaitingMonitoringContracts.ReconciliationStatus.MATCHED, asOf.minusSeconds(1));
+        return new WaitingMonitoringContracts.Detail(cell, List.of());
+    }
+
+    private static MenuHoldMonitoringContracts.BatchResult menuBatch(
+            String caseId,
+            Instant changedAt
+    ) {
+        var cell = new MenuHoldMonitoringContracts.SourceCell(
+                caseId, "7", new MenuHoldMonitoringContracts.ConfirmedState(
+                        "CONFIRMED", 2L, changedAt),
+                NOW, NOW, MenuHoldMonitoringContracts.Completeness.COMPLETE,
+                MenuHoldMonitoringContracts.ReconciliationStatus.MATCHED, changedAt,
+                new MenuHoldMonitoringContracts.Links(null, "12"));
+        return new MenuHoldMonitoringContracts.BatchResult(List.of(cell), NOW, NOW);
+    }
+
+    private static PaymentMonitoringContracts.BatchResult paymentBatch(
+            String caseId,
+            Instant changedAt
+    ) {
+        var cell = new PaymentMonitoringContracts.SourceCell(
+                caseId,
+                new PaymentMonitoringContracts.ConfirmedState(
+                        "81", "PAID", 1L, changedAt, 10_000L, 0L, "KRW"),
+                NOW, NOW, PaymentMonitoringContracts.Completeness.COMPLETE,
+                PaymentMonitoringContracts.ReconciliationStatus.MATCHED, changedAt);
+        return new PaymentMonitoringContracts.BatchResult(List.of(cell), NOW, NOW);
     }
 
     private static MenuHoldMonitoringContracts.Detail menuDetail(String caseId) {

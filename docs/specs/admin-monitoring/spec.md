@@ -28,7 +28,8 @@ ReservationHold가 최종 Reservation으로 전환돼도 공개 case ID는 바�
 - 선택 필터: `storeId`, `caseTypes`, `lifecycleStatuses`, 원장-qualified `sourceStatuses`, `reconciliationStatuses`
 - 크기: 기본 20, 1~100
 - 고정 정렬: `statusChangedAt DESC`, `caseType ASC`, `caseId DESC`
-- cursor: 계약 version, key ID, 첫 페이지 `asOf`, 정규화 필터 지문과 마지막 평가 후보의 seek tuple을 HMAC으로 보호한다.
+- 변경 후보는 Reservation·Waiting·MenuHold·Payment 네 공개 change stream을 병합하며, 연결 원장만 변경된 사건도 포함한다.
+- cursor: 계약 version, key ID, 첫 페이지 `asOf`, 정규화 필터 지문과 네 원장별 seek tuple을 HMAC으로 보호한다.
 
 ### 상세
 
@@ -42,7 +43,7 @@ ReservationHold가 최종 Reservation으로 전환돼도 공개 case ID는 바�
 - 후속 페이지는 cursor에 포함된 같은 `asOf`를 사용한다.
 - 각 원장 cell은 `source`, 원본 `sourceStatus`, 원본 `statusVersion`, `statusChangedAt`, `asOf`, `dataThrough`, `completeness`, `reconciliationStatus`를 독립적으로 보존한다.
 - `dataThrough < asOf`이면 `DELAYED`다. 이를 최신 확정 상태로 승격하지 않는다.
-- 사건 배정용 `caseVersion`은 주 원장의 원본 version에 1을 더한 양수다.
+- 응답 `caseVersion`은 요청한 `asOf` 주 원장의 원본 version에 1을 더한 양수다. 상세 배정 검증은 이 snapshot version과 분리해 현재 시점 주 원장의 version을 사용한다.
 - lifecycle과 reconciliation은 별도 축이다. 한 원장의 실패·대사 필요가 다른 원장의 lifecycle을 덮어쓰지 않는다.
 
 ## 부분 실패

@@ -89,6 +89,10 @@ class AdminMonitoringOpenApiContractTest {
         assertThat(list(failure.get("required")))
                 .containsExactlyInAnyOrder("source", "errorCode", "retryable");
 
+        Map<String, Object> transition = map(schemas.get("AdminMonitoringTransition"));
+        assertThat(list(transition.get("required"))).contains("eventType");
+        assertThat(map(transition.get("properties"))).containsKey("eventType");
+
         Map<String, Object> detail = map(schemas.get("AdminMonitoringCaseDetail"));
         assertThat(list(detail.get("required")))
                 .contains("caseType", "caseId", "maskingLevel", "ledgers", "history");

@@ -31,7 +31,10 @@ class AdminMonitoringCursorCodecTest {
                 NOW,
                 new GlobalSeek(NOW.minusSeconds(5), RESERVATION, "reservation:12"),
                 new SourceSeek(NOW.minusSeconds(5), "reservation:12"),
-                new SourceSeek(NOW.minusSeconds(7), "waiting:9"));
+                new SourceSeek(NOW.minusSeconds(7), "waiting:9"),
+                new SourceSeek(NOW.minusSeconds(6), "reservation-hold:12"),
+                new SourceSeek(NOW.minusSeconds(8), "waiting:9"),
+                Set.of("reservation:12", "waiting:9"));
 
         assertThat(codec.decode(codec.encode(state, query(20)), query(20)))
                 .isEqualTo(state);
@@ -65,7 +68,14 @@ class AdminMonitoringCursorCodecTest {
     @Test
     void rejectsCursorIssuedInTheFuture() {
         String token = codec("key-1", NOW.plusSeconds(1)).encode(
-                new CursorState(NOW, state().lastEvaluated(), state().reservationAfter(), state().waitingAfter()),
+                new CursorState(
+                        NOW,
+                        state().lastEvaluated(),
+                        state().reservationAfter(),
+                        state().waitingAfter(),
+                        state().menuHoldAfter(),
+                        state().paymentAfter(),
+                        state().emittedCaseIds()),
                 query(20));
 
         assertError(() -> codec("key-1", NOW).decode(token, query(20)),
@@ -77,7 +87,10 @@ class AdminMonitoringCursorCodecTest {
                 NOW,
                 new GlobalSeek(NOW.minusSeconds(5), WAITING, "waiting:9"),
                 new SourceSeek(NOW.minusSeconds(6), "reservation:12"),
-                new SourceSeek(NOW.minusSeconds(5), "waiting:9"));
+                new SourceSeek(NOW.minusSeconds(5), "waiting:9"),
+                new SourceSeek(NOW.minusSeconds(7), "reservation-hold:12"),
+                new SourceSeek(NOW.minusSeconds(8), "waiting:9"),
+                Set.of("waiting:9"));
     }
 
     private static ListQuery query(int size) {
