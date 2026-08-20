@@ -4,10 +4,10 @@
 
 이 문서는 현재 `dev`의 Flyway V1~V66을 기준으로 작성한 MySQL 물리 ERD다. 너무 큰 단일 다이어그램 대신 도메인별로 나눠 검토한다. 각 문서의 테이블 색인을 합치면 V1~V66에서 생성한 모든 테이블을 찾을 수 있다.
 
-- 실선 관계는 DB `FOREIGN KEY`다.
+- 관계 라벨에 `logical`이 없는 선은 DB `FOREIGN KEY`다.
 - `logical` 표기는 애플리케이션이 식별자만 보관하는 논리 참조다. DB FK가 있다는 뜻이 아니다.
 - 객체 키, URL, 토큰, 사업자등록번호, 대표자명 같은 민감값은 표시하지 않는다.
-- V67 사업자등록증 증빙 원장은 아직 `dev`에 병합되지 않았으며, #489의 [증빙 ERD](../specs/store-onboarding/erd.md)에서 별도로 관리한다.
+- V67 사업자등록증 증빙 원장은 아직 `dev`에 병합되지 않았으며, [PR #489](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/489)의 별도 증빙 ERD에서 관리한다.
 
 ## 도메인별 ERD
 
