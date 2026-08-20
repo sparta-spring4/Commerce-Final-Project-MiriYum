@@ -41,9 +41,9 @@ QR·회전 코드의 발급·검증·소비와 운영자 통제 API는 후속 Is
 
 Waiting은 Reservation이 소유하는 capability다. 새 최상위 Java 도메인이나 별도 배포 단위를
 만들지 않는다. 이 계약은 store-operator audience 진입점에 고도화 path를 조합하지만 1차 MVP
-aggregate에는 넣지 않는다. production Java, migration, frontend 또는 생성 클라이언트는
-추가하지 않는다. Issue #250 contract-first는 `contract-only` SSE path와 정본 계약·계약
-테스트만 추가하며 production Runtime은 별도 PR이 소유한다.
+aggregate에는 넣지 않는다. Issue #250의 계약 PR #442와 Runtime PR #474가 SSE path와
+production Java Runtime을 제공한다. Nginx·환경 활성화·부하 및 장애 검증은 #250 배포 검증이,
+frontend와 생성 클라이언트는 #251·#410·#411이 별도로 소유한다.
 
 Issue #271 설정 Runtime은 설정 저장·조회·version 조건부 전체 교체와 비활성화 closure
 연계를 소유한다. Issue #380 AUTO 오픈 Runtime은 아래의 영속 작업·접수 원장과 CAS로 이
@@ -472,13 +472,13 @@ Runtime은 immutable 사건 high-watermark를 독립적으로 소비하며 이 p
 | consumer | `GET /api/v1/consumers/me/waiting-events` | `waiting.changed` | `GET /api/v1/consumers/me/waiting-teams/current` |
 | store-operator | `GET /api/v1/store-operators/stores/{storeId}/waiting-events` | `waiting.changed` | 해당 store의 Waiting 목록·상세 |
 
-- 두 endpoint는 각 audience Bearer JWT와 Authorization header를 전달할 수 있는 fetch streaming을 사용하고 성공 media type은 `text/event-stream`이다. 이 계약 단계에서는 path item에 `x-miriyum-runtime-status: contract-only`, `x-miriyum-owner-issue: 250`을 유지한다.
+- 두 endpoint는 각 audience Bearer JWT와 Authorization header를 전달할 수 있는 fetch streaming을 사용하고 성공 media type은 `text/event-stream`이다. PR #474가 두 production Runtime route와 공통 transport를 활성화했으며 실제 환경 활성화와 proxy·부하·장애 증거는 #250 배포 검증이 소유한다.
 - SSE는 상태 본문이 아니라 변경 신호다. consumer는 본인 팀 생성·공개 상태 변경과 같은 매장·영업일의 앞선 활성 팀 변화로 `teamsAhead`가 달라질 수 있을 때 신호를 받는다. store-operator는 해당 store의 팀 생성·공개 상태 변경만 받으며 설정·AUTO 작업·알림 worker 내부 상태는 제외한다.
 - `Last-Event-ID`가 없으면 최초 연결이다. 연결 직후와 유효한 재연결 뒤 현재 MySQL high-watermark에 결속된 신호를 한 번 보내며, client는 payload나 cursor로 상태·순번·`teamsAhead`를 합성하지 않고 표의 HTTP 조회를 사용한다.
 - wire frame은 `event: waiting.changed`, opaque `id`, 고정 `data: {}` 세 줄 뒤 필수 빈 줄을 두어 `\n\n`으로 종료한다. 빈 data 객체에 계정·매장·팀·상태·순번·`teamsAhead`를 추가하지 않는다.
 - `id`는 audience·인증 계정·필요한 store scope·계약 version에 결속한 1~512자의 base64url 문자 집합 opaque cursor다. 형식·무결성이 잘못됐거나 다른 audience·계정·store cursor면 `400 COMMON_001` JSON 오류 envelope로 거절한다.
 - Valkey Pub/Sub은 다중 인스턴스 wake-up hint일 뿐 재생 원장이나 상태 성공의 근거가 아니다. 신호 유실·중복·역순·구독 재시작 뒤 유한한 MySQL correction과 HTTP 재조회로 수렴하며, keepalive comment는 업무 event나 cursor 전진이 아니다.
-- 공통 SSE transport·cursor·connection registry·Valkey fan-out·MySQL correction과 timeout·heartbeat·연결 한도는 이 계약이 `dev`에 병합된 뒤 #250 Runtime PR이 소유한다. frontend 소비는 #410·#411이 각각 소유하고 SSE 실패를 Waiting 업무 실패로 표시하지 않는다.
+- 공통 SSE transport·cursor·connection registry·Valkey fan-out·MySQL correction과 timeout·heartbeat·연결 한도 Runtime은 PR #474에 병합됐다. Nginx·배포 설정·부하 및 장애 검증은 #250이, frontend 소비는 #410·#411이 각각 소유하고 SSE 실패를 Waiting 업무 실패로 표시하지 않는다.
 
 관측 가능한 인수 조건은 최초 연결·재연결·중복·역순과 Valkey 신호 유실 뒤 각 audience가 HTTP/MySQL 최신 상태로 수렴하는 것, 다른 scope cursor가 거절되는 것, SSE 장애가 Waiting 상태·membership·순번을 바꾸지 않는 것이다.
 

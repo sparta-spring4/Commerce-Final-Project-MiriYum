@@ -365,3 +365,9 @@ Use this order when an image rollback must not start new reservation deposit cla
 Re-enabling the worker also requires a new container or task revision with the value set explicitly to `true`. Do not treat an environment-file or task-definition edit by itself as a runtime state change.
 
 The workflow uses the separate `staging-backend` marker when deciding the last successful backend image. This is intentionally separate from the shared `staging` Environment so a future frontend CD cannot make a backend deployment look newer. It also makes manual rollback explicit: the selected `inputs.image_tag` is the SHA recorded by the marker. After each deployment, record the GitHub Actions run URL, ECR image digest, SSM command ID, and EC2 loopback health result. Until those four runtime results exist, deployment evidence remains `NOT RUN`.
+
+## SSE deployment boundary
+
+Backend CD transfers the shared Nginx SSE location snippet with the existing HTTP/HTTPS templates. The snippet applies only to the Notification consumer and Waiting consumer/store-operator stream routes, disables proxy buffering and caching, and leaves the generic `/api/` proxy unchanged. Application Runtime remains fail-closed when its dedicated cursor secret or bounded policy is invalid.
+
+Environment activation, load evidence, Valkey interruption, same-SHA backend replacement and rollback must follow [the SSE Runtime runbook](sse-runtime-runbook.md). The loadtest values are local inputs, not staging or production defaults. Until the post-#455 production Compose/ECS secret contract and approved evidence are merged, keep production SSE disabled and record staging, browser, and production execution as `NOT RUN` rather than inferring success from template delivery.
