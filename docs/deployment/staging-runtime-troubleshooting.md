@@ -139,3 +139,11 @@ falls below the threshold.
    repeat the commands above before resuming CD.
 3. Keep the deployment blocked until one of the options restores headroom and a
    controlled health check succeeds.
+
+### Applied recovery evidence
+
+On 2026-08-20, the staging instance type was changed from `t4g.small` (2 GiB)
+to `t4g.medium` (4 GiB). After restart, `free -h` reported 2.4 GiB available
+memory and `http://127.0.0.1:8080/actuator/health` returned `UP`. This restores
+enough headroom to resume controlled staging CD; continue to collect container
+memory evidence during later load tests.
