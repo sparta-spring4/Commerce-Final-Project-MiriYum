@@ -206,15 +206,31 @@ describe('NotificationHistoryPage', () => {
     expect(events.subscriptions[1]?.signal.aborted).toBe(false)
   })
 
-  test('renders delivered history without an unsupported action control', async () => {
+  test('links available reservation and pickup actions to their protected details', async () => {
     server.use(
       http.get(NOTIFICATION_HISTORY_PATH, () =>
         HttpResponse.json(
           successResponse([
             historyItem({
+              notificationId: '1001',
               action: {
                 type: 'RESERVATION_DETAIL',
                 resource: { type: 'RESERVATION', id: '501' },
+                availability: 'AVAILABLE',
+                expiresAt: null,
+              },
+            }),
+            historyItem({
+              notificationId: '1002',
+              purpose: 'PICKUP_RESERVATION_CONFIRMED',
+              title: '픽업 예약이 확정되었습니다.',
+              resource: { type: 'PICKUP_RESERVATION', id: 'pickup/701' },
+              action: {
+                type: 'PICKUP_RESERVATION_DETAIL',
+                resource: {
+                  type: 'PICKUP_RESERVATION',
+                  id: 'pickup/701',
+                },
                 availability: 'AVAILABLE',
                 expiresAt: null,
               },
@@ -234,6 +250,91 @@ describe('NotificationHistoryPage', () => {
       'dateTime',
       '2026-08-13T10:00:02+09:00',
     )
+    expect(screen.getByRole('link', { name: '예약 상세 보기' })).toHaveAttribute(
+      'href',
+      '/reservations/501',
+    )
+    expect(
+      screen.getByRole('link', { name: '픽업 상세 보기' }),
+    ).toHaveAttribute('href', '/pickup-reservations/pickup%2F701')
+  })
+
+  test.each(['EXPIRED', 'SUPERSEDED', 'UNAVAILABLE'])(
+    'disables a %s detail action instead of navigating',
+    async (availability) => {
+      server.use(
+        http.get(NOTIFICATION_HISTORY_PATH, () =>
+          HttpResponse.json(
+            successResponse([
+              historyItem({
+                action: {
+                  type: 'RESERVATION_DETAIL',
+                  resource: { type: 'RESERVATION', id: '501' },
+                  availability,
+                  expiresAt: null,
+                },
+              }),
+            ]),
+          ),
+        ),
+      )
+
+      await renderPage()
+
+      expect(
+        await screen.findByRole('button', { name: '예약 상세 보기' }),
+      ).toBeDisabled()
+      expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    },
+  )
+
+  test.each([
+    {
+      name: 'menu substitution review',
+      action: {
+        type: 'MENU_SUBSTITUTION_REVIEW',
+        resource: { type: 'MENU_SUBSTITUTION_PROPOSAL', id: '801' },
+        availability: 'AVAILABLE',
+        expiresAt: null,
+      },
+    },
+    {
+      name: 'crossed action and resource types',
+      action: {
+        type: 'RESERVATION_DETAIL',
+        resource: { type: 'PICKUP_RESERVATION', id: '701' },
+        availability: 'AVAILABLE',
+        expiresAt: null,
+      },
+    },
+    {
+      name: 'unknown action type',
+      action: {
+        type: 'UNKNOWN_DETAIL',
+        resource: { type: 'RESERVATION', id: '501' },
+        availability: 'AVAILABLE',
+        expiresAt: null,
+      },
+    },
+    {
+      name: 'blank resource id',
+      action: {
+        type: 'RESERVATION_DETAIL',
+        resource: { type: 'RESERVATION', id: '   ' },
+        availability: 'AVAILABLE',
+        expiresAt: null,
+      },
+    },
+  ])('does not execute $name', async ({ action }) => {
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(successResponse([historyItem({ action })])),
+      ),
+    )
+
+    await renderPage()
+
+    expect(await screen.findByText('예약이 확정되었습니다.')).toBeVisible()
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
