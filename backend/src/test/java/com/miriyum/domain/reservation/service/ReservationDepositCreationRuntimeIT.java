@@ -149,6 +149,8 @@ class ReservationDepositCreationRuntimeIT {
         jdbcTemplate.execute("DELETE FROM idempotency_commands");
         jdbcTemplate.execute("DELETE FROM payment_webhook_receipts");
         jdbcTemplate.execute("DELETE FROM payment_ledger_entries");
+        jdbcTemplate.execute("TRUNCATE TABLE payment_refund_monitoring_snapshots");
+        jdbcTemplate.execute("TRUNCATE TABLE payment_monitoring_snapshots");
         jdbcTemplate.execute("DELETE FROM payment_refunds");
         jdbcTemplate.execute("DELETE FROM payment_attempts");
         jdbcTemplate.execute("DELETE FROM payments");

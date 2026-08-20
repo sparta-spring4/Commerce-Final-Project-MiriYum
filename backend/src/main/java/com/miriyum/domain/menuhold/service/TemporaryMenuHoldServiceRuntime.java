@@ -7,10 +7,13 @@ import com.miriyum.domain.menuhold.dto.TemporaryMenuHoldContracts;
 import com.miriyum.domain.menuhold.entity.MenuHold;
 import com.miriyum.domain.menuhold.entity.MenuHoldItem;
 import com.miriyum.domain.menuhold.entity.MenuHoldItemSnapshot;
+import com.miriyum.domain.menuhold.entity.MenuHoldStatus;
+import com.miriyum.domain.menuhold.entity.MenuHoldTransitionAudit;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.CurrentInventorySelection;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
+import com.miriyum.domain.menuhold.repository.MenuHoldTransitionAuditRepository;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalStatus;
 import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
@@ -18,6 +21,7 @@ import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.DateTimeException;
+import java.time.Clock;
 import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.List;
@@ -42,6 +46,8 @@ public class TemporaryMenuHoldServiceRuntime implements TemporaryMenuHoldService
     private final MenuInventoryService inventoryService;
     private final MenuHoldRepository holdRepository;
     private final MenuHoldTerminalService terminalService;
+    private final MenuHoldTransitionAuditRepository transitionAuditRepository;
+    private final Clock clock;
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
@@ -121,6 +127,7 @@ public class TemporaryMenuHoldServiceRuntime implements TemporaryMenuHoldService
             }
             throw exception;
         }
+        transitionAuditRepository.save(MenuHoldTransitionAudit.created(hold, clock.instant()));
         return toResult(hold);
     }
 
@@ -143,8 +150,13 @@ public class TemporaryMenuHoldServiceRuntime implements TemporaryMenuHoldService
         MenuHold hold = holdRepository.findByReservationHoldId(command.reservationHoldId())
                 .orElseThrow(() -> new ServiceException(
                         MenuHoldErrorCode.INVENTORY_STATE_CONFLICT));
+        MenuHoldStatus beforeStatus = hold.getStatus();
         boolean transitioned = terminalService.apply(
                 hold, command.target(), command.finalReservationId());
+        if (transitioned) {
+            transitionAuditRepository.save(
+                    MenuHoldTransitionAudit.transition(hold, beforeStatus, clock.instant()));
+        }
         if (transitioned && (command.target() == TemporaryMenuHoldContracts.Target.RELEASE
                 || command.target() == TemporaryMenuHoldContracts.Target.EXPIRE)) {
             inventoryService.restoreInventory(new InventoryRestoreRequest(

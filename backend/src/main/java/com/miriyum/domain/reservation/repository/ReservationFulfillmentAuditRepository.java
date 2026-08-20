@@ -4,6 +4,7 @@ import com.miriyum.domain.reservation.entity.ReservationFulfillmentAudit;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Optional;
+import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -12,6 +13,9 @@ public interface ReservationFulfillmentAuditRepository
         extends JpaRepository<ReservationFulfillmentAudit, Long> {
 
     Optional<ReservationFulfillmentAudit> findByReservationId(Long reservationId);
+
+    List<ReservationFulfillmentAudit> findAllByReservationIdInOrderByOccurredAtAscIdAsc(
+            List<Long> reservationIds);
 
     @Query(value = """
             SELECT

@@ -528,6 +528,7 @@ public class ReservationService {
         PaymentPreparation preparation = paymentService.prepareReservationDeposit(
                 new PrepareReservationDepositCommand(
                         String.valueOf(hold.getId()),
+                        store.storeId(),
                         consumerAccountId,
                         calculation.amountMinor(),
                         calculation.currency(),

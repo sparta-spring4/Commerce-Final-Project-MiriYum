@@ -9,10 +9,13 @@ import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
 import com.miriyum.domain.menuhold.dto.MenuSelection;
 import com.miriyum.domain.menuhold.entity.MenuHold;
 import com.miriyum.domain.menuhold.entity.MenuHoldItemSnapshot;
+import com.miriyum.domain.menuhold.entity.MenuHoldStatus;
+import com.miriyum.domain.menuhold.entity.MenuHoldTransitionAudit;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.CurrentInventorySelection;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
+import com.miriyum.domain.menuhold.repository.MenuHoldTransitionAuditRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
 import com.miriyum.domain.menu.service.MenuTransactionFacade;
@@ -21,6 +24,7 @@ import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalStatus;
 import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.exception.ServiceException;
 import java.time.DateTimeException;
+import java.time.Clock;
 import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -43,6 +47,8 @@ public class MenuHoldServiceRuntime implements MenuHoldService {
     private final StoreServiceIntervalValidationService intervalService;
     private final MenuInventoryService inventoryService;
     private final MenuHoldRepository holdRepository;
+    private final MenuHoldTransitionAuditRepository transitionAuditRepository;
+    private final Clock clock;
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
@@ -145,6 +151,7 @@ public class MenuHoldServiceRuntime implements MenuHoldService {
             }
             throw exception;
         }
+        transitionAuditRepository.save(MenuHoldTransitionAudit.created(hold, clock.instant()));
         return MenuHoldCommandResult.confirmed(command.reservationId());
     }
 
@@ -152,6 +159,7 @@ public class MenuHoldServiceRuntime implements MenuHoldService {
     @Transactional(propagation = Propagation.MANDATORY)
     public MenuHoldCommandResult release(MenuHoldReleaseCommand command) {
         MenuHold hold = findLockedHold(command.reservationId());
+        MenuHoldStatus beforeStatus = hold.getStatus();
         boolean transitioned;
         try {
             transitioned = hold.release();
@@ -159,6 +167,8 @@ public class MenuHoldServiceRuntime implements MenuHoldService {
             throw stateConflict(exception);
         }
         if (transitioned) {
+            transitionAuditRepository.save(
+                    MenuHoldTransitionAudit.transition(hold, beforeStatus, clock.instant()));
             inventoryService.restoreInventory(new InventoryRestoreRequest(
                     command.operationId(), hold.getAcquireOperationId()));
         }
@@ -169,10 +179,16 @@ public class MenuHoldServiceRuntime implements MenuHoldService {
     @Transactional(propagation = Propagation.MANDATORY)
     public MenuHoldCommandResult fulfill(MenuHoldFulfillCommand command) {
         MenuHold hold = findLockedHold(command.reservationId());
+        MenuHoldStatus beforeStatus = hold.getStatus();
+        boolean transitioned;
         try {
-            hold.fulfill();
+            transitioned = hold.fulfill();
         } catch (IllegalStateException exception) {
             throw stateConflict(exception);
+        }
+        if (transitioned) {
+            transitionAuditRepository.save(
+                    MenuHoldTransitionAudit.transition(hold, beforeStatus, clock.instant()));
         }
         return MenuHoldCommandResult.fulfilled(command.reservationId());
     }
@@ -181,10 +197,16 @@ public class MenuHoldServiceRuntime implements MenuHoldService {
     @Transactional(propagation = Propagation.MANDATORY)
     public MenuHoldCommandResult forfeit(MenuHoldForfeitCommand command) {
         MenuHold hold = findLockedHold(command.reservationId());
+        MenuHoldStatus beforeStatus = hold.getStatus();
+        boolean transitioned;
         try {
-            hold.forfeit();
+            transitioned = hold.forfeit();
         } catch (IllegalStateException exception) {
             throw stateConflict(exception);
+        }
+        if (transitioned) {
+            transitionAuditRepository.save(
+                    MenuHoldTransitionAudit.transition(hold, beforeStatus, clock.instant()));
         }
         return MenuHoldCommandResult.forfeited(command.reservationId());
     }
