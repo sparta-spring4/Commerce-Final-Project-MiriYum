@@ -35,12 +35,26 @@ export interface components {
       statusVersion: number;
       /** Format: date-time */
       statusChangedAt: string;
+      /**
+       * Format: int64
+       * @description Payment 원장에만 존재하는 결제 금액이다.
+       */
+      amountMinor?: number | null;
+      /**
+       * Format: int64
+       * @description Payment 원장에만 존재하는 누적 환불 금액이다.
+       */
+      refundedAmountMinor?: number | null;
+      currency?: string | null;
     };
     AdminMonitoringLedgerCell: {
       source: components["schemas"]["AdminMonitoringSource"];
       /** @description UNAVAILABLE이면 null이며 원본 상태·version·시각을 추측하지 않는다. */
       state: components["schemas"]["AdminMonitoringLedgerState"] | null;
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description 첫 페이지 changedTo로 고정되어 후속 cursor 페이지까지 유지되는 기준 시각
+       */
       asOf: string;
       /** Format: date-time */
       dataThrough: string;
@@ -90,6 +104,7 @@ export interface components {
     };
     AdminMonitoringTransition: {
       source: components["schemas"]["AdminMonitoringSource"];
+      eventType: string;
       /** Format: int64 */
       resultVersion: number;
       beforeStatus?: string | null;
@@ -97,13 +112,28 @@ export interface components {
       /** Format: date-time */
       occurredAt: string;
     };
-    AdminMonitoringMaskedSubject: {
-      /** @description 원 도메인이 제공한 마스킹 표시값 */
-      name?: string | null;
-      /** @description 원 도메인이 제공한 마스킹 표시값 */
-      phone?: string | null;
-      /** @description 원 도메인이 제공한 마스킹 표시값 */
-      email?: string | null;
+    AdminMonitoringMenuItem: {
+      menuId: string;
+      displayName: string;
+      quantity: number;
+    };
+    AdminMonitoringPaymentLedgerEvent: {
+      eventType: string;
+      /** Format: int64 */
+      amountMinor: number;
+      /** Format: date-time */
+      occurredAt: string;
+    };
+    AdminMonitoringPaymentRefund: {
+      sourceStatus: string;
+      /** Format: int64 */
+      statusVersion: number;
+      /** Format: int64 */
+      amountMinor: number;
+      /** Format: date-time */
+      requestedAt: string;
+      /** Format: date-time */
+      completedAt?: string | null;
     };
     AdminMonitoringCaseDetail: {
       caseType: components["schemas"]["AdminMonitoringCaseType"];
@@ -119,9 +149,20 @@ export interface components {
       completeness: components["schemas"]["AdminMonitoringCompleteness"];
       /** @enum {string} */
       maskingLevel: "MINIMIZED";
-      subject?: components["schemas"]["AdminMonitoringMaskedSubject"];
+      partySize?: number | null;
+      /** Format: date-time */
+      scheduledStartAt?: string | null;
+      /** Format: date-time */
+      scheduledEndAt?: string | null;
+      /** Format: int64 */
+      queueSequence?: number | null;
       ledgers: components["schemas"]["AdminMonitoringLedgerCell"][];
       history: components["schemas"]["AdminMonitoringTransition"][];
+      menuItems: components["schemas"]["AdminMonitoringMenuItem"][];
+      paymentLedger: components["schemas"]["AdminMonitoringPaymentLedgerEvent"][];
+      paymentLedgerTruncated: boolean;
+      refunds: components["schemas"]["AdminMonitoringPaymentRefund"][];
+      refundsTruncated: boolean;
       failures: components["schemas"]["AdminMonitoringDependencyFailure"][];
     };
     AdminMonitoringCasePageSuccessResponse: {
@@ -182,7 +223,7 @@ export interface components {
     /** @description changedFrom 이후 최대 31일 */
     ChangedTo: string;
     PageSize?: number;
-    /** @description asOf, 필터 지문과 마지막 평가 후보 seek tuple을 HMAC으로 보호한 문자열 */
+    /** @description asOf=changedTo, 필터 지문, 마지막 전역 정렬 tuple과 Reservation·Waiting·MenuHold·Payment별 seek만 HMAC으로 보호한 고정 크기 문자열. 이전 페이지 사건 ID는 누적하지 않는다. */
     Cursor?: string;
   };
   requestBodies: never;
