@@ -32,7 +32,6 @@ describe('사용자별 route 계약', () => {
       reservationCreate: '/stores/:storeId/reserve',
       reservationDetail: '/reservations/:reservationId',
       reservationComplete: '/reservations/:reservationId/complete',
-      reservationPayment: '/reservation-requests/:reservationRequestId/payment',
       reservationCheckIn: '/reservations/:reservationId/check-in',
       pickupCreate: '/stores/:storeId/pickup',
       pickupDetail: '/pickup-reservations/:pickupReservationId',
