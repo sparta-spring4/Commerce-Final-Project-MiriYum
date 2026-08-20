@@ -65,7 +65,11 @@ export function StoreImagePanel({ storeId }: { storeId: string }) {
   }
 
   function handleFile(file: File | undefined, imageId?: string) {
-    if (file === undefined || !validateFile(file)) return
+    if (file === undefined) return
+
+    // A new file selection supersedes the failed request, even when the new file is invalid.
+    setRetry(null)
+    if (!validateFile(file)) return
     const request = { file, imageId, idempotencyKey: createIdempotencyKey() }
     void submitFile(request)
   }

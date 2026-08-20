@@ -162,4 +162,82 @@ describe('매장 이미지 패널', () => {
     expect(await screen.findByText('JPG, PNG, WEBP 이미지 파일만 등록할 수 있습니다.')).toBeInTheDocument()
     expect(uploadCalled).toBe(false)
   })
+
+  it('실패한 업로드 뒤 새 파일 선택은 이전 재시도를 폐기한다', async () => {
+    let uploadAttempts = 0
+    server.use(
+      authenticatedOperator(),
+      http.get(IMAGE_PATH, () => successResponse([])),
+      http.post(IMAGE_PATH, () => {
+        uploadAttempts += 1
+        return HttpResponse.json(
+          { code: 'COMMON_012', message: '잠시 후 다시 시도해 주세요.' },
+          { status: 503 },
+        )
+      }),
+    )
+
+    renderPanel()
+    await screen.findByText('등록된 매장 이미지가 없습니다.')
+    fireEvent.change(screen.getByLabelText('이미지 추가'), {
+      target: { files: [new File(['image'], 'before.webp', { type: 'image/webp' })] },
+    })
+
+    expect(await screen.findByRole('button', { name: '다시 업로드' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('이미지 추가'), {
+      target: { files: [new File(['text'], 'invalid.gif', { type: 'image/gif' })] },
+    })
+
+    expect(await screen.findByText('JPG, PNG, WEBP 이미지 파일만 등록할 수 있습니다.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '다시 업로드' })).not.toBeInTheDocument()
+    expect(uploadAttempts).toBe(1)
+  })
+
+  it('서버 이미지 오류를 이미지 관리 문구로 표시한다', async () => {
+    server.use(
+      authenticatedOperator(),
+      http.get(IMAGE_PATH, () => successResponse([])),
+      http.post(IMAGE_PATH, () =>
+        HttpResponse.json(
+          { code: 'STORE_012', message: '매장 이미지는 최대 10장까지 등록할 수 있습니다.' },
+          { status: 409 },
+        ),
+      ),
+    )
+
+    renderPanel()
+    await screen.findByText('등록된 매장 이미지가 없습니다.')
+    fireEvent.change(screen.getByLabelText('이미지 추가'), {
+      target: { files: [new File(['image'], 'store.webp', { type: 'image/webp' })] },
+    })
+
+    expect(await screen.findByText('매장 이미지는 최대 10장까지 등록할 수 있습니다.')).toBeInTheDocument()
+  })
+
+  it('서버의 이미지 용량과 형식 오류를 구분해 표시한다', async () => {
+    let attempt = 0
+    server.use(
+      authenticatedOperator(),
+      http.get(IMAGE_PATH, () => successResponse([])),
+      http.post(IMAGE_PATH, () => {
+        attempt += 1
+        return HttpResponse.json(
+          { code: 'COMMON_001', message: '입력값이 올바르지 않습니다.' },
+          { status: attempt === 1 ? 413 : 415 },
+        )
+      }),
+    )
+
+    renderPanel()
+    await screen.findByText('등록된 매장 이미지가 없습니다.')
+    fireEvent.change(screen.getByLabelText('이미지 추가'), {
+      target: { files: [new File(['image'], 'first.webp', { type: 'image/webp' })] },
+    })
+    expect(await screen.findByText('이미지 파일은 10MB 이하만 등록할 수 있습니다.')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('이미지 추가'), {
+      target: { files: [new File(['image'], 'second.webp', { type: 'image/webp' })] },
+    })
+    expect(await screen.findByText('JPG, PNG, WEBP 이미지 파일만 등록할 수 있습니다.')).toBeInTheDocument()
+  })
 })
