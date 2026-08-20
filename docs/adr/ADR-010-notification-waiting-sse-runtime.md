@@ -59,7 +59,12 @@ Notification과 Waiting이 각각 cursor, connection registry, heartbeat, Valkey
 
 Notification adapter는 인증된 소비자 계정에 대해 `notification_consumer_change_states.change_version`과 현재 공개 이력의 최대 `notification_id` 중 큰 값을 반환한다. account state는 새 공개 `IN_APP DELIVERED`, 최초 개별 읽음과 실제 변경이 있는 전체 읽음을 같은 MySQL transaction에서 단조 증가시키며 미확인 개수를 중복 저장하지 않는다. 미확인 개수는 공개 전달 조건과 `notification_tasks.read_at IS NULL`을 만족하는 본인 알림을 인덱스로 집계한다. PENDING·FAILED·CANCELLED, 외부 채널과 반복 읽음 no-op은 watermark를 증가시키지 않는다.
 
-기존 공개 전달 완료 알림은 읽음으로 backfill하고 account state version은 기존 공개 최대 `notification_id`로 초기화한다. rolling replacement 중 구 worker가 완료한 새 전달은 `max(changeVersion, notificationId)` fallback으로 회수한다. 읽음 endpoint를 소비하는 frontend는 새 Backend가 전체 배포된 뒤 활성화해 구 worker가 읽음 version을 모르는 혼합 기간을 만들지 않는다.
+기존 공개 전달 완료 알림은 읽음으로 backfill하고 account state version은 기존 공개 최대 `notification_id`로 초기화한다. `changeVersion`과 `notificationId`는 독립적인 단조 수열이므로 두 값의 `max`는 두 종류 변경이 동시에 허용되면 작은 쪽 증가를 숨길 수 있다. 따라서 rolling replacement는 다음 강제 gate를 따른다.
+
+1. 호환 기반 PR 1A가 migration, account state, version-aware 전달 writer와 legacy 전달용 `max(changeVersion, notificationId)` correction을 배포한다. 읽음·미확인 개수 OpenAPI path는 `contract-only`이며 production Controller route를 등록하지 않는다.
+2. PR 1A revision이 모든 Backend·Notification worker에 적용되고 이전 revision의 instance·worker·진행 중 transaction이 0임을 배포 증거로 확인한다. 읽음 변경이 없는 이 구간의 legacy 전달은 증가한 `notificationId`로 correction이 회수한다.
+3. gate 통과 뒤 PR 1B에서만 읽음·미확인 개수 production route를 활성화한다. 이 시점부터 모든 전달과 읽음은 account state를 잠그고 `changeVersion`을 증가시키므로 `읽음 → 새 전달`도 더 큰 scalar를 만든다.
+4. route 활성화 뒤 rollback은 version-aware 전달 writer 계약을 유지하는 호환 image로만 수행한다. 구 worker revision은 다시 실행하지 않고 Frontend는 PR 1B 전체 배포 뒤 활성화한다.
 
 Waiting adapter는 `waiting_status_events.waiting_status_event_id`를 단조 watermark로 사용한다.
 
@@ -138,13 +143,14 @@ Redis Streams, Kafka, 분산 lock과 별도 SSE gateway는 현재 connection 규
 - MySQL 통합: Notification 공개 `DELIVERED` 필터와 Waiting 소비자·운영자 scope watermark, terminal membership, 중복·역순 사건 수렴
 - Valkey 통합: 두 instance fan-out, 중복 wake-up 병합, publish 유실·구독 재시작 뒤 correction 회수
 - lifecycle 통합: 느린 client·연결 종료·JWT 만료가 다른 stream과 업무 API 자원을 점유하지 않음
+- rolling 회귀: PR 1A에는 읽음 production route가 없고 legacy 전달은 `notificationId` 증가로 회수됨; gate 뒤에는 `읽음 version 증가 → 새 전달`이 더 큰 `changeVersion`을 만들며 구 worker revision 재진입이 차단됨
 - 회귀: backend unit·integration shard, OpenAPI route inventory, `git diff --check`, Issue #250 exact allowlist
 
 ## 마이그레이션과 되돌리기
 
 Issue #250 Runtime 자체에는 DB migration이 없었다. Issue #500은 기존 Runtime의 Notification adapter 입력을 확장하기 위해 `notification_tasks.read_at`과 `notification_consumer_change_states`를 추가한다. 기존 공개 전달 완료 알림은 `read_at=delivered_at`, account version은 기존 공개 최대 `notification_id`로 초기화하며 미확인 counter를 중복 저장하지 않는다. SSE Runtime은 계속 기본 OFF이고 기존 전용 설정이 모두 유효한 환경에서만 활성화한다.
 
-문제가 발생하면 SSE Runtime을 비활성화하고 client가 기존 HTTP 조회를 유지하게 한다. Valkey channel과 로컬 registry는 업무 원장이 아니므로 별도 데이터 rollback이 없다. 코드 rollback은 공개 endpoint·event 의미를 임의로 되돌리지 않으며, Runtime 가용성은 명시적인 환경 비활성화와 HTTP/MySQL 재조회로 복구한다.
+문제가 발생하면 SSE Runtime을 비활성화하고 client가 기존 HTTP 조회를 유지하게 한다. Valkey channel과 로컬 registry는 업무 원장이 아니므로 별도 데이터 rollback이 없다. 읽음 route 활성화 전에는 PR 1A 호환 기반을 유지한 채 배포 gate를 중단할 수 있다. 활성화 뒤에는 읽음 route를 비활성화할 수 있지만 version-aware 전달 writer가 없는 구 revision으로 되돌릴 수 없으며, 같은 version 계약을 유지하는 forward rollback image와 HTTP/MySQL 재조회로 복구한다.
 
 ## 전환 뒤 확인할 새 단점
 
@@ -173,4 +179,4 @@ PR 3에서 실제 proxy buffering, heartbeat 전달, timeout, 연결·재연결 
 |---|---|---|---|---|---|
 | 2026-08-19 | 고도화 | PR #442 계약 병합과 Issue #250 Runtime 인수 조건 | 공통 SSE transport, 소유 high-watermark adapter, Valkey wake-up hint와 MySQL correction 선택 | 설계 승인; Runtime·부하·장애 검증은 후속 PR | 운영 수치·경보 임계치는 PR 3 증거 뒤 확정 |
 | 2026-08-19 | 고도화 | PR #474 Runtime 병합과 고정 xk6 SSE 하네스 계약 | production Runtime 활성 상태를 반영하고 proxy·배포·부하 검증을 PR 3에 유지 | 정적 계약·전용 이미지 build PASS; 실제 부하·장애는 미실행 | 로컬 시험 입력을 운영 기본값으로 승격하지 않음 |
-| 2026-08-20 | 고도화 | Issue #500 사용자 동작·동시성 설계 승인 | Notification watermark를 공개 전달·읽음 단조 version으로 확장하고 전역 배지는 이력·개수 HTTP 재조회로 수렴 | 정본 설계 검토 중; Runtime·Frontend 구현은 후속 contract-first PR | Backend 전체 배포 뒤 Frontend 활성화와 rolling replacement 회귀 필요 |
+| 2026-08-20 | 고도화 | Issue #500 사용자 동작·동시성 설계와 PR #502 rolling 호환성 리뷰 | Notification watermark를 공개 전달·읽음 단조 version으로 확장하고, 읽음 route 부재 기반 PR 1A → 구 worker 0건 gate → PR 1B 활성화 순서를 강제 | 정본 설계 검토 중; Runtime·Frontend 구현은 후속 contract-first PR | route 활성화 뒤 version 계약 없는 구 worker rollback 금지와 rolling 회귀 필요 |
