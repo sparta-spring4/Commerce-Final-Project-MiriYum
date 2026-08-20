@@ -10,12 +10,10 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class StoreBusinessRegistrationEvidenceFileDeletionGuard implements FileMetadataDeletionGuard {
 
-    private static final int CURRENT_MARKER = 1;
-
     private final BusinessRegistrationEvidenceRepository evidenceRepository;
 
     @Override
     public boolean blocksDeletion(String fileId) {
-        return evidenceRepository.existsByFileIdAndCurrentMarker(fileId, CURRENT_MARKER);
+        return evidenceRepository.findCurrentByFileIdForUpdate(fileId).isPresent();
     }
 }

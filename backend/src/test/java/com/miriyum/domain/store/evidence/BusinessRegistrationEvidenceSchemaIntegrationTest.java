@@ -26,6 +26,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -70,6 +72,9 @@ class BusinessRegistrationEvidenceSchemaIntegrationTest {
 
     @Autowired
     private TransactionTemplate transactionTemplate;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Test
     @DisplayName("현재 증빙은 하나만 보관하고 교체 이력은 여러 건 보관한다")
@@ -153,6 +158,59 @@ class BusinessRegistrationEvidenceSchemaIntegrationTest {
                 "SELECT storage_status FROM file_metadata WHERE file_id = ?",
                 String.class, fileId.toString());
         assertThat(evidenceCount).isEqualTo(1);
+        assertThat(status).isEqualTo("CONFIRMED");
+    }
+
+    @Test
+    @DisplayName("REPEATABLE READ 스냅샷 뒤에도 현재 증빙 파일 삭제를 거절한다")
+    void rejectsCurrentEvidenceDeletionAfterOuterTransactionCreatesSnapshot() throws Exception {
+        long applicationId = 904L;
+        UUID fileId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-20T00:00:00Z");
+        insertPrivateLicenseMetadata(fileId, applicationId, now);
+
+        CountDownLatch metadataLocked = new CountDownLatch(1);
+        CountDownLatch snapshotCreated = new CountDownLatch(1);
+        CountDownLatch deletionStarted = new CountDownLatch(1);
+        CountDownLatch releaseEvidenceCommit = new CountDownLatch(1);
+        TransactionTemplate repeatableReadTransaction = new TransactionTemplate(transactionManager);
+        repeatableReadTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> evidenceLink = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                fileMetadataRepository.findByFileIdForUpdate(fileId.toString()).orElseThrow();
+                insertEvidence(applicationId, 1L, "CURRENT", 1, fileId, now);
+                metadataLocked.countDown();
+                await(releaseEvidenceCommit);
+            }));
+
+            assertThat(metadataLocked.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<FileMetadata> deletion = executor.submit(() -> repeatableReadTransaction.execute(status -> {
+                Integer currentCountBeforeLock = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM store_business_registration_evidences WHERE file_id = ?",
+                        Integer.class,
+                        fileId.toString());
+                assertThat(currentCountBeforeLock).isZero();
+                snapshotCreated.countDown();
+                deletionStarted.countDown();
+                return fileMetadataTransactionExecutor.markDeletedWithinCurrentTransaction(fileId.toString(), now);
+            }));
+
+            assertThat(snapshotCreated.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(deletionStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> deletion.get(250, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
+
+            releaseEvidenceCommit.countDown();
+            evidenceLink.get(5, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> deletion.get(5, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(FileMetadataConflictException.class);
+        }
+
+        String status = jdbcTemplate.queryForObject(
+                "SELECT storage_status FROM file_metadata WHERE file_id = ?",
+                String.class,
+                fileId.toString());
         assertThat(status).isEqualTo("CONFIRMED");
     }
 

@@ -28,5 +28,13 @@ public interface BusinessRegistrationEvidenceRepository extends JpaRepository<Bu
             long applicationVersion,
             Integer currentMarker);
 
-    boolean existsByFileIdAndCurrentMarker(String fileId, Integer currentMarker);
+    /** REPEATABLE READ 스냅샷과 무관하게 최신 CURRENT 증빙을 확인하기 위한 locking current read다. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select evidence
+            from BusinessRegistrationEvidence evidence
+            where evidence.fileId = :fileId
+              and evidence.currentMarker = 1
+            """)
+    Optional<BusinessRegistrationEvidence> findCurrentByFileIdForUpdate(@Param("fileId") String fileId);
 }
