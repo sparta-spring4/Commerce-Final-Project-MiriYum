@@ -16,6 +16,9 @@ interface Props {
  *
  * 영업 상태가 `OPEN`이 아니면 거래 진입 자체를 숨긴다. 임시 휴무·폐점 매장의
  * 예약 시도는 서버가 거절하므로 화면에서 먼저 막는다.
+ *
+ * 웨이팅만 예외다. 매장 상세 계약에 웨이팅 on/off 필드가 없어 여기서는 켜짐
+ * 여부를 알 수 없고, 서버 availability가 소유한 판정을 화면이 대신하지 않는다.
  */
 export function StoreTransactionActions({ store, search }: Props) {
   if (store.operationStatus !== 'OPEN') {
@@ -37,9 +40,19 @@ export function StoreTransactionActions({ store, search }: Props) {
 
   if (!reservationEnabled && !pickupEnabled) {
     return (
-      <Alert tone="info" title="이 매장은 온라인 예약을 받지 않습니다.">
-        <p>매장 정보와 메뉴만 확인할 수 있습니다.</p>
-      </Alert>
+      <>
+        <Alert tone="info" title="이 매장은 온라인 예약을 받지 않습니다.">
+          <p>매장 정보와 메뉴를 확인하거나 웨이팅 접수 여부를 확인할 수 있습니다.</p>
+        </Alert>
+        <div className="store-detail__actions">
+          <Link
+            className="mi-button mi-button--ghost"
+            to={`/stores/${store.storeId}/waiting`}
+          >
+            웨이팅 등록
+          </Link>
+        </div>
+      </>
     )
   }
 
@@ -61,6 +74,17 @@ export function StoreTransactionActions({ store, search }: Props) {
           픽업 예약하기
         </Link>
       )}
+      {/*
+        웨이팅은 매장 상세 계약에 on/off 필드가 없다. 실제 접수 가능 여부는
+        등록 화면이 서버 availability로 판정하므로 여기서 추측하지 않고
+        진입만 제공한다. 예약 조건 search는 웨이팅과 뜻이 달라 넘기지 않는다.
+      */}
+      <Link
+        className="mi-button mi-button--ghost"
+        to={`/stores/${store.storeId}/waiting`}
+      >
+        웨이팅 등록
+      </Link>
     </div>
   )
 }
