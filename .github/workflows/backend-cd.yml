@@ -283,6 +283,8 @@ jobs:
           tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.tag }}-frontend
           build-args: |
             VITE_KAKAO_MAP_APP_KEY=${{ vars.STAGING_KAKAO_MAP_APP_KEY }}
+            MIRIYUM_PORTONE_STORE_ID=${{ vars.MIRIYUM_PORTONE_STORE_ID }}
+            MIRIYUM_PORTONE_CHANNEL_KEY=${{ vars.MIRIYUM_PORTONE_CHANNEL_KEY }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

@@ -44,8 +44,14 @@ Manual dispatch is reserved for rollback or redeployment of an image that alread
 | `AWS_ECR_REPOSITORY` | `miriyum-backend` |
 | `AWS_EC2_INSTANCE_ID` | The staging EC2 instance ID |
 | `AWS_ROLE_TO_ASSUME` | The IAM role ARN for `miriyum-github-staging-cd-role` |
+| `MIRIYUM_PORTONE_STORE_ID` | The public Store ID for the approved staging PortOne store |
+| `MIRIYUM_PORTONE_CHANNEL_KEY` | The public Channel Key for the approved staging PortOne channel |
 
-These are staging Environment variables, not application secrets. Application and database secrets remain only in the staging EC2's `/opt/miriyum/.env`.
+These are staging Environment variables, not application secrets. The workflow passes only the two
+public PortOne values to the Frontend image build. Never register `MIRIYUM_PORTONE_API_SECRET` as a
+GitHub Variable or Secret, and never add it to Frontend build arguments. Runtime copies of
+application and database secrets remain only in the staging EC2's `/opt/miriyum/.env`; the
+authoritative PortOne API Secret remains in staging AWS Secrets Manager.
 
 ## EC2 runtime setup
 
@@ -54,6 +60,29 @@ These are staging Environment variables, not application secrets. Application an
 3. Run `chmod 600 /opt/miriyum/.env`.
 4. Confirm the instance role has `AmazonEC2ContainerRegistryReadOnly` and Systems Manager access.
 5. Confirm the security group allows TCP `80` only as required for the API. Do not expose MySQL `3306`, backend `8080`, or Valkey `6379`.
+
+### PortOne staging configuration boundary (#520)
+
+| Value | Authoritative source | Delivery target |
+|---|---|---|
+| `MIRIYUM_PORTONE_STORE_ID` | Approved staging PortOne public configuration | GitHub `staging` Environment Variable for the Frontend build and the server-local `/opt/miriyum/.env` for the Backend container |
+| `MIRIYUM_PORTONE_CHANNEL_KEY` | Approved staging PortOne public configuration | GitHub `staging` Environment Variable for the Frontend build only |
+| `MIRIYUM_PORTONE_API_SECRET` | Staging AWS Secrets Manager | Server-local `/opt/miriyum/.env`, then the Backend container only |
+
+The deployment operator owns materialization of `MIRIYUM_PORTONE_API_SECRET`. In an approved
+operator session, retrieve it with an IAM role restricted to the staging secret and write it into
+`/opt/miriyum/.env` without displaying the value. Keep shell tracing disabled, do not use a GitHub
+Actions or SSM command as the transfer channel, and do not retain the value in command output,
+temporary artifacts, Issues, or PRs. If the approved procedure uses a temporary file, create it with
+mode `600` and remove it immediately after updating the environment file. Restore `chmod 600
+/opt/miriyum/.env` after every edit.
+
+The Store ID in `/opt/miriyum/.env` must match the public Store ID registered in the GitHub
+`staging` Environment. The Channel Key is not a Backend or Compose setting. The API Secret and
+API Secret is not a Frontend setting and is never part of a static image. These three values only
+establish the delivery contract: they do not set `MIRIYUM_PAYMENT_ENABLED`, enable a payment worker,
+or prove a staging payment. Keep payment disabled when any required PortOne value or the separate
+activation prerequisites are not configured and verified.
 
 ### S3 runtime activation gate (#223)
 

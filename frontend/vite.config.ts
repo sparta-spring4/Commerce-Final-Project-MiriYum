@@ -1,4 +1,5 @@
 import react from '@vitejs/plugin-react'
+import { resolve } from 'node:path'
 import { loadEnv } from 'vite'
 import { defineConfig } from 'vitest/config'
 
@@ -6,7 +7,19 @@ import { defineConfig } from 'vitest/config'
 // dev server가 /api를 프록시해 same-origin 조건을 만들어야 인증 흐름이 동작한다.
 // 포트를 바꾸면 deploy/local/.env의 MIRIYUM_ALLOWED_ORIGIN도 함께 바꾼다.
 const DEV_SERVER_PORT = 5173
+const LOCAL_ENV_DIR = resolve(process.cwd(), '../deploy/local')
 const KAKAO_STATE_COOKIE = /^MIRIYUM_(?:CONSUMER|STORE_OPERATOR)_KAKAO_(?:LOGIN|LINK)_STATE=/
+
+export function portOneBrowserDefines(env: Record<string, string>) {
+  return {
+    'import.meta.env.MIRIYUM_PORTONE_STORE_ID': JSON.stringify(
+      env.MIRIYUM_PORTONE_STORE_ID ?? '',
+    ),
+    'import.meta.env.MIRIYUM_PORTONE_CHANNEL_KEY': JSON.stringify(
+      env.MIRIYUM_PORTONE_CHANNEL_KEY ?? '',
+    ),
+  }
+}
 
 export function rewriteKakaoStateCookies(cookies: string[]): string[] {
   return cookies.map((cookie) => {
@@ -18,11 +31,15 @@ export function rewriteKakaoStateCookies(cookies: string[]): string[] {
 }
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), 'MIRIYUM_')
+  const env = {
+    ...loadEnv(mode, process.cwd(), 'MIRIYUM_'),
+    ...loadEnv(mode, LOCAL_ENV_DIR, 'MIRIYUM_'),
+  }
   const backendOrigin = env.MIRIYUM_VITE_PROXY_TARGET || 'http://127.0.0.1:8080'
 
   return {
     plugins: [react()],
+    define: portOneBrowserDefines(env),
     server: {
       port: DEV_SERVER_PORT,
       // 포트가 이미 사용 중이면 조용히 다른 포트로 옮기지 않는다.
