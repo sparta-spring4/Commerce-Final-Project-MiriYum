@@ -31,7 +31,6 @@ import {
   ModesFieldset,
   toggleCode,
 } from './StoreFormFields'
-import { StoreImagePanel } from './StoreImagePanel'
 
 /**
  * 읽기 전용 값 한 줄.
@@ -325,8 +324,6 @@ function StoreInfoForm({
                 />
               </div>
             </SectionCard>
-
-            <StoreImagePanel storeId={storeId} />
           </div>
 
           <div className="op-stack">

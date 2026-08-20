@@ -5,7 +5,6 @@ import { storeOperatorKeys } from '../../../../app/shells/store-operator/queryKe
 import type {
   CatalogItem,
   ManagedStore,
-  PublicImage,
   PublicStoreDetail,
   StoreCreateRequest,
   StoreUpdateRequest,
@@ -123,111 +122,6 @@ export function useUpdateStore(storeId: string) {
         queryKey: storeOperatorKeys.publishedStore(storeId),
       })
       void queryClient.invalidateQueries({ queryKey: ['store-search'] })
-    },
-  })
-}
-
-/** 매장에 연결된 공개 이미지는 매장 정보 PATCH와 별도 API로 관리한다. */
-export function useStoreImages(storeId: string) {
-  const { apiClient } = useStoreOperatorAuth()
-
-  return useQuery({
-    enabled: storeId.length > 0,
-    queryKey: storeOperatorKeys.images(storeId),
-    queryFn: async ({ signal }): Promise<PublicImage[]> => {
-      const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/images',
-        { method: 'get', pathParams: { storeId }, signal },
-      )
-      return response.data
-    },
-  })
-}
-
-export function useUploadStoreImage(storeId: string) {
-  const { apiClient } = useStoreOperatorAuth()
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async (variables: {
-      file: File
-      idempotencyKey: string
-    }): Promise<PublicImage> => {
-      const multipart = new FormData()
-      multipart.append('file', variables.file)
-      const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/images',
-        {
-          method: 'post',
-          pathParams: { storeId },
-          multipart,
-          idempotencyKey: variables.idempotencyKey,
-        },
-      )
-      return response.data
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: storeOperatorKeys.images(storeId),
-      })
-    },
-  })
-}
-
-export function useReplaceStoreImage(storeId: string) {
-  const { apiClient } = useStoreOperatorAuth()
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async (variables: {
-      imageId: string
-      file: File
-      idempotencyKey: string
-    }): Promise<PublicImage> => {
-      const multipart = new FormData()
-      multipart.append('file', variables.file)
-      const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/images/{imageId}',
-        {
-          method: 'put',
-          pathParams: { storeId, imageId: variables.imageId },
-          multipart,
-          idempotencyKey: variables.idempotencyKey,
-        },
-      )
-      return response.data
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: storeOperatorKeys.images(storeId),
-      })
-    },
-  })
-}
-
-export function useDeleteStoreImage(storeId: string) {
-  const { apiClient } = useStoreOperatorAuth()
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async (variables: {
-      imageId: string
-      idempotencyKey: string
-    }): Promise<void> => {
-      await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/images/{imageId}',
-        {
-          method: 'delete',
-          pathParams: { storeId, imageId: variables.imageId },
-          allowNoContent: true,
-          idempotencyKey: variables.idempotencyKey,
-        },
-      )
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: storeOperatorKeys.images(storeId),
-      })
     },
   })
 }
