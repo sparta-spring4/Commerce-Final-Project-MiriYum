@@ -15,6 +15,7 @@ import com.miriyum.domain.notification.dto.source.NotificationResourceType;
 import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import com.miriyum.domain.notification.port.PickupNotificationSource;
 import com.miriyum.domain.notification.port.WaitingNotificationSource;
+import com.miriyum.domain.notification.repository.NotificationReadRepository;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
@@ -89,6 +90,7 @@ class NotificationTaskWorkerIntegrationTest {
 
     @Autowired NotificationTaskRecorder recorder;
     @Autowired NotificationTaskWorker worker;
+    @Autowired NotificationReadRepository readRepository;
     @Autowired TransactionTemplate transactions;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired TestPickupSource pickupSource;
@@ -105,6 +107,7 @@ class NotificationTaskWorkerIntegrationTest {
         jdbcTemplate.execute("DELETE FROM notification_task_transition_audits");
         jdbcTemplate.execute("DELETE FROM notification_channel_attempts");
         jdbcTemplate.execute("DELETE FROM notification_tasks");
+        jdbcTemplate.execute("DELETE FROM notification_consumer_change_states");
         jdbcTemplate.execute("DELETE FROM reservations");
         jdbcTemplate.execute("DELETE FROM stores");
         jdbcTemplate.execute("DELETE FROM store_operator_accounts");
@@ -132,6 +135,148 @@ class NotificationTaskWorkerIntegrationTest {
                 "SOURCE_EVENT_RECORDED",
                 "IN_APP_DELIVERED@notification-worker-test-v1"
         );
+    }
+
+    @Test
+    void deliveryCreatesTheConsumerChangeVersionAtTheNotificationId() {
+        record("change-version-created-1");
+        long notificationId = jdbcTemplate.queryForObject(
+                "SELECT notification_id FROM notification_tasks", Long.class);
+
+        assertThat(worker.deliverDueBatch()).isOne();
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT change_version
+                  FROM notification_consumer_change_states
+                 WHERE consumer_account_id = 11
+                """, Long.class)).isEqualTo(notificationId);
+    }
+
+    @Test
+    void deliveryIncrementsAnExistingChangeVersionAboveTheNotificationId() {
+        record("change-version-incremented-1");
+        jdbcTemplate.update("""
+                INSERT INTO notification_consumer_change_states (
+                    consumer_account_id, change_version
+                ) VALUES (11, 1000)
+                """);
+
+        assertThat(worker.deliverDueBatch()).isOne();
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT change_version
+                  FROM notification_consumer_change_states
+                 WHERE consumer_account_id = 11
+                """, Long.class)).isEqualTo(1001L);
+    }
+
+    @Test
+    void existingChangeStateCanBeLockedWithoutReadingNotificationHistory() throws Exception {
+        record("change-version-existing-fast-path-1");
+        assertThat(worker.deliverDueBatch()).isOne();
+        long expectedVersion = jdbcTemplate.queryForObject("""
+                SELECT change_version
+                  FROM notification_consumer_change_states
+                 WHERE consumer_account_id = 11
+                """, Long.class);
+        CountDownLatch notificationLocked = new CountDownLatch(1);
+        CountDownLatch releaseNotification = new CountDownLatch(1);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var notificationLock = executor.submit(() -> transactions.executeWithoutResult(ignored -> {
+                jdbcTemplate.queryForObject("""
+                        SELECT notification_id
+                          FROM notification_tasks
+                         WHERE recipient_account_id = 11
+                         FOR UPDATE
+                        """, Long.class);
+                notificationLocked.countDown();
+                try {
+                    if (!releaseNotification.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("notification row lock was not released");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("notification row lock wait was interrupted", exception);
+                }
+            }));
+            assertThat(notificationLocked.await(5, TimeUnit.SECONDS)).isTrue();
+
+            var changeStateLock = executor.submit(() -> transactions.execute(ignored ->
+                    readRepository.lockOrCreateChangeState(11L)));
+
+            assertThat(changeStateLock.get(2, TimeUnit.SECONDS)).isEqualTo(expectedVersion);
+            releaseNotification.countDown();
+            notificationLock.get(10, TimeUnit.SECONDS);
+        } finally {
+            releaseNotification.countDown();
+        }
+    }
+
+    @Test
+    void missingChangeStateInitializesFromAConcurrentLegacyDelivery() throws Exception {
+        CountDownLatch legacyDeliveryReady = new CountDownLatch(1);
+        CountDownLatch commitLegacyDelivery = new CountDownLatch(1);
+        AtomicReference<Long> legacyNotificationId = new AtomicReference<>();
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var legacyDelivery = executor.submit(() -> transactions.executeWithoutResult(ignored -> {
+                OffsetDateTime occurredAt = OffsetDateTime.parse("2026-08-12T01:02:03Z");
+                recorder.record(new NotificationSourceEventV1(
+                        "legacy-delivery-before-state-1",
+                        NotificationSourceDomain.PICKUP,
+                        NotificationPurpose.PICKUP_RESERVATION_CONFIRMED,
+                        "11",
+                        7L,
+                        NotificationResourceType.PICKUP_RESERVATION,
+                        "21",
+                        3L,
+                        "CONFIRMED",
+                        occurredAt,
+                        occurredAt,
+                        null,
+                        null,
+                        "correlation-legacy-delivery-before-state-1"
+                ));
+                long notificationId = jdbcTemplate.queryForObject(
+                        "SELECT notification_id FROM notification_tasks", Long.class);
+                legacyNotificationId.set(notificationId);
+                jdbcTemplate.update("""
+                        UPDATE notification_tasks
+                           SET status = 'DELIVERED', title = '구 worker 전달',
+                               delivered_at = UTC_TIMESTAMP(6)
+                         WHERE notification_id = ?
+                        """, notificationId);
+                jdbcTemplate.update("""
+                        UPDATE notification_channel_attempts
+                           SET status = 'DELIVERED'
+                         WHERE notification_id = ?
+                           AND channel = 'IN_APP'
+                        """, notificationId);
+                legacyDeliveryReady.countDown();
+                try {
+                    if (!commitLegacyDelivery.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("legacy delivery commit was not released");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("legacy delivery commit wait was interrupted", exception);
+                }
+            }));
+            assertThat(legacyDeliveryReady.await(5, TimeUnit.SECONDS)).isTrue();
+
+            var changeState = executor.submit(() -> transactions.execute(ignored ->
+                    readRepository.lockOrCreateChangeState(11L)));
+
+            assertThatThrownBy(() -> changeState.get(1, TimeUnit.SECONDS))
+                    .isInstanceOf(TimeoutException.class);
+            commitLegacyDelivery.countDown();
+            legacyDelivery.get(10, TimeUnit.SECONDS);
+            assertThat(changeState.get(10, TimeUnit.SECONDS))
+                    .isEqualTo(legacyNotificationId.get());
+        } finally {
+            commitLegacyDelivery.countDown();
+        }
     }
 
     @Test
