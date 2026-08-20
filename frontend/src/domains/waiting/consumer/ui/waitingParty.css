@@ -1,0 +1,266 @@
+/* 웨이팅 일행 초대·합류 화면 배치. 색과 간격 토큰은 shared/ui/theme.css가 소유한다. */
+
+.waiting-party .mi-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.waiting-party__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.waiting-party__title {
+  margin: 0;
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+}
+
+.waiting-party__subtitle {
+  margin: 0;
+  font-size: var(--font-size-body-lg);
+  line-height: var(--line-height-body-lg);
+  font-weight: 700;
+}
+
+/*
+ * 방문 인원과 합류 계정을 나란히 둔다. 두 값이 다른 뜻이라는 것이 배치로도
+ * 보이도록 한 줄에 합치지 않고 각자 이름을 위에 얹는다.
+ */
+.waiting-party__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.waiting-party__count {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 6rem;
+  padding-inline: var(--space-2);
+  padding-block: var(--space-1);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-container-low);
+}
+
+.waiting-party__count dt {
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-label-sm);
+  line-height: var(--line-height-label-md);
+}
+
+.waiting-party__count dd {
+  margin: 0;
+  font-size: var(--font-size-body-lg);
+  line-height: var(--line-height-body-lg);
+  font-weight: 700;
+}
+
+.waiting-party__hint {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-label-md);
+  line-height: var(--line-height-label-md);
+}
+
+.waiting-party__invitation,
+.waiting-party__members,
+.waiting-party__transfer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--color-outline-variant);
+}
+
+.waiting-party__invitation-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* 초대 코드는 옮겨 적는 값이다. 글자를 넓게 두고 좁은 화면에서 줄바꿈을 허용한다. */
+.waiting-party__code-box {
+  padding-inline: var(--space-2);
+  padding-block: var(--space-2);
+  border: 1px dashed var(--color-outline);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-container-lowest);
+}
+
+.waiting-party__code-label {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-label-sm);
+  line-height: var(--line-height-label-md);
+}
+
+.waiting-party__code {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/*
+ * 복사 결과 문구 자리.
+ *
+ * 비어 있어도 `display: none`으로 지우지 않는다. live 영역은 변화가 일어나기
+ * 전부터 접근성 트리에 있어야 보조기술이 그 변화를 읽는다. 숨겼다가 되살리면
+ * 첫 복사 결과를 놓치는 보조기술이 있다. 내용이 없는 문단은 줄 상자를 만들지
+ * 않으므로 높이도 차지하지 않는다.
+ */
+.waiting-party__live {
+  margin: 0;
+  color: var(--color-primary);
+  font-size: var(--font-size-label-md);
+  line-height: var(--line-height-label-md);
+  font-weight: 600;
+}
+
+.waiting-party__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.waiting-party__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.waiting-party__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-inline: var(--space-2);
+  padding-block: var(--space-1);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-md);
+}
+
+.waiting-party__row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.waiting-party__row-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--font-size-body-md);
+  line-height: var(--line-height-body-md);
+  font-weight: 600;
+}
+
+.waiting-party__row-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.waiting-party__row-joined {
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-label-sm);
+  line-height: var(--line-height-label-md);
+}
+
+.waiting-party__transfer-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/*
+ * 확인 다이얼로그.
+ *
+ * 되돌릴 수 없는 조작만 여기로 보낸다. 본문 위에 겹쳐 흐름을 끊고, 좁은 화면에서는
+ * 좌우 여백을 남긴 채 너비를 줄인다.
+ */
+.waiting-party__dialog {
+  position: fixed;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(24rem, calc(100vw - 2rem));
+  padding-inline: var(--space-3);
+  padding-block: var(--space-3);
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-container-lowest);
+  box-shadow: var(--shadow-3);
+}
+
+.waiting-party__dialog-title {
+  margin: 0;
+  font-size: var(--font-size-body-lg);
+  line-height: var(--line-height-body-lg);
+  font-weight: 700;
+  word-break: keep-all;
+}
+
+.waiting-party__dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-body-md);
+  line-height: var(--line-height-body-md);
+}
+
+.waiting-party__dialog-body p {
+  margin: 0;
+}
+
+.waiting-party__dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+/* 좁은 화면에서는 목록 행의 버튼이 이름 아래로 내려간다. */
+@media (width <= 30rem) {
+  .waiting-party__row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .waiting-party__dialog-actions {
+    flex-direction: column-reverse;
+  }
+}
+
+/* ── 일행 합류 화면 ──────────────────────────────────────────────────── */
+
+.waiting-join {
+  padding-bottom: var(--space-8);
+}
+
+.waiting-join__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
