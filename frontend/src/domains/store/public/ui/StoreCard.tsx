@@ -19,6 +19,17 @@ interface Props {
   categoryNames: ReadonlyMap<string, string>
   /** 상세로 넘길 때 현재 검색 조건을 유지한다. */
   detailSearch: string
+  /**
+   * 지도 마커와 대응하는 목록 순번.
+   *
+   * 지도가 없는 자리(홈 캐러셀)에서는 번호가 가리킬 마커가 없으므로 넘기지
+   * 않는다. 아래 세 지도 관련 prop은 모두 같은 이유로 선택 사항이다.
+   */
+  ordinal?: number
+  /** 지도에서 이 매장이 선택돼 있는지. */
+  isSelected?: boolean
+  /** 지도에서 이 매장을 짚어 달라는 요청. 없으면 지도 버튼을 그리지 않는다. */
+  onShowOnMap?: (storeId: string) => void
 }
 
 /**
@@ -45,14 +56,28 @@ const AVAILABILITY_ICON: Record<ReservationAvailability, IconName> = {
  *
  * 시안의 별점·리뷰 수·북마크는 계약에 없는 값이라 만들지 않는다.
  */
-export function StoreCard({ store, categoryNames, detailSearch }: Props) {
+export function StoreCard({
+  store,
+  categoryNames,
+  detailSearch,
+  ordinal,
+  isSelected = false,
+  onShowOnMap,
+}: Props) {
   const availability = store.reservationAvailability
   const art = categoryArt(store.storeCategoryCode)
   const tint = categoryTint(store.storeCategoryCode)
   const detailTo = { pathname: `/stores/${store.storeId}`, search: detailSearch }
 
   return (
-    <li className="mi-card mi-card--interactive store-card">
+    <li
+      className={`mi-card mi-card--interactive store-card${isSelected ? ' store-card--selected' : ''}`}
+      /*
+       * 지도에서 지금 짚고 있는 매장임을 목록 쪽에서도 알린다. 테두리 강조만
+       * 두면 마커를 눌러 선택한 사실이 화면을 보지 않는 사용자에게 닿지 않는다.
+       */
+      aria-current={isSelected ? 'true' : undefined}
+    >
       <div
         className="store-card__media"
         style={{ '--tile-from': tint.from, '--tile-to': tint.to } as CSSProperties}
@@ -81,6 +106,17 @@ export function StoreCard({ store, categoryNames, detailSearch }: Props) {
 
       <div className="mi-card__body store-card__body">
         <h3 className="store-card__name">
+          {/*
+            지도 마커와 짝을 이루는 번호. 마커 이름도 같은 번호로 시작하므로
+            (`toMapStores`) 숫자만 읽히지 않도록 앞에 무엇의 번호인지 붙인다.
+          */}
+          {ordinal !== undefined && (
+            <span className="store-card__ordinal">
+              <span className="visually-hidden">{`지도 표시 번호 ${ordinal}`}</span>
+              {/* 위 문장이 같은 번호를 이미 읽는다. 숫자만 두 번 읽지 않게 한다. */}
+              <span aria-hidden="true">{ordinal}</span>
+            </span>
+          )}
           <Link to={detailTo}>{store.name}</Link>
         </h3>
 
@@ -116,6 +152,21 @@ export function StoreCard({ store, categoryNames, detailSearch }: Props) {
           조건이 그대로 이어진다. 매장 상세의 예약 버튼과 같은 방식이다.
         */}
         <div className="store-card__foot">
+          {/*
+            지도를 쓰는 화면에서만 뜬다. 누르면 지도가 이 매장을 중심에 놓고,
+            좁은 화면에서는 지도 보기로 넘어간다. 선택 자체는 화면이 소유하므로
+            여기서는 요청만 올린다.
+          */}
+          {onShowOnMap !== undefined && (
+            <button
+              type="button"
+              className="mi-button mi-button--ghost store-card__map-button"
+              onClick={() => onShowOnMap(store.storeId)}
+            >
+              <Icon name="pin" className="mi-icon--sm" />
+              지도에서 보기
+            </button>
+          )}
           {store.operationStatus === 'OPEN' && store.modes.reservationEnabled ? (
             <Link
               className="mi-button mi-button--primary mi-button--block"
