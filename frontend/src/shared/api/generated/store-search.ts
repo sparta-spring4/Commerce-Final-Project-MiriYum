@@ -261,7 +261,7 @@ export interface components {
      * @description 매장 등록 신청에서 선택하는 업종 구분. 픽업 가능 여부에는 사용하지 않는다.
      * @enum {string}
      */
-    BusinessType: "CAFE" | "BAKERY" | "RESTAURANT" | "OTHER";
+    BusinessType: "CAFE" | "BAKERY" | "OTHER";
     /** @description 등록 업종과 무관하게 거래별 기능 활성화 여부를 선택한다. */
     StoreModes: {
       reservationEnabled: boolean;

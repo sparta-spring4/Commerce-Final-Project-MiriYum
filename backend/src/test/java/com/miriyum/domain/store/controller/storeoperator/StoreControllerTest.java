@@ -100,22 +100,6 @@ class StoreControllerTest {
     }
 
     @Test
-    void createAcceptsRestaurantBusinessType() throws Exception {
-        authenticateStoreOperator(11L);
-        given(storeService.create(eq(11L), any(IdempotencyKey.class), any()))
-                .willReturn(new StoreCommandResult(201, managedStore(7L)));
-
-        mockMvc.perform(post("/api/v1/store-operators/stores")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
-                        .header("Idempotency-Key", TEST_KEY)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(validCreateJson().replace(
-                                "\"businessType\": \"CAFE\"",
-                                "\"businessType\": \"RESTAURANT\"")))
-                .andExpect(status().isCreated());
-    }
-
-    @Test
     void createReturnsBadRequestWhenGeocodingResultDoesNotMatch() throws Exception {
         authenticateStoreOperator(11L);
         given(storeService.create(eq(11L), any(IdempotencyKey.class), any()))

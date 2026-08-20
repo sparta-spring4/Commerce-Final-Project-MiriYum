@@ -56,12 +56,7 @@ const REGIONS: readonly Region[] = [
   'GWANGJU',
 ]
 
-const BUSINESS_TYPES: readonly BusinessType[] = [
-  'CAFE',
-  'BAKERY',
-  'RESTAURANT',
-  'OTHER',
-]
+const BUSINESS_TYPES: readonly BusinessType[] = ['CAFE', 'BAKERY', 'OTHER']
 
 /** 좌측 단계 표시에 쓰는 구역 이름. 카드 제목의 번호와 순서가 같다. */
 const FORM_SECTIONS: readonly string[] = [

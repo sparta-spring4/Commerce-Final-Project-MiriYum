@@ -139,7 +139,7 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 
 - `POST /api/v1/store-operators/stores`는 인증된 매장 운영자 계정으로 새 매장 신청을 만든다.
 - 요청의 운영자 ID나 역할 값은 받지 않고 JWT subject를 사용한다.
-- 사업자등록번호와 업종 구분 `CAFE`, `BAKERY`, `RESTAURANT`, `OTHER`를 구조화 입력한다.
+- 사업자등록번호와 업종 구분 `CAFE`, `BAKERY`, `OTHER`를 구조화 입력한다.
 - 1차 MVP는 사업자등록번호 형식과 중앙 영구 중복을 검증한다. 한 번 매장에 귀속된 번호는 폐점 후에도 일반 등록에서 재사용할 수 없으며, 재개·이전·복구는 향후 플랫폼 운영자 전용 절차로 분리한다. 사전 사업자 진위·업종 기준 데이터 비교, 국세청 공식 진위조회와 플랫폼 운영자 심사는 사용하지 않는다.
 - 형식과 중복 검사를 통과한 신청은 즉시 `APPROVED`로 매장을 생성한다.
 - 사업자등록증 이미지·파일 URL을 받지 않는다.
@@ -151,7 +151,7 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 | --- | --- |
 | `verificationStatus` | `APPROVED` |
 | `operationStatus` | `OPEN`, `TEMPORARILY_CLOSED`, `CLOSED` |
-등록 업종과 검색 카테고리·태그는 픽업 사용 여부를 제한하지 않는다. `CAFE`, `BAKERY`, `RESTAURANT`, `OTHER` 모두 등록·수정 요청에서 `modes.pickupEnabled=true`를 선택할 수 있다.
+등록 업종과 검색 카테고리·태그는 픽업 사용 여부를 제한하지 않는다. `CAFE`, `BAKERY`, `OTHER` 모두 등록·수정 요청에서 `modes.pickupEnabled=true`를 선택할 수 있다.
 
 ## 2차 MVP 주소 검증과 좌표 저장
 

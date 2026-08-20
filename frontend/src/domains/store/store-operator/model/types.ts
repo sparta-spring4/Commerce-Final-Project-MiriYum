@@ -84,7 +84,6 @@ export const REGION_LABEL: Record<Region, string> = {
 export const BUSINESS_TYPE_LABEL: Record<BusinessType, string> = {
   CAFE: '카페',
   BAKERY: '베이커리',
-  RESTAURANT: '음식점',
   OTHER: '그 외',
 }
 

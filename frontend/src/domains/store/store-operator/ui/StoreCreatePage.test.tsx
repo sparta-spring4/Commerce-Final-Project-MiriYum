@@ -139,31 +139,6 @@ describe('매장 등록 화면', () => {
     })
   })
 
-  it('음식점 업종을 선택해 등록 요청에 담는다', async () => {
-    let body: Record<string, unknown> | null = null
-    server.use(
-      authenticatedOperator(),
-      ...catalogHandlers(),
-      http.post(OPERATOR_STORES_PATH, async ({ request }) => {
-        body = (await request.json()) as Record<string, unknown>
-        return successResponse(managedStore())
-      }),
-    )
-
-    renderCreatePage()
-    await screen.findByLabelText('매장명')
-
-    fillRequiredFields()
-    fireEvent.change(screen.getByLabelText('업종'), {
-      target: { value: 'RESTAURANT' },
-    })
-    agreeAll()
-    submit()
-
-    await waitFor(() => expect(body).not.toBeNull())
-    expect(body).toMatchObject({ businessType: 'RESTAURANT' })
-  })
-
   it('사업자등록번호 중복은 서버 오류 문구로 안내한다', async () => {
     server.use(
       authenticatedOperator(),

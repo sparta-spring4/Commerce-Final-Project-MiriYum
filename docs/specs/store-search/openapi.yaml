@@ -1486,7 +1486,7 @@ components:
     BusinessType:
       type: string
       description: 매장 등록 신청에서 선택하는 업종 구분. 픽업 가능 여부에는 사용하지 않는다.
-      enum: [CAFE, BAKERY, RESTAURANT, OTHER]
+      enum: [CAFE, BAKERY, OTHER]
     StoreModes:
       type: object
       description: 등록 업종과 무관하게 거래별 기능 활성화 여부를 선택한다.
