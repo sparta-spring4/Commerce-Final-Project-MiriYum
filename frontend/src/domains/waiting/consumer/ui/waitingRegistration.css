@@ -1,0 +1,208 @@
+/* 소비자 웨이팅 등록 화면 배치. 토큰은 shared/ui/theme.css가 소유한다. */
+
+.waiting-register {
+  padding-bottom: var(--space-8);
+}
+
+.waiting-register__header {
+  padding-bottom: var(--space-2);
+}
+
+.waiting-register__back {
+  margin-bottom: var(--space-1);
+}
+
+/* 예약·픽업 화면의 돌아가기 줄과 같은 형태를 쓴다. */
+.waiting-register__back a,
+.waiting-register__closed-link a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+.waiting-register__back a:hover,
+.waiting-register__closed-link a:hover {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.waiting-register__closed-link {
+  margin-top: var(--space-1);
+}
+
+.waiting-register__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.waiting-register__section-title {
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+}
+
+/*
+ * 인원 조절 줄.
+ *
+ * `.mi-counter`가 알약 배경과 버튼 모양을 소유하고 여기서는 가운데 입력의
+ * 폭과 정렬만 정한다. 좁은 화면에서 줄이 넘치지 않도록 알약을 왼쪽에 둔다.
+ */
+.waiting-register__counter {
+  align-self: flex-start;
+}
+
+/*
+ * 인원 입력.
+ *
+ * `.mi-counter__value`의 폭·정렬을 이어받되 입력이라 기본 테두리와 배경을
+ * 지운다. 배경을 남기면 알약 안에 사각형이 한 겹 더 그려진다.
+ */
+.waiting-register__party-input {
+  /*
+   * 입력은 `size` 속성에서 오는 기본 폭(약 20글자)을 가진다. `.mi-counter__value`의
+   * min-width만으로는 줄지 않아 알약이 화면 밖까지 늘어난다. 폭을 직접 정한다.
+   */
+  width: 3.5rem;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  font-family: inherit;
+  color: var(--color-on-surface);
+  /* 숫자 입력의 스피너는 알약 안에서 버튼 두 개와 겹쳐 보인다. */
+  appearance: textfield;
+}
+
+.waiting-register__party-input::-webkit-outer-spin-button,
+.waiting-register__party-input::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.waiting-register__party-input:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.waiting-register__party-input:disabled {
+  color: var(--color-on-surface-variant);
+  /* 값 자체는 계속 읽혀야 하므로 색만 낮추고 흐리게 지우지 않는다. */
+  opacity: 1;
+}
+
+/* 위치를 언제 어디에 쓰는지 알리는 줄. 등록 버튼 바로 위에 둔다. */
+.waiting-register__location-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+  font-size: var(--font-size-label-md);
+  line-height: var(--line-height-body-md);
+  color: var(--color-on-surface-variant);
+  word-break: keep-all;
+}
+
+.waiting-register__location-note .mi-icon {
+  margin-top: 0.125rem;
+  color: var(--color-primary);
+}
+
+/*
+ * 진행 문구.
+ *
+ * 비어 있을 때도 요소는 남는다. 보조기술이 같은 영역의 변화를 읽게 하려면
+ * 영역이 먼저 있어야 한다. 빈 줄이 여백을 만들지 않도록 내용이 없으면
+ * 높이를 갖지 않는다.
+ */
+.waiting-register__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+.waiting-register__progress:empty {
+  display: none;
+}
+
+/* ── 등록 성공 ────────────────────────────────────────────────────────── */
+
+.waiting-register__result-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+}
+
+.waiting-register__result-head .mi-icon {
+  color: var(--color-status-available);
+}
+
+/*
+ * 순번 요약.
+ *
+ * 좁은 화면에서는 한 줄에 하나씩, 넓은 화면에서는 세 칸으로 편다.
+ * 마이페이지의 현재 웨이팅 요약과 같은 이름(내 순번·앞 팀·인원)을 쓴다.
+ */
+.waiting-register__summary {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+@media (min-width: 30rem) {
+  .waiting-register__summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.waiting-register__summary > div {
+  padding: var(--space-2);
+  background-color: var(--color-surface-container-low);
+  border-radius: var(--radius-md);
+}
+
+.waiting-register__summary dt {
+  font-size: var(--font-size-label-sm);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+.waiting-register__summary dd {
+  margin: 0.25rem 0 0;
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 800;
+  color: var(--color-on-surface);
+}
+
+/*
+ * 다음 행동.
+ *
+ * 좁은 화면에서는 세로로 쌓아 버튼 하나가 한 줄을 차지하게 한다.
+ * `gap`만으로 간격을 주고 버튼 자체에 margin을 붙이지 않는다.
+ */
+.waiting-register__result-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+@media (min-width: 30rem) {
+  .waiting-register__result-actions {
+    flex-direction: row;
+  }
+
+  .waiting-register__result-actions > * {
+    flex: 1;
+  }
+}
