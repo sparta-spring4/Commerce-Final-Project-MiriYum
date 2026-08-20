@@ -1,4 +1,4 @@
-# Waiting / Notification 물리 ERD
+# Waiting / Notification 주요 관계 ERD
 
 ```mermaid
 erDiagram

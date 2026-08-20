@@ -6,7 +6,7 @@
 
 ## 데이터 모델
 
-- [전체 물리 ERD](erd/README.md): 현재 `dev` Flyway V1~V66 기준 도메인별 MySQL 테이블·FK·논리 참조
+- [전체 스키마 색인과 주요 관계 ERD](erd/README.md): 현재 `dev` Flyway V1~V66 기준 전체 MySQL 테이블 색인과 도메인별 주요 관계
 
 ## 활성 정본 allowlist
 

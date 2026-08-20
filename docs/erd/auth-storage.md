@@ -1,4 +1,4 @@
-# Auth / Storage 물리 ERD
+# Auth / Storage 주요 관계 ERD
 
 ```mermaid
 erDiagram

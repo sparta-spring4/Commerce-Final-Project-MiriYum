@@ -1,4 +1,4 @@
-# Store / Catalog 물리 ERD
+# Store / Catalog 주요 관계 ERD
 
 ```mermaid
 erDiagram

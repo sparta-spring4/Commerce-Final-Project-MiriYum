@@ -1,4 +1,4 @@
-# Reservation / Payment 물리 ERD
+# Reservation / Payment 주요 관계 ERD
 
 ```mermaid
 erDiagram
@@ -16,7 +16,7 @@ erDiagram
     PAYMENTS ||--o{ PAYMENT_ATTEMPTS : has
     PAYMENTS ||--o{ PAYMENT_REFUNDS : has
     PAYMENTS ||--o{ PAYMENT_LEDGER_ENTRIES : records
-    PAYMENTS ||--o{ PAYMENT_WEBHOOK_RECEIPTS : receives
+    PAYMENTS ||--o{ PAYMENT_WEBHOOK_RECEIPTS : receipt_lookup_logical
 ```
 
 ## 테이블 색인
