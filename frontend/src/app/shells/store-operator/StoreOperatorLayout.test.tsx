@@ -10,8 +10,12 @@ import { StoreOperatorAuthProvider } from './StoreOperatorAuthProvider'
 import {
   STORE_ID,
   authenticatedOperator,
+  managedStore,
   managedStoreHandler,
+  operatorStorePath,
 } from '../../../domains/store/store-operator/test/handlers'
+import { http } from 'msw'
+import { successResponse } from '../../../test/msw/envelope'
 import { StoreOperatorLayout } from './StoreOperatorLayout'
 
 /**
@@ -79,6 +83,21 @@ describe('매장 운영자 셸', () => {
       'href',
       fillPath(STORE_OPERATOR_PATHS.menus, { storeId: STORE_ID }),
     )
+  })
+
+  it('픽업을 사용하지 않는 매장은 픽업 목록 메뉴를 숨긴다', async () => {
+    server.use(
+      authenticatedOperator(),
+      http.get(operatorStorePath(), () => successResponse(managedStore({
+        modes: { reservationEnabled: true, menuHoldEnabled: false, pickupEnabled: false },
+      }))),
+    )
+
+    renderShell(STORE_ROUTE)
+
+    expect(await screen.findByText('카페 에비뉴')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '픽업 목록' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '메뉴 재고' })).toBeInTheDocument()
   })
 
   it('매장을 모르면 매장별 항목 없이 운영 홈만 남긴다', async () => {

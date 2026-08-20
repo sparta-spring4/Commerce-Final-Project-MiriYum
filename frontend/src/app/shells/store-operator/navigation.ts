@@ -3,9 +3,10 @@ import { STORE_OPERATOR_PATHS } from '../../routes/paths/storeOperatorPaths'
 
 export function storeOperatorNavigation(
   storeId: string | number,
+  capabilities: { pickupEnabled: boolean } = { pickupEnabled: true },
 ): NavigationItem[] {
   const params = { storeId }
-  return [
+  const items: NavigationItem[] = [
     { label: '매장 정보', path: fillPath(STORE_OPERATOR_PATHS.store, params) },
     {
       label: '영업시간',
@@ -26,6 +27,11 @@ export function storeOperatorNavigation(
       path: fillPath(STORE_OPERATOR_PATHS.reservationTimePolicy, params),
     },
     { label: '예약 목록', path: fillPath(STORE_OPERATOR_PATHS.reservations, params) },
+    ...(capabilities.pickupEnabled
+      ? [{ label: '픽업 목록', path: fillPath(STORE_OPERATOR_PATHS.pickupReservations, params) }]
+      : []),
+    { label: '메뉴 재고', path: fillPath(STORE_OPERATOR_PATHS.menuInventory, params) },
+    { label: '추천 메뉴', path: fillPath(STORE_OPERATOR_PATHS.representativeMenus, params) },
     {
       label: '웨이팅 설정',
       path: fillPath(STORE_OPERATOR_PATHS.waitingSettings, params),
@@ -35,4 +41,5 @@ export function storeOperatorNavigation(
       path: fillPath(STORE_OPERATOR_PATHS.waitingTeams, params),
     },
   ]
+  return items
 }

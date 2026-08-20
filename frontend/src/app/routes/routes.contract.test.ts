@@ -59,6 +59,14 @@ describe('사용자별 route 계약', () => {
       reservations: '/store-operator/stores/:storeId/reservations',
       reservation:
         '/store-operator/stores/:storeId/reservations/:reservationId',
+      pickupReservations:
+        '/store-operator/stores/:storeId/pickup-reservations',
+      pickupReservation:
+        '/store-operator/stores/:storeId/pickup-reservations/:pickupReservationId',
+      menuInventory:
+        '/store-operator/stores/:storeId/menu-inventory',
+      representativeMenus:
+        '/store-operator/stores/:storeId/representative-menus',
       waitingSettings: '/store-operator/stores/:storeId/waiting-settings',
       waitingTeams: '/store-operator/stores/:storeId/waiting-teams',
       waitingTeam:
@@ -121,6 +129,18 @@ describe('사용자별 navigation 계약', () => {
         path: '/store-operator/stores/store%2F7/reservation-time-policy',
       },
       { label: '예약 목록', path: '/store-operator/stores/store%2F7/reservations' },
+      {
+        label: '픽업 목록',
+        path: '/store-operator/stores/store%2F7/pickup-reservations',
+      },
+      {
+        label: '메뉴 재고',
+        path: '/store-operator/stores/store%2F7/menu-inventory',
+      },
+      {
+        label: '추천 메뉴',
+        path: '/store-operator/stores/store%2F7/representative-menus',
+      },
       {
         label: '웨이팅 설정',
         path: '/store-operator/stores/store%2F7/waiting-settings',

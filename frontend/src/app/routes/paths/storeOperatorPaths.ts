@@ -17,6 +17,11 @@ export const STORE_OPERATOR_PATHS = {
     '/store-operator/stores/:storeId/reservation-time-policy',
   reservations: '/store-operator/stores/:storeId/reservations',
   reservation: '/store-operator/stores/:storeId/reservations/:reservationId',
+  pickupReservations: '/store-operator/stores/:storeId/pickup-reservations',
+  pickupReservation:
+    '/store-operator/stores/:storeId/pickup-reservations/:pickupReservationId',
+  menuInventory: '/store-operator/stores/:storeId/menu-inventory',
+  representativeMenus: '/store-operator/stores/:storeId/representative-menus',
   waitingSettings: '/store-operator/stores/:storeId/waiting-settings',
   waitingTeams: '/store-operator/stores/:storeId/waiting-teams',
   waitingTeam: '/store-operator/stores/:storeId/waiting-teams/:waitingTeamId',

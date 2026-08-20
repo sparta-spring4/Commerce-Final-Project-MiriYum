@@ -43,6 +43,10 @@ export type MenuVersionStatus = MenuVersion['status']
 export type MenuWriteRequest = components['schemas']['MenuWriteRequest']
 export type MenuVisibility = ManagedMenu['visibility']
 export type MenuSellingStatus = ManagedMenu['sellingStatus']
+export type RepresentativeMenuSetting =
+  components['schemas']['RepresentativeMenuSetting']
+export type RepresentativeMenuReplaceRequest =
+  components['schemas']['RepresentativeMenuReplaceRequest']
 export type DisclosureRegistrationStatus =
   components['schemas']['DisclosureRegistrationStatus']
 export type AllergenDisclosure = components['schemas']['AllergenDisclosure']
