@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { http } from 'msw'
+import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { errorResponse, successResponse } from '../../../test/msw/envelope'
 import { server } from '../../../test/msw/server'
@@ -24,10 +24,18 @@ import {
 
 /** 보호 API 호출을 대신하는 임의 경로. 계약에 있는 경로 하나를 빌린다. */
 const PROTECTED_PATH = '/api/v1/consumers/me'
+const NOTIFICATION_EVENT_PATH = '/api/v1/consumers/me/notification-events'
 
 function Probe() {
-  const { status, apiClient, signIn, completeKakaoSignIn, signOut, signOutNotice } =
-    useConsumerAuth()
+  const {
+    status,
+    apiClient,
+    notificationEventStream,
+    signIn,
+    completeKakaoSignIn,
+    signOut,
+    signOutNotice,
+  } = useConsumerAuth()
 
   return (
     <div>
@@ -59,6 +67,19 @@ function Probe() {
         }}
       >
         보호 API 호출
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          const controller = new AbortController()
+          void notificationEventStream.subscribe({
+            signal: controller.signal,
+            onChanged: () => controller.abort(),
+            onConnectionStateChange: () => {},
+          })
+        }}
+      >
+        알림 실시간 연결
       </button>
     </div>
   )
@@ -219,6 +240,46 @@ describe('일반 사용자 인증 shell', () => {
     await waitFor(() => expect(protectedCalls).toBe(2))
     expect(refreshCalls).toBe(2)
     expect(status()).toBe('authenticated')
+  })
+
+  it('알림 SSE도 메모리 token과 AUTH_002 단일 재발급 경계를 공유한다', async () => {
+    const authorizations: Array<string | null> = []
+    let refreshCalls = 0
+    let streamCalls = 0
+    server.use(
+      http.post(CONSUMER_REFRESH_PATH, () => {
+        refreshCalls += 1
+        return successResponse(tokenData(`stream-token-${refreshCalls}`))
+      }),
+      http.get(NOTIFICATION_EVENT_PATH, ({ request }) => {
+        authorizations.push(request.headers.get('Authorization'))
+        streamCalls += 1
+        if (streamCalls === 1) {
+          return errorResponse(
+            401,
+            AuthErrorCode.ACCESS_TOKEN_EXPIRED,
+            'Access Token이 만료됐습니다.',
+          )
+        }
+        return new HttpResponse(
+          'id: stream_cursor\nevent: notifications.changed\ndata: {}\n\n',
+          { headers: { 'Content-Type': 'text/event-stream' } },
+        )
+      }),
+    )
+
+    renderProvider()
+    await waitFor(() => expect(status()).toBe('authenticated'))
+    expect(refreshCalls).toBe(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '알림 실시간 연결' }))
+
+    await waitFor(() => expect(streamCalls).toBe(2))
+    expect(refreshCalls).toBe(2)
+    expect(authorizations).toEqual([
+      'Bearer stream-token-1',
+      'Bearer stream-token-2',
+    ])
   })
 
   it('AUTH_004 namespace 불일치는 재발급하지 않고 세션을 끊는다', async () => {

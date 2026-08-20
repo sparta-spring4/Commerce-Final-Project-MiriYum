@@ -1,6 +1,6 @@
 import { CONSUMER_PATHS } from '../../../app/routes/paths/consumerPaths'
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 
 import type { ApiClient } from '../../../shared/api/client'
@@ -11,11 +11,16 @@ import {
   type NotificationHistoryItem,
 } from './notificationHistoryApi'
 import { getNotificationPurposeLabel } from './notificationPurposeLabel'
+import type {
+  NotificationEventConnectionState,
+  NotificationEventStreamClient,
+} from './notificationEventStream'
 
 const NOTIFICATION_HISTORY_QUERY_ROOT = ['consumer', 'notification-history'] as const
 
 type NotificationHistoryPageProps = {
   apiClient: ApiClient
+  eventStream: NotificationEventStreamClient
   sessionKey: number
 }
 
@@ -27,7 +32,68 @@ function formatDeliveredAt(deliveredAt: string): string {
   }).format(new Date(deliveredAt))
 }
 
+type DetailActionPresentation =
+  | { kind: 'link'; label: string; to: string }
+  | { kind: 'disabled'; label: string }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function resolveDetailAction(
+  action: unknown,
+): DetailActionPresentation | null {
+  if (!isRecord(action) || !isRecord(action.resource)) {
+    return null
+  }
+
+  const resourceId = action.resource.id
+  if (typeof resourceId !== 'string' || resourceId.trim().length === 0) {
+    return null
+  }
+
+  let label: string
+  let to: string
+  if (
+    action.type === 'RESERVATION_DETAIL' &&
+    action.resource.type === 'RESERVATION'
+  ) {
+    label = '예약 상세 보기'
+    to = CONSUMER_PATHS.reservationDetail.replace(
+      ':reservationId',
+      encodeURIComponent(resourceId),
+    )
+  } else if (
+    action.type === 'PICKUP_RESERVATION_DETAIL' &&
+    action.resource.type === 'PICKUP_RESERVATION'
+  ) {
+    label = '픽업 상세 보기'
+    to = CONSUMER_PATHS.pickupDetail.replace(
+      ':pickupReservationId',
+      encodeURIComponent(resourceId),
+    )
+  } else {
+    return null
+  }
+
+  if (action.availability === 'AVAILABLE') {
+    return { kind: 'link', label, to }
+  }
+
+  if (
+    action.availability === 'EXPIRED' ||
+    action.availability === 'SUPERSEDED' ||
+    action.availability === 'UNAVAILABLE'
+  ) {
+    return { kind: 'disabled', label }
+  }
+
+  return null
+}
+
 function NotificationItem({ item }: { item: NotificationHistoryItem }) {
+  const detailAction = resolveDetailAction(item.action)
+
   return (
     <li>
       <article>
@@ -36,6 +102,14 @@ function NotificationItem({ item }: { item: NotificationHistoryItem }) {
         <time dateTime={item.deliveredAt}>
           {formatDeliveredAt(item.deliveredAt)}
         </time>
+        {detailAction?.kind === 'link' ? (
+          <Link to={detailAction.to}>{detailAction.label}</Link>
+        ) : null}
+        {detailAction?.kind === 'disabled' ? (
+          <button type="button" disabled>
+            {detailAction.label}
+          </button>
+        ) : null}
       </article>
     </li>
   )
@@ -117,9 +191,12 @@ function HistoryError({
 
 export function NotificationHistoryPage({
   apiClient,
+  eventStream,
   sessionKey,
 }: NotificationHistoryPageProps) {
   const queryClient = useQueryClient()
+  const [eventConnectionState, setEventConnectionState] =
+    useState<NotificationEventConnectionState | null>(null)
   const queryKey = useMemo(
     () => [...NOTIFICATION_HISTORY_QUERY_ROOT, sessionKey] as const,
     [sessionKey],
@@ -137,6 +214,65 @@ export function NotificationHistoryPage({
         ? lastPage.nextCursor
         : undefined,
   })
+
+  useEffect(() => {
+    const controller = new AbortController()
+    let refreshRequested = false
+    let refreshRunning = false
+
+    const refreshHistory = async () => {
+      if (refreshRunning) {
+        return
+      }
+
+      refreshRunning = true
+      try {
+        while (refreshRequested && !controller.signal.aborted) {
+          const queryState = queryClient.getQueryState(queryKey)
+          if (
+            queryState?.fetchStatus === 'fetching' &&
+            queryState.data === undefined
+          ) {
+            await queryClient.cancelQueries({
+              queryKey,
+              exact: true,
+            })
+          }
+
+          if (controller.signal.aborted) {
+            return
+          }
+
+          refreshRequested = false
+          await queryClient.invalidateQueries({
+            queryKey,
+            exact: true,
+          })
+        }
+      } finally {
+        refreshRunning = false
+      }
+    }
+
+    setEventConnectionState(null)
+    void eventStream.subscribe({
+      signal: controller.signal,
+      onChanged: () => {
+        if (controller.signal.aborted) {
+          return
+        }
+
+        refreshRequested = true
+        void refreshHistory()
+      },
+      onConnectionStateChange: setEventConnectionState,
+    })
+
+    return () => {
+      refreshRequested = false
+      controller.abort()
+    }
+  }, [eventStream, queryClient, queryKey])
 
   useEffect(
     () => () => {
@@ -160,6 +296,19 @@ export function NotificationHistoryPage({
   return (
     <main>
       <h1>알림 이력</h1>
+
+      {eventConnectionState === 'reconnecting' ? (
+        <p
+          role="status"
+          aria-label="실시간 알림 연결을 복구하는 중입니다."
+        >
+          실시간 알림 연결을 복구하는 중입니다.
+        </p>
+      ) : null}
+
+      {eventConnectionState === 'unavailable' ? (
+        <p role="status">실시간 알림 연결을 사용할 수 없습니다.</p>
+      ) : null}
 
       {history.isPending ? <p role="status">알림 이력을 불러오는 중입니다.</p> : null}
 
