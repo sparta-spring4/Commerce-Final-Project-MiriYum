@@ -40,6 +40,7 @@ export function storeSummary(
       pickupEnabled: false,
     },
     reservationAvailability: 'NOT_REQUESTED',
+    coordinates: null,
     ...overrides,
   }
 }
