@@ -12,18 +12,20 @@ PR #442가 Notification 이력과 소비자·매장 운영자 Waiting 변경을 
 
 SSE event는 업무 상태가 아니라 변경 신호다. 네트워크와 브라우저 재연결에서는 event가 중복·역순·유실될 수 있고, Valkey Pub/Sub도 내구성 있는 원장이 아니다. Notification과 Waiting의 최신 상태는 MySQL이 소유하므로, stream payload나 Valkey 수신만으로 전달 성공·알림 이력·Waiting 상태·`teamsAhead`를 확정하면 오래된 상태가 노출될 수 있다.
 
-Issue #250은 최초 연결·재연결·다중 탭·다중 instance·Valkey 유실·느린 client·JWT 만료 뒤에도 HTTP/MySQL 최신 상태로 수렴할 것을 요구한다. 운영 connection 수와 재연결 폭주, timeout·heartbeat·보정 주기의 적정 수치는 아직 부하·장애 증거가 없다.
+Issue #250은 최초 연결·재연결·다중 탭·다중 instance·Valkey 유실·느린 client·JWT 만료 뒤에도 HTTP/MySQL 최신 상태로 수렴할 것을 요구한다. Issue #500은 같은 consumer stream을 웹 전역 배지에 재사용하고 새 공개 전달뿐 아니라 개별·전체 읽음 변경도 이력·미확인 개수 HTTP 조회로 수렴하도록 확장한다. 운영 connection 수와 재연결 폭주, timeout·heartbeat·보정 주기의 적정 수치는 아직 부하·장애 증거가 없다.
 
 ## 단계 제약과 적용 범위
 
-이번 결정은 #250의 SSE Runtime과 후속 배포 검증에 적용한다.
+이번 결정은 #250의 SSE Runtime·후속 배포 검증과 #500의 Notification 공개 읽음 변경 확장에 적용한다.
 
-- 포함: Spring MVC SSE transport, scope-bound opaque cursor, 로컬 connection registry, Valkey Pub/Sub wake-up hint, 주기 MySQL correction, Notification·Waiting high-watermark adapter, timeout·heartbeat·connection limit 설정과 Runtime 검증
+- 포함: Spring MVC SSE transport, scope-bound opaque cursor, 로컬 connection registry, Valkey Pub/Sub wake-up hint, 주기 MySQL correction, Notification·Waiting high-watermark adapter, Notification 공개 전달·읽음 변경 version, timeout·heartbeat·connection limit 설정과 Runtime 검증
 - 제외: Nginx buffering·timeout, Compose·ECS 환경변수 wiring, 운영 기본 수치·경보 임계치, k6 부하·장애 검증과 runbook, frontend SSE client와 화면
-- 데이터: 기존 `notification_tasks`, `notification_channel_attempts`, `waiting_teams`, `waiting_active_memberships`, `waiting_status_events`를 사용하고 이번 Runtime을 위한 Flyway migration은 만들지 않는다.
-- 공개 계약: PR #442의 endpoint·event·payload·오류 계약을 유지하며 새 route·상태·오류 코드를 추가하지 않는다.
+- 데이터: #250 Runtime은 기존 `notification_tasks`, `notification_channel_attempts`, `waiting_teams`, `waiting_active_memberships`, `waiting_status_events`만 사용했다. #500은 Notification 공개 읽음 원장과 단조 변경 version을 위한 Flyway migration을 추가한다.
+- 공개 계약: #250은 PR #442의 endpoint·event·payload·오류 계약을 유지한다. #500은 읽음·미확인 개수 HTTP route와 비열거 오류를 추가하지만 SSE event 이름과 고정 `data: {}` payload는 변경하지 않는다.
 
 배포·프록시·부하·장애 검증은 #250 PR 3이, frontend 소비는 #251·#410·#411이 소유한다.
+
+#500 읽음 route 활성화 전 구 revision 제거 증거와 활성화 뒤 최소 호환 writer rollback floor는 배포 후속 Issue #518이 소유한다.
 
 ## 검토한 대안
 
@@ -57,7 +59,14 @@ Notification과 Waiting이 각각 cursor, connection registry, heartbeat, Valkey
 
 ### 도메인 high-watermark 경계
 
-Notification adapter는 인증된 소비자 계정에 대해 `notification_tasks`와 IN_APP channel attempt가 모두 `DELIVERED`이고 공개 이력에 필요한 title·`delivered_at`이 존재하는 행의 최대 `notification_id`를 반환한다. PENDING·FAILED·CANCELLED와 외부 채널은 watermark를 증가시키지 않는다.
+Notification adapter는 인증된 소비자 계정에 대해 `notification_consumer_change_states.change_version`과 현재 공개 이력의 최대 `notification_id` 중 큰 값을 반환한다. account state는 새 공개 `IN_APP DELIVERED`, 최초 개별 읽음과 실제 변경이 있는 전체 읽음을 같은 MySQL transaction에서 단조 증가시키며 미확인 개수를 중복 저장하지 않는다. 미확인 개수는 공개 전달 조건과 `notification_tasks.read_at IS NULL`을 만족하는 본인 알림을 인덱스로 집계한다. PENDING·FAILED·CANCELLED, 외부 채널과 반복 읽음 no-op은 watermark를 증가시키지 않는다.
+
+기존 공개 전달 완료 알림은 읽음으로 backfill하고 account state version은 기존 공개 최대 `notification_id`로 초기화한다. `changeVersion`과 `notificationId`는 독립적인 단조 수열이므로 두 값의 `max`는 두 종류 변경이 동시에 허용되면 작은 쪽 증가를 숨길 수 있다. 따라서 rolling replacement는 다음 강제 gate를 따른다.
+
+1. 호환 기반 PR 1A가 migration, account state, version-aware 전달 writer와 legacy 전달용 `max(changeVersion, notificationId)` correction을 배포한다. 읽음·미확인 개수 OpenAPI path는 `contract-only`이며 production Controller route를 등록하지 않는다.
+2. #518은 staging 구 container 종료·DB connection closure와 production 이전 revision running·pending task 0건·target deregistration 완료를 배포 표면에서 확인한다. 관측할 수 없는 별도 “진행 중 transaction 0” 지표를 gate로 요구하지 않으며, 읽음 변경이 없는 이 구간의 legacy 전달은 증가한 `notificationId`로 correction이 회수한다.
+3. #518의 gate와 최소 호환 writer floor가 완료된 뒤 PR 1B에서만 읽음·미확인 개수 production route를 활성화한다. 이 시점부터 모든 전달과 읽음은 account state를 잠그고 `changeVersion`을 증가시키므로 `읽음 → 새 전달`도 더 큰 scalar를 만든다.
+4. route 활성화 뒤 staging·production CD는 최소 호환 writer revision보다 오래된 image를 배포 전에 거절한다. rollback은 version-aware 전달 writer 계약을 유지하는 forward rollback image로만 수행하고 Frontend는 PR 1B 전체 배포 뒤 활성화한다.
 
 Waiting adapter는 `waiting_status_events.waiting_status_event_id`를 단조 watermark로 사용한다.
 
@@ -93,6 +102,7 @@ Redis Streams, Kafka, 분산 lock과 별도 SSE gateway는 현재 connection 규
 - SSE 중복·역순·유실 뒤에도 MySQL watermark와 HTTP 재조회로 최신 상태에 수렴한다.
 - Valkey 장애가 Notification·Waiting 업무 트랜잭션을 롤백하지 않는다.
 - cursor가 audience·계정·store·version에 결속되어 교차 scope 재사용을 실패 폐쇄한다.
+- 전역 배지의 새 전달·개별 읽음·전체 읽음도 payload 상태를 신뢰하지 않고 MySQL 이력·개수 조회로 여러 탭과 기기에서 수렴한다.
 - 연결 수명과 개수가 유한해 느린 client와 JWT 만료가 thread·DB connection을 무한 점유하지 않는다.
 - Notification과 Waiting은 상대 Entity·Repository를 직접 참조하지 않고 소유 공개 Service·DTO만 노출한다.
 
@@ -135,13 +145,14 @@ Redis Streams, Kafka, 분산 lock과 별도 SSE gateway는 현재 connection 규
 - MySQL 통합: Notification 공개 `DELIVERED` 필터와 Waiting 소비자·운영자 scope watermark, terminal membership, 중복·역순 사건 수렴
 - Valkey 통합: 두 instance fan-out, 중복 wake-up 병합, publish 유실·구독 재시작 뒤 correction 회수
 - lifecycle 통합: 느린 client·연결 종료·JWT 만료가 다른 stream과 업무 API 자원을 점유하지 않음
+- rolling 회귀: PR 1A에는 읽음 production route가 없고 legacy 전달은 `notificationId` 증가로 회수됨; #518 gate 뒤에는 `읽음 version 증가 → 새 전달`이 더 큰 `changeVersion`을 만들며 최소 호환 revision 이전 image의 자동·수동 배포가 차단됨
 - 회귀: backend unit·integration shard, OpenAPI route inventory, `git diff --check`, Issue #250 exact allowlist
 
 ## 마이그레이션과 되돌리기
 
-DB migration은 없다. Runtime은 기본 OFF이며 전용 설정이 모두 유효한 환경에서만 활성화한다. PR 2는 애플리케이션 설정 key와 Runtime을 제공하고 deploy wiring은 PR 3에서 별도 검증한다.
+Issue #250 Runtime 자체에는 DB migration이 없었다. Issue #500은 기존 Runtime의 Notification adapter 입력을 확장하기 위해 `notification_tasks.read_at`과 `notification_consumer_change_states`를 추가한다. 기존 공개 전달 완료 알림은 `read_at=delivered_at`, account version은 기존 공개 최대 `notification_id`로 초기화하며 미확인 counter를 중복 저장하지 않는다. SSE Runtime은 계속 기본 OFF이고 기존 전용 설정이 모두 유효한 환경에서만 활성화한다.
 
-문제가 발생하면 SSE Runtime을 비활성화하고 client가 기존 HTTP 조회를 유지하게 한다. Valkey channel과 로컬 registry는 업무 원장이 아니므로 별도 데이터 rollback이 없다. 코드 rollback은 공개 endpoint·event 의미를 임의로 되돌리지 않으며, Runtime 가용성은 명시적인 환경 비활성화와 HTTP/MySQL 재조회로 복구한다.
+문제가 발생하면 SSE Runtime을 비활성화하고 client가 기존 HTTP 조회를 유지하게 한다. Valkey channel과 로컬 registry는 업무 원장이 아니므로 별도 데이터 rollback이 없다. 읽음 route 활성화 전에는 PR 1A 호환 기반을 유지한 채 #518 gate를 중단할 수 있다. 활성화 뒤에는 읽음 route를 비활성화할 수 있지만 #518의 CD floor보다 오래된 image는 배포할 수 없으며, 같은 version 계약을 유지하는 forward rollback image와 HTTP/MySQL 재조회로 복구한다.
 
 ## 전환 뒤 확인할 새 단점
 
@@ -159,6 +170,7 @@ PR 3에서 실제 proxy buffering, heartbeat 전달, timeout, 연결·재연결 
 - [ADR-002 단계적 기술 도입](ADR-002-staged-technology-adoption.md)
 - [ADR-006 JWT·Valkey 전환](ADR-006-jwt-valkey-refresh-token.md)
 - [Issue #250](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/250)
+- [Issue #518](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/518)
 - [PR #442](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/442)
 - [PR #474](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/474)
 - [SSE Runtime 배포·복구 runbook](../deployment/sse-runtime-runbook.md)
@@ -170,3 +182,4 @@ PR 3에서 실제 proxy buffering, heartbeat 전달, timeout, 연결·재연결 
 |---|---|---|---|---|---|
 | 2026-08-19 | 고도화 | PR #442 계약 병합과 Issue #250 Runtime 인수 조건 | 공통 SSE transport, 소유 high-watermark adapter, Valkey wake-up hint와 MySQL correction 선택 | 설계 승인; Runtime·부하·장애 검증은 후속 PR | 운영 수치·경보 임계치는 PR 3 증거 뒤 확정 |
 | 2026-08-19 | 고도화 | PR #474 Runtime 병합과 고정 xk6 SSE 하네스 계약 | production Runtime 활성 상태를 반영하고 proxy·배포·부하 검증을 PR 3에 유지 | 정적 계약·전용 이미지 build PASS; 실제 부하·장애는 미실행 | 로컬 시험 입력을 운영 기본값으로 승격하지 않음 |
+| 2026-08-20 | 고도화 | Issue #500 사용자 동작·동시성 설계와 PR #502 rolling·배포 표면 리뷰 | Notification watermark를 공개 전달·읽음 단조 version으로 확장하고, 읽음 route 부재 기반 PR 1A → #518 관측 gate·rollback floor → PR 1B 활성화 순서를 강제 | 정본 설계 검토 중; Runtime·Frontend 구현과 #518 배포 guard는 후속 contract-first PR | route 활성화 뒤 최소 호환 revision enforcement와 rolling 회귀 필요 |
