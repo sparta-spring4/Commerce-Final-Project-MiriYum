@@ -19,6 +19,8 @@ export const StoreErrorCode = {
   VERIFICATION_STATE_CONFLICT: 'STORE_007',
   MENU_NOT_FOUND: 'STORE_009',
   MENU_STATE_CONFLICT: 'STORE_010',
+  PUBLIC_IMAGE_NOT_FOUND: 'STORE_011',
+  PUBLIC_IMAGE_LIMIT_EXCEEDED: 'STORE_012',
 } as const
 
 /**
@@ -59,6 +61,10 @@ export function storeErrorMessage(error: unknown): string {
       return '메뉴를 찾을 수 없습니다.'
     case StoreErrorCode.MENU_STATE_CONFLICT:
       return '현재 메뉴 상태에서는 이 전이를 할 수 없습니다.'
+    case StoreErrorCode.PUBLIC_IMAGE_NOT_FOUND:
+      return '이미지를 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.'
+    case StoreErrorCode.PUBLIC_IMAGE_LIMIT_EXCEEDED:
+      return '매장 이미지는 최대 10장까지 등록할 수 있습니다.'
     case CommonErrorCode.VALIDATION_FAILED:
       return '입력한 내용을 다시 확인해 주세요.'
     case CommonErrorCode.IDEMPOTENCY_KEY_REUSED:
