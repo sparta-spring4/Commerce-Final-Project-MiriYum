@@ -86,6 +86,19 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
             self.workflow,
         )
 
+    def test_cd_validates_and_replaces_the_live_qr_storage_generation(self):
+        self.assertIn(
+            'QR_STORAGE_GENERATION: ${{ vars.MIRIYUM_QR_STORAGE_GENERATION }}',
+            self.workflow,
+        )
+        self.assertIn('"$QR_STORAGE_GENERATION" =~ ^[A-Za-z0-9._-]{1,64}$', self.workflow)
+        self.assertIn('--arg qr_storage_generation "$QR_STORAGE_GENERATION"', self.workflow)
+        self.assertIn('.name != "MIRIYUM_QR_STORAGE_GENERATION"', self.workflow)
+        self.assertIn(
+            '{name: "MIRIYUM_QR_STORAGE_GENERATION", value: $qr_storage_generation}',
+            self.workflow,
+        )
+
     def test_openai_secret_is_added_only_when_llm_is_enabled(self):
         self.assertIn('if $llm_enabled == "true" then', self.workflow)
         self.assertIn('{name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}', self.workflow)
