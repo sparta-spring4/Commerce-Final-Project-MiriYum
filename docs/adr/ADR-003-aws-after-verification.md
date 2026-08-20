@@ -83,6 +83,8 @@ AWS 배포와 Terraform 구현은 정의된 테스트 게이트를 통과한 뒤
 ### Auto Scaling과 OFF/ON 공존 경계
 
 - ECS Auto Scaling은 기존 service의 desired count만 `2..3` 범위에서 조절하며, VPC·ALB·DNS·RDS·Valkey 같은 영속 리소스를 Terraform state에 편입하거나 변경하지 않는다.
+- Auto Scaling과 파일 저장 runtime Terraform은 `production/runtime-resources.tfstate`를 사용한다. 기존 전체 인프라 state(`production/terraform.tfstate`)와 분리해, 좁은 runtime 구성으로 영속 인프라 삭제 계획이 생성되지 않게 한다.
+- runtime Terraform 적용 전에는 `terraform plan`에서 기존 인프라의 `destroy = 0`을 확인한다. 콘솔에서 먼저 만든 Auto Scaling target·policy는 import block으로 runtime state에 편입한다.
 - 운영 OFF는 Auto Scaling의 동적·예약 scaling을 먼저 중지하고 최소 용량을 `0`으로 내린 다음 desired count를 `0`으로 전환한다.
 - 운영 ON은 RDS가 `available`이 된 뒤 Auto Scaling 최소 용량을 `2`로 복구하고 desired count `2`를 확인한 다음 동적·예약 scaling을 재개한다.
 - `scale_in_cooldown=300`은 첫 축소 전 관찰 시간이 아니라 축소 완료 뒤 다음 축소를 막는 시간이다.
