@@ -12,7 +12,11 @@ public enum MenuHoldErrorCode implements ErrorCode {
             "MENU_HOLD_004",
             "수량 풀 배분 합계가 총 공급 수량을 초과합니다."),
     QUANTITY_IN_USE(HttpStatus.CONFLICT, "MENU_HOLD_005", "이미 사용 중인 수량보다 작게 줄일 수 없습니다."),
-    INVENTORY_STATE_CONFLICT(HttpStatus.CONFLICT, "MENU_HOLD_006", "현재 수량 상태에서 요청한 전이를 수행할 수 없습니다.");
+    INVENTORY_STATE_CONFLICT(HttpStatus.CONFLICT, "MENU_HOLD_006", "현재 수량 상태에서 요청한 전이를 수행할 수 없습니다."),
+    MONITORING_SOURCE_UNAVAILABLE(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "MENU_HOLD_007",
+            "메뉴 홀드 모니터링 원장을 조회할 수 없습니다.");
 
     private final HttpStatus httpStatus;
     private final String code;

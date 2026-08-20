@@ -123,6 +123,8 @@ class WaitingLedgerConcurrencyIT {
         when(intervalPort.lockCurrent(anyLong(), any(LocalDate.class), any(Instant.class)))
                 .thenAnswer(invocation -> List.of(openInterval(
                         invocation.getArgument(0), invocation.getArgument(1))));
+        jdbc.execute("TRUNCATE TABLE payment_refund_monitoring_snapshots");
+        jdbc.execute("TRUNCATE TABLE payment_monitoring_snapshots");
         for (String table : new String[]{"waiting_conversion_compensations",
                 "payment_webhook_receipts", "payment_ledger_entries", "payment_refunds",
                 "payment_attempts", "payments",

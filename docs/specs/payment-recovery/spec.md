@@ -9,7 +9,7 @@
 - Selected consumer migration: `V66__create_payment_recovery_workflow.sql`
 - Active HTTP contract: `docs/specs/payment-recovery/openapi.yaml`
 
-Issue #281 started as a stacked branch because approved prerequisite PR #468 could not merge while deployment load testing changed the Docker image. PR #468 is now included in `dev`. Open PR #475 owns V64 and V65, so #475 must merge before #281 and #281 owns V66. Migration and shared Platform Operator OpenAPI collision checks are repeated immediately before commit and merge.
+Issue #281 started as a stacked branch because approved prerequisite PR #468 could not merge while deployment load testing changed the Docker image. PR #468 is now included in `dev`. PR #475, which owns V64 and V65, merged to `dev` at `69d29b81`; #281 owns V66 and has merged that latest `dev`. The shared Platform Operator OpenAPI conflict was resolved by preserving both admin-monitoring and payment-recovery path sets, and the collision checks are repeated immediately before merge.
 
 ## 1. Purpose
 
@@ -175,7 +175,7 @@ Application logging uses public case/execution IDs and correlation IDs. Exceptio
 
 ## 11. OpenAPI, migrations, and exact allowlists
 
-Migration numbers are assigned only after fetching the latest `origin/dev` and inspecting open PRs for each PR. PR #475 owns V64 and V65 and must merge first. #281 is the later migration owner and uses V66; it must not merge before #475 because deploying V66 first would make the later lower-numbered migrations unsafe.
+Migration numbers are assigned only after fetching the latest `origin/dev` and inspecting open PRs for each PR. PR #475 owns V64 and V65 and merged first at `69d29b81`. #281 is the later migration owner and uses V66, preserving Flyway deployment order.
 
 The shared Admin OpenAPI and migration directory are checked:
 

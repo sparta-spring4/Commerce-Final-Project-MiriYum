@@ -68,11 +68,14 @@ class PlatformOperatorOpenApiContractTest {
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals/{proposalVersion}/approvals",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}/failed-unresolved-closures");
+    private static final Set<String> ADMIN_MONITORING_PATHS = Set.of(
+            "/api/v1/platform-operators/monitoring-cases",
+            "/api/v1/platform-operators/monitoring-cases/{caseType}/{caseId}");
     private static final Set<String> EXPECTED_AUDIENCE_PATHS = java.util.stream.Stream.of(
                     AUTH_PATHS.stream(), java.util.stream.Stream.of(REAUTHENTICATION_PATH),
                     java.util.stream.Stream.of(CAPABILITIES_PATH), MEMBER_SUPPORT_PATHS.stream(),
                     MANAGEMENT_AUDIT_PATHS.stream(), ADMIN_STORE_PATHS.stream(),
-                    PAYMENT_RECOVERY_PATHS.stream())
+                    ADMIN_MONITORING_PATHS.stream(), PAYMENT_RECOVERY_PATHS.stream())
             .flatMap(java.util.function.Function.identity())
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
@@ -115,6 +118,8 @@ class PlatformOperatorOpenApiContractTest {
                 feature = "admin-store";
             } else if (PAYMENT_RECOVERY_PATHS.contains(entry.getKey())) {
                 feature = "payment-recovery";
+            } else if (ADMIN_MONITORING_PATHS.contains(entry.getKey())) {
+                feature = "admin-monitoring";
             } else {
                 feature = "platform-operator-auth";
             }

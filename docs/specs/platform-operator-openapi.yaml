@@ -74,6 +74,10 @@ paths:
     $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases~1{caseId}~1sanctions~1{sanctionId}~1approvals"
   /api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions/{sanctionId}/releases:
     $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases~1{caseId}~1sanctions~1{sanctionId}~1releases"
+  /api/v1/platform-operators/monitoring-cases:
+    $ref: "./admin-monitoring/openapi.yaml#/paths/~1api~1v1~1platform-operators~1monitoring-cases"
+  /api/v1/platform-operators/monitoring-cases/{caseType}/{caseId}:
+    $ref: "./admin-monitoring/openapi.yaml#/paths/~1api~1v1~1platform-operators~1monitoring-cases~1{caseType}~1{caseId}"
   /api/v1/platform-operators/payment-recovery-cases:
     $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases"
   /api/v1/platform-operators/payment-recovery-cases/{caseId}:
