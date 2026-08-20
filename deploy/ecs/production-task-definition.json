@@ -27,7 +27,8 @@
         {"name": "MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED", "value": "false"},
         {"name": "MIRIYUM_KAKAO_ENABLED", "value": "false"},
         {"name": "MIRIYUM_RUNTIME_CONFIG_ENABLED", "value": "false"},
-        {"name": "MIRIYUM_STORAGE_S3_ENABLED", "value": "true"},
+        {"name": "MIRIYUM_STORAGE_S3_ENABLED", "value": "false"},
+        {"name": "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED", "value": "false"},
         {"name": "MIRIYUM_STORAGE_S3_REGION", "value": "ap-northeast-2"},
         {"name": "MIRIYUM_STORE_SEARCH_LLM_ENABLED", "value": "true"},
         {"name": "MIRIYUM_STORE_SEARCH_LLM_MODEL", "value": "gpt-4o-mini"},
@@ -60,7 +61,6 @@
         {"name": "MIRIYUM_JWT_SECRET", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_JWT_SECRET::"},
         {"name": "MIRIYUM_STORE_GEOCODING_REST_API_KEY", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_STORE_GEOCODING_REST_API_KEY::"},
         {"name": "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET::"},
-        {"name": "MIRIYUM_STORAGE_S3_BUCKET", "valueFrom": "REPLACE_WITH_MIRIYUM_STORAGE_S3_BUCKET_PARAMETER_ARN"},
         {"name": "MIRIYUM_VALKEY_PASSWORD", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_VALKEY_PASSWORD::"},
         {"name": "OPENAI_API_KEY", "valueFrom": "REPLACE_WITH_OPENAI_API_KEY_PARAMETER_ARN"}
       ],

@@ -40,6 +40,50 @@ resource "aws_s3_bucket_ownership_controls" "production_files" {
   }
 }
 
+# 업로드가 중단된 multipart 객체만 정리한다. 정상 공개 이미지의 보존·삭제는
+# FileMetadata 상태 전이와 reconciliation이 결정하므로 Terraform에서 임의 만료하지 않는다.
+resource "aws_s3_bucket_lifecycle_configuration" "production_files" {
+  bucket = aws_s3_bucket.production_files.id
+
+  rule {
+    id     = "abort-incomplete-multipart-uploads"
+    status = "Enabled"
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
+data "aws_iam_policy_document" "production_files_tls_only" {
+  statement {
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.production_files.arn,
+      "${aws_s3_bucket.production_files.arn}/*"
+    ]
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "production_files_tls_only" {
+  bucket = aws_s3_bucket.production_files.id
+  policy = data.aws_iam_policy_document.production_files_tls_only.json
+}
+
 # 버킷 이름은 민감하지 않지만, ECS task definition에 고정하지 않고 Parameter Store로 주입한다.
 resource "aws_ssm_parameter" "production_storage_s3_bucket" {
   name  = "/miriyum/production/storage-s3-bucket"
@@ -61,14 +105,17 @@ resource "aws_iam_role_policy" "production_backend_s3_files" {
         Resource = aws_s3_bucket.production_files.arn
       },
       {
-        Sid    = "ManagePublicStoreImageObjects"
+        Sid    = "ManagePublicImageObjects"
         Effect = "Allow"
         Action = [
           "s3:GetObject",
           "s3:PutObject",
           "s3:DeleteObject"
         ]
-        Resource = "${aws_s3_bucket.production_files.arn}/public/stores/*"
+        Resource = [
+          "${aws_s3_bucket.production_files.arn}/public/stores/*",
+          "${aws_s3_bucket.production_files.arn}/public/menus/*"
+        ]
       }
     ]
   })
