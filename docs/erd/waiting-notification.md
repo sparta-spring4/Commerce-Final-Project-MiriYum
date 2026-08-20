@@ -2,8 +2,8 @@
 
 ```mermaid
 erDiagram
-    STORES ||--|| WAITING_SETTINGS : configures
-    STORES ||--|| WAITING_QUEUE_SEQUENCES : sequences
+    STORES ||--o| WAITING_SETTINGS : configures
+    STORES ||--o{ WAITING_QUEUE_SEQUENCES : sequences
     STORES ||--o{ WAITING_TEAMS : queues
     WAITING_TEAMS ||--o| WAITING_ACTIVE_MEMBERSHIPS : active_membership
     WAITING_TEAMS ||--o{ WAITING_TRANSITION_AUDITS : transitions
