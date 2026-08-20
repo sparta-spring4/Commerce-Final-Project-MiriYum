@@ -19,10 +19,12 @@ import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
 import com.miriyum.domain.menuhold.dto.MenuSelection;
 import com.miriyum.domain.menuhold.entity.MenuHold;
 import com.miriyum.domain.menuhold.entity.MenuHoldStatus;
+import com.miriyum.domain.menuhold.entity.MenuHoldTransitionAudit;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
+import com.miriyum.domain.menuhold.repository.MenuHoldTransitionAuditRepository;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
@@ -113,6 +115,7 @@ class MenuHoldRuntimeIT {
     @Autowired MenuHoldServiceRuntime service;
     @Autowired MenuHoldSnapshotQueryService snapshotQueryService;
     @Autowired MenuHoldRepository holdRepository;
+    @Autowired MenuHoldTransitionAuditRepository transitionAuditRepository;
     @Autowired MenuInventoryBucketRepository bucketRepository;
     @Autowired ReservationRepository reservationRepository;
     @Autowired ConsumerAccountRepository consumerRepository;
@@ -172,6 +175,16 @@ class MenuHoldRuntimeIT {
                 .singleElement().satisfies(hold -> {
             assertThat(hold.getReservationId()).isEqualTo(reservation.getId());
             assertThat(hold.getStatus()).isEqualTo(MenuHoldStatus.CONFIRMED);
+            assertThat(hold.getStatusVersion()).isZero();
+            assertThat(transitionAuditRepository
+                    .findByMenuHoldIdAndOccurredAtLessThanEqualOrderByResultVersionAsc(
+                            hold.getId(), Instant.now().plusSeconds(1)))
+                    .singleElement().satisfies(audit -> {
+                        assertThat(audit.getEventType())
+                                .isEqualTo(MenuHoldTransitionAudit.EventType.CREATED);
+                        assertThat(audit.getResultVersion()).isZero();
+                        assertThat(audit.getAfterStatus()).isEqualTo(MenuHoldStatus.CONFIRMED);
+                    });
         });
         assertThat(bucketRepository.findById(bucket.getId()).orElseThrow().getOnlineHoldRemaining()).isZero();
         assertThat(jdbcTemplate.queryForMap("""
@@ -292,6 +305,22 @@ class MenuHoldRuntimeIT {
                 new MenuHoldReleaseCommand(reservation.getId(), "release-repeat")));
 
         assertThat(holdFor(reservation.getId()).getStatus()).isEqualTo(MenuHoldStatus.RELEASED);
+        MenuHold released = holdFor(reservation.getId());
+        assertThat(released.getStatusVersion()).isEqualTo(1L);
+        assertThat(transitionAuditRepository
+                .findByMenuHoldIdAndOccurredAtLessThanEqualOrderByResultVersionAsc(
+                        released.getId(), Instant.now().plusSeconds(1)))
+                .extracting(
+                        MenuHoldTransitionAudit::getEventType,
+                        MenuHoldTransitionAudit::getResultVersion,
+                        MenuHoldTransitionAudit::getAfterStatus)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                MenuHoldTransitionAudit.EventType.CREATED, 0L,
+                                MenuHoldStatus.CONFIRMED),
+                        org.assertj.core.groups.Tuple.tuple(
+                                MenuHoldTransitionAudit.EventType.TRANSITION, 1L,
+                                MenuHoldStatus.RELEASED));
         assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
                 .getOnlineHoldRemaining()).isEqualTo(1);
         assertThat(restoreLedgerCount("release-acquire")).isEqualTo(1);
@@ -822,7 +851,8 @@ class MenuHoldRuntimeIT {
         assertThat(constraintNames("menu_holds", "CHECK"))
                 .containsExactlyInAnyOrder(
                         "ck_menu_holds_service_interval",
-                        "ck_menu_holds_parent_and_status");
+                        "ck_menu_holds_parent_and_status",
+                        "ck_menu_holds_status_version");
         assertThat(constraintNames("menu_hold_items", "CHECK"))
                 .containsExactlyInAnyOrder(
                         "ck_menu_hold_items_versions",
@@ -840,6 +870,50 @@ class MenuHoldRuntimeIT {
                 .isEqualTo("menu_hold_id,menu_inventory_bucket_id");
         assertThat(indexColumns("menu_hold_items", "idx_menu_hold_items_bucket"))
                 .isEqualTo("menu_inventory_bucket_id,menu_hold_item_id");
+        assertThat(constraintNames("menu_hold_transition_audits", "FOREIGN KEY"))
+                .as("append-only audit history must outlive the MenuHold aggregate")
+                .isEmpty();
+        assertThat(constraintNames("menu_hold_transition_audits", "CHECK"))
+                .containsExactlyInAnyOrder(
+                        "ck_menu_hold_transition_event_type",
+                        "ck_menu_hold_transition_result_version",
+                        "ck_menu_hold_transition_shape");
+        assertThat(indexColumns(
+                "menu_hold_transition_audits", "uk_menu_hold_transition_version"))
+                .isEqualTo("menu_hold_id,result_version");
+    }
+
+    @Test
+    @DisplayName("MenuHold aggregate 삭제 뒤에도 append-only 전이 감사 원장은 보존된다")
+    void deletingMenuHoldPreservesTransitionAuditHistory() {
+        transactions.execute(status -> bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status ->
+                service.create(command(reservation.getId(), 1, "audit-outlives-hold")));
+        Long holdId = jdbcTemplate.queryForObject(
+                "SELECT menu_hold_id FROM menu_holds WHERE reservation_id = ?",
+                Long.class,
+                reservation.getId());
+        Integer auditCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_hold_transition_audits WHERE menu_hold_id = ?",
+                Integer.class,
+                holdId);
+
+        assertThat(auditCount).isPositive();
+        assertThat(jdbcTemplate.update(
+                "DELETE FROM menu_hold_items WHERE menu_hold_id = ?", holdId)).isEqualTo(1);
+        assertThat(jdbcTemplate.update(
+                "DELETE FROM menu_holds WHERE menu_hold_id = ?", holdId)).isEqualTo(1);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_holds WHERE menu_hold_id = ?",
+                Integer.class,
+                holdId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_hold_transition_audits WHERE menu_hold_id = ?",
+                Integer.class,
+                holdId)).isEqualTo(auditCount);
     }
 
     @Test

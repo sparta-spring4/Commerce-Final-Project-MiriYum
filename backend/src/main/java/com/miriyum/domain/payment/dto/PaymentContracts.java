@@ -51,6 +51,7 @@ public final class PaymentContracts {
 
     public record PrepareReservationDepositCommand(
             String sourceReferenceId,
+            long storeId,
             long consumerAccountId,
             long amountMinor,
             String currency,
@@ -60,6 +61,7 @@ public final class PaymentContracts {
     ) {
         public PrepareReservationDepositCommand {
             requirePublicId(sourceReferenceId, "sourceReferenceId");
+            requirePositive(storeId, "storeId");
             requirePositive(consumerAccountId, "consumerAccountId");
             requirePositive(amountMinor, "amountMinor");
             requireCurrency(currency);
@@ -73,6 +75,7 @@ public final class PaymentContracts {
 
     public record PrepareWaitingReservationDepositCommand(
             String sourceReferenceId,
+            long storeId,
             long consumerAccountId,
             long amountMinor,
             String currency,
@@ -82,6 +85,7 @@ public final class PaymentContracts {
     ) {
         public PrepareWaitingReservationDepositCommand {
             requirePublicId(sourceReferenceId, "sourceReferenceId");
+            requirePositive(storeId, "storeId");
             requirePositive(consumerAccountId, "consumerAccountId");
             requirePositive(amountMinor, "amountMinor");
             requireCurrency(currency);

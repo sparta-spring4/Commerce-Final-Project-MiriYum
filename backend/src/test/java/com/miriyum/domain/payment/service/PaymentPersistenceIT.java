@@ -45,6 +45,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -125,6 +126,8 @@ class PaymentPersistenceIT {
         jdbcTemplate.execute("DELETE FROM payment_webhook_receipts");
         jdbcTemplate.execute("DELETE FROM payment_ledger_entries");
         jdbcTemplate.execute("DELETE FROM reservation_deposit_dispositions");
+        jdbcTemplate.execute("TRUNCATE TABLE payment_refund_monitoring_snapshots");
+        jdbcTemplate.execute("TRUNCATE TABLE payment_monitoring_snapshots");
         jdbcTemplate.execute("DELETE FROM payment_refunds");
         jdbcTemplate.execute("DELETE FROM payment_attempts");
         jdbcTemplate.execute("DELETE FROM payments");
@@ -1101,7 +1104,8 @@ class PaymentPersistenceIT {
         when(providerClient.getPayment(preparation.portOnePaymentId())).thenAnswer(invocation -> {
             jdbcTemplate.update("""
                     UPDATE payment_refunds
-                       SET status = 'FAILED', updated_at = NOW(6)
+                       SET status = 'FAILED', updated_at = NOW(6),
+                           version = version + 1
                      WHERE refund_id = ?
                     """, unknown.refundId());
             return new ProviderPayment(
@@ -1547,6 +1551,7 @@ class PaymentPersistenceIT {
         PrepareWaitingReservationDepositCommand waitingCommand =
                 new PrepareWaitingReservationDepositCommand(
                         reservationCommand.sourceReferenceId(),
+                        reservationCommand.storeId(),
                         reservationCommand.consumerAccountId(),
                         reservationCommand.amountMinor(),
                         reservationCommand.currency(),
@@ -1570,6 +1575,11 @@ class PaymentPersistenceIT {
                 WHERE payment_id = ?
                 """, String.class, waiting.paymentId()))
                 .isEqualTo("WAITING_RESERVATION_DEPOSIT");
+        assertThat(jdbcTemplate.queryForList("""
+                SELECT monitoring_case_type FROM payments
+                 WHERE source_reference_id = '123'
+                 ORDER BY monitoring_case_type
+                """, String.class)).containsExactly("RESERVATION_HOLD", "WAITING");
     }
 
     @Test
@@ -1577,7 +1587,7 @@ class PaymentPersistenceIT {
         Instant expiresAt = Instant.now().plusSeconds(3_600);
         PrepareWaitingReservationDepositCommand waitingCommand =
                 new PrepareWaitingReservationDepositCommand(
-                        "41", 11L, 12_000L, "KRW", expiresAt, 3L,
+                        "41", 12L, 11L, 12_000L, "KRW", expiresAt, 3L,
                         UUID.nameUUIDFromBytes("waiting:41".getBytes(StandardCharsets.UTF_8))
                                 .toString());
         PaymentPreparation waiting = paymentService.prepareWaitingReservationDeposit(waitingCommand);
@@ -1602,7 +1612,7 @@ class PaymentPersistenceIT {
 
         PaymentPreparation ordinary = paymentService.prepareReservationDeposit(
                 new PrepareReservationDepositCommand(
-                        "41", 11L, 12_000L, "KRW", expiresAt, 3L,
+                        "41", 12L, 11L, 12_000L, "KRW", expiresAt, 3L,
                         UUID.nameUUIDFromBytes("reservation:41".getBytes(StandardCharsets.UTF_8))
                                 .toString()));
         assertThatThrownBy(() -> paymentService.getVerifiedWaitingReservationDeposit(
@@ -1626,19 +1636,58 @@ class PaymentPersistenceIT {
                 .isEqualTo(1L);
         assertThatThrownBy(() -> paymentService.prepareReservationDeposit(
                 new PrepareReservationDepositCommand(
-                        "130", 11L, 31_000L, "KRW", Instant.now().plusSeconds(3_600), 7L,
+                        "130", 12L, 11L, 31_000L, "KRW", Instant.now().plusSeconds(3_600), 7L,
                         command.idempotencyKey())))
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
         assertThatThrownBy(() -> paymentService.prepareReservationDeposit(
                 new PrepareReservationDepositCommand(
-                        "131", 11L, 30_000L, "KRW", Instant.now().minusSeconds(1), 7L,
+                        "131", 12L, 11L, 30_000L, "KRW", Instant.now().minusSeconds(1), 7L,
                         UUID.nameUUIDFromBytes("prepare:expired".getBytes(StandardCharsets.UTF_8))
                                 .toString())))
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(PaymentErrorCode.SOURCE_EXPIRED);
+    }
+
+    @Test
+    @DisplayName("V65 이전 준비 fingerprint는 동일 store replay만 허용한다")
+    void replaysLegacyPreparationFingerprintOnlyForThePersistedStore() throws Exception {
+        Instant expiresAt = Instant.now().plusSeconds(7_200).truncatedTo(ChronoUnit.MICROS);
+        Instant createdAt = expiresAt.minusSeconds(3_600);
+        String idempotencyKey = UUID.nameUUIDFromBytes(
+                "legacy-prepare:129".getBytes(StandardCharsets.UTF_8)).toString();
+        String legacyFingerprint = sha256("129\n11\n30000\nKRW\n"
+                + expiresAt.truncatedTo(ChronoUnit.MICROS) + "\n7");
+        jdbcTemplate.update("""
+                INSERT INTO payments (
+                    payment_id, source_type, source_reference_id, store_id,
+                    monitoring_case_type, monitoring_case_reference_id,
+                    source_policy_version, source_expires_at,
+                    preparation_idempotency_key, preparation_request_fingerprint,
+                    consumer_account_id, amount_minor, refunded_amount_minor, currency,
+                    portone_payment_id, order_name, status, last_attempt_status,
+                    created_at, updated_at, version
+                ) VALUES (?, 'RESERVATION_DEPOSIT', '129', 12,
+                          'RESERVATION_HOLD', '129', 7, ?, ?, ?,
+                          11, 30000, 0, 'KRW', ?, ?, 'READY', 'NOT_STARTED', ?, ?, 0)
+                """,
+                "900000000000000129", Timestamp.from(expiresAt), idempotencyKey,
+                legacyFingerprint, "payment-reservation-900000000000000129",
+                "MiriYum 예약금 129", Timestamp.from(createdAt), Timestamp.from(createdAt));
+        PrepareReservationDepositCommand original = new PrepareReservationDepositCommand(
+                "129", 12L, 11L, 30_000L, "KRW", expiresAt, 7L, idempotencyKey);
+
+        PaymentPreparation replay = paymentService.prepareReservationDeposit(original);
+
+        assertThat(replay.paymentId()).isEqualTo("900000000000000129");
+        assertThatThrownBy(() -> paymentService.prepareReservationDeposit(
+                new PrepareReservationDepositCommand(
+                        "129", 13L, 11L, 30_000L, "KRW", expiresAt, 7L, idempotencyKey)))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
     }
 
     @Test
@@ -2091,7 +2140,8 @@ class PaymentPersistenceIT {
                 prepareCommand("132", 30_000L));
         jdbcTemplate.update("""
                 UPDATE payments
-                   SET status = 'CONFIRMING', last_attempt_status = 'PENDING'
+                   SET status = 'CONFIRMING', last_attempt_status = 'PENDING',
+                       version = version + 1
                  WHERE payment_id = ?
                 """, preparation.paymentId());
         jdbcTemplate.update("""
@@ -2878,6 +2928,7 @@ class PaymentPersistenceIT {
     ) {
         return new PrepareReservationDepositCommand(
                 sourceReferenceId,
+                12L,
                 11L,
                 amountMinor,
                 "KRW",

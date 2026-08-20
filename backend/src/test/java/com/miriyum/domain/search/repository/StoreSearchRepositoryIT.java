@@ -158,6 +158,11 @@ class StoreSearchRepositoryIT {
                     name VARCHAR(100) NOT NULL,
                     region VARCHAR(20) NOT NULL,
                     address VARCHAR(300) NOT NULL,
+                    address_version BIGINT NOT NULL DEFAULT 1,
+                    geocoding_status VARCHAR(20) NOT NULL DEFAULT 'UNVERIFIED',
+                    latitude DECIMAL(18, 15) NULL,
+                    longitude DECIMAL(18, 15) NULL,
+                    geocoding_address_version BIGINT NULL,
                     store_category_code VARCHAR(50) NOT NULL,
                     operation_status VARCHAR(30) NOT NULL,
                     verification_status VARCHAR(20) NOT NULL,
@@ -477,6 +482,81 @@ class StoreSearchRepositoryIT {
 
     @Test
     @Transactional
+    @DisplayName("현재 주소 버전의 검증 좌표만 검색하고 최종 재조회에서도 다시 검증한다")
+    void projectsOnlyCurrentVerifiedCoordinatesAndRefreshesThem() {
+        Store current = createStore("좌표 현재", Region.SEOUL, "KOREAN", false);
+        Store missing = createStore("좌표 없음", Region.SEOUL, "KOREAN", false);
+        setVerifiedCoordinates(current, "37.566500000000000", "126.978000000000000");
+        flushAndClear();
+
+        List<StoreSearchCandidate> candidates = repository.searchAll(
+                query("좌표", null, null, "name,asc", 0, 20), 100);
+
+        StoreSearchCandidate currentCandidate = candidates.stream()
+                .filter(candidate -> candidate.storeId() == current.getId())
+                .findFirst()
+                .orElseThrow();
+        assertThat(currentCandidate.latitude()).isEqualByComparingTo("37.566500000000000");
+        assertThat(currentCandidate.longitude()).isEqualByComparingTo("126.978000000000000");
+        assertThat(candidates.stream()
+                .filter(candidate -> candidate.storeId() == missing.getId())
+                .findFirst().orElseThrow().latitude()).isNull();
+
+        jdbcTemplate.update("""
+                UPDATE stores
+                SET geocoding_status = 'UNVERIFIED',
+                    latitude = NULL,
+                    longitude = NULL,
+                    verified_address = NULL,
+                    geocoding_verified_at = NULL,
+                    geocoding_address_version = NULL
+                WHERE store_id = ?
+                """, current.getId());
+
+        assertThat(repository.refreshCurrentlyPublic(List.of(currentCandidate)))
+                .singleElement()
+                .satisfies(refreshed -> {
+                    assertThat(refreshed.latitude()).isNull();
+                    assertThat(refreshed.longitude()).isNull();
+                });
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("후보 주소 버전과 다른 신규 좌표는 최종 재조회에서 노출하지 않는다")
+    void refreshCurrentlyPublicHidesCoordinatesVerifiedForANewerAddressVersion() {
+        Store moved = createStore("주소 변경", Region.SEOUL, "KOREAN", false);
+        setVerifiedCoordinates(moved, "37.566500000000000", "126.978000000000000");
+        flushAndClear();
+        StoreSearchCandidate candidate = repository.searchAll(
+                        query("주소 변경", null, null, "name,asc", 0, 20), 100)
+                .getFirst();
+
+        jdbcTemplate.update("""
+                UPDATE stores
+                SET address = '변경된 주소',
+                    address_version = address_version + 1,
+                    geocoding_status = 'UNVERIFIED',
+                    latitude = NULL,
+                    longitude = NULL,
+                    verified_address = NULL,
+                    geocoding_verified_at = NULL,
+                    geocoding_address_version = NULL
+                WHERE store_id = ?
+                """, moved.getId());
+        setVerifiedCoordinates(moved, "35.179600000000000", "129.075600000000000");
+
+        assertThat(repository.refreshCurrentlyPublic(List.of(candidate)))
+                .singleElement()
+                .satisfies(refreshed -> {
+                    assertThat(refreshed.address()).isEqualTo("테스트 주소");
+                    assertThat(refreshed.latitude()).isNull();
+                    assertThat(refreshed.longitude()).isNull();
+                });
+    }
+
+    @Test
+    @Transactional
     void refreshCurrentlyPublicPreservesRegionAfterConcurrentRegionChange() {
         Store moved = createStore("지역 이동", Region.SEOUL, "KOREAN", false);
         flushAndClear();
@@ -609,6 +689,23 @@ class StoreSearchRepositoryIT {
     private void setCreatedAt(Store store, String createdAt) {
         jdbcTemplate.update(
                 "UPDATE stores SET created_at = ? WHERE store_id = ?", createdAt, store.getId());
+    }
+
+    private void setVerifiedCoordinates(
+            Store store,
+            String latitude,
+            String longitude
+    ) {
+        jdbcTemplate.update("""
+                UPDATE stores
+                SET geocoding_status = 'VERIFIED',
+                    latitude = ?,
+                    longitude = ?,
+                    verified_address = address,
+                    geocoding_verified_at = '2026-08-06 00:00:00',
+                    geocoding_address_version = address_version
+                WHERE store_id = ?
+                """, latitude, longitude, store.getId());
     }
 
     private List<String> indexColumns(String indexName) {

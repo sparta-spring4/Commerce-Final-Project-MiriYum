@@ -9,6 +9,8 @@ import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
 import com.miriyum.domain.menuhold.dto.MenuSelection;
 import com.miriyum.domain.menuhold.inventory.dto.CurrentInventorySelection;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
+import com.miriyum.domain.menuhold.entity.MenuHoldTransitionAudit;
+import com.miriyum.domain.menuhold.repository.MenuHoldTransitionAuditRepository;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
@@ -17,9 +19,11 @@ import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalStatus;
 import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,6 +38,10 @@ class MenuHoldCreateServiceTest {
     @Mock StoreServiceIntervalValidationService intervalService;
     @Mock MenuInventoryService inventoryService;
     @Mock MenuHoldRepository holdRepository;
+    @Mock MenuHoldTransitionAuditRepository transitionAuditRepository;
+
+    private static final Instant AUDIT_TIME = Instant.parse("2026-08-10T03:05:00Z");
+    private static final Clock CLOCK = Clock.fixed(AUDIT_TIME, ZoneOffset.UTC);
 
     @Test
     void createsConfirmedHoldAfterEligibilityIntervalAndInventorySucceed() {
@@ -59,6 +67,12 @@ class MenuHoldCreateServiceTest {
         MenuHoldCommandResult result = service().create(command);
 
         assertThat(result).isEqualTo(MenuHoldCommandResult.confirmed(10L));
+        org.mockito.ArgumentCaptor<MenuHoldTransitionAudit> captor =
+                org.mockito.ArgumentCaptor.forClass(MenuHoldTransitionAudit.class);
+        org.mockito.Mockito.verify(transitionAuditRepository).save(captor.capture());
+        assertThat(captor.getValue().getEventType())
+                .isEqualTo(MenuHoldTransitionAudit.EventType.CREATED);
+        assertThat(captor.getValue().getOccurredAt()).isEqualTo(AUDIT_TIME);
     }
 
     @Test
@@ -200,7 +214,8 @@ class MenuHoldCreateServiceTest {
 
     private MenuHoldServiceRuntime service() {
         return new MenuHoldServiceRuntime(
-                menuTransactionFacade, intervalService, inventoryService, holdRepository);
+                menuTransactionFacade, intervalService, inventoryService, holdRepository,
+                transitionAuditRepository, CLOCK);
     }
 
     private static MenuTransactionEligibility eligibility() {
