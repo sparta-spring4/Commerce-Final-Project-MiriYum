@@ -272,6 +272,51 @@ function validateReservationSuccess(response) {
   if (data.cancellationReason !== null) {
     requireBoundedString(data.cancellationReason, 'reservation cancellationReason', 0, 500)
   }
+  return data
+}
+
+function reservationIdForCleanup(response) {
+  const data = requireObject(parseEnvelope(response).data, 'reservation response data')
+  requirePublicId(data.reservationId, 'reservationId')
+  return data.reservationId
+}
+
+function cancelCreatedReservation({
+  client,
+  baseUrl,
+  accessToken,
+  reservationId,
+  runId,
+  vu,
+  iteration,
+  tags,
+}) {
+  const requestTagSet = { ...tags, phase: 'cleanup', request: 'reservationCancel' }
+  const idempotencyKey = deterministicUuid(`${runId}:${vu}:${iteration}:reservation-cancel`)
+  const response = client.post(
+    `${baseUrl}/api/v1/consumers/me/reservations/${reservationId}/cancellations`,
+    JSON.stringify({ reason: 'synthetic k6 reservation cleanup' }),
+    {
+      headers: bearerHeaders(accessToken, { 'Idempotency-Key': idempotencyKey }),
+      tags: requestTagSet,
+      redirects: 0,
+    },
+  )
+  const classification = recordClassification(
+    classifyStatus(response.status, []),
+    requestTagSet,
+  )
+  if (response.status !== 200) {
+    throw new Error(`reservation cleanup returned HTTP ${response.status} (${classification})`)
+  }
+  const data = validateReservationSuccess(response)
+  if (data.reservationId !== reservationId) {
+    throw new Error('reservation cleanup returned a different reservationId')
+  }
+  if (data.status !== 'CANCELLED' || data.cancelledBy !== 'CONSUMER') {
+    throw new Error('reservation cleanup did not return the consumer-cancelled state')
+  }
+  return response.status
 }
 
 export function runReservationCreate({
@@ -299,11 +344,38 @@ export function runReservationCreate({
     classifyReservationResponse(response),
     requestTagSet,
   )
+  let cleanupStatus
   if (response.status === 201) {
-    validateReservationSuccess(response)
+    let reservationId
+    try {
+      reservationId = reservationIdForCleanup(response)
+    } catch (_) {
+      // The full response validator below reports the contract failure.
+    }
+
+    let validationError
+    try {
+      validateReservationSuccess(response)
+    } catch (error) {
+      validationError = error
+    }
+
+    if (reservationId !== undefined) {
+      cleanupStatus = cancelCreatedReservation({
+        client,
+        baseUrl,
+        accessToken,
+        reservationId,
+        runId,
+        vu,
+        iteration,
+        tags,
+      })
+    }
+    if (validationError !== undefined) throw validationError
   } else if (classification === 'success') {
     throw new Error(`reservation creation returned unsupported success HTTP ${response.status}`)
   }
 
-  return { status: response.status, classification }
+  return { status: response.status, classification, cleanupStatus }
 }
