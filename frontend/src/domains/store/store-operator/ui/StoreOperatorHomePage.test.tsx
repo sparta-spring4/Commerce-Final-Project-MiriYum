@@ -57,6 +57,10 @@ describe('매장 운영 홈', () => {
     renderHome()
 
     expect(await screen.findByText('카페 에비뉴')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '매장 추가 등록' })).toHaveAttribute(
+      'href',
+      STORE_OPERATOR_PATHS.storeCreate,
+    )
     expect(screen.getByRole('link', { name: '예약 목록' })).toHaveAttribute(
       'href',
       fillPath(STORE_OPERATOR_PATHS.reservations, { storeId: STORE_ID }),

@@ -123,13 +123,22 @@ function ManagedStoreOverview({ storeId }: { storeId: string }) {
         title="매장 운영 관리"
         description="등록된 매장의 운영 설정을 관리합니다."
         actions={
-          <Link
-            className="mi-button mi-button--ghost"
-            to={fillPath(STORE_OPERATOR_PATHS.store, { storeId })}
-          >
-            <OperatorIcon name="edit" />
-            매장 정보 수정
-          </Link>
+          <>
+            <Link
+              className="mi-button mi-button--primary"
+              to={STORE_OPERATOR_PATHS.storeCreate}
+            >
+              <OperatorIcon name="plus" />
+              매장 추가 등록
+            </Link>
+            <Link
+              className="mi-button mi-button--ghost"
+              to={fillPath(STORE_OPERATOR_PATHS.store, { storeId })}
+            >
+              <OperatorIcon name="edit" />
+              매장 정보 수정
+            </Link>
+          </>
         }
       />
 
