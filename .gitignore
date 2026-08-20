@@ -1,6 +1,15 @@
 # Temporary SDD inventories and delegation artifacts are local-only.
 .superpowers/sdd/
+# Non-canonical SDD plans and designs must not be added again.
+docs/superpowers/plans/
+docs/superpowers/specs/
 # EC2 실행 비밀값은 서버에서만 만들며 Git에 포함하지 않는다.
 deploy/.env
 # 로컬 실행 비밀값은 기여자 PC에서만 만들며 Git에 포함하지 않는다.
 deploy/local/.env
+# k6의 실제 합성 fixture와 실행 결과는 로컬에서만 유지한다.
+performance/k6/fixtures/test-data.local.json
+performance/k6/fixtures/sse-test-data.local.json
+performance/k6/results/
+# IntelliJ 로컬 프로젝트 설정은 개발자마다 달라 저장소에 포함하지 않는다.
+.idea/

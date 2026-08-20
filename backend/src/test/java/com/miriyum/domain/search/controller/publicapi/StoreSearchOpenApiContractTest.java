@@ -14,8 +14,8 @@ class StoreSearchOpenApiContractTest {
 
     private static final String TOO_MANY_REQUESTS_RESPONSE =
             "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests";
-    private static final String RESERVATION_CONFLICT_RESPONSE =
-            "../reservation/openapi.yaml#/components/responses/ReservationConflict";
+    private static final String MENU_ALTERNATIVE_RESERVATION_CONFLICT_RESPONSE =
+            "#/components/responses/MenuAlternativeReservationConflict";
 
     @Test
     void publicRoutesParametersAndResponseFieldsMatchRuntimeContract() throws Exception {
@@ -29,16 +29,16 @@ class StoreSearchOpenApiContractTest {
                 "/api/v1/stores",
                 "/api/v1/stores/{storeId}",
                 "/api/v1/stores/{storeId}/menus",
-                "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search");
+                "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches");
         Map<String, Object> alternativePath = map(paths.get(
-                "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search"));
+                "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches"));
         assertThat(alternativePath).containsOnlyKeys("post");
         Map<String, Object> alternativePost = map(alternativePath.get("post"));
         assertThat(map(map(map(alternativePost.get("requestBody")).get("content"))
                 .get("application/json"))).containsEntry("schema",
                 Map.of("$ref", "#/components/schemas/MenuAlternativeSearchRequest"));
         assertThat((String) map(map(alternativePost.get("responses")).get("409")).get("$ref"))
-                .isEqualTo(RESERVATION_CONFLICT_RESPONSE);
+                .isEqualTo(MENU_ALTERNATIVE_RESERVATION_CONFLICT_RESPONSE);
         assertThat(responseReference(paths, "/api/v1/stores", "429"))
                 .isEqualTo(TOO_MANY_REQUESTS_RESPONSE);
         assertThat(responseReference(paths, "/api/v1/stores/{storeId}", "429"))
@@ -91,14 +91,26 @@ class StoreSearchOpenApiContractTest {
                         "REGION_SELECTION_REQUIRED");
         assertThat(list(map(schemas.get("MenuAlternativeSearchRequest")).get("required")))
                 .containsExactlyInAnyOrder("quantity", "serviceDate", "startTime", "partySize");
+        assertThat(list(map(schemas.get("MenuAlternativeItem")).get("required")))
+                .contains("alternativeScore", "rankingReason", "scoreBreakdown");
+        assertThat(list(map(schemas.get("MenuAlternativeRankingReason")).get("enum")))
+                .containsExactly("LLM_CONCEPT", "SECONDARY_CATEGORY", "PRICE_SIMILARITY");
         assertThat(list(map(schemas.get("StoreSummary")).get("required")))
                 .containsExactlyInAnyOrder(
                         "storeId", "name", "region", "address", "storeCategoryCode",
-                        "operationStatus", "modes", "reservationAvailability");
+                        "operationStatus", "modes", "reservationAvailability", "coordinates");
+        Map<String, Object> summaryCoordinates = map(map(
+                schemas.get("StoreSummary")).get("properties"));
+        assertThat(listOfMaps(map(summaryCoordinates.get("coordinates")).get("oneOf")))
+                .containsExactly(
+                        Map.of("$ref", "#/components/schemas/PublicStoreCoordinates"),
+                        Map.of("type", "null"));
         assertThat(list(map(schemas.get("PublicMenu")).get("required")))
                 .contains("menuId", "name", "description", "price", "representative",
                         "primaryCategoryCode", "secondaryCategoryCodes", "localTags",
-                        "holdEnabled", "pickupEnabled", "saleStatus");
+                        "holdEnabled", "pickupEnabled", "saleStatus", "imageUrl");
+        assertThat(list(map(map(map(schemas.get("PublicMenu")).get("properties")).get("imageUrl")).get("type")))
+                .containsExactly("string", "null");
         assertThat(list(map(schemas.get("IntegratedStoreSearchData")).get("required")))
                 .containsExactlyInAnyOrder(
                         "items", "normalizedCondition", "warnings", "ruleVersion",

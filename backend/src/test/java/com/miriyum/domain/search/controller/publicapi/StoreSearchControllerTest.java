@@ -1,5 +1,6 @@
 package com.miriyum.domain.search.controller.publicapi;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -31,8 +32,8 @@ import com.miriyum.domain.recommendation.ranking.RecommendationReason;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
-import java.util.List;
 import java.math.BigDecimal;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -62,11 +63,21 @@ class StoreSearchControllerTest {
     @Test
     void anonymousSearchReturnsOpenApiPageEnvelopeAndPassesInfantFlag() throws Exception {
         given(searchService.search(any(), eq(true))).willReturn(new PageImpl<>(
-                List.of(new PublicStoreSummary(
-                        "7", "미리윰", Region.SEOUL, "서울 중구", "CAFE_BAKERY",
-                        OperationStatus.OPEN, new PublicStoreModes(true, true, true),
-                        ReservationAvailability.AVAILABLE)),
-                PageRequest.of(0, 20), 1));
+                List.of(
+                        new PublicStoreSummary(
+                                "7", "미리윰", Region.SEOUL, "서울 중구", "CAFE_BAKERY",
+                                OperationStatus.OPEN,
+                                new PublicStoreModes(true, true, true),
+                                ReservationAvailability.AVAILABLE,
+                                new PublicStoreCoordinates(
+                                        new BigDecimal("37.5665"),
+                                        new BigDecimal("126.9780"))),
+                        new PublicStoreSummary(
+                                "8", "좌표 미확인", Region.SEOUL, "서울 종로구", "KOREAN",
+                                OperationStatus.OPEN,
+                                new PublicStoreModes(true, false, false),
+                                ReservationAvailability.AVAILABLE)),
+                PageRequest.of(0, 20), 2));
 
         mockMvc.perform(get("/api/v1/stores")
                         .queryParam("serviceDate", "2026-08-03")
@@ -78,8 +89,13 @@ class StoreSearchControllerTest {
                 .andExpect(jsonPath("$.data.items[0].storeId").value("7"))
                 .andExpect(jsonPath("$.data.items[0].reservationAvailability")
                         .value("AVAILABLE"))
+                .andExpect(jsonPath("$.data.items[0].coordinates.latitude")
+                        .value(37.5665))
+                .andExpect(jsonPath("$.data.items[0].coordinates.longitude")
+                        .value(126.9780))
+                .andExpect(jsonPath("$.data.items[1].coordinates").value(nullValue()))
                 .andExpect(jsonPath("$.data.page.number").value(0))
-                .andExpect(jsonPath("$.data.page.totalElements").value(1));
+                .andExpect(jsonPath("$.data.page.totalElements").value(2));
     }
 
     @Test
@@ -201,6 +217,7 @@ class StoreSearchControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.items[0].menuId").value("11"))
+                .andExpect(jsonPath("$.data.items[0].imageUrl").isEmpty())
                 .andExpect(jsonPath("$.data.items[0].saleStatus").value("SELLING"));
     }
 

@@ -29,7 +29,8 @@ class DomainPackageArchitectureTest {
     private static final Set<String> LEGACY_STORE_SUBDOMAINS = Set.of(
             "core", "schedule", "closure", "menu", "search", "recommendation");
     private static final Set<String> HTTP_BOUNDARIES = Set.of(
-            "publicapi", "consumer", "storeoperator", "auth", "account");
+            "publicapi", "consumer", "storeoperator", "auth", "account",
+            "membersupport", "management", "audit");
     private static final Map<String, Set<String>> APPROVED_CROSS_DOMAIN_QUERY_READERS = Map.of(
             "recommendation/repository/RecommendationSignalRepository.java",
             Set.of("menu", "store"),
@@ -100,6 +101,21 @@ class DomainPackageArchitectureTest {
     }
 
     @Test
+    void adminMonitoringUsesOnlyPublishedForeignMonitoringContracts() {
+        List<SourceFile> monitoring = javaSources().stream()
+                .filter(source -> source.relativePath().startsWith("platformoperator/adminmonitoring/"))
+                .toList();
+
+        assertThat(monitoring).isNotEmpty();
+        assertThat(monitoring.stream()
+                .flatMap(source -> source.imports().stream())
+                .filter(imported -> imported.startsWith(DOMAIN_PREFIX))
+                .filter(imported -> !topLevelDomain(imported).equals("platformoperator")))
+                .allMatch(imported -> imported.endsWith("MonitoringContracts")
+                        || imported.endsWith("MonitoringQueryService"));
+    }
+
+    @Test
     void persistentTypesAreDetectedFromDeclarations() {
         assertThat(persistentTypeNames(javaSources()))
                 .contains(
@@ -144,11 +160,15 @@ class DomainPackageArchitectureTest {
         assertThat(domains)
                 .containsExactly(
                         "alternative",
+                        "analytics",
                         "auth",
                         "consumer",
                         "menu",
                         "menuhold",
+                        "notification",
+                        "payment",
                         "pickup",
+                        "platformoperator",
                         "recommendation",
                         "reservation",
                         "schedule",
@@ -241,6 +261,15 @@ class DomainPackageArchitectureTest {
                 && APPROVED_CROSS_DOMAIN_QUERY_READERS
                         .getOrDefault(source.relativePath(), Set.of())
                         .contains(topLevelDomain(imported));
+    }
+
+    private static SourceFile sourceInDomain(String domain) {
+        return new SourceFile(
+                domain + "/Example.java",
+                DOMAIN_PREFIX + domain,
+                List.of(),
+                ""
+        );
     }
 
     private static Map<String, Set<String>> domainDependencies(List<SourceFile> sources) {

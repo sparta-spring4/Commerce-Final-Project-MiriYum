@@ -1,0 +1,17 @@
+export const PLATFORM_OPERATOR_PATHS = {
+  signIn: '/admin/login',
+  initialPassword: '/admin/first-password-change',
+  members: '/admin/members',
+  memberDetail: '/admin/members/:accountType/:accountId',
+  supportCases: '/admin/member-support-cases',
+  supportCaseDetail: '/admin/member-support-cases/:caseId',
+  operators: '/admin/operators',
+  operatorCreate: '/admin/operators/new',
+  operatorDetail: '/admin/operators/:operatorId',
+  stores: '/admin/stores',
+  storeDetail: '/admin/stores/:storeId',
+  storeSanctionCase: '/admin/stores/:storeId/sanction-cases/:caseId',
+  memberSanctionApproval: '/admin/member-sanctions/approvals',
+  audit: '/admin/audit',
+  auditDetail: '/admin/audit/:eventKey',
+} as const

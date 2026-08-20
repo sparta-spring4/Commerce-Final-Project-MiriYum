@@ -7,9 +7,13 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 
+import com.miriyum.domain.store.dto.contract.StoreDashboardAuthority;
 import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
+import com.miriyum.domain.store.dto.contract.StoreWaitingReceptionProfile;
+import com.miriyum.domain.store.dto.contract.StoreWaitingLocationProfile;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
@@ -46,6 +50,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -96,6 +101,9 @@ class StoreServiceTest {
     private StoreGeocodingPort geocodingPort;
 
     @Mock
+    private StoreAdministrationService storeAdministrationService;
+
+    @Mock
     private StoreCommandTransactionExecutor transactionExecutor;
 
     private ObjectMapper objectMapper;
@@ -124,9 +132,11 @@ class StoreServiceTest {
                 transactionExecutor,
                 idempotencyExecutor,
                 objectMapper,
-                FIXED_CLOCK);
+                FIXED_CLOCK,
+                storeAdministrationService);
         menuTransactionFacade = new MenuTransactionFacade(
-                new StoreTransactionEligibilityService(storeRepository),
+                new StoreTransactionEligibilityService(
+                        storeRepository, mock(StoreAdministrationService.class)),
                 menuRepository);
     }
 
@@ -240,6 +250,116 @@ class StoreServiceTest {
     }
 
     @Test
+    void returnsWaitingReceptionProfilesForOpenAndUnavailableStores() {
+        Store open = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(open, "id", STORE_ID);
+        Store temporarilyClosed = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(temporarilyClosed, "id", 8L);
+        ReflectionTestUtils.setField(
+                temporarilyClosed,
+                "operationStatus",
+                OperationStatus.TEMPORARILY_CLOSED);
+        Store unapproved = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(unapproved, "id", 9L);
+        ReflectionTestUtils.setField(unapproved, "verificationStatus", null);
+        given(storeRepository.findAllById(Set.of(STORE_ID, 8L, 9L)))
+                .willReturn(List.of(open, temporarilyClosed, unapproved));
+
+        Map<Long, StoreWaitingReceptionProfile> profiles =
+                storeService.getWaitingReceptionProfiles(Set.of(STORE_ID, 8L, 9L));
+
+        assertThat(profiles).containsExactlyInAnyOrderEntriesOf(Map.of(
+                STORE_ID,
+                new StoreWaitingReceptionProfile(STORE_ID, "Asia/Seoul", true),
+                8L,
+                new StoreWaitingReceptionProfile(8L, "Asia/Seoul", false),
+                9L,
+                new StoreWaitingReceptionProfile(9L, "Asia/Seoul", false)));
+    }
+
+    @Test
+    void returnsVerifiedWaitingLocationThroughPublicProjection() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        ReflectionTestUtils.setField(store, "latitude", new BigDecimal("37.566826000000000"));
+        ReflectionTestUtils.setField(store, "longitude", new BigDecimal("126.978656700000000"));
+        ReflectionTestUtils.setField(store, "geocodingAddressVersion", 2L);
+        ReflectionTestUtils.setField(store, "geocodingStatus", GeocodingStatus.VERIFIED);
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+
+        StoreWaitingLocationProfile profile =
+                storeService.getWaitingLocationProfile(STORE_ID);
+
+        assertThat(profile).isEqualTo(new StoreWaitingLocationProfile(
+                STORE_ID,
+                new BigDecimal("37.566826000000000"),
+                new BigDecimal("126.978656700000000"),
+                2L,
+                true));
+    }
+
+    @Test
+    void waitingLocationFailsClosedWithoutVerifiedCoordinates() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        ReflectionTestUtils.setField(store, "latitude", new BigDecimal("37.566826000000000"));
+        ReflectionTestUtils.setField(store, "longitude", null);
+        ReflectionTestUtils.setField(store, "geocodingAddressVersion", 2L);
+        ReflectionTestUtils.setField(store, "geocodingStatus", GeocodingStatus.UNVERIFIED);
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+
+        StoreWaitingLocationProfile profile =
+                storeService.getWaitingLocationProfile(STORE_ID);
+
+        assertThat(profile.locationProofEligible()).isFalse();
+        assertThat(profile.latitude()).isNull();
+        assertThat(profile.longitude()).isNull();
+    }
+
+    @Test
+    void inspectsWaitingReceptionUnderStoreRowLock() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
+
+        StoreWaitingReceptionProfile profile =
+                storeService.inspectWaitingReceptionForUpdate(STORE_ID);
+
+        assertThat(profile)
+                .isEqualTo(new StoreWaitingReceptionProfile(
+                        STORE_ID,
+                        "Asia/Seoul",
+                        true));
+        then(storeRepository).should().findByIdForUpdate(STORE_ID);
+    }
+
+    @Test
+    void lockedWaitingReceptionInspectionFailsClosedForUnavailableStore() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        ReflectionTestUtils.setField(
+                store,
+                "operationStatus",
+                OperationStatus.TEMPORARILY_CLOSED);
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
+
+        StoreWaitingReceptionProfile profile =
+                storeService.inspectWaitingReceptionForUpdate(STORE_ID);
+
+        assertThat(profile.waitingReceptionEligible()).isFalse();
+    }
+
+    @Test
+    void lockedWaitingReceptionInspectionRejectsMissingStore() {
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> storeService.inspectWaitingReceptionForUpdate(STORE_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_NOT_FOUND);
+    }
+
+    @Test
     void managementOwnershipChecksOnlyExistenceAndOwner() {
         given(storeRepository.findOperatorAccountIdById(STORE_ID))
                 .willReturn(Optional.of(OPERATOR_ID));
@@ -249,6 +369,91 @@ class StoreServiceTest {
         then(operatorAccountService).should().getMe(OPERATOR_ID);
         then(storeRepository).should().findOperatorAccountIdById(STORE_ID);
         then(storeRepository).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    void concealedReadOwnershipAcceptsOnlyTheOwnedStore() {
+        given(storeRepository.existsByIdAndStoreOperatorAccountId(STORE_ID, OPERATOR_ID))
+                .willReturn(true);
+
+        storeService.requireConcealedReadOwnership(OPERATOR_ID, STORE_ID);
+
+        then(operatorAccountService).should().getMe(OPERATOR_ID);
+        then(storeRepository).should()
+                .existsByIdAndStoreOperatorAccountId(STORE_ID, OPERATOR_ID);
+        then(storeRepository).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    void concealedReadOwnershipHidesMissingStoreAsNotFound() {
+        given(storeRepository.existsByIdAndStoreOperatorAccountId(STORE_ID, OPERATOR_ID))
+                .willReturn(false);
+
+        assertThatThrownBy(() ->
+                storeService.requireConcealedReadOwnership(OPERATOR_ID, STORE_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_NOT_FOUND);
+    }
+
+    @Test
+    void concealedReadOwnershipHidesForeignStoreAsTheSameNotFoundError() {
+        given(storeRepository.existsByIdAndStoreOperatorAccountId(STORE_ID, OPERATOR_ID))
+                .willReturn(false);
+
+        assertThatThrownBy(() ->
+                storeService.requireConcealedReadOwnership(OPERATOR_ID, STORE_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_NOT_FOUND);
+    }
+
+    @Test
+    void dashboardAuthorityReturnsOwnedStoreTimeZoneAndVersion() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+
+        StoreDashboardAuthority authority =
+                storeService.requireDashboardAuthority(OPERATOR_ID, STORE_ID);
+
+        assertThat(authority).isEqualTo(new StoreDashboardAuthority(
+                STORE_ID,
+                "Asia/Seoul",
+                1L));
+        then(operatorAccountService).should().getMe(OPERATOR_ID);
+        then(storeRepository).should().findById(STORE_ID);
+    }
+
+    @Test
+    void dashboardAuthorityRejectsForeignExistingStore() {
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(storeOwnedBy(12L)));
+
+        assertThatThrownBy(() ->
+                storeService.requireDashboardAuthority(OPERATOR_ID, STORE_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.ACCESS_DENIED);
+    }
+
+    @Test
+    void dashboardAuthorityHidesMissingStoreAsNotFound() {
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() ->
+                storeService.requireDashboardAuthority(OPERATOR_ID, STORE_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_NOT_FOUND);
+    }
+
+    @Test
+    void publicDisplayNameLookupReturnsOnlyTheStoreName() {
+        Store store = transactionStore();
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+
+        assertThat(storeService.findDisplayName(STORE_ID)).contains("미리윰");
+        assertThat(storeService.findDisplayName(0L)).isEmpty();
     }
 
     @Test

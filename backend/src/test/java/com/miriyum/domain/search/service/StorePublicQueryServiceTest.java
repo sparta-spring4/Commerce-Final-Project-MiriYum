@@ -12,7 +12,11 @@ import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.error.StoreErrorCode;
+import com.miriyum.domain.menu.dto.contract.RepresentativeMenuItem;
+import com.miriyum.domain.menu.dto.contract.RepresentativeMenuSnapshot;
 import com.miriyum.domain.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.menu.enums.RepresentativeMenuSettingStatus;
+import com.miriyum.domain.menu.service.RepresentativeMenuQueryService;
 import com.miriyum.domain.schedule.dto.contract.PublicStoreSchedules;
 import com.miriyum.domain.schedule.service.StoreScheduleQueryService;
 import com.miriyum.domain.search.dto.publicapi.ReservationAvailability;
@@ -21,10 +25,15 @@ import com.miriyum.domain.search.model.ReservationSearchCondition;
 import com.miriyum.domain.search.repository.PublicStoreSnapshot;
 import com.miriyum.domain.search.repository.StorePublicReadRepository;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.storage.FileStorageOwner;
+import com.miriyum.global.storage.FileStoragePurpose;
+import com.miriyum.global.storage.service.FileStorageFacade;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Map;
+import org.springframework.beans.factory.ObjectProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,6 +46,9 @@ class StorePublicQueryServiceTest {
     @Mock StorePublicReadRepository publicReadRepository;
     @Mock StoreScheduleQueryService scheduleQueryService;
     @Mock ReservationService reservationService;
+    @Mock RepresentativeMenuQueryService representativeMenuQueryService;
+    @Mock ObjectProvider<FileStorageFacade> fileStorageFacadeProvider;
+    @Mock FileStorageFacade fileStorageFacade;
 
     private StorePublicQueryService service;
 
@@ -45,7 +57,9 @@ class StorePublicQueryServiceTest {
         service = new StorePublicQueryService(
                 publicReadRepository,
                 scheduleQueryService,
-                reservationService);
+                reservationService,
+                representativeMenuQueryService,
+                fileStorageFacadeProvider);
     }
 
     @Test
@@ -61,6 +75,35 @@ class StorePublicQueryServiceTest {
             assertThat(menu.name()).isEqualTo("아메리카노");
             assertThat(menu.saleStatus()).isEqualTo(MenuSellingStatus.SELLING);
         });
+    }
+
+    @Test
+    void publicMenusAttachOnlyConfirmedPublicMenuImageUrls() {
+        PublicMenu menu = publicMenu(11L);
+        given(publicReadRepository.findPublicStore(7L)).willReturn(Optional.of(publicStore(7L)));
+        given(publicReadRepository.findPublicMenus(7L)).willReturn(List.of(menu));
+        given(fileStorageFacadeProvider.getIfAvailable()).willReturn(fileStorageFacade);
+        given(fileStorageFacade.findConfirmedPublicUrls(
+                List.of(new FileStorageOwner("MENU", 11L)), FileStoragePurpose.MENU_IMAGE))
+                .willReturn(Map.of(
+                        new FileStorageOwner("MENU", 11L), "/api/v1/public-files/menu-image-id"));
+
+        List<PublicMenu> result = service.getMenus(7L);
+
+        assertThat(result).singleElement().satisfies(found ->
+                assertThat(found.imageUrl()).isEqualTo("/api/v1/public-files/menu-image-id"));
+    }
+
+    @Test
+    void publicMenusKeepImageUrlNullWhenStorageIsNotConfigured() {
+        PublicMenu menu = publicMenu(11L);
+        given(publicReadRepository.findPublicStore(7L)).willReturn(Optional.of(publicStore(7L)));
+        given(publicReadRepository.findPublicMenus(7L)).willReturn(List.of(menu));
+        given(fileStorageFacadeProvider.getIfAvailable()).willReturn(null);
+
+        List<PublicMenu> result = service.getMenus(7L);
+
+        assertThat(result).singleElement().satisfies(found -> assertThat(found.imageUrl()).isNull());
     }
 
     @Test
@@ -82,6 +125,8 @@ class StorePublicQueryServiceTest {
         given(publicReadRepository.findPublicMenus(7L)).willReturn(List.of());
         given(scheduleQueryService.getPublicSchedules(7L))
                 .willReturn(PublicStoreSchedules.empty());
+        given(representativeMenuQueryService.getCurrent(7L))
+                .willReturn(RepresentativeMenuSnapshot.unconfigured(7L));
         given(reservationService.getAvailabilities(org.mockito.ArgumentMatchers.eq(List.of(7L)),
                 org.mockito.ArgumentMatchers.any()))
                 .willReturn(List.of(new ReservationAvailabilityResult(
@@ -112,6 +157,8 @@ class StorePublicQueryServiceTest {
         given(publicReadRepository.findPublicMenus(7L)).willReturn(List.of());
         given(scheduleQueryService.getPublicSchedules(7L))
                 .willReturn(PublicStoreSchedules.empty());
+        given(representativeMenuQueryService.getCurrent(7L))
+                .willReturn(RepresentativeMenuSnapshot.unconfigured(7L));
         given(reservationService.getAvailabilities(
                 org.mockito.ArgumentMatchers.eq(List.of(7L)),
                 org.mockito.ArgumentMatchers.any()))
@@ -137,6 +184,8 @@ class StorePublicQueryServiceTest {
         given(publicReadRepository.findPublicMenus(7L)).willReturn(List.of());
         given(scheduleQueryService.getPublicSchedules(7L))
                 .willReturn(PublicStoreSchedules.empty());
+        given(representativeMenuQueryService.getCurrent(7L))
+                .willReturn(RepresentativeMenuSnapshot.unconfigured(7L));
         given(reservationService.getAvailabilities(
                 org.mockito.ArgumentMatchers.eq(List.of(7L)),
                 org.mockito.ArgumentMatchers.any()))
@@ -153,6 +202,59 @@ class StorePublicQueryServiceTest {
         assertThat(result.modes().reservationEnabled()).isFalse();
         assertThat(result.reservationAvailability())
                 .isEqualTo(ReservationAvailability.UNAVAILABLE);
+    }
+
+    @Test
+    void detailUsesCurrentRepresentativeSettingOrderAndKeepsSoldOut() {
+        PublicMenu eleven = publicMenu(11L);
+        PublicMenu twelve = publicMenu(12L);
+        PublicMenu thirteen = new PublicMenu(
+                "13", "sold out", "", 7_000, true, "COFFEE",
+                List.of(), List.of(), false, false, MenuSellingStatus.SOLD_OUT);
+        given(publicReadRepository.findPublicStore(7L)).willReturn(Optional.of(publicStore(7L)));
+        given(publicReadRepository.findPublicMenus(7L))
+                .willReturn(List.of(eleven, twelve, thirteen));
+        given(scheduleQueryService.getPublicSchedules(7L))
+                .willReturn(PublicStoreSchedules.empty());
+        given(representativeMenuQueryService.getCurrent(7L)).willReturn(
+                new RepresentativeMenuSnapshot(
+                        "7",
+                        8L,
+                        RepresentativeMenuSettingStatus.CONFIGURED,
+                        List.of(
+                                representative(13L, 1, MenuSellingStatus.SOLD_OUT),
+                                representative(11L, 2, MenuSellingStatus.SELLING))));
+
+        var result = service.getDetail(7L, null, false);
+
+        assertThat(result.representativeMenus())
+                .extracting(PublicMenu::menuId)
+                .containsExactly("13", "11");
+        assertThat(result.representativeMenus().getFirst().saleStatus())
+                .isEqualTo(MenuSellingStatus.SOLD_OUT);
+    }
+
+    @Test
+    void detailKeepsTheSamePublicImageUrlForRepresentativeMenus() {
+        PublicMenu menu = publicMenu(11L);
+        given(publicReadRepository.findPublicStore(7L)).willReturn(Optional.of(publicStore(7L)));
+        given(publicReadRepository.findPublicMenus(7L)).willReturn(List.of(menu));
+        given(scheduleQueryService.getPublicSchedules(7L))
+                .willReturn(PublicStoreSchedules.empty());
+        given(representativeMenuQueryService.getCurrent(7L)).willReturn(
+                new RepresentativeMenuSnapshot(
+                        "7", 1L, RepresentativeMenuSettingStatus.CONFIGURED,
+                        List.of(representative(11L, 1, MenuSellingStatus.SELLING))));
+        given(fileStorageFacadeProvider.getIfAvailable()).willReturn(fileStorageFacade);
+        given(fileStorageFacade.findConfirmedPublicUrls(
+                List.of(new FileStorageOwner("MENU", 11L)), FileStoragePurpose.MENU_IMAGE))
+                .willReturn(Map.of(
+                        new FileStorageOwner("MENU", 11L), "/api/v1/public-files/menu-image-id"));
+
+        var result = service.getDetail(7L, null, false);
+
+        assertThat(result.representativeMenus()).singleElement().satisfies(found ->
+                assertThat(found.imageUrl()).isEqualTo("/api/v1/public-files/menu-image-id"));
     }
 
     private static PublicStoreSnapshot publicStore(long id) {
@@ -174,5 +276,14 @@ class StorePublicQueryServiceTest {
         return new PublicMenu(
                 Long.toString(id), "아메리카노", "", 4500, true, "COFFEE",
                 List.of(), List.of(), false, false, MenuSellingStatus.SELLING);
+    }
+
+    private static RepresentativeMenuItem representative(
+            long id,
+            int displayOrder,
+            MenuSellingStatus status
+    ) {
+        return new RepresentativeMenuItem(
+                Long.toString(id), displayOrder, 1, "menu", 1_000, status);
     }
 }

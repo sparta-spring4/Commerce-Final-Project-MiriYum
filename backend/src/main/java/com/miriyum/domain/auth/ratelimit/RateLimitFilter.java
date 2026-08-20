@@ -18,30 +18,48 @@ import tools.jackson.databind.ObjectMapper;
  * 요청은 "IP당 N회" 한도를 함께 나눠 쓴다(합쳐서 N회). 경로별로 각각 N회를 주려는 게 아니라
  * 정책 문구("IP당 10분에 5회" 등)가 등급 단위 총량을 뜻하기 때문이다.</p>
  *
- * <p>{@link HttpServletRequest#getRemoteAddr()}는 리버스 프록시·로드밸런서 뒤에서 실행되면
- * 클라이언트가 아니라 프록시의 IP를 반환해, 모든 사용자가 같은 한도를 나눠 쓰게 될 수 있다.
- * 1차 MVP는 그런 프록시 구성이 확정되지 않아 이 방식을 그대로 쓰며, 실제 배포 구조가 정해지면
- * {@code X-Forwarded-For} 등 신뢰할 수 있는 헤더를 읽도록 바꿔야 한다.</p>
+ * <p>배포 환경에서는 Nginx가 외부 요청의 forwarded IP 헤더를 원격 주소로 덮어쓰고 Spring Boot의
+ * native forwarded-header 처리가 이를 {@link HttpServletRequest#getRemoteAddr()}에 반영한다. 따라서
+ * 이 필터는 클라이언트가 직접 보낸 forwarded header가 아니라 신뢰 프록시 경계를 통과한 주소만 쓴다.</p>
  */
 public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final Map<String, RateLimitCategory> LIMITED_REQUESTS = Map.ofEntries(
             Map.entry("POST /api/v1/consumers/auth/accounts", RateLimitCategory.SIGN_UP),
             Map.entry("POST /api/v1/consumers/auth/sessions", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/consumers/auth/kakao/authorizations", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/consumers/auth/kakao/sessions", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/consumers/auth/kakao/accounts", RateLimitCategory.SIGN_UP),
             Map.entry("POST /api/v1/consumers/auth/token-refreshes", RateLimitCategory.TOKEN_REFRESH),
             Map.entry("GET /api/v1/consumers/auth/csrf-tokens/current", RateLimitCategory.CSRF_PREPARATION),
             Map.entry("POST /api/v1/store-operators/auth/accounts", RateLimitCategory.SIGN_UP),
             Map.entry("POST /api/v1/store-operators/auth/sessions", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/store-operators/auth/kakao/authorizations", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/store-operators/auth/kakao/sessions", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/store-operators/auth/kakao/accounts", RateLimitCategory.SIGN_UP),
             Map.entry("POST /api/v1/store-operators/auth/token-refreshes", RateLimitCategory.TOKEN_REFRESH),
-            Map.entry("GET /api/v1/store-operators/auth/csrf-tokens/current", RateLimitCategory.CSRF_PREPARATION)
+            Map.entry("GET /api/v1/store-operators/auth/csrf-tokens/current", RateLimitCategory.CSRF_PREPARATION),
+            Map.entry("POST /api/v1/platform-operators/auth/sessions", RateLimitCategory.LOGIN),
+            Map.entry(
+                    "POST /api/v1/platform-operators/auth/token-refreshes",
+                    RateLimitCategory.TOKEN_REFRESH),
+            Map.entry(
+                    "GET /api/v1/platform-operators/auth/csrf-tokens/current",
+                    RateLimitCategory.CSRF_PREPARATION)
     );
 
     private final RateLimiter rateLimiter;
     private final ObjectMapper objectMapper;
+    private final StagingRateLimitBypass stagingBypass;
 
-    public RateLimitFilter(RateLimiter rateLimiter, ObjectMapper objectMapper) {
+    public RateLimitFilter(
+            RateLimiter rateLimiter,
+            ObjectMapper objectMapper,
+            StagingRateLimitBypass stagingBypass
+    ) {
         this.rateLimiter = rateLimiter;
         this.objectMapper = objectMapper;
+        this.stagingBypass = stagingBypass;
     }
 
     @Override
@@ -56,7 +74,13 @@ public class RateLimitFilter extends OncePerRequestFilter {
             FilterChain filterChain
     ) throws ServletException, IOException {
         RateLimitCategory category = LIMITED_REQUESTS.get(requestKey(request));
-        RateLimiter.RateLimitResult result = rateLimiter.tryConsume(category, clientIp(request));
+        String clientIp = clientIp(request);
+        if (stagingBypass.allows(category, clientIp)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        RateLimiter.RateLimitResult result = rateLimiter.tryConsume(category, clientIp);
 
         if (!result.allowed()) {
             RateLimitRejectionWriter.write(response, objectMapper, result);

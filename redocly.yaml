@@ -5,6 +5,22 @@ apis:
     root: docs/specs/mvp1-common/openapi.yaml
     rules:
       no-unused-components: off
+  platform-operator:
+    root: docs/specs/platform-operator-openapi.yaml
+  platform-operator-authorization:
+    root: docs/specs/platform-operator-authorization/openapi.yaml
+    rules:
+      no-unused-components: off
+  platform-operator-capabilities:
+    root: docs/specs/platform-operator-capabilities/openapi.yaml
+  member-support:
+    root: docs/specs/member-support/openapi.yaml
+  analytics:
+    root: docs/specs/analytics/openapi.yaml
+  platform-operator-management-audit:
+    root: docs/specs/platform-operator-management-audit/openapi.yaml
+  admin-store:
+    root: docs/specs/admin-store/openapi.yaml
 extends:
   - recommended-strict
 telemetry: off

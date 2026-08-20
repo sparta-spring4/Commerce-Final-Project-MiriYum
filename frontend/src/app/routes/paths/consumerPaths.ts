@@ -1,0 +1,17 @@
+export const CONSUMER_PATHS = {
+  signIn: '/sign-in',
+  signUp: '/sign-up',
+  kakaoCallback: '/auth/kakao/callback',
+  kakaoSignUp: '/auth/kakao/sign-up',
+  myPage: '/mypage',
+  myReservations: '/mypage/reservations',
+  notificationHistory: '/mypage/notifications',
+  reservationCreate: '/stores/:storeId/reserve',
+  reservationDetail: '/reservations/:reservationId',
+  reservationComplete: '/reservations/:reservationId/complete',
+  pickupCreate: '/stores/:storeId/pickup',
+  pickupDetail: '/pickup-reservations/:pickupReservationId',
+  pickupComplete: '/pickup-reservations/:pickupReservationId/complete',
+  waitingInvitationAccept: '/waiting/invitations/accept',
+  waitingRegister: '/stores/:storeId/waiting',
+} as const

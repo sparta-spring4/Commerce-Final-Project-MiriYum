@@ -1,0 +1,375 @@
+package com.miriyum.domain.store.evidence;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.store.evidence.dto.BusinessRegistrationEvidenceCommand;
+import com.miriyum.global.storage.entity.FileMetadata;
+import com.miriyum.global.storage.repository.FileMetadataRepository;
+import com.miriyum.global.storage.service.FileMetadataConflictException;
+import com.miriyum.global.storage.service.FileMetadataTransactionExecutor;
+import java.time.Instant;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.UUID;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.mysql.MySQLContainer;
+
+/** 비공개 사업자등록증 원장의 current/replaced 저장 제약을 실제 MySQL에서 검증한다. */
+@Tag("integration")
+@Tag("integration-shard-b")
+@Testcontainers
+@Import(BusinessRegistrationEvidenceSchemaIntegrationTest.OwnershipPortTestConfiguration.class)
+@SpringBootTest(
+        classes = MiriyumApplication.class,
+        properties = {
+            "spring.jpa.hibernate.ddl-auto=validate",
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
+        })
+class BusinessRegistrationEvidenceSchemaIntegrationTest {
+
+    @Container
+    static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.0.40");
+
+    @DynamicPropertySource
+    static void datasourceProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+    }
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private FileMetadataRepository fileMetadataRepository;
+
+    @Autowired
+    private FileMetadataTransactionExecutor fileMetadataTransactionExecutor;
+
+    @Autowired
+    private StoreBusinessRegistrationEvidenceService evidenceService;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    @Test
+    @DisplayName("현재 증빙은 하나만 보관하고 교체 이력은 여러 건 보관한다")
+    void allowsOneCurrentEvidenceAndMultipleReplacedHistoryRows() {
+        long applicationId = 901L;
+        long applicationVersion = 3L;
+        insertEvidence(applicationId, applicationVersion, "REPLACED", null);
+        insertEvidence(applicationId, applicationVersion, "REPLACED", null);
+        insertEvidence(applicationId, applicationVersion, "CURRENT", 1);
+
+        assertThatThrownBy(() -> insertEvidence(applicationId, applicationVersion, "CURRENT", 1))
+                .isInstanceOf(DuplicateKeyException.class)
+                .hasMessageContaining("uk_store_business_registration_current");
+
+        Integer currentCount = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM store_business_registration_evidences
+                WHERE onboarding_application_id = ?
+                  AND application_version = ?
+                  AND current_marker = 1
+                """,
+                Integer.class,
+                applicationId,
+                applicationVersion);
+        Integer replacedCount = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM store_business_registration_evidences
+                WHERE onboarding_application_id = ?
+                  AND application_version = ?
+                  AND evidence_status = 'REPLACED'
+                """,
+                Integer.class,
+                applicationId,
+                applicationVersion);
+
+        assertThat(currentCount).isEqualTo(1);
+        assertThat(replacedCount).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("현재 증빙 연결과 경합한 파일 삭제는 잠금 해제 후에도 거절한다")
+    void rejectsFileDeletionAfterCurrentEvidenceLinkCommit() throws Exception {
+        long applicationId = 902L;
+        UUID fileId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-20T00:00:00Z");
+        insertPrivateLicenseMetadata(fileId, applicationId, now);
+
+        CountDownLatch metadataLocked = new CountDownLatch(1);
+        CountDownLatch releaseEvidenceCommit = new CountDownLatch(1);
+        CountDownLatch deletionStarted = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> evidenceLink = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                FileMetadata metadata = fileMetadataRepository.findByFileIdForUpdate(fileId.toString()).orElseThrow();
+                assertThat(metadata.getStorageStatus().name()).isEqualTo("CONFIRMED");
+                insertEvidence(applicationId, 1L, "CURRENT", 1, fileId, now);
+                metadataLocked.countDown();
+                await(releaseEvidenceCommit);
+            }));
+
+            assertThat(metadataLocked.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<FileMetadata> deletion = executor.submit(() -> {
+                deletionStarted.countDown();
+                return fileMetadataTransactionExecutor.deleteOrGetDeleted(fileId.toString(), now);
+            });
+            assertThat(deletionStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> deletion.get(250, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
+
+            releaseEvidenceCommit.countDown();
+            evidenceLink.get(5, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> deletion.get(5, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(FileMetadataConflictException.class);
+        }
+
+        Integer evidenceCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM store_business_registration_evidences WHERE file_id = ?",
+                Integer.class, fileId.toString());
+        String status = jdbcTemplate.queryForObject(
+                "SELECT storage_status FROM file_metadata WHERE file_id = ?",
+                String.class, fileId.toString());
+        assertThat(evidenceCount).isEqualTo(1);
+        assertThat(status).isEqualTo("CONFIRMED");
+    }
+
+    @Test
+    @DisplayName("REPEATABLE READ 스냅샷 뒤에도 현재 증빙 파일 삭제를 거절한다")
+    void rejectsCurrentEvidenceDeletionAfterOuterTransactionCreatesSnapshot() throws Exception {
+        long applicationId = 904L;
+        UUID fileId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-20T00:00:00Z");
+        insertPrivateLicenseMetadata(fileId, applicationId, now);
+
+        CountDownLatch metadataLocked = new CountDownLatch(1);
+        CountDownLatch snapshotCreated = new CountDownLatch(1);
+        CountDownLatch deletionStarted = new CountDownLatch(1);
+        CountDownLatch releaseEvidenceCommit = new CountDownLatch(1);
+        TransactionTemplate repeatableReadTransaction = new TransactionTemplate(transactionManager);
+        repeatableReadTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> evidenceLink = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                fileMetadataRepository.findByFileIdForUpdate(fileId.toString()).orElseThrow();
+                insertEvidence(applicationId, 1L, "CURRENT", 1, fileId, now);
+                metadataLocked.countDown();
+                await(releaseEvidenceCommit);
+            }));
+
+            assertThat(metadataLocked.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<FileMetadata> deletion = executor.submit(() -> repeatableReadTransaction.execute(status -> {
+                Integer currentCountBeforeLock = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM store_business_registration_evidences WHERE file_id = ?",
+                        Integer.class,
+                        fileId.toString());
+                assertThat(currentCountBeforeLock).isZero();
+                snapshotCreated.countDown();
+                deletionStarted.countDown();
+                return fileMetadataTransactionExecutor.markDeletedWithinCurrentTransaction(fileId.toString(), now);
+            }));
+
+            assertThat(snapshotCreated.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(deletionStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> deletion.get(250, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
+
+            releaseEvidenceCommit.countDown();
+            evidenceLink.get(5, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> deletion.get(5, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(FileMetadataConflictException.class);
+        }
+
+        String status = jdbcTemplate.queryForObject(
+                "SELECT storage_status FROM file_metadata WHERE file_id = ?",
+                String.class,
+                fileId.toString());
+        assertThat(status).isEqualTo("CONFIRMED");
+    }
+
+    @Test
+    @DisplayName("서비스 증빙 교체는 기존 CURRENT를 먼저 반영한 뒤 새 CURRENT를 저장한다")
+    void replacesCurrentEvidenceWithoutViolatingCurrentMarkerConstraint() {
+        long applicationId = 903L;
+        long applicationVersion = 1L;
+        long storeOperatorAccountId = 55L;
+        UUID firstFileId = UUID.randomUUID();
+        UUID replacementFileId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-20T00:00:00Z");
+        insertPrivateLicenseMetadata(firstFileId, applicationId, now);
+        insertPrivateLicenseMetadata(replacementFileId, applicationId, now);
+
+        evidenceService.replaceCurrentEvidence(new BusinessRegistrationEvidenceCommand(
+                applicationId, applicationVersion, storeOperatorAccountId, firstFileId));
+        evidenceService.replaceCurrentEvidence(new BusinessRegistrationEvidenceCommand(
+                applicationId, applicationVersion, storeOperatorAccountId, replacementFileId));
+
+        Integer currentCount = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM store_business_registration_evidences
+                WHERE onboarding_application_id = ?
+                  AND application_version = ?
+                  AND current_marker = 1
+                """,
+                Integer.class,
+                applicationId,
+                applicationVersion);
+        String firstStatus = jdbcTemplate.queryForObject(
+                "SELECT evidence_status FROM store_business_registration_evidences WHERE file_id = ?",
+                String.class,
+                firstFileId.toString());
+        String currentFileId = jdbcTemplate.queryForObject(
+                """
+                SELECT file_id
+                FROM store_business_registration_evidences
+                WHERE onboarding_application_id = ?
+                  AND application_version = ?
+                  AND current_marker = 1
+                """,
+                String.class,
+                applicationId,
+                applicationVersion);
+
+        assertThat(currentCount).isEqualTo(1);
+        assertThat(firstStatus).isEqualTo("REPLACED");
+        assertThat(currentFileId).isEqualTo(replacementFileId.toString());
+    }
+
+    @Test
+    @DisplayName("교체된 구버전 증빙 파일도 전용 파기 작업 전에는 일반 삭제를 거절한다")
+    void rejectsDeletionOfReplacedEvidenceFile() {
+        long applicationId = 905L;
+        long applicationVersion = 1L;
+        long storeOperatorAccountId = 55L;
+        UUID replacedFileId = UUID.randomUUID();
+        UUID currentFileId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-20T00:00:00Z");
+        insertPrivateLicenseMetadata(replacedFileId, applicationId, now);
+        insertPrivateLicenseMetadata(currentFileId, applicationId, now);
+
+        evidenceService.replaceCurrentEvidence(new BusinessRegistrationEvidenceCommand(
+                applicationId, applicationVersion, storeOperatorAccountId, replacedFileId));
+        evidenceService.replaceCurrentEvidence(new BusinessRegistrationEvidenceCommand(
+                applicationId, applicationVersion, storeOperatorAccountId, currentFileId));
+
+        assertThatThrownBy(() -> fileMetadataTransactionExecutor.deleteOrGetDeleted(replacedFileId.toString(), now))
+                .isInstanceOf(FileMetadataConflictException.class);
+
+        String evidenceStatus = jdbcTemplate.queryForObject(
+                "SELECT evidence_status FROM store_business_registration_evidences WHERE file_id = ?",
+                String.class,
+                replacedFileId.toString());
+        String storageStatus = jdbcTemplate.queryForObject(
+                "SELECT storage_status FROM file_metadata WHERE file_id = ?",
+                String.class,
+                replacedFileId.toString());
+        assertThat(evidenceStatus).isEqualTo("REPLACED");
+        assertThat(storageStatus).isEqualTo("CONFIRMED");
+    }
+
+    private void insertEvidence(long applicationId, long applicationVersion, String status, Integer currentMarker) {
+        UUID fileId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-20T00:00:00Z");
+        insertPrivateLicenseMetadata(fileId, applicationId, now);
+        insertEvidence(applicationId, applicationVersion, status, currentMarker, fileId, now);
+    }
+
+    private void insertEvidence(
+            long applicationId,
+            long applicationVersion,
+            String status,
+            Integer currentMarker,
+            UUID fileId,
+            Instant now) {
+        jdbcTemplate.update(
+                """
+                INSERT INTO store_business_registration_evidences (
+                    evidence_id, onboarding_application_id, application_version, store_operator_account_id,
+                    file_id, evidence_status, current_marker, retention_due_at, replaced_at, created_at, version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                UUID.randomUUID().toString(),
+                applicationId,
+                applicationVersion,
+                55L,
+                fileId.toString(),
+                status,
+                currentMarker,
+                "REPLACED".equals(status) ? now.plusSeconds(7 * 24 * 60 * 60) : null,
+                "REPLACED".equals(status) ? now : null,
+                now,
+                0L);
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("timed out waiting for concurrent transaction");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while waiting for concurrent transaction", exception);
+        }
+    }
+
+    private void insertPrivateLicenseMetadata(UUID fileId, long applicationId, Instant createdAt) {
+        jdbcTemplate.update(
+                """
+                INSERT INTO file_metadata (
+                    file_id, owner_type, owner_id, purpose, object_key, content_type,
+                    size_bytes, checksum, visibility, storage_status, retention_policy, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                fileId.toString(),
+                "STORE_ONBOARDING_APPLICATION",
+                applicationId,
+                "BUSINESS_LICENSE",
+                "private/onboarding/" + applicationId + "/" + fileId,
+                "application/pdf",
+                512L,
+                "a".repeat(64),
+                "PRIVATE",
+                "CONFIRMED",
+                "BUSINESS_LICENSE_REVIEW",
+                createdAt);
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class OwnershipPortTestConfiguration {
+
+        @Bean
+        StoreOnboardingApplicationOwnershipPort storeOnboardingApplicationOwnershipPort() {
+            return (applicationId, applicationVersion, storeOperatorAccountId) -> {
+                // #277의 authoritative ownership aggregate는 해당 PR에서 제공한다.
+            };
+        }
+    }
+}

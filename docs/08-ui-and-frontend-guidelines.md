@@ -4,6 +4,37 @@
 
 프런트엔드는 React 19.2.8, TypeScript 7.0.2, Vite 8.1.5를 사용한다. 화면과 코드는 기능 중심으로 구성하고 화면, UI 상태, API 연동과 입력 검증을 해당 기능이 함께 소유한다. API 호출과 토큰 처리를 렌더링 코드에 흩어 두지 않는다.
 
+## 디렉터리와 소유권 정본
+
+`frontend/src`는 도메인 우선 구조를 사용하고, 같은 도메인 안에서는 사용자 경계를 먼저 분리한다.
+
+```text
+src/
+├─ app/
+│  ├─ routes/                    # 사용자별 라우트 조합과 URL 정본
+│  │  └─ paths/                  # public/consumer/store/platform 경로 상수
+│  └─ shells/                    # 사용자 경계의 Provider·Guard·layout·navigation
+│     ├─ public/
+│     ├─ consumer/
+│     ├─ store-operator/
+│     ├─ platform-operator/
+│     └─ shared/                 # 둘 이상의 shell이 실제 사용하는 layout만
+├─ domains/
+│  └─ <domain>/<user>/           # 화면·도메인 상태·API query·테스트
+└─ shared/                       # 둘 이상의 사용자 또는 도메인이 검증해 재사용
+```
+
+- `app/routes/index.tsx`는 `publicRoutes`, `consumerRoutes`, `storeOperatorRoutes`, `platformOperatorRoutes`를 조합만 한다. 화면, 인증 판단, 내비게이션 항목을 소유하지 않는다.
+- URL 상수와 사용자별 내비게이션은 각각 `app/routes/paths/<user>Paths.ts`, `app/shells/<user>/navigation.ts`가 소유한다. 새 화면은 해당 두 정본에 연결하고 전체 중앙 목록을 다시 만들지 않는다.
+- Provider, Guard, 인증된 API client 인스턴스, 세션 종료 query 정리는 `app/shells/<user>`가 소유한다. 계정 생성·로그인 endpoint adapter와 화면은 `domains/account/<user>/auth`가 소유하고, 도메인은 다른 사용자 shell을 참조하지 않는다.
+- 도메인 코드는 `account`, `notification`, `payment`, `pickup`, `platform-operation`, `reservation`, `store`, `waiting` 아래의 사용자 폴더가 소유한다. 한 사용자에게만 필요한 UI·API·모델·테스트는 `shared`로 올리지 않는다. 마이페이지는 payment·reservation·waiting API를 조합하지만 그 query와 key를 소유하지 않는다.
+- store-operator의 query key 뿌리는 store·reservation·waiting 도메인을 함께 정리해야 하므로 `app/shells/store-operator/queryKeys.ts`가 소유한다. consumer와 platform-operator의 보호 query root도 각 shell의 `querySession.ts`가 소유한다. 기존 key 값과 무효화 범위는 호환성 계약이다.
+- store·reservation·waiting의 운영 화면이 함께 쓰는 페이지 머리말·섹션 카드·요약 목록과 게시 컨트롤은 `app/shells/store-operator`가 소유한다. 각 도메인은 이 shell 계약을 직접 import하며, 한 도메인의 barrel이 shell이나 다른 도메인이 쓰는 UI를 대신 re-export하지 않는다.
+- `shared/api`에는 사용자 중립 API 기반 코드, 둘 이상의 사용자 목록에서 쓰는 query 비교 규칙과 서버 필드 오류 변환, OpenAPI generated type을 둔다. `shared/auth`에는 여러 사용자 계정 화면이 실제로 함께 쓰는 오류 코드·입력 검증과 정확 일치 쿠키 파서만 둔다. namespace별 쿠키 이름은 각 사용자 소유자에 남긴다. generated type은 여러 사용자·도메인의 typed client 계약을 함께 제공하므로 예외적으로 shared에 유지하며 생성 결과를 손으로 수정하지 않는다.
+- 플랫폼 운영자 route와 shell의 동적 import는 `VITE_PLATFORM_OPERATOR_ENABLED`가 명시적으로 켜졌을 때만 빌드에 포함한다. 기본 비활성 빌드와 lazy-loading 경계를 없애지 않는다.
+
+파일 수가 하나라는 이유만으로 `shared`에 두지 않는다. 두 번째 실제 소비자가 생기기 전에는 소유 사용자와 도메인에 두고, 재사용 시에도 인증·권한·세션 의미가 같은지 먼저 확인한다.
+
 ## 계정별 shell과 인증 경계
 
 일반 사용자, 매장 운영자와 플랫폼 운영자는 분리된 로그인 시작점·shell·라우트 가드·principal·토큰 namespace를 사용한다.
@@ -60,6 +91,8 @@ Access JWT는 로그인·재발급 응답에서 받아 shell별 메모리에만 
 - 결제·환불·알림·웨이팅 이력
 
 SSE가 끊기면 마지막 표시를 성공 근거로 사용하지 않고 HTTP 재조회로 최신 상태에 수렴한다. PortOne 브라우저 성공 응답은 `확인 중`으로 표시하고 서버 검증 전 `결제 완료`로 표시하지 않는다.
+
+공개 이미지 조회 API는 `file_metadata`의 `CONFIRMED` 상태인 메타데이터만 객체 키로 서빙한다. `DELETED`·`PENDING`·`FAILED` 상태는 저장소에 원본이 남아 있어도 공개 URL을 만들지 않는다.
 
 ### `향후 고도화`
 

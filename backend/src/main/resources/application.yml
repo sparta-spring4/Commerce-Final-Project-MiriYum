@@ -5,10 +5,22 @@ spring:
     url: ${MIRIYUM_DB_URL}
     username: ${MIRIYUM_DB_USERNAME}
     password: ${MIRIYUM_DB_PASSWORD}
+  data:
+    redis:
+      host: ${MIRIYUM_VALKEY_HOST:localhost}
+      port: ${MIRIYUM_VALKEY_PORT:6379}
+      password: ${MIRIYUM_VALKEY_PASSWORD:}
+      ssl:
+        enabled: ${MIRIYUM_VALKEY_SSL_ENABLED:false}
+      timeout: ${MIRIYUM_VALKEY_TIMEOUT:2s}
   jackson:
     deserialization:
       fail-on-unknown-properties: true
-
+  servlet:
+    multipart:
+      # 10MB 파일 본문과 multipart 헤더·boundary를 함께 수용한다.
+      max-file-size: ${MIRIYUM_STORAGE_S3_MAX_SIZE_BYTES:10485760}
+      max-request-size: ${MIRIYUM_STORAGE_MULTIPART_MAX_REQUEST_SIZE:11MB}
 server:
   forward-headers-strategy: native
   tomcat:
@@ -19,6 +31,10 @@ server:
 
 # Docker 배포 확인은 백엔드 127.0.0.1(EC2 내부 전용) 포트의 이 엔드포인트만 사용한다.
 management:
+  health:
+    # Valkey 장애는 Refresh Token 기능만 503으로 닫고, 배포용 앱 health 전체를 DOWN으로 만들지 않는다.
+    redis:
+      enabled: false
   endpoints:
     web:
       exposure:
@@ -29,24 +45,150 @@ management:
       show-details: never
 
 miriyum:
+  cloudwatch-metrics:
+    # Spring Boot 4에는 CloudWatch registry 자동 설정이 없으므로 CloudWatchMetricsConfig가 이
+    # 설정으로 registry를 직접 만든다. LLM meter 이외에는 CloudWatch로 전송하지 않는다.
+    enabled: ${MIRIYUM_CLOUDWATCH_METRICS_ENABLED:false}
+    namespace: ${MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE:MiriYum}
+    region: ${MIRIYUM_CLOUDWATCH_METRICS_REGION:ap-northeast-2}
+    step: ${MIRIYUM_CLOUDWATCH_METRICS_STEP:1m}
+  platform-operator:
+    enabled: ${MIRIYUM_PLATFORM_OPERATOR_ENABLED:false}
+    reauthentication-fingerprint-secret: ${MIRIYUM_PLATFORM_OPERATOR_REAUTH_FINGERPRINT_SECRET:}
+    temporary-password:
+      validity: ${MIRIYUM_PLATFORM_OPERATOR_TEMPORARY_PASSWORD_VALIDITY:}
+      max-failures: ${MIRIYUM_PLATFORM_OPERATOR_TEMPORARY_PASSWORD_MAX_FAILURES:0}
   jwt:
     secret: ${MIRIYUM_JWT_SECRET}
     issuer: ${MIRIYUM_JWT_ISSUER:miriyum}
+  kakao:
+    enabled: ${MIRIYUM_KAKAO_ENABLED:false}
+    rest-api-key: ${MIRIYUM_KAKAO_REST_API_KEY:}
+    client-secret: ${MIRIYUM_KAKAO_CLIENT_SECRET:}
+    redirect-uris: ${MIRIYUM_KAKAO_REDIRECT_URIS:}
+    state-secret: ${MIRIYUM_KAKAO_STATE_SECRET:${miriyum.jwt.secret}}
+    sign-up-ticket-secret: ${MIRIYUM_KAKAO_SIGN_UP_TICKET_SECRET:${miriyum.jwt.secret}}
+    identity-fingerprint-active-key-version: ${MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_ACTIVE_KEY_VERSION:}
+    identity-fingerprint-active-secret: ${MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_ACTIVE_SECRET:}
+    identity-fingerprint-previous-key-version: ${MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_PREVIOUS_KEY_VERSION:}
+    identity-fingerprint-previous-secret: ${MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_PREVIOUS_SECRET:}
   security:
     allowed-origin: ${MIRIYUM_ALLOWED_ORIGIN:http://localhost:5173}
   identity-verification:
     dev-stub-enabled: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED:false}
+  member-support:
+    enabled: ${MIRIYUM_MEMBER_SUPPORT_ENABLED:false}
+    proof-digest-secret: ${MIRIYUM_MEMBER_SUPPORT_PROOF_DIGEST_SECRET:}
+    pii-encryption-active-key-version: ${MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_ACTIVE_KEY_VERSION:0}
+    pii-encryption-active-key: ${MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_ACTIVE_KEY:}
+    pii-encryption-previous-key-version: ${MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_PREVIOUS_KEY_VERSION:0}
+    pii-encryption-previous-key: ${MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_PREVIOUS_KEY:}
+    verification-ttl: ${MIRIYUM_MEMBER_SUPPORT_VERIFICATION_TTL:PT15M}
+    recovery-completion-ttl: ${MIRIYUM_MEMBER_SUPPORT_RECOVERY_COMPLETION_TTL:P30D}
+    recovery-tracking-ttl: ${MIRIYUM_MEMBER_SUPPORT_RECOVERY_TRACKING_TTL:P365D}
+    assignment-ttl: ${MIRIYUM_MEMBER_SUPPORT_ASSIGNMENT_TTL:PT30M}
+    dev-stub-enabled: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED:false}
+  auth:
+    qr-epoch:
+      storage-generation: ${MIRIYUM_QR_STORAGE_GENERATION:}
+    # Valkey와 위험 사건 저장소를 함께 구성한 환경에서만 전달 재시도를 실행한다.
+    refresh-risk-event-delivery:
+      enabled: ${MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED:false}
+    # 30초 주기 전달이 10회 연속 실패하면 CloudWatch 로그 기반 운영 알람을 발생시킨다.
+    refresh-risk-event-delivery-alert-threshold: ${MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ALERT_THRESHOLD:10}
+  reservation:
+    hold-expiration:
+      enabled: ${MIRIYUM_RESERVATION_HOLD_EXPIRATION_ENABLED:true}
+  payment:
+    enabled: ${MIRIYUM_PAYMENT_ENABLED:false}
+    cursor-secret: ${MIRIYUM_PAYMENT_CURSOR_SECRET:}
+    portone:
+      api-secret: ${MIRIYUM_PORTONE_API_SECRET:}
+      webhook-secret: ${MIRIYUM_PORTONE_WEBHOOK_SECRET:}
+      store-id: ${MIRIYUM_PORTONE_STORE_ID:}
+      base-url: ${MIRIYUM_PORTONE_BASE_URL:https://api.portone.io}
+      timeout-policy-version: ${MIRIYUM_PORTONE_TIMEOUT_POLICY_VERSION:portone-v2-v1}
+      connect-timeout: ${MIRIYUM_PORTONE_CONNECT_TIMEOUT:1s}
+      read-timeout: ${MIRIYUM_PORTONE_READ_TIMEOUT:3s}
+  notification:
+    history:
+      cursor-secret: ${MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET:}
+    worker:
+      enabled: ${MIRIYUM_NOTIFICATION_WORKER_ENABLED:false}
+      policy-version: ${MIRIYUM_NOTIFICATION_WORKER_POLICY_VERSION:}
+      worker-id: ${MIRIYUM_NOTIFICATION_WORKER_ID:}
+      batch-size: ${MIRIYUM_NOTIFICATION_WORKER_BATCH_SIZE:0}
+      lease-duration-ms: ${MIRIYUM_NOTIFICATION_WORKER_LEASE_DURATION_MS:0}
+      max-attempts: ${MIRIYUM_NOTIFICATION_WORKER_MAX_ATTEMPTS:0}
+      initial-retry-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_INITIAL_RETRY_DELAY_MS:0}
+      max-retry-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_MAX_RETRY_DELAY_MS:0}
+      poll-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_POLL_DELAY_MS:60000}
+      initial-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_INITIAL_DELAY_MS:60000}
+  sse:
+    enabled: ${MIRIYUM_SSE_ENABLED:false}
+    cursor-secret: ${MIRIYUM_SSE_CURSOR_SECRET:}
+    timeout: ${MIRIYUM_SSE_TIMEOUT:PT0S}
+    heartbeat-interval: ${MIRIYUM_SSE_HEARTBEAT_INTERVAL:PT0S}
+    correction-interval: ${MIRIYUM_SSE_CORRECTION_INTERVAL:PT0S}
+    correction-batch-size: ${MIRIYUM_SSE_CORRECTION_BATCH_SIZE:0}
+    max-connections-total: ${MIRIYUM_SSE_MAX_CONNECTIONS_TOTAL:0}
+    max-connections-per-account: ${MIRIYUM_SSE_MAX_CONNECTIONS_PER_ACCOUNT:0}
+  waiting:
+    auto-open:
+      enabled: ${MIRIYUM_WAITING_AUTO_OPEN_ENABLED:false}
+      worker-id: ${MIRIYUM_WAITING_AUTO_OPEN_WORKER_ID:}
+      planning-horizon: ${MIRIYUM_WAITING_AUTO_OPEN_PLANNING_HORIZON:PT0S}
+      planning-batch-size: ${MIRIYUM_WAITING_AUTO_OPEN_PLANNING_BATCH_SIZE:0}
+      claim-batch-size: ${MIRIYUM_WAITING_AUTO_OPEN_CLAIM_BATCH_SIZE:0}
+      lease-duration: ${MIRIYUM_WAITING_AUTO_OPEN_LEASE_DURATION:PT0S}
+      max-attempts: ${MIRIYUM_WAITING_AUTO_OPEN_MAX_ATTEMPTS:0}
+      initial-retry-delay: ${MIRIYUM_WAITING_AUTO_OPEN_INITIAL_RETRY_DELAY:PT0S}
+      maximum-retry-delay: ${MIRIYUM_WAITING_AUTO_OPEN_MAXIMUM_RETRY_DELAY:PT0S}
+      invalidation-batch-size: ${MIRIYUM_WAITING_AUTO_OPEN_INVALIDATION_BATCH_SIZE:0}
+      poll-delay: ${MIRIYUM_WAITING_AUTO_OPEN_POLL_DELAY:PT0S}
+      initial-delay: ${MIRIYUM_WAITING_AUTO_OPEN_INITIAL_DELAY:PT0S}
+    closure:
+      enabled: ${MIRIYUM_WAITING_CLOSURE_ENABLED:false}
+    compensation:
+      enabled: ${MIRIYUM_WAITING_COMPENSATION_ENABLED:true}
+      fixed-delay-ms: ${MIRIYUM_WAITING_COMPENSATION_FIXED_DELAY_MS:5000}
+      initial-delay-ms: ${MIRIYUM_WAITING_COMPENSATION_INITIAL_DELAY_MS:5000}
+      reconciliation-delay-ms: ${MIRIYUM_WAITING_COMPENSATION_RECONCILIATION_DELAY_MS:60000}
   store:
     schedule:
       activation-enabled: ${MIRIYUM_STORE_SCHEDULE_ACTIVATION_ENABLED:true}
       activation-delay-ms: ${MIRIYUM_STORE_SCHEDULE_ACTIVATION_DELAY_MS:1000}
     geocoding:
       base-url: ${MIRIYUM_STORE_GEOCODING_BASE_URL:https://dapi.kakao.com}
-      rest-api-key: ${MIRIYUM_KAKAO_LOCAL_REST_API_KEY:}
+      rest-api-key: ${MIRIYUM_STORE_GEOCODING_REST_API_KEY:${MIRIYUM_KAKAO_LOCAL_REST_API_KEY:}}
       connect-timeout-ms: ${MIRIYUM_STORE_GEOCODING_CONNECT_TIMEOUT_MS:1000}
       response-timeout-ms: ${MIRIYUM_STORE_GEOCODING_RESPONSE_TIMEOUT_MS:2000}
   store-search:
     available-candidate-limit: ${MIRIYUM_STORE_SEARCH_AVAILABLE_CANDIDATE_LIMIT:5000}
+    llm:
+      enabled: ${MIRIYUM_STORE_SEARCH_LLM_ENABLED:false}
+      base-url: ${MIRIYUM_STORE_SEARCH_LLM_BASE_URL:https://api.openai.com}
+      api-key: ${OPENAI_API_KEY:}
+      model: ${MIRIYUM_STORE_SEARCH_LLM_MODEL:gpt-4o-mini}
+      connect-timeout-ms: ${MIRIYUM_STORE_SEARCH_LLM_CONNECT_TIMEOUT_MS:1000}
+      response-timeout-ms: ${MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS:2000}
+      max-output-tokens: ${MIRIYUM_STORE_SEARCH_LLM_MAX_OUTPUT_TOKENS:100}
+      max-concepts: ${MIRIYUM_STORE_SEARCH_LLM_MAX_CONCEPTS:8}
+      supplement-candidate-limit: ${MIRIYUM_STORE_SEARCH_LLM_CANDIDATE_LIMIT:200}
+  storage:
+    s3:
+      enabled: ${MIRIYUM_STORAGE_S3_ENABLED:false}
+      bucket: ${MIRIYUM_STORAGE_S3_BUCKET:}
+      region: ${MIRIYUM_STORAGE_S3_REGION:ap-northeast-2}
+      max-size-bytes: ${MIRIYUM_STORAGE_S3_MAX_SIZE_BYTES:10485760}
+      reconciliation:
+        enabled: ${MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED:false}
+        delay-ms: ${MIRIYUM_STORAGE_S3_RECONCILIATION_DELAY_MS:60000}
+        batch-size: ${MIRIYUM_STORAGE_S3_RECONCILIATION_BATCH_SIZE:50}
+        pending-min-age-seconds: ${MIRIYUM_STORAGE_S3_RECONCILIATION_PENDING_MIN_AGE_SECONDS:600}
+        long-stay-threshold-seconds: ${MIRIYUM_STORAGE_S3_RECONCILIATION_LONG_STAY_THRESHOLD_SECONDS:3600}
+        retry-base-delay-seconds: ${MIRIYUM_STORAGE_S3_RECONCILIATION_RETRY_BASE_DELAY_SECONDS:60}
+        claim-lease-seconds: ${MIRIYUM_STORAGE_S3_RECONCILIATION_CLAIM_LEASE_SECONDS:300}
   rate-limit:
     sign-up:
       max-requests: ${MIRIYUM_RATE_LIMIT_SIGN_UP_MAX_REQUESTS:5}
@@ -63,6 +205,9 @@ miriyum:
     public-store-read:
       max-requests: ${MIRIYUM_RATE_LIMIT_PUBLIC_STORE_READ_MAX_REQUESTS:60}
       window-seconds: ${MIRIYUM_RATE_LIMIT_PUBLIC_STORE_READ_WINDOW_SECONDS:60}
+    staging-bypass:
+      runtime-environment: ${MIRIYUM_RUNTIME_ENVIRONMENT:}
+      source-ip: ${MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP:}
   menu:
     schedule:
       enabled: ${MIRIYUM_MENU_SCHEDULE_ENABLED:true}

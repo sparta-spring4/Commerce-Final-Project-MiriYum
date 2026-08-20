@@ -8,6 +8,26 @@ from pathlib import Path
 WORKFLOW = Path(".github/workflows/backend-cd.yml").read_text(encoding="utf-8")
 
 
+def run_block(workflow, step_name):
+    lines = workflow.splitlines()
+    step_index = next(
+        index for index, line in enumerate(lines) if line.strip() == f"- name: {step_name}"
+    )
+    step_indent = len(lines[step_index]) - len(lines[step_index].lstrip())
+    run_index = step_index + 1
+    run_indent = step_indent + 2
+
+    if lines[run_index] != " " * run_indent + "run: |":
+        raise AssertionError(f"{step_name} must declare an indented run block")
+
+    block = []
+    for line in lines[run_index + 1 :]:
+        if line.strip() and len(line) - len(line.lstrip()) <= run_indent:
+            break
+        block.append(line)
+    return "\n".join(block)
+
+
 class ShouldDeployBackendTest(unittest.TestCase):
     def assert_decision(self, paths, expected):
         result = subprocess.run(
@@ -28,8 +48,11 @@ class ShouldDeployBackendTest(unittest.TestCase):
     def test_backend_cd_workflow_change_deploys(self):
         self.assert_decision([".github/workflows/backend-cd.yml"], "true")
 
-    def test_docs_and_frontend_only_changes_skip(self):
-        self.assert_decision(["docs/README.md", "frontend/src/App.tsx"], "false")
+    def test_frontend_change_deploys(self):
+        self.assert_decision(["frontend/src/App.tsx"], "true")
+
+    def test_docs_only_changes_skip(self):
+        self.assert_decision(["docs/README.md"], "false")
 
     def test_accumulated_backend_change_before_docs_change_still_deploys(self):
         self.assert_decision(
@@ -79,6 +102,14 @@ class ShouldDeployBackendTest(unittest.TestCase):
             "deployments?environment=$BACKEND_DEPLOYMENT_ENVIRONMENT&per_page=100",
             WORKFLOW,
         )
+
+    def test_backend_ci_verifies_production_task_definition_secret_contract(self):
+        backend_ci = Path(".github/workflows/backend-ci.yml").read_text(encoding="utf-8")
+        run = run_block(backend_ci, "Verify production task definition secret contract")
+
+        self.assertIn("scripts/test-verify-production-task-definition.py", run)
+        self.assertIn("scripts/verify-production-task-definition.py", run)
+        self.assertIn("--application-config backend/src/main/resources/application.yml", run)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 package com.miriyum.domain.consumer.entity;
 
+import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.global.entity.BaseEntity;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import jakarta.persistence.Column;
@@ -15,7 +16,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
+import com.miriyum.global.exception.ServiceException;
 
 /**
  * 일반 사용자 계정이다. 매장 운영자 계정과 물리적으로 분리된 별도 테이블·기본 키를 사용한다.
@@ -24,7 +25,6 @@ import lombok.RequiredArgsConstructor;
 @Table(name = "consumer_accounts")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@RequiredArgsConstructor(access = AccessLevel.PRIVATE)
 public class ConsumerAccount extends BaseEntity {
 
     @Id
@@ -36,8 +36,7 @@ public class ConsumerAccount extends BaseEntity {
     @Column(name = "email", nullable = false, length = 254)
     private String email;
 
-    @NonNull
-    @Column(name = "password_hash", nullable = false, length = 255)
+    @Column(name = "password_hash", length = 255)
     private String passwordHash;
 
     @Column(name = "phone", length = 512)
@@ -53,9 +52,21 @@ public class ConsumerAccount extends BaseEntity {
     @Column(name = "nickname_changed_at")
     private LocalDateTime nicknameChangedAt;
 
+    @Column(name = "password_reset_required", nullable = false)
+    private boolean passwordResetRequired;
+
+    @Column(name = "support_version", nullable = false)
+    private long supportVersion;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private ConsumerAccountStatus status;
+
+    private ConsumerAccount(String email, String passwordHash, String name) {
+        this.email = java.util.Objects.requireNonNull(email);
+        this.passwordHash = passwordHash;
+        this.name = java.util.Objects.requireNonNull(name);
+    }
 
     public static ConsumerAccount create(String email, String passwordHash, String name) {
         ConsumerAccount account = new ConsumerAccount(email, passwordHash, name);
@@ -88,4 +99,37 @@ public class ConsumerAccount extends BaseEntity {
         this.name = newName;
         this.nicknameChangedAt = changedAt;
     }
+
+    public void assertSupportVersion(long expectedVersion) {
+        if (supportVersion != expectedVersion) {
+            throw new ServiceException(AuthErrorCode.MEMBER_SUPPORT_STATE_CONFLICT);
+        }
+    }
+
+    public void approveRecovery(String newEmail) {
+        this.email = java.util.Objects.requireNonNull(newEmail);
+        this.passwordResetRequired = true;
+        this.supportVersion++;
+    }
+
+    public void replaceRecoveredPassword(String newPasswordHash) {
+        if (!passwordResetRequired) {
+            throw new ServiceException(AuthErrorCode.MEMBER_SUPPORT_STATE_CONFLICT);
+        }
+        this.passwordHash = java.util.Objects.requireNonNull(newPasswordHash);
+        this.passwordResetRequired = false;
+        this.supportVersion++;
+    }
+
+    public void applySupportSuspension() {
+        this.status = ConsumerAccountStatus.SUSPENDED;
+        this.supportVersion++;
+    }
+
+    public void clearSupportSuspension() {
+        this.status = ConsumerAccountStatus.ACTIVE;
+        this.supportVersion++;
+    }
+
+    public void advanceSupportVersion() { this.supportVersion++; }
 }

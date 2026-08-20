@@ -3,6 +3,7 @@ package com.miriyum.domain.store.service;
 import com.miriyum.domain.store.dto.contract.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.dto.contract.StoreReservationTransactionEligibility;
 import com.miriyum.domain.store.dto.contract.StoreMenuTransactionEligibility;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.RestrictedFeature;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.VerificationStatus;
@@ -22,9 +23,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class StoreTransactionEligibilityService {
 
     private final StoreRepository storeRepository;
+    private final StoreAdministrationService storeAdministrationService;
 
-    StoreTransactionEligibilityService(StoreRepository storeRepository) {
+    StoreTransactionEligibilityService(
+            StoreRepository storeRepository,
+            StoreAdministrationService storeAdministrationService
+    ) {
         this.storeRepository = storeRepository;
+        this.storeAdministrationService = storeAdministrationService;
     }
 
     /**
@@ -40,6 +46,7 @@ public class StoreTransactionEligibilityService {
             requireReservationTransactionEligibility(long storeId) {
         Store store = loadStore(storeId);
         requireOpenApproved(store);
+        storeAdministrationService.requireFeatureAllowed(storeId, RestrictedFeature.RESERVATION);
         if (!store.isReservationEnabled()) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }
@@ -60,6 +67,7 @@ public class StoreTransactionEligibilityService {
             requirePickupTransactionEligibility(long storeId) {
         Store store = loadStore(storeId);
         requireOpenApproved(store);
+        storeAdministrationService.requireFeatureAllowed(storeId, RestrictedFeature.PICKUP);
         if (!store.isPickupEnabled()) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }
@@ -79,11 +87,20 @@ public class StoreTransactionEligibilityService {
     public StoreMenuTransactionEligibility requireMenuTransactionEligibility(long storeId) {
         Store store = loadStore(storeId);
         requireOpenApproved(store);
+        storeAdministrationService.requireFeatureAllowed(storeId, RestrictedFeature.MENU_HOLD);
         return new StoreMenuTransactionEligibility(
                 store.getId(),
                 store.isReservationEnabled(),
                 store.isMenuHoldEnabled(),
                 store.isPickupEnabled());
+    }
+
+    /** 신규 대기 등록 직전에 Store 상태와 매장 단위 대기 제재를 잠금 검증한다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void requireWaitingTransactionEligibility(long storeId) {
+        Store store = loadStore(storeId);
+        requireOpenApproved(store);
+        storeAdministrationService.requireFeatureAllowed(storeId, RestrictedFeature.WAITING);
     }
 
     private Store loadStore(long storeId) {

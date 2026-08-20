@@ -19,6 +19,82 @@ import org.springframework.data.repository.query.Param;
  */
 public interface ReservationRepository extends JpaRepository<Reservation, Long> {
 
+    List<Reservation> findAllByIdIn(List<Long> reservationIds);
+
+    @Query(value = """
+            WITH candidates AS (
+                SELECT r.*,
+                       COALESCE(
+                           CONCAT('reservation-hold:', p.reservation_hold_id),
+                           CONCAT('reservation:', r.reservation_id)
+                       ) AS monitoring_case_id,
+                       GREATEST(
+                           IF(r.created_at BETWEEN :changedFrom AND :changedTo,
+                              r.created_at, TIMESTAMP('1000-01-01 00:00:00')),
+                           IF(r.cancelled_at BETWEEN :changedFrom AND :changedTo,
+                              r.cancelled_at, TIMESTAMP('1000-01-01 00:00:00')),
+                           IF(r.fulfilled_at BETWEEN :changedFrom AND :changedTo,
+                              r.fulfilled_at, TIMESTAMP('1000-01-01 00:00:00')),
+                           IF(r.no_show_at BETWEEN :changedFrom AND :changedTo,
+                              r.no_show_at, TIMESTAMP('1000-01-01 00:00:00'))
+                       ) AS monitoring_changed_at
+                  FROM reservations r
+                  LEFT JOIN reservation_deposit_processes p
+                    ON p.final_reservation_id = r.reservation_id
+                 WHERE (:storeId IS NULL OR r.store_id = :storeId)
+                   AND r.created_at <= :changedTo
+                   AND (
+                        r.created_at BETWEEN :changedFrom AND :changedTo
+                        OR r.cancelled_at BETWEEN :changedFrom AND :changedTo
+                        OR r.fulfilled_at BETWEEN :changedFrom AND :changedTo
+                        OR r.no_show_at BETWEEN :changedFrom AND :changedTo
+                   )
+            )
+            SELECT candidates.*
+              FROM candidates
+             WHERE (
+                    :allStatuses = TRUE
+                    OR FIND_IN_SET(
+                        CASE
+                            WHEN no_show_at = monitoring_changed_at THEN 'NO_SHOW'
+                            WHEN fulfilled_at = monitoring_changed_at THEN 'FULFILLED'
+                            WHEN cancelled_at = monitoring_changed_at THEN 'CANCELLED'
+                            ELSE 'CONFIRMED'
+                        END,
+                        :statusesCsv
+                    ) > 0
+               )
+               AND (
+                    :afterChangedAt IS NULL
+                    OR monitoring_changed_at < :afterChangedAt
+                    OR (monitoring_changed_at = :afterChangedAt
+                        AND monitoring_case_id < :afterCaseId)
+               )
+             ORDER BY monitoring_changed_at DESC, monitoring_case_id DESC
+            """, nativeQuery = true)
+    List<Reservation> findMonitoringChanges(
+            @Param("changedFrom") Instant changedFrom,
+            @Param("changedTo") Instant changedTo,
+            @Param("storeId") Long storeId,
+            @Param("allStatuses") boolean allStatuses,
+            @Param("statusesCsv") String statusesCsv,
+            @Param("afterChangedAt") Instant afterChangedAt,
+            @Param("afterCaseId") String afterCaseId,
+            Pageable pageable);
+
+    @Query("""
+            select reservation.id
+            from Reservation reservation
+            where reservation.storeId = :storeId
+              and reservation.status = :#{T(com.miriyum.domain.reservation.entity.ReservationStatus).CONFIRMED}
+              and reservation.timeSnapshot.serviceEndAt > :now
+            order by reservation.id
+            """)
+    List<Long> findConfirmedFutureIdsByStoreId(
+            @Param("storeId") long storeId,
+            @Param("now") Instant now
+    );
+
     /**
      * Locks confirmed reservations for one consumer and store whose service interval overlaps
      * the requested half-open interval. This is called after the Store serialization lock and
@@ -128,4 +204,40 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             ReservationStatus status,
             Pageable pageable
     );
+
+    @Query(value = """
+            SELECT
+                COALESCE(SUM(CASE
+                    WHEN r.cancelled_at IS NULL OR r.cancelled_at > :asOf
+                    THEN 1 ELSE 0 END), 0) AS todayReservationTeams,
+                COALESCE(SUM(CASE
+                    WHEN r.cancelled_at IS NOT NULL AND r.cancelled_at <= :asOf
+                    THEN 1 ELSE 0 END), 0) AS cancelledTeams,
+                COUNT(*) AS everConfirmedTeams,
+                COALESCE(MAX(r.reservation_id), 0) AS maxReservationId,
+                COALESCE(MAX(r.capacity_policy_version), 0) AS maxCapacityPolicyVersion,
+                CAST(UNIX_TIMESTAMP(MAX(GREATEST(
+                    r.created_at,
+                    CASE WHEN r.cancelled_at <= :asOf THEN r.cancelled_at ELSE r.created_at END,
+                    CASE WHEN r.fulfilled_at <= :asOf THEN r.fulfilled_at ELSE r.created_at END
+                ))) * 1000000 AS SIGNED) AS dataThroughEpochMicros
+            FROM reservations r
+            WHERE r.store_id = :storeId
+              AND r.service_date = :businessDate
+              AND r.created_at <= :asOf
+            """, nativeQuery = true)
+    ReservationAnalyticsLifecycle aggregateDashboardLifecycle(
+            @Param("storeId") long storeId,
+            @Param("businessDate") LocalDate businessDate,
+            @Param("asOf") Instant asOf
+    );
+
+    interface ReservationAnalyticsLifecycle {
+        Long getTodayReservationTeams();
+        Long getCancelledTeams();
+        Long getEverConfirmedTeams();
+        Long getMaxReservationId();
+        Long getMaxCapacityPolicyVersion();
+        Long getDataThroughEpochMicros();
+    }
 }

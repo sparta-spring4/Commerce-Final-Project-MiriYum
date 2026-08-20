@@ -20,11 +20,14 @@ dependencies {
     implementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("io.micrometer:micrometer-registry-cloudwatch2")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("io.github.openfeign.querydsl:querydsl-jpa:7.5")
+    implementation("org.springframework.boot:spring-boot-starter-data-redis")
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-flyway")
+    implementation("software.amazon.awssdk:s3:2.33.4")
     implementation("com.ibm.icu:icu4j:78.3")
     runtimeOnly("org.flywaydb:flyway-mysql")
     runtimeOnly("com.mysql:mysql-connector-j")
@@ -59,15 +62,32 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // Gradle 기본 test JVM 힙은 512m이라 통합 테스트에서 부족하다. 한 shard가 여러
+    // Spring ApplicationContext를 캐시한 채 Testcontainers까지 함께 띄우면 힙이 고갈되어
+    // OutOfMemoryError로 실패한다(CI run 31624143460, integration-test-a).
+    maxHeapSize = "2g"
+    // 캐시된 context 수를 제한해 shard가 커져도 힙 사용량이 무한히 늘지 않게 한다.
+    // Spring 기본값은 32이며, context 하나당 애플리케이션 전체가 메모리에 상주한다.
+    systemProperty("spring.test.context.cache.maxSize", "8")
     systemProperty("miriyum.menu.schedule.enabled", "false")
     systemProperty("miriyum.reservation.time-policy.activation-enabled", "false")
     systemProperty("miriyum.store.schedule.activation-enabled", "false")
+    systemProperty("miriyum.waiting.closure.enabled", "false")
+    systemProperty("junit.jupiter.extensions.autodetection.enabled", "true")
 }
 
 val integrationTag = "integration"
+val externalLiveTag = "external-live"
 val integrationShardATag = "integration-shard-a"
 val integrationShardBTag = "integration-shard-b"
-val integrationShardTags = listOf(integrationShardATag, integrationShardBTag)
+val integrationShardCTag = "integration-shard-c"
+val integrationShardDTag = "integration-shard-d"
+val integrationShardTags = listOf(
+    integrationShardATag,
+    integrationShardBTag,
+    integrationShardCTag,
+    integrationShardDTag,
+)
 
 val verifyIntegrationTestTags = tasks.register("verifyIntegrationTestTags") {
     group = "verification"
@@ -81,6 +101,7 @@ val verifyIntegrationTestTags = tasks.register("verifyIntegrationTestTags") {
             source.contains("@Testcontainers")
                 || source.contains("MySQLContainer")
                 || source.contains("@SpringBootTest")
+                || source.contains("@Tag(\"$integrationTag\")")
         }
         val missingIntegrationTags = candidates.filterNot { file ->
             file.readText().contains("@Tag(\"$integrationTag\")")
@@ -101,7 +122,21 @@ val verifyIntegrationTestTags = tasks.register("verifyIntegrationTestTags") {
 
 tasks.named<Test>("test") {
     useJUnitPlatform {
-        excludeTags(integrationTag)
+        excludeTags(integrationTag, externalLiveTag)
+    }
+    dependsOn(verifyIntegrationTestTags)
+}
+
+tasks.register<Test>("openAiSearchConceptLiveTest") {
+    group = "verification"
+    description = "OPENAI_API_KEY가 있을 때 실제 OpenAI 검색 개념 계약을 검증합니다."
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform {
+        includeTags(externalLiveTag)
+    }
+    onlyIf("OPENAI_API_KEY must be set") {
+        !System.getenv("OPENAI_API_KEY").isNullOrBlank()
     }
     dependsOn(verifyIntegrationTestTags)
 }
@@ -114,6 +149,7 @@ val integrationTest = tasks.register<Test>("integrationTest") {
     useJUnitPlatform {
         includeTags(integrationTag)
     }
+    systemProperty("spring.test.context.cache.maxSize", "4")
     dependsOn(verifyIntegrationTestTags)
 }
 
@@ -125,11 +161,14 @@ fun registerIntegrationTestShard(taskName: String, shardTag: String) = tasks.reg
     useJUnitPlatform {
         includeTags(shardTag)
     }
+    systemProperty("spring.test.context.cache.maxSize", "4")
     dependsOn(verifyIntegrationTestTags)
 }
 
 val integrationTestShardA = registerIntegrationTestShard("integrationTestShardA", integrationShardATag)
 val integrationTestShardB = registerIntegrationTestShard("integrationTestShardB", integrationShardBTag)
+val integrationTestShardC = registerIntegrationTestShard("integrationTestShardC", integrationShardCTag)
+val integrationTestShardD = registerIntegrationTestShard("integrationTestShardD", integrationShardDTag)
 
 tasks.check {
     dependsOn(integrationTest)

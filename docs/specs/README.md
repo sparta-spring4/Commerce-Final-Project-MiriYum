@@ -10,3 +10,15 @@
 - 명령, 결과와 검증 증빙은 Pull Request와 CI가 소유한다.
 
 지속적인 아키텍처 결정은 [ADR](../adr/)에 기록한다. 기능 명세에는 해당 결정을 복제하지 말고 필요한 ADR과 정책을 연결한다.
+
+## 고도화 활성 기능 명세
+
+- [입점 신청 사업자등록증 비공개 증빙](store-onboarding/spec.md): #344가 소유하는 불투명 증빙 식별자, 교체 이력과 Store 공개 Service/DTO 경계
+- [매장 운영자 예약별 결제·환불 상태 조회](store-payment-status/spec.md): #273이 소유하는 Store 은닉 권한, Reservation 조합과 Payment 최소 공개 snapshot 계약
+- [플랫폼 운영자 인증·세션·최초 비밀번호 변경](platform-operator-auth/spec.md): #275가 소유하는 독립 인증 namespace와 중앙 세션 계약
+- [플랫폼 운영자 권한·재인증·고위험 명령 공통 기반](platform-operator-authorization/spec.md): #276이 소유하는 RBAC·사건 배정·일회 승인·guard 계약
+- [현재 플랫폼 운영자 capabilities 조회](platform-operator-capabilities/spec.md): #403이 소유하는 현재 중앙 역할·최종 유효 권한 읽기 계약
+- [회원 조회·계정 복구·제재 사건 관리](member-support/spec.md): #278이 소유하는 최소 회원 조회·mock 확인·복구·제재·이의 계약
+- [운영자 계정·권한 관리 및 감사 이력](platform-operator-management-audit/spec.md): #282의 쓰기·감사 계약과 #415의 운영자 계정 목록·상세 읽기 계약. 플랫폼 운영자 중앙 세션·RBAC 원장을 재사용한다.
+- [플랫폼 매장 조회·제재·운영 중지 관리](admin-store/spec.md): #279가 소유하는 Store 단위 최소 조회·영향 확인·제재·불변 감사 계약
+- [예약·웨이팅 통합 모니터링](admin-monitoring/spec.md): #280이 소유하는 사건 중심 원장 조합·부분 실패·최소 마스킹 조회 계약

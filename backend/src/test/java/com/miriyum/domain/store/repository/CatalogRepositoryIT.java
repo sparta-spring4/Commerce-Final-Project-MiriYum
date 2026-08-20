@@ -34,7 +34,7 @@ import org.testcontainers.utility.DockerImageName;
             "miriyum.jwt.issuer=miriyum"
         })
 @Tag("integration")
-@Tag("integration-shard-b")
+@Tag("integration-shard-d")
 @Testcontainers(disabledWithoutDocker = true)
 @Transactional
 class CatalogRepositoryIT {

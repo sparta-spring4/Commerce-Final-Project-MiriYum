@@ -1,5 +1,8 @@
 # Backend 구현 가드레일
 
+- `platformoperator`는 일반 사용자·매장 운영자와 분리된 최상위 도메인이며 HTTP root는 `/api/v1/platform-operators/**`만 사용한다.
+- 플랫폼 운영자 Controller와 활성 보안 체인은 `miriyum.platform-operator.enabled=true`일 때만 등록한다. 기본값 OFF에서는 MVC 404로 수렴한다.
+
 계약 상태: ACTIVE
 
 ## 빌드 및 애플리케이션 경계
@@ -31,7 +34,8 @@ com.miriyum
    ├─ recommendation
    ├─ reservation
    ├─ menuhold
-   └─ pickup
+   ├─ pickup
+   └─ payment
 ```
 
 각 도메인은 실제 필요가 확인된 경우에만 `controller`, `service`, `repository`, `entity`, `dto`, `exception`을 만든다. 검증된 계산 책임은 `recommendation.ranking`처럼 목적이 분명한 capability 패키지에 둘 수 있지만, 영속 조회 구현은 `repository` 패키지에 둔다. HTTP 호출자 구분이 필요한 Controller와 HTTP DTO만 `publicapi`, `consumer`, `storeoperator` 하위로 나눈다. `publicapi`는 별도 제휴 API가 아니라 인증 principal을 요구하지 않는 공개 HTTP 조회 경계다. 사용자 유형 자체가 도메인인 `consumer`, `storeoperator`는 Controller와 HTTP DTO를 `auth`, `account` 목적별로 나눈다. Service·Repository·Entity를 호출자별로 복제하지 않는다.
@@ -51,8 +55,9 @@ com.miriyum
 - `ReservationService`
 - `MenuHoldService`
 - `PickupService`
+- `PaymentService`
 
-예약과 MenuHold의 교차 트랜잭션은 예약 소유 `ReservationMenuHoldPort`와 MenuHold 소유 `ReservationMenuHoldAdapter`로 연결한다. MenuHold가 예약 시간을 해석할 때는 `ReservationService` 전체가 아니라 `ReservationTimeResolutionService`만 의존한다. 도메인 의존 그래프의 순환 baseline은 0건이다.
+예약과 MenuHold의 교차 트랜잭션은 예약 소유 포트와 MenuHold 소유 adapter로만 연결한다. 1차 MVP 즉시 확정 흐름은 `ReservationMenuHoldPort`·`ReservationMenuHoldAdapter`, 고도화 10분 임시 선점 흐름은 `ReservationTemporaryMenuHoldPort`·`ReservationTemporaryMenuHoldAdapter`를 사용한다. 두 경계는 scalar DTO만 교환하며 Reservation에서 MenuHold Entity·Repository를 직접 참조하지 않는다. 임시 선점 종결은 ReservationHold를 잠근 뒤 임시 MenuHold 루트만 선잠그는 계약과, 수용량 처리 뒤 MenuHold 상태·재고를 적용하는 계약을 분리해 `ReservationHold → temporary MenuHold → capacity bucket PK → inventory bucket PK` 순서를 지킨다. MenuHold가 예약 시간을 해석할 때는 `ReservationService` 전체가 아니라 `ReservationTimeResolutionService`만 의존한다. 도메인 의존 그래프의 순환 baseline은 0건이다.
 
 API·유스케이스 소유 Service가 교차 도메인 transaction을 조정한다. 다른 도메인은 소유자의 공개 Service 메서드와 DTO만 사용하며 Entity·Repository·내부 구현에 직접 접근하지 않는다.
 
@@ -99,15 +104,15 @@ Controller와 Service는 생성자 주입을 사용하며 필요한 경우 `@Req
 
 JSON 성공 응답은 `ApiResponse<T>(code, message, data)`를 사용한다. 반환 데이터가 없으면 `data: null`, 빈 조회는 `data: []`로 표현한다. 파일·stream 같은 비 JSON 응답은 envelope 예외가 될 수 있다.
 
-기술 공통 오류는 `CommonErrorCode`, 도메인별 오류는 `AuthErrorCode`, `StoreErrorCode`, `ReservationErrorCode`, `MenuHoldErrorCode`, `PickupErrorCode` 하나씩만 사용한다. 계정 상태·회원정보 오류도 인증 도메인의 `AuthErrorCode`가 소유하며 별도 `AccountErrorCode`나 `domain.account` package를 만들지 않는다. ErrorCode는 HTTP status, 외부 code, message를 제공하고 `ServiceException(ErrorCode)`와 `GlobalExceptionHandler`가 처리한다. Security `401/403`도 같은 JSON 오류 구조를 사용한다.
+기술 공통 오류는 `CommonErrorCode`, 도메인별 오류는 `AuthErrorCode`, `StoreErrorCode`, `ReservationErrorCode`, `MenuHoldErrorCode`, `PickupErrorCode`, `PaymentErrorCode` 하나씩만 사용한다. 계정 상태·회원정보 오류도 인증 도메인의 `AuthErrorCode`가 소유하며 별도 `AccountErrorCode`나 `domain.account` package를 만들지 않는다. ErrorCode는 HTTP status, 외부 code, message를 제공하고 `ServiceException(ErrorCode)`와 `GlobalExceptionHandler`가 처리한다. Security `401/403`도 같은 JSON 오류 구조를 사용한다.
 
 요청 DTO `record`에 Bean Validation을 선언하고 Controller에서 `@Valid`를 사용한다. 구조·형식 검증은 DTO, business 정책 검증은 Service가 소유한다. exception, SQL, stack trace, secret, token, 민감 입력값을 응답에 노출하지 않는다.
 
 ## 테스트
 
-- 핵심 Service의 성공·실패와 상태 전이·인가·정원·재고·날짜·시간을 unit test로 검증한다.
+- 핵심 Service의 성공·실패와 상태 전이·인가·정원·재고·날짜·시간·금액·통화·결제 멱등성을 unit test로 검증한다.
 - validation, HTTP status, 성공·오류 envelope, Security와 `Idempotency-Key`를 MockMvc로 검증한다.
-- Flyway, DB constraint, 조건부 수량 변경, 동시성·멱등성, rollback·취소 복구와 픽업 분리는 Testcontainers MySQL로 검증한다.
+- Flyway, DB constraint, 조건부 수량 변경, 동시성·멱등성, rollback·취소 복구, 픽업 분리와 결제·Webhook·환불 원장 중복 방지는 Testcontainers MySQL로 검증한다.
 - H2만으로 MySQL 동작을 증명하지 않는다.
 - given/when/then 구조, camelCase test method와 한국어 `@DisplayName`을 사용한다.
 - 시간은 `Clock`, 동시성은 barrier/latch로 제어하고 `sleep`에 의존하지 않는다.
@@ -116,6 +121,8 @@ JSON 성공 응답은 `ApiResponse<T>(code, message, data)`를 사용한다. 반
 ## 설정·형식·Javadoc
 
 runtime 설정은 실제 구현 Issue에서만 변경한다. YAML은 2칸 들여쓰기를 사용한다. Java 21, Spring Boot 4.1.0, Gradle 9.6.1을 임의 변경하지 않는다. Lombok은 실제 구현 Issue에서 추가하고 Testcontainers MySQL image는 첫 DB 통합 Issue의 검증된 정확 버전으로 고정한다. QueryDSL, Valkey와 외부 SDK는 필요한 단계와 Issue 전에는 추가하지 않는다.
+
+Issue #368의 검색 LLM은 OpenAI `gpt-4o-mini` Structured Outputs 어댑터로 최대 8개의 음식 개념만 반환한다. 정확 MySQL 검색을 먼저 실행하고 최초 응답 부족 시에만 호출하며, 후보·가용성·알레르기 안전·재고·예약·점수·순위는 현재 MySQL과 결정적 코드가 확정한다. 벡터 저장소·외부 색인·캐시는 두지 않는다. `OPENAI_API_KEY`는 환경 Secret으로만 주입하고 원문·응답·Secret을 로그에 남기지 않는다.
 
 Java는 4칸 들여쓰기, UTF-8, final newline, wildcard import 금지를 지킨다. package는 lowercase, constant와 enum은 `UPPER_SNAKE_CASE`다. `process`, `handle`처럼 목적이 모호한 이름을 피한다.
 

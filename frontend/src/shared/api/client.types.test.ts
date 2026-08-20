@@ -30,7 +30,7 @@ export function allowedCalls() {
   expectTypeOf<Data['items'][number]>().toHaveProperty('displayName')
 
   // 경로 변수와 필수 본문·멱등 키를 갖춘 호출
-  void api('/api/v1/consumers/reservations/{reservationId}', {
+  void api('/api/v1/consumers/me/reservations/{reservationId}', {
     method: 'get',
     pathParams: { reservationId: 1 },
   })
@@ -62,7 +62,7 @@ export function rejectedCalls() {
   })
 
   // @ts-expect-error reservationId가 필요하다
-  void api('/api/v1/consumers/reservations/{reservationId}', { method: 'get' })
+  void api('/api/v1/consumers/me/reservations/{reservationId}', { method: 'get' })
 
   // @ts-expect-error PATCH /consumers/me는 Idempotency-Key가 필수다
   void api('/api/v1/consumers/me', { method: 'patch', body: { nickname: '미리' } })
@@ -74,6 +74,93 @@ export function rejectedCalls() {
   // 이제 타입 인자는 경로와 method로 고정되므로 수동 응답 타입을 넣을 수 없다.
   // @ts-expect-error 응답 타입은 호출자가 지정하지 않는다
   void api<{ anything: true }>('/api/v1/store-categories', { method: 'get' })
+}
+
+/**
+ * 플랫폼 운영자 고위험 명령과 감사 조회의 헤더 조건.
+ *
+ * 재인증 헤더는 생성 타입에서 파생되지 않는다. `member-support` 문서가 이
+ * parameter를 다른 문서로 가는 `$ref`로 정의해서, openapi-typescript 6.7.6이
+ * 두 단계 참조에서 헤더 이름을 복원하지 못하고 operation에서 빠뜨린다.
+ * `paths.ts`가 경로 목록으로 닫아 두었고, 아래가 그 장치의 회귀 테스트다.
+ *
+ * 이 테스트가 깨지는 경우는 둘이다. 문서가 고쳐져 생성 타입에 헤더가 들어왔거나,
+ * 누군가 목록에서 경로를 지웠거나. 앞이면 `paths.ts`의 목록을 지우면 되고,
+ * 뒤면 제재가 재인증 없이 나가게 된 것이므로 되돌려야 한다.
+ */
+export function platformOperatorCommandHeaders() {
+  // 계약이 요구하는 것을 모두 갖춘 제재 호출
+  void api(
+    '/api/v1/platform-operators/members/{accountType}/{accountId}/sanctions',
+    {
+      method: 'post',
+      pathParams: { accountType: 'CONSUMER', accountId: 'op-1' },
+      body: {
+        level: 'WARNING',
+        reasonCode: 'ABUSE_REPORT',
+        policyVersion: 'SANCTION_POLICY_V1',
+      },
+      idempotencyKey: 'key-1',
+      ifMatch: 3,
+      adminReauthentication: 'approval-1',
+    },
+  )
+
+  void api(
+    '/api/v1/platform-operators/members/{accountType}/{accountId}/sanctions',
+    {
+      method: 'post',
+      pathParams: { accountType: 'CONSUMER', accountId: 'op-1' },
+      body: {
+        level: 'WARNING',
+        reasonCode: 'ABUSE_REPORT',
+        policyVersion: 'SANCTION_POLICY_V1',
+      },
+      idempotencyKey: 'key-1',
+      ifMatch: 3,
+      // @ts-expect-error 제재는 재인증 승인 없이 보낼 수 없다
+      adminReauthentication: undefined,
+    },
+  )
+
+  void api('/api/v1/platform-operators/member-support-cases/{caseId}/decisions', {
+    method: 'post',
+    pathParams: { caseId: 'case-1' },
+    body: { decision: 'APPROVE', reasonCode: 'VERIFIED' },
+    idempotencyKey: 'key-2',
+    ifMatch: 1,
+    // @ts-expect-error 사건 결정도 재인증 승인이 필요하다
+    adminReauthentication: undefined,
+  })
+
+  // 감사 조회는 사건·version·사유 코드를 함께 보내야 한다.
+  void api('/api/v1/platform-operators/audit-events', {
+    method: 'get',
+    adminAuditContext: {
+      caseId: 'audit-case-1',
+      caseVersion: 2,
+      reasonCode: 'AUDIT_REVIEW',
+    },
+  })
+
+  // @ts-expect-error 감사 조회는 사건·사유 맥락 없이 보낼 수 없다
+  void api('/api/v1/platform-operators/audit-events', { method: 'get' })
+
+  // 자기 배정은 version만 요구하고 재인증은 요구하지 않는다.
+  void api(
+    '/api/v1/platform-operators/member-support-cases/{caseId}/assignments',
+    {
+      method: 'post',
+      pathParams: { caseId: 'case-1' },
+      ifMatch: 1,
+    },
+  )
+
+  void api('/api/v1/consumers/auth/csrf-tokens/current', {
+    method: 'get',
+    // @ts-expect-error 일반 사용자 경로에는 운영자 명령 헤더를 붙일 수 없다
+    adminReauthentication: 'approval-1',
+  })
 }
 
 /**

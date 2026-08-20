@@ -2,6 +2,7 @@ package com.miriyum.domain.menuhold.adapter;
 
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldForfeitCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
@@ -63,6 +64,12 @@ public class ReservationMenuHoldAdapter implements ReservationMenuHoldPort {
     public ReservationMenuHoldResult fulfill(long reservationId, String operationId) {
         return toResult(menuHoldService.fulfill(
                 new MenuHoldFulfillCommand(reservationId, operationId)));
+    }
+
+    @Override
+    public ReservationMenuHoldResult forfeit(long reservationId, String operationId) {
+        return toResult(menuHoldService.forfeit(
+                new MenuHoldForfeitCommand(reservationId, operationId)));
     }
 
     @Override

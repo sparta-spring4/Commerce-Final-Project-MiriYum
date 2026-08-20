@@ -14,6 +14,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
   deployments: read
 
@@ -32,8 +33,9 @@ jobs:
   verify-source:
     name: verify-staging-deployment-source
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
+      actions: read
       contents: read
       deployments: read
     if: >-
@@ -68,6 +70,29 @@ jobs:
               echo "deployable=false" >> "$GITHUB_OUTPUT"
               echo "::notice::Skipping stale CI revision $WORKFLOW_SHA; current dev is $current_dev_sha."
               exit 0
+            fi
+
+            # 같은 dev SHA의 frontend CI가 성공한 뒤에만 same-origin runtime을 배포한다.
+            for ((attempt = 0; attempt < 60; attempt++)); do
+              frontend_conclusion=$(gh api \
+                "repos/$GITHUB_REPOSITORY/actions/workflows/frontend-ci.yml/runs?head_sha=$WORKFLOW_SHA&event=push&per_page=100" \
+                --jq '[.workflow_runs[] | select(.head_branch == "dev") | .conclusion] | first // ""')
+
+              case "$frontend_conclusion" in
+                success)
+                  break
+                  ;;
+                failure|cancelled|timed_out|action_required)
+                  echo "::error::Frontend CI did not succeed for $WORKFLOW_SHA: $frontend_conclusion"
+                  exit 1
+                  ;;
+              esac
+              sleep 10
+            done
+
+            if [ "$frontend_conclusion" != "success" ]; then
+              echo "::error::Frontend CI did not complete successfully for $WORKFLOW_SHA within 10 minutes."
+              exit 1
             fi
 
             last_deployed_sha=$(gh api \
@@ -106,7 +131,7 @@ jobs:
     name: build-and-deploy-backend-staging
     needs: verify-source
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 40
     # staging Environment의 변수와 배포 이력을 사용한다. 운영 Environment는 이 워크플로에서 사용하지 않는다.
     environment: staging
     permissions:
@@ -199,6 +224,34 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check immutable frontend ECR image exists
+        id: frontend-image
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          frontend_tag="${IMAGE_TAG}-frontend"
+          if ! image_count=$(aws ecr batch-get-image \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=$frontend_tag" \
+            --query 'length(images)' \
+            --output text); then
+            echo "::error::Frontend ECR image lookup failed. The staging CD role requires ecr:BatchGetImage on $ECR_REPOSITORY."
+            exit 1
+          fi
+
+          if [ "$image_count" = "1" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Reusing immutable frontend ECR image tag: $frontend_tag"
+          else
+            if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+              echo "::error::Manual deployment requires an existing immutable frontend ECR image tag: $frontend_tag."
+              exit 1
+            fi
+
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up QEMU for ARM64 builds
         if: github.event_name == 'workflow_run'
         uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
@@ -216,6 +269,20 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push ARM64 frontend image
+        if: github.event_name == 'workflow_run' && steps.frontend-image.outputs.exists != 'true'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: frontend/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.tag }}-frontend
+          build-args: |
+            VITE_KAKAO_MAP_APP_KEY=${{ vars.STAGING_KAKAO_MAP_APP_KEY }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -258,10 +325,18 @@ jobs:
         run: |
           # 실행 .env는 EC2의 제한된 권한으로만 유지하므로 의도적으로 전송 대상에서 제외한다.
           compose_base64=$(base64 --wrap=0 deploy/docker-compose.prod.yml)
-          nginx_base64=$(base64 --wrap=0 deploy/nginx/default.conf)
+          nginx_http_base64=$(base64 --wrap=0 deploy/nginx/templates/http.conf.template)
+          nginx_https_base64=$(base64 --wrap=0 deploy/nginx/templates/https.conf.template)
+          nginx_sse_base64=$(base64 --wrap=0 deploy/nginx/templates/snippets/sse-location.conf)
+          nginx_entrypoint_base64=$(base64 --wrap=0 deploy/nginx/entrypoint/40-select-server-config.sh)
           script_base64=$(base64 --wrap=0 deploy/deploy.sh)
+          certbot_script_base64=$(base64 --wrap=0 deploy/certbot.sh)
           cloudwatch_base64=$(base64 --wrap=0 deploy/monitoring/cloudwatch-agent-config.json)
+          valkey_memory_metrics_base64=$(base64 --wrap=0 deploy/monitoring/publish-valkey-memory-metrics.sh)
+          valkey_memory_service_base64=$(base64 --wrap=0 deploy/monitoring/miriyum-valkey-memory-metrics.service)
+          valkey_memory_timer_base64=$(base64 --wrap=0 deploy/monitoring/miriyum-valkey-memory-metrics.timer)
           image_uri="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          frontend_image_uri="$ECR_REGISTRY/$ECR_REPOSITORY:${IMAGE_TAG}-frontend"
 
           cat > ssm-command.json <<EOF
           {
@@ -271,15 +346,28 @@ jobs:
             "Parameters": {
               "commands": [
                 "set -Eeuo pipefail",
-                "install -d -m 0755 /opt/miriyum/nginx",
+                "install -d -m 0755 /opt/miriyum/nginx/templates/snippets /opt/miriyum/nginx/entrypoint",
                 "echo '$compose_base64' | base64 --decode > /opt/miriyum/docker-compose.prod.yml",
-                "echo '$nginx_base64' | base64 --decode > /opt/miriyum/nginx/default.conf",
+                "echo '$nginx_http_base64' | base64 --decode > /opt/miriyum/nginx/templates/http.conf.template",
+                "echo '$nginx_https_base64' | base64 --decode > /opt/miriyum/nginx/templates/https.conf.template",
+                "echo '$nginx_sse_base64' | base64 --decode > /opt/miriyum/nginx/templates/snippets/sse-location.conf",
+                "echo '$nginx_entrypoint_base64' | base64 --decode > /opt/miriyum/nginx/entrypoint/40-select-server-config.sh",
                 "echo '$script_base64' | base64 --decode > /opt/miriyum/deploy.sh",
+                "echo '$certbot_script_base64' | base64 --decode > /opt/miriyum/certbot.sh",
                 "install -d -m 0755 /opt/miriyum/monitoring",
                 "echo '$cloudwatch_base64' | base64 --decode > /opt/miriyum/monitoring/cloudwatch-agent.json",
+                "echo '$valkey_memory_metrics_base64' | base64 --decode > /opt/miriyum/monitoring/publish-valkey-memory-metrics.sh",
+                "echo '$valkey_memory_service_base64' | base64 --decode > /etc/systemd/system/miriyum-valkey-memory-metrics.service",
+                "echo '$valkey_memory_timer_base64' | base64 --decode > /etc/systemd/system/miriyum-valkey-memory-metrics.timer",
                 "if [ -x /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl ]; then /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/miriyum/monitoring/cloudwatch-agent.json -s; fi",
                 "chmod 700 /opt/miriyum/deploy.sh",
-                "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' /opt/miriyum/deploy.sh"
+                "chmod 700 /opt/miriyum/monitoring/publish-valkey-memory-metrics.sh",
+                "systemctl daemon-reload",
+                "systemd-analyze verify /etc/systemd/system/miriyum-valkey-memory-metrics.service /etc/systemd/system/miriyum-valkey-memory-metrics.timer",
+                "systemctl enable --now miriyum-valkey-memory-metrics.timer",
+                "chmod 700 /opt/miriyum/certbot.sh",
+                "chmod 755 /opt/miriyum/nginx/entrypoint/40-select-server-config.sh",
+                "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' FRONTEND_IMAGE='$frontend_image_uri' /opt/miriyum/deploy.sh"
               ]
             }
           }

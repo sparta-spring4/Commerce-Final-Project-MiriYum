@@ -1,0 +1,173 @@
+name: k6 Contract
+
+on:
+  pull_request:
+    branches: [dev, mvp2, main]
+    paths:
+      - 'performance/k6/**'
+      - 'deploy/local/docker-compose.dev.yml'
+      - 'deploy/local/docker-compose.loadtest.yml'
+      - 'deploy/local/Caddyfile.loadtest'
+      - 'deploy/local/nginx.sse.conf'
+      - 'deploy/local/.env.example'
+      - 'deploy/nginx/templates/**'
+      - 'scripts/test-sse-deployment-contract.py'
+      - 'deploy/docker-compose.prod.yml'
+      - 'deploy/.env.example'
+      - '.github/workflows/k6-contract.yml'
+  push:
+    branches: [dev, main]
+    paths:
+      - 'performance/k6/**'
+      - 'deploy/local/docker-compose.dev.yml'
+      - 'deploy/local/docker-compose.loadtest.yml'
+      - 'deploy/local/Caddyfile.loadtest'
+      - 'deploy/local/nginx.sse.conf'
+      - 'deploy/local/.env.example'
+      - 'deploy/nginx/templates/**'
+      - 'scripts/test-sse-deployment-contract.py'
+      - 'deploy/docker-compose.prod.yml'
+      - 'deploy/.env.example'
+      - '.github/workflows/k6-contract.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k6-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: k6-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify load-test Kakao geocoding secret wiring
+        shell: bash
+        env:
+          MIRIYUM_STORE_GEOCODING_REST_API_KEY: contract-test-kakao-key
+          MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET: contract-test-notification-cursor-secret-32bytes
+        run: |
+          set -euo pipefail
+          combined_config="$RUNNER_TEMP/loadtest-compose.json"
+          blank_config="$RUNNER_TEMP/loadtest-compose-blank-key.json"
+          default_config="$RUNNER_TEMP/default-compose.json"
+          staging_config="$RUNNER_TEMP/staging-compose.json"
+
+          docker compose --env-file deploy/local/.env.example \
+            -f deploy/local/docker-compose.dev.yml \
+            -f deploy/local/docker-compose.loadtest.yml \
+            --profile loadtest config --format json > "$combined_config"
+          env -u MIRIYUM_STORE_GEOCODING_REST_API_KEY \
+            -u MIRIYUM_KAKAO_LOCAL_REST_API_KEY \
+            docker compose --env-file deploy/local/.env.example \
+            -f deploy/local/docker-compose.dev.yml \
+            -f deploy/local/docker-compose.loadtest.yml \
+            --profile loadtest config --format json > "$blank_config"
+          docker compose --env-file deploy/local/.env.example \
+            -f deploy/local/docker-compose.dev.yml \
+            config --format json > "$default_config"
+          docker compose --env-file deploy/.env.example \
+            -f deploy/docker-compose.prod.yml \
+            config --format json > "$staging_config"
+
+          COMBINED_CONFIG="$combined_config" BLANK_CONFIG="$blank_config" \
+            DEFAULT_CONFIG="$default_config" STAGING_CONFIG="$staging_config" \
+            node --input-type=module -e '
+            import fs from "node:fs";
+            const key = "MIRIYUM_STORE_GEOCODING_REST_API_KEY";
+            const legacyKey = "MIRIYUM_KAKAO_LOCAL_REST_API_KEY";
+            const expected = process.env[key];
+            const combined = JSON.parse(fs.readFileSync(process.env.COMBINED_CONFIG, "utf8"));
+            const blank = JSON.parse(fs.readFileSync(process.env.BLANK_CONFIG, "utf8"));
+            const defaults = JSON.parse(fs.readFileSync(process.env.DEFAULT_CONFIG, "utf8"));
+            const staging = JSON.parse(fs.readFileSync(process.env.STAGING_CONFIG, "utf8"));
+            const exposedServices = (config, secretName) => Object.entries(config.services ?? {})
+              .filter(([, service]) => Object.hasOwn(service.environment ?? {}, secretName))
+              .map(([name]) => name)
+              .sort();
+            const assertBackendOnly = (config, label, value) => {
+              const backend = config.services?.backend?.environment ?? {};
+              if (backend[key] !== value) {
+                throw new Error(key + " was not forwarded to the " + label + " backend");
+              }
+              const exposure = exposedServices(config, key);
+              if (exposure.length !== 1 || exposure[0] !== "backend") {
+                throw new Error(key + " must be exposed only to the " + label + " backend");
+              }
+            };
+            assertBackendOnly(combined, "load-test", expected);
+            assertBackendOnly(staging, "staging", expected);
+            const blankBackend = blank.services?.backend?.environment ?? {};
+            if (blankBackend[key] !== "") {
+              throw new Error(key + " must remain optional when the local value is blank");
+            }
+            const blankExposure = exposedServices(blank, key);
+            if (blankExposure.length !== 1 || blankExposure[0] !== "backend") {
+              throw new Error(key + " blank mapping must remain backend-only");
+            }
+            if (exposedServices(defaults, key).length !== 0) {
+              throw new Error(key + " must not change the default local stack");
+            }
+            for (const [label, config] of Object.entries({combined, blank, defaults, staging})) {
+              if (exposedServices(config, legacyKey).length !== 0) {
+                throw new Error(legacyKey + " must remain application fallback only in " + label);
+              }
+            }
+          '
+
+      - name: Verify SSE deployment contracts
+        shell: bash
+        run: python3 scripts/test-sse-deployment-contract.py
+
+      - name: Build and inspect pinned SSE k6 runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --tag miriyum/k6-sse:contract performance/k6/sse
+          version_output="$(docker run --rm miriyum/k6-sse:contract version)"
+          grep -Fq 'k6 v1.2.2' <<<"$version_output"
+          grep -Fq 'github.com/phymbert/xk6-sse v0.1.12' <<<"$version_output"
+          docker run --rm \
+            -v "$PWD/performance/k6:/scripts:ro" \
+            miriyum/k6-sse:contract inspect \
+            -e TARGET_ENV=local \
+            -e BASE_URL=https://loadtest-proxy:8443 \
+            -e ALLOWED_HOSTS=loadtest-proxy \
+            -e SSE_PROFILE=smoke \
+            -e SSE_FIXTURE_PATH=/scripts/fixtures/sse-test-data.example.json \
+            -e SSE_RUN_ID=ci-sse-inspect \
+            -e COMMIT_SHA=1111111111111111111111111111111111111111 \
+            -e HARNESS_COMMIT_SHA=1111111111111111111111111111111111111111 \
+            -e SSE_CONNECTIONS=1 \
+            -e SSE_CONNECTIONS_PER_ACCOUNT=1 \
+            -e SSE_HOLD_DURATION_SECONDS=5 \
+            -e SSE_SLOW_CLIENT_DELAY_SECONDS=1 \
+            -e SSE_ENDPOINT_KINDS=notification-consumer \
+            /scripts/sse/main.js >/dev/null
+
+      - name: Run isolated k6 contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tests=(performance/k6/tests/*.js)
+          if (( ${#tests[@]} == 0 )); then
+            echo "No k6 contract tests found" >&2
+            exit 1
+          fi
+          for test in "${tests[@]}"; do
+            echo "Running $test"
+            runtime_image="grafana/k6:2.1.0"
+            if [[ "$(basename "$test")" == sse-* ]]; then
+              runtime_image="miriyum/k6-sse:contract"
+            fi
+            docker run --rm --network none \
+              -v "$PWD/performance/k6:/scripts:ro" \
+              "$runtime_image" \
+              run "/scripts/tests/$(basename "$test")"
+          done

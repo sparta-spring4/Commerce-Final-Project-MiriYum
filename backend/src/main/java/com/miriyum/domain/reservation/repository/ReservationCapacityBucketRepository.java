@@ -104,6 +104,28 @@ public interface ReservationCapacityBucketRepository
             @Param("serviceDate") LocalDate serviceDate
     );
 
+    /** 여러 매장의 업무 날짜별 최신 수용량 정책 전체를 한 번에 조회한다. */
+    @Query("""
+            select bucket
+            from ReservationCapacityBucket bucket
+            where bucket.storeId in :storeIds
+              and bucket.serviceDate = :serviceDate
+              and bucket.policyVersion = (
+                  select max(latest.policyVersion)
+                  from ReservationCapacityBucket latest
+                  where latest.storeId = bucket.storeId
+                    and latest.serviceDate = bucket.serviceDate
+              )
+            order by bucket.storeId asc,
+                     bucket.startTime asc,
+                     bucket.endTime asc,
+                     bucket.id asc
+            """)
+    List<ReservationCapacityBucket> findLatestPolicyBuckets(
+            @Param("storeIds") Collection<Long> storeIds,
+            @Param("serviceDate") LocalDate serviceDate
+    );
+
     /**
      * 여러 매장의 업무 날짜별 최신 정책에서 요청 구간과 겹치는 버킷을 한 번에 조회한다.
      *
@@ -169,4 +191,38 @@ public interface ReservationCapacityBucketRepository
             @Param("startTime") LocalTime startTime,
             @Param("queryEndTime") LocalTime queryEndTime
     );
+
+    @Query(value = """
+            SELECT
+                COALESCE(SUM(b.max_people), 0) AS offeredPeopleUnits,
+                COALESCE(SUM(b.max_teams), 0) AS offeredTeamUnits,
+                COALESCE(MAX(b.policy_version), 0) AS policyVersion,
+                COALESCE(MAX(b.reservation_capacity_bucket_id), 0) AS maxBucketId,
+                CAST(UNIX_TIMESTAMP(MAX(b.policy_published_at)) * 1000000 AS SIGNED)
+                    AS dataThroughEpochMicros
+            FROM reservation_capacity_buckets b
+            WHERE b.store_id = :storeId
+              AND b.service_date = :businessDate
+              AND b.policy_published_at <= :asOf
+              AND b.policy_version = (
+                  SELECT MAX(latest.policy_version)
+                  FROM reservation_capacity_buckets latest
+                  WHERE latest.store_id = :storeId
+                    AND latest.service_date = :businessDate
+                    AND latest.policy_published_at <= :asOf
+              )
+            """, nativeQuery = true)
+    ReservationCapacityOfferAnalytics aggregateDashboardOffers(
+            @Param("storeId") long storeId,
+            @Param("businessDate") LocalDate businessDate,
+            @Param("asOf") java.time.Instant asOf
+    );
+
+    interface ReservationCapacityOfferAnalytics {
+        Long getOfferedPeopleUnits();
+        Long getOfferedTeamUnits();
+        Long getPolicyVersion();
+        Long getMaxBucketId();
+        Long getDataThroughEpochMicros();
+    }
 }

@@ -1,0 +1,281 @@
+# 기능 명세: 결제·환불 기반 계약
+
+> 문서 상태: #236 계약 활성화 설계 승인
+> 적용 단계: 고도화
+> 도메인 소유자: Payment — @usersy628
+> 협업 검토: Reservation, Consumer
+> 관련 정책 ID: PAY-001~PAY-011, PAY-013~PAY-015, RES-006, RES-009, RES-014
+> OpenAPI: `docs/specs/payment/openapi.yaml`
+> 최종 승인일: 2026-08-18
+
+## 목표와 범위
+
+Payment는 MiriYum 내부 결제·시도·환불 원장과 PortOne V2 어댑터를 소유한다. Reservation은 Payment의 공개 Service·DTO·오류만 사용하며 Payment Entity·Repository 또는 PortOne 모델에 접근하지 않는다.
+
+### 포함
+
+- 예약금 결제 준비와 고객사 채번 PortOne `paymentId`
+- 브라우저 확정 요청과 검증된 Webhook이 합류하는 단일 멱등 확정 경로
+- PortOne 서버 조회를 통한 상태·금액·통화·내부 주문 매핑 검증
+- 결제·결제 시도·환불의 추가 전용 원장과 결과 불명확 격리
+- Reservation이 소비하는 준비·확정·환불 공개 Service 계약
+- 일반 사용자 본인의 결제 상세와 결제·환불 이력 조회
+- 로그·응답·감사에서 API Secret, Webhook Secret, 결제수단 원문과 토큰 원문 제외
+
+### 제외
+
+- Reservation 수용량·상태·MenuHold의 직접 변경
+- 임시 선점과 예약 생성·취소 HTTP 조정
+- 브라우저 PortOne SDK 화면과 frontend 구현
+- 특정 PG 채널·결제수단의 운영 활성화
+- 실제 식당 정산 `PAY-012`, 차지백 운영 자동화와 플랫폼 운영자 수동 복구 UI
+
+## 소유권과 의존 방향
+
+```text
+Consumer → Reservation HTTP 조정자
+                    ↓ Payment 공개 Service
+              Payment 원장·PortOne V2
+
+Consumer → Payment 확정·본인 조회 HTTP
+PortOne  → Payment Webhook HTTP
+                    ↓
+              같은 멱등 확정 경로
+```
+
+- Reservation은 임시 선점과 서버가 확정한 예약금 스냅샷을 만든 뒤 `PaymentService.prepareReservationDeposit(...)`를 호출한다. 이 snapshot은 Store 설정 revision인 `policyVersion`과 `PAY-002` 계산 알고리즘 version을 서로 다른 값으로 보존하며 Store의 기술적 `lockVersion`은 포함하지 않는다.
+- Payment는 Reservation을 역조회하거나 Reservation Entity·Repository를 참조하지 않는다. 준비 명령에 포함된 소유자·금액·통화·만료·정책 버전 스냅샷을 원장에 보존한다.
+- 내부 source boundary에서 일반 예약금은 `RESERVATION_DEPOSIT`, 대기열 예약금은 `WAITING_RESERVATION_DEPOSIT`를 사용한다. 두 source type은 같은 `sourceReferenceId`와 준비 멱등 키를 독립적으로 보유하며, 이 구분은 Payment 내부 원장·공개 Service 경계에만 적용되고 Payment HTTP/OpenAPI를 변경하지 않는다.
+- 별도의 브라우저용 결제 준비 HTTP API는 만들지 않는다. 예약 조정 응답이 Payment 준비 DTO를 포함하는 계약은 #238의 Reservation OpenAPI가 소유한다.
+- Payment는 결제 확정·본인 조회·PortOne Webhook HTTP를 소유한다.
+- Payment는 검증된 결제 결과 DTO만 반환한다. Reservation의 최종 확정 또는 보상 전이는 Reservation이 소유한다.
+
+## 식별자와 신뢰 경계
+
+| 식별자 | 채번·소유자 | 관계와 공개 규칙 |
+| --- | --- | --- |
+| `paymentId` | MiriYum Payment | 내부 DB PK와 별도로 채번한 공개 전용 양수 숫자 문자열 참조이며 본인 조회와 Payment HTTP path에 사용한다. 클라이언트는 불투명 값으로 취급한다. |
+| `paymentOrderId` | MiriYum Payment | 내부 주문 식별자다. 하나의 `paymentId`와 일대일이며 외부 응답에 노출하지 않는다. |
+| `portOnePaymentId` | MiriYum Payment | `paymentOrderId`에서 결정적으로 파생한 고객사 채번 PortOne 식별자다. 준비 응답과 확정 요청의 조회 선택자로만 사용한다. |
+| `transactionId` | PortOne | 한 `portOnePaymentId` 아래 시도별로 달라질 수 있다. 인증된 서버 조회 또는 검증된 Webhook에서 얻은 값만 저장한다. |
+| `sourceReferenceId` | Reservation | Payment가 해석하지 않는 예약 선점·거래 연결 참조다. 공개 이력에서는 `reservationReferenceId`로만 반환한다. |
+| `refundId` | MiriYum Payment | 내부 DB PK와 별도로 채번한 공개 전용 환불 양수 숫자 문자열 참조이며 환불 명령과 원장을 식별한다. 클라이언트는 불투명 값으로 취급한다. |
+
+브라우저가 보낸 성공 여부, 금액, 통화, `transactionId`, 환불 완료 주장은 모두 신뢰하지 않는다. 확정 요청은 path의 MiriYum `paymentId`와 본문의 준비된 `portOnePaymentId`만 전달하며, 서버는 인증 principal의 소유권과 원장 매핑을 확인한 뒤 PortOne V2 API를 조회한다.
+
+## 공개 Service 계약
+
+공개 Service의 명령과 결과는 scalar·enum·record 기반 DTO만 사용하고 JPA Entity, Repository, PortOne SDK·API 타입을 노출하지 않는다.
+
+### 예약금 준비
+
+```java
+PaymentPreparation prepareReservationDeposit(PrepareReservationDepositCommand command)
+```
+
+`PrepareReservationDepositCommand`는 다음 필드를 가진다.
+
+- `sourceReferenceId`: Reservation이 소유한 불투명 거래 연결 참조
+- `consumerAccountId`: 인증된 일반 사용자 계정 ID
+- `amountMinor`: 서버가 계산한 최소 통화 단위의 양수 정수
+- `currency`: ISO 4217 통화 코드
+- `sourceExpiresAt`: 임시 선점의 중앙 만료 시각
+- `sourcePolicyVersion`: `PAY-002` 예약금 계산 알고리즘의 known version. Store 설정 revision인 `policyVersion`과 서로 다른 의미이며, Store revision은 Reservation 소유 계산 snapshot에서 별도로 보존한다.
+- `idempotencyKey`: 예약 조정 명령과 결제 준비를 연결하는 멱등 키
+
+`PaymentPreparation`은 `paymentId`, `portOnePaymentId`, `orderName`, `amountMinor`, `currency`, `sourceExpiresAt`, `status=READY`만 반환한다. Store ID, Channel Key와 활성 결제수단은 배포 환경의 공개 frontend 설정이며 이 DTO가 API Secret이나 Webhook Secret을 반환하지 않는다.
+
+같은 source·멱등 키·지문은 기존 결과를 반환한다. 같은 멱등 키의 다른 지문, 만료됐거나 금액이 0 이하인 source, 같은 source의 다른 활성 결제는 실패 폐쇄한다.
+
+예약금 준비의 unique 경합은 Payment 내부에서만 구조화된 원인을 판정한다. Hibernate
+`ConstraintViolationException`의 MySQL vendor code가 `1062`이고 constraint 이름이
+`uk_payments_source`, `payments.uk_payments_source`,
+`uk_payments_preparation_idempotency`,
+`payments.uk_payments_preparation_idempotency` 중 하나인 경우만 승인된 준비 경합이다.
+caller transaction에 참여한 승인 경합은 DB 원인을 노출하지 않는
+`PaymentPreparationRetryableConflictException`으로 전달하며 외부 오류 의미는 `COMMON_008`을
+유지한다. 호출자는 실패한 transaction이 완전히 종료된 뒤에만 제한 재진입할 수 있다. caller
+transaction이 없는 승인 경합은 실패 transaction 종료 뒤 저장된 준비 결과를 replay한다.
+message-only 판정, 다른 constraint, 다른 vendor code와 일반
+`DataIntegrityViolationException`은 전용 신호나 replay 대상이 아니며 `COMMON_008`로 실패한다.
+
+### 결제 확정
+
+```java
+PaymentResult confirmPayment(ConfirmPaymentCommand command)
+```
+
+`ConfirmPaymentCommand`는 `paymentId`, `portOnePaymentId`, 인증된 `consumerAccountId`, `idempotencyKey`만 가진다. Payment는 `paymentId + consumerAccountId` 소유 범위에서 결제를 먼저 조회해 실제 부재와 타인 소유를 모두 `PAYMENT_001` 404로 숨긴다. 그 뒤 원장의 source·amount·currency·PortOne 매핑을 검증하고 중앙 `CONFIRMING` 임대를 조건부 선점한 뒤 PortOne V2 결제를 조회한다.
+
+- 인증된 조회가 `PAID`이고 금액·통화·내부 매핑이 모두 일치할 때만 `PAID`를 확정한다.
+- 명시적인 실패·취소·결제 없음은 시도 원장에 종결 결과를 기록하고 결제를 `READY`로 복원할 수 있다.
+- 조회 시간 초과·응답 불명확·대기 상태는 성공이나 실패로 추정하지 않고 `RECONCILIATION_REQUIRED`로 격리한다.
+- 이미 `PAID`, `PARTIALLY_REFUNDED`, `REFUNDED`인 결제의 같은 확정 재시도는 외부 조회나 원장을 중복 생성하지 않고 기존 결과를 반환한다.
+
+### 환불
+
+```java
+RefundResult requestRefund(RequestRefundCommand command)
+```
+
+이 계약은 Reservation 같은 소유 업무 도메인의 서버 내부 조정자만 사용하며 일반 사용자용 직접 환불 HTTP를 만들지 않는다. 명령은 `paymentId`, `sourceEventId`, `refundAmountMinor`, `reasonCode`, `policyVersion`, `idempotencyKey`를 가진다. Payment는 원 승인 스냅샷과 완료된 누적 환불을 기준으로 잔액을 검증하고, 결과 불명확 상태에서는 새 외부 환불을 발행하지 않는다.
+
+`RefundResult`는 `refundId`, `paymentId`, 요청·완료·누적·잔여 금액, 통화, 공개 환불 상태와 시각만 반환한다. 환불 완료 뒤에도 과거 원장 행을 수정·삭제하지 않고 반대·보정 원장을 추가한다.
+
+### 예약금 처분
+
+```java
+DispositionResult applyReservationDepositDisposition(
+    ApplyReservationDepositDispositionCommand command)
+DispositionResult getReservationDepositDisposition(
+    GetReservationDepositDispositionQuery query)
+```
+
+이 서버 내부 계약은 #239의 Payment 소유 경계이며 새 HTTP·OpenAPI를 만들지 않는다. 명령은 `paymentId`, `sourceEventId`, `sourceEventType`, nullable `correctsSourceEventId`, `policyVersion`, `responsibilityCode`, `targetRefundRateBasisPoints`, `idempotencyKey`만 가진다. 책임 코드는 `CONSUMER`, `STORE_RESPONSIBLE`, `PLATFORM_RESPONSIBLE`, 목표율은 `0`, `5000`, `10000`만 허용한다.
+
+Issue #241은 같은 계약에 `RESERVATION_FULFILLED`와 `RESERVATION_NO_SHOW` source를 추가한다. 정상 방문은 `CONSUMER/10000`, 확정 no-show는 Reservation이 승인한 `CONSUMER/0`, `STORE_RESPONSIBLE/10000`, `PLATFORM_RESPONSIBLE/10000`만 전달하며 `UNCLEAR`는 호출하지 않는다. Payment는 source type으로 귀책이나 목표율을 다시 판정하지 않는다.
+
+Payment는 `RESERVATION_DEPOSIT` 원 승인 스냅샷에서 목표 누적 환불액을 계산한다. `10000`은 원 승인액 그대로, 나머지는 `amountMinor × basisPoints ÷ 10000`의 정수 나눗셈 결과다. 최초 처분은 목표액 전부, 완료 처분의 정정은 기존 완료액과 목표액의 양의 차액만 `requestRefund`에 전달한다. 목표율 `0` 또는 이미 완료액과 같은 목표는 provider 호출 없이 완료한다.
+
+처분 ID는 정규화 UUID 멱등 키와 같고 `(payment, idempotencyKey)`, `(payment, sourceEventId)`를 유일하게 보존한다. 같은 키·같은 지문은 저장 결과를 재생하고 다른 지문은 `COMMON_007`로 거부한다. 정정 대상은 같은 결제의 완료 처분이면서 아직 유효한 자식 정정이 없는 현재 lineage head여야 한다. Payment 잠금 아래 이 조건을 확인하고 DB도 부모당 유효한 자식 하나만 허용해 순차·동시 sibling 정정의 초과 환불을 막는다. 목표 하향, stale parent, 미완료·미존재 처분 정정, 비예약금 source, 부적합 결제 상태와 환불 가능 잔액 초과는 외부 호출 없이 `FAILED/PERMANENT` 원장을 남기며 실제 완료액을 축소하지 않는다.
+
+`DispositionResult`는 처분·결제·원/정정 사건 식별자, 정책·귀책·목표율, 원 승인·목표·이번 차액·누적 완료·유보 금액, 통화, nullable `refundId`, 상태·실패 분류와 시각을 반환한다. 공개 상태는 `PROCESSING`, `COMPLETED`, `FAILED`, `RECONCILIATION_REQUIRED`, nullable 실패 분류는 `RETRYABLE`, `PERMANENT`, `UNKNOWN`이다. provider 명시 실패는 같은 처분과 기존 환불 ID로 재시도하고, sibling `PROCESSING` 환불의 잔액 점유는 provider 호출·새 환불 없이 nullable `refundId`의 `FAILED/RETRYABLE` 처분으로 보존한다. 같은 처분 재생은 동일 멱등 키의 matching refund를 먼저 잠가 완료·실패·처리 중·대사 상태를 흡수한 뒤에만 현재 결제 상태·기본 환불 가능 잔액·sibling 처리 중 금액을 검증한다. 일시 점유 중에는 `RETRYABLE`을 유지하고 sibling 완료로 기본 잔액이 실제 부족해진 경우에만 `PERMANENT`로 확정한다. 실제 provider 시도별 `processingStartedAt` 임대와 감사 원장을 갱신한다. timeout·대기·mapping 불일치는 새 환불을 만들지 않고 대사 상태로 격리한다. 공개 처분 진입점은 ambient caller transaction을 중단하므로 provider 호출 동안 Reservation 등 상위 transaction과 잠금을 유지하지 않는다.
+
+취소 POST는 business reason 뒤에 내부 `refundId`를 담은 `[MIRIYUM_REFUND_ID=<refundId>]` marker를 붙이고 내부 원장의 reason code는 바꾸지 않는다. `getReservationDepositDisposition(paymentId + sourceEventId)`는 terminal 결과면 저장 결과만 반환한다. 처분과 연결된 환불이 아직 `PROCESSING`이면 5분 임대 동안 저장 상태만 반환하고, 임대가 만료되면 같은 transaction에서 기존 refund·Payment·disposition을 `RECONCILIATION_REQUIRED/UNKNOWN`으로 격리한다. 그 뒤 짧은 claim transaction을 commit하고 transaction 밖에서 PortOne V2 `GET /payments/{paymentId}`만 호출한다. 임대 만료 전 시작된 취소 POST가 늦게 성공·실패하면 다음 query가 같은 refund의 terminal 결과를 우선 흡수해 처분도 `COMPLETED` 또는 `FAILED/RETRYABLE`로 수렴한다. provider GET이 먼저 명시 실패를 기록한 뒤 원래 POST 성공이 도착한 경우에도, 같은 refund ID·payment ID·요청/완료 금액이 일치하는 `FAILED/RETRYABLE` 처분만 즉시 finalize 또는 다음 query에서 `COMPLETED`로 수렴한다. 환불 결과 transaction과 대사 transaction은 `Payment → disposition(필요한 경우) → PaymentRefund` 잠금 순서를 지킨다. 응답 `cancellations[]`에서 reason이 정확히 일치하는 항목이 하나이며 provider payment ID·원 승인 금액·취소 금액·통화가 모두 맞을 때만 별도 결과 transaction으로 기존 refund·Payment·disposition·ledger에 반영한다. `SUCCEEDED`는 멱등 완료한다. `FAILED`는 같은 refund와 disposition을 `FAILED/RETRYABLE`로 기록하고, 다른 미해결 refund가 없으며 해당 refund의 최신 `processingStartedAt` 이후 독립 `PAYMENT_RECONCILIATION_REQUIRED` 원장이 없을 때만 Payment를 실제 완료 환불액 기준 `PAID` 또는 `PARTIALLY_REFUNDED`로 복구해 같은 참조 재시도를 허용한다. 성공·실패 어느 terminal 결과든 sibling 미해결 refund나 그 이후 독립 payment-level 대사 provenance가 있으면 Payment의 `RECONCILIATION_REQUIRED`를 유지한다. `REQUESTED`·미발견·중복 marker·미지원 상태·mapping 불일치·조회 장애는 기존 `RECONCILIATION_REQUIRED/UNKNOWN`을 유지한다. 결과 transaction은 현재 refund가 여전히 `RECONCILIATION_REQUIRED`인지 다시 잠가 검사하고 stale 결과를 무시한다. 대사 경로는 취소 POST, 새 `PaymentRefund`, 새 disposition을 만들지 않는다.
+
+### 본인 조회
+
+```java
+PaymentResult getOwnedPayment(String paymentId, String consumerAccountId)
+PaymentHistorySlice getConsumerPaymentHistory(PaymentHistoryQuery query)
+```
+
+ID 단독 조회 뒤 소유권을 다시 조회하지 않는다. `paymentId + consumerAccountId`로 한 번에 조회하고 실제 부재와 타인 소유를 같은 `PAYMENT_001` 404로 숨긴다.
+
+이력은 `createdAt DESC, paymentId DESC`의 안정 정렬과 불투명 cursor를 사용한다. 페이지 크기는 공통 `Size` query parameter의 `size`를 재사용하며 기본 20, 최대 100이다. cursor와 결제 전용 slice는 현재 Payment만 소비하므로 도메인 계약에 유지하고, 두 번째 소비 도메인이 생기기 전에는 공통 계약으로 승격하지 않는다. cursor에는 정렬 경계와 필터 지문을 위변조 방지 형식으로 담고 원문 ID 목록이나 개인정보를 넣지 않는다. 잘못됐거나 다른 필터에 재사용한 cursor는 `PAYMENT_005` 400으로 거부한다.
+
+## 공개 HTTP 계약
+
+| 사용자 목적 | API | 인증·멱등 |
+| --- | --- | --- |
+| 결제 확정 요청 | `POST /api/v1/consumers/me/payments/{paymentId}/confirmations` | Consumer Access JWT, `Idempotency-Key` 필수 |
+| 본인 결제 상세 | `GET /api/v1/consumers/me/payments/{paymentId}` | Consumer Access JWT |
+| 본인 결제·환불 이력 | `GET /api/v1/consumers/me/payments` | Consumer Access JWT, cursor pagination |
+| PortOne Webhook | `POST /api/v1/payments/webhooks/portone` | Access JWT 없음, Webhook signature·원문 body 검증 |
+
+확정 요청 본문은 `portOnePaymentId` 외의 상태·금액·통화·`transactionId`를 받지 않는다. 확정 동기 조회가 최종 결론을 내리지 못하면 HTTP 202와 `RECONCILIATION_REQUIRED` 상태를 반환하며 완료로 표시하지 않는다.
+
+Webhook은 PortOne V2 최신 `2024-04-25` body를 수신하고 Standard Webhooks 서명을 raw body 기준으로 검증한다. 공통 envelope의 `type`, `timestamp`, `data`를 먼저 검증한다. 현재 처리 allowlist는 결제 상태용 `Transaction.Paid`, `Transaction.Failed`, `Transaction.PayPending`과 취소·환불 상태용 `Transaction.PartialCancelled`, `Transaction.Cancelled`, `Transaction.CancelPending`이다. 지원 type은 `data.storeId`, `data.paymentId`, `data.transactionId`를 필수로 요구하고 취소·환불 type은 `data.cancellationId`도 필수로 요구한다. 지원 type에서 필수 식별자가 누락되면 `COMMON_001` 400으로 거부하고 원장을 변경하지 않는다. 서명이 유효하지만 allowlist 밖의 알려진 또는 미래 type은 `data.storeId`가 없더라도 추가 필드를 허용한 채 거래를 변경하지 않고 200으로 무시해 제공자의 무한 재시도를 막는다. 지원 type은 알려진 `portOnePaymentId`를 서버 API로 다시 조회해 같은 확정 경로를 호출한다. 서명 검증 실패 요청은 거래를 변경하지 않는다.
+
+## 상태와 전이
+
+### 결제 공개 상태
+
+| 상태 | 의미 |
+| --- | --- |
+| `READY` | 준비 완료 또는 인증된 비성공 종결 뒤 재시도 가능 |
+| `CONFIRMING` | 한 처리자가 PortOne 서버 조회와 내부 확정을 수행 중 |
+| `PAID` | 서버 검증된 결제 성공과 원장 기록 완료 |
+| `PARTIALLY_REFUNDED` | 일부 환불 완료, 환불 가능 잔액 존재 |
+| `REFUNDED` | 환불 가능 잔액 전부 환불 완료 |
+| `RECONCILIATION_REQUIRED` | 결과 불명확 또는 계약 불일치로 신규 청구·환불을 차단한 격리 상태 |
+
+`PAID` 이후의 결제를 `READY`로 되돌리지 않는다. `PARTIALLY_REFUNDED`와 `REFUNDED`는 새 결제 성공 이벤트로 되돌릴 수 없다. 과거·중복 Webhook은 상태 버전 조건에 실패하면 성공적으로 무시하고 감사만 남긴다.
+
+### 환불 공개 상태
+
+`REQUESTED`, `VALIDATING`, `PROCESSING`, `COMPLETED`, `FAILED`, `RECONCILIATION_REQUIRED`를 사용한다. 명시적 실패만 `FAILED`로 종결하고 외부 결과를 모르면 `RECONCILIATION_REQUIRED`를 유지한다.
+
+### 예약금 처분 공개 상태
+
+`PROCESSING`, `COMPLETED`, `FAILED`, `RECONCILIATION_REQUIRED`를 사용한다. `FAILED`는 `RETRYABLE` 또는 `PERMANENT`, 대사 필요는 `UNKNOWN`으로 분류한다. 완료와 대사 필요는 terminal이며 자동 재발행하지 않는다.
+
+### 마지막 결제 시도 공개 상태
+
+`NOT_STARTED`, `PENDING`, `PAID`, `FAILED`, `CANCELLED`, `UNKNOWN`을 사용한다. 결제 aggregate가 재시도 가능한 `READY`여도 `lastAttemptStatus`로 최초 준비와 명시적 실패·취소를 구분한다. 제공자 오류 코드·문구와 `transactionId`는 공개하지 않는다.
+
+## 공개 응답
+
+결제 상세·이력 항목은 다음 필드만 공개한다.
+
+- `paymentId`, `reservationReferenceId`
+- `amountMinor`, `refundedAmountMinor`, `refundableAmountMinor`, `currency`
+- 결제 `status`, `lastAttemptStatus`, `createdAt`, nullable `paidAt`, nullable `updatedAt`
+- `refunds`: `refundId`, 금액, 상태, 요청·완료 시각의 배열
+
+`paymentOrderId`, `transactionId`, PortOne 원문 응답, 결제수단 상세, 카드·계좌·휴대전화 원문, API Secret, Webhook Secret과 내부 대사 메모는 공개하지 않는다. 빈 이력은 `items: []`, `nextCursor: null`, `hasNext: false`다.
+
+## 오류 코드
+
+| 외부 코드 | HTTP | 의미 |
+| --- | --- | --- |
+| `PAYMENT_001` | 404 | 본인 범위에서 결제를 찾을 수 없음 |
+| `PAYMENT_002` | 409 | 현재 결제·환불 상태에서 요청한 전이 불가 |
+| `PAYMENT_003` | 409 | 서버 조회로 확인한 source, 금액, 통화 또는 PortOne 매핑 불일치 |
+| `PAYMENT_004` | 409 | 같은 source에 다른 활성 결제가 존재함 |
+| `PAYMENT_005` | 400 | 이력 cursor가 잘못됐거나 현재 필터와 일치하지 않음 |
+| `PAYMENT_006` | 401 | PortOne Webhook 서명·timestamp 검증 실패 |
+| `PAYMENT_007` | 409 | 환불 요청액이 검증된 환불 가능 잔액을 초과함 |
+| `PAYMENT_008` | 409 | 결제 준비 source가 이미 만료됐거나 확정 불가 상태임 |
+
+PortOne 조회 장애나 결과 불명확은 거짓 4xx·최종 실패로 변환하지 않고 202 상태 응답과 대사 상태로 보존한다. 기술 공통 입력·인증·속도 제한 오류와 같은 `Idempotency-Key`의 다른 요청 지문 충돌은 공통 오류 계약의 `COMMON_007`을 사용한다.
+
+## 원장·동시성·복구
+
+- 결제, 시도, 환불, 예약금 처분, Webhook 수신, 상태 전이와 대사 작업을 별도 추가 전용 기록으로 보존한다.
+- 준비 멱등 키·요청 지문, source 활성 결제, `portOnePaymentId`, 시도별 `transactionId`, Webhook 메시지 식별 조합, 환불과 예약금 처분의 source event·멱등 키를 DB 유일 제약과 조건부 전이로 보호한다.
+- 외부 네트워크 호출을 긴 DB 트랜잭션 안에 유지하지 않는다. `CONFIRMING` 작업 임대와 상태 버전으로 단일 처리자를 선점하고, 결과 저장은 인증된 조회 스냅샷에 연결한다.
+- 오래된 `CONFIRMING`과 `RECONCILIATION_REQUIRED`는 중앙 작업자만 임대를 인수해 알려진 `portOnePaymentId`를 재조회한다. 자동 해소할 수 없는 건은 PAY-014·PAY-015로 보낸다.
+- Reservation은 Payment 성공 DTO를 받은 뒤 자신의 상태를 확정한다. 그 뒤 Reservation 확정이 실패하면 별도의 멱등 환불 obligation을 Payment에 요청하며 Payment가 Reservation 상태를 직접 바꾸지 않는다.
+
+## Migration·호환성
+
+- 기존 1차 MVP 예약과 비금전 취소 V1에는 Payment 행을 backfill하지 않는다.
+- 신규 Payment 테이블은 기존 예약 PK나 상태 enum의 의미를 변경하지 않고 scalar source reference로 연결한다.
+- #239 Payment 선행 구현은 #396의 예약 처리 V55, #389의 V56, #400의 V57 뒤인 V58에서 예약금 처분 원장, 기존 환불 `attempt_count`, 환불 재시도 원장 타입을 추가한다. V56·V57이 `dev`에 병합되기 전에는 V58을 병합하지 않는다.
+- 기존 `/api/v1/reservations` 즉시 확정 계약은 예약금 미사용 매장에 유지한다. 예약금 활성 흐름의 Reservation 요청·응답 변경은 #238에서 별도 명세와 OpenAPI로 활성화한다.
+
+## 검증 계약
+
+- Service 단위 계약: 준비 지문, 소유권, 금액·통화, 상태 전이, 환불 잔액과 예약금 처분 실패 분류
+- MockMvc 계약: 확정 요청 최소 body, 본인 존재 은닉, cursor 경계, 202 대사 응답, secret 비노출
+- MySQL 통합 계약: 중복 준비·확정·Webhook·환불·예약금 처분, 목표율 정정, 동일 환불 ID 재시도, V58 backfill, 상태 버전 경합, 원장 추가 전용성과 재시작 복구
+- PortOne adapter 계약: `paymentId` 조회, `PAID` 검증, 실패·대기·timeout 분리, 최신 Webhook 서명 검증, 지원 type별 필수 식별자와 미지원 type 200 무시
+- sandbox 검증은 자격 증명과 도달 가능한 Webhook 환경이 구성된 경우에만 별도 증거로 기록하며 unit·mock 성공을 sandbox 성공으로 표현하지 않는다.
+
+## 인수 조건
+
+- 브라우저 성공 응답만으로 결제를 확정하지 않는다.
+- 같은 결제·Webhook·환불 재시도가 외부 호출과 원장을 중복 확정하지 않는다.
+- 결과 불명확 거래는 신규 청구·환불에서 격리되고 대사 전 거짓 완료·실패로 표시되지 않는다.
+- Reservation과 Consumer는 Payment Entity·Repository 없이 공개 Service·DTO·오류만 사용한다.
+- 일반 사용자는 본인의 최소 결제·환불 이력만 안정적인 cursor로 조회한다.
+- 로그·DB 공개 필드·응답에 PortOne secret, 결제 토큰과 결제수단 원문이 남지 않는다.
+
+## 외부 계약 근거
+
+- [PortOne V2 인증 결제 연동](https://developers.portone.io/opi/ko/integration/start/v2/checkout?v=v2)
+- [PortOne V2 Webhook 연동](https://developers.portone.io/opi/ko/integration/webhook/readme-v2?v=v2)
+- [PortOne V2 결제 취소](https://developers.portone.io/opi/ko/integration/cancel/v2/readme)
+
+## Internal Waiting reservation deposit verification
+
+Waiting conversion uses the distinct source type `WAITING_RESERVATION_DEPOSIT`. The internal
+`getVerifiedWaitingReservationDeposit(paymentId, waitingTeamId, consumerAccountId)` query validates
+all Payment-owned identity: public payment ID, consumer owner, exact source type, and the decimal
+Waiting team source reference. A normal `RESERVATION_DEPOSIT` with the same numeric source reference
+is not interchangeable and is returned as not found.
+
+The query returns an immutable `VerifiedWaitingReservationDeposit` snapshot containing payment ID,
+amount, currency, source policy version, current status, and `paidAt`. Both completion verifiers lock
+the Payment row after the caller has locked the Waiting row. The completable verifier additionally
+requires current `PAID` status and an empty refund ledger, including no `PROCESSING` refund. The
+historical verifier requires `paidAt` and accepts PAID or the historically paid
+refund/reconciliation states needed only for terminal compensation callback replay. Thus an
+in-flight refund cannot race a stale PAID snapshot into a new conversion, while a cancellation or
+closure winner can still converge on deterministic compensation after refund state changes.
+
+Payment preparation is invoked with any ambient caller transaction suspended, allowing its internal
+required transaction to commit independently before Waiting records `RESERVATION_CONVERTING`.
+Payment provider calls remain outside Waiting/Payment row-lock transactions, and Payment does not
+access Waiting or Reservation entities/repositories.

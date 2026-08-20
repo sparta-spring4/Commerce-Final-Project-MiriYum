@@ -1,5 +1,7 @@
 param(
-    [string]$WorkflowPath = (Join-Path $PSScriptRoot "..\.github\workflows\backend-cd.yml")
+    [string]$WorkflowPath = (Join-Path $PSScriptRoot "..\.github\workflows\backend-cd.yml"),
+    [string]$ComposePath = (Join-Path $PSScriptRoot "..\deploy\docker-compose.prod.yml"),
+    [string]$ComposeEnvPath = (Join-Path $PSScriptRoot "..\deploy\.env.example")
 )
 
 $workflow = Get-Content -Raw -Path $WorkflowPath
@@ -18,6 +20,11 @@ $requiredFragments = @(
     'git diff --name-only "$last_deployed_sha" "$WORKFLOW_SHA"',
     "git hash-object -t tree /dev/null",
     "id: ecr-image",
+    "id: frontend-image",
+    "Build and push ARM64 frontend image",
+    '${IMAGE_TAG}-frontend',
+    "FRONTEND_IMAGE='`$frontend_image_uri'",
+    "Frontend CI did not complete successfully",
     "steps.ecr-image.outputs.exists != 'true'",
     "Manual deployment requires an existing immutable ECR image tag",
     'ref: ${{ inputs.image_tag }}',
@@ -35,7 +42,10 @@ $requiredFragments = @(
     "cloudwatch_base64",
     "/opt/miriyum/monitoring/cloudwatch-agent.json",
     "amazon-cloudwatch-agent-ctl -a fetch-config",
-    "file:/opt/miriyum/monitoring/cloudwatch-agent.json"
+    "file:/opt/miriyum/monitoring/cloudwatch-agent.json",
+    "deploy/nginx/templates/snippets/sse-location.conf",
+    "nginx_sse_base64",
+    "/opt/miriyum/nginx/templates/snippets/sse-location.conf"
 )
 
 foreach ($fragment in $requiredFragments) {
@@ -44,4 +54,27 @@ foreach ($fragment in $requiredFragments) {
     }
 }
 
-Write-Output "Backend CD immutable ECR and OIDC safeguards are configured."
+$cursorSecretName = "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET"
+$cursorSecret = "test-only-notification-history-cursor-secret"
+$previousCursorSecret = [Environment]::GetEnvironmentVariable($cursorSecretName, "Process")
+
+try {
+    [Environment]::SetEnvironmentVariable($cursorSecretName, $cursorSecret, "Process")
+    $composeJson = & docker compose --env-file $ComposeEnvPath -f $ComposePath config --format json
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to render production Docker Compose configuration."
+    }
+
+    $compose = ($composeJson -join "`n") | ConvertFrom-Json
+    $renderedCursorSecret = $compose.services.backend.environment.$cursorSecretName
+
+    if ($renderedCursorSecret -ne $cursorSecret) {
+        throw "Production backend does not receive $cursorSecretName."
+    }
+}
+finally {
+    [Environment]::SetEnvironmentVariable($cursorSecretName, $previousCursorSecret, "Process")
+}
+
+Write-Output "Backend CD and production Compose safeguards are configured."

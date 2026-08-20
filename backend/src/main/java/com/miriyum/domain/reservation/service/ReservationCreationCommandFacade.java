@@ -1,5 +1,6 @@
 package com.miriyum.domain.reservation.service;
 
+import com.miriyum.domain.payment.service.PaymentPreparationRetryableConflictException;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
@@ -26,6 +27,7 @@ import org.springframework.stereotype.Service;
 public class ReservationCreationCommandFacade {
 
     private static final int MAX_ATTEMPTS = 3;
+    private static final int MAX_PAYMENT_PREPARATION_ATTEMPTS = 2;
 
     private final ReservationService reservationService;
     private final IntToLongFunction retryDelayMillis;
@@ -68,8 +70,18 @@ public class ReservationCreationCommandFacade {
             IdempotencyKey key,
             ReservationCreateRequest request
     ) {
-        return executeWithRetry(() -> reservationService.createReservation(
-                consumerAccountId, key, request));
+        Supplier<ReservationCreationCommandResult> command =
+                () -> reservationService.createReservation(consumerAccountId, key, request);
+        for (int attempt = 1; attempt <= MAX_PAYMENT_PREPARATION_ATTEMPTS; attempt++) {
+            try {
+                return executeWithRetry(command);
+            } catch (PaymentPreparationRetryableConflictException exception) {
+                if (attempt == MAX_PAYMENT_PREPARATION_ATTEMPTS) {
+                    throw exception;
+                }
+            }
+        }
+        throw new IllegalStateException("unreachable payment preparation retry state");
     }
 
     private <T> T executeWithRetry(Supplier<T> command) {

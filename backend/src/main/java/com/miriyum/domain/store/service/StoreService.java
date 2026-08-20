@@ -1,10 +1,14 @@
 package com.miriyum.domain.store.service;
 
+import com.miriyum.domain.store.dto.contract.StoreDashboardAuthority;
 import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
+import com.miriyum.domain.store.dto.contract.StoreWaitingReceptionProfile;
+import com.miriyum.domain.store.dto.contract.StoreWaitingLocationProfile;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreUpdateRequest;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreBaseSettings;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
@@ -26,6 +30,7 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -60,6 +65,7 @@ public class StoreService {
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final StoreAdministrationService storeAdministrationService;
 
     public StoreCommandResult create(
             long operatorAccountId,
@@ -161,6 +167,13 @@ public class StoreService {
                             modes == null ? null : modes.pickupEnabled(),
                             request.operationStatus(),
                             verified);
+                    storeAdministrationService.recomposeAfterOperatorUpdate(
+                            storeId,
+                            new StoreBaseSettings(
+                                    request.operationStatus(),
+                                    modes == null ? null : modes.reservationEnabled(),
+                                    modes == null ? null : modes.menuHoldEnabled(),
+                                    modes == null ? null : modes.pickupEnabled()));
                     Store saved = saveStore(store);
                     return success(HttpStatus.OK, saved);
                 }));
@@ -244,6 +257,36 @@ public class StoreService {
     }
 
     /**
+     * 조회 대상 매장의 부재와 비소유를 같은 not-found 결과로 숨긴다.
+     */
+    @Transactional(readOnly = true)
+    public void requireConcealedReadOwnership(
+            long operatorAccountId,
+            long storeId
+    ) {
+        operatorAccountService.getMe(operatorAccountId);
+        if (!storeRepository.existsByIdAndStoreOperatorAccountId(storeId, operatorAccountId)) {
+            throw new ServiceException(StoreErrorCode.STORE_NOT_FOUND);
+        }
+    }
+
+    /**
+     * 대시보드 통계 조회에 필요한 소유권과 시간 경계를 공개 DTO로 반환한다.
+     */
+    @Transactional(readOnly = true)
+    public StoreDashboardAuthority requireDashboardAuthority(
+            long operatorAccountId,
+            long storeId
+    ) {
+        operatorAccountService.getMe(operatorAccountId);
+        Store store = loadManagedStore(operatorAccountId, storeId);
+        return new StoreDashboardAuthority(
+                store.getId(),
+                store.getTimeZoneId(),
+                store.getDashboardAuthorityVersion());
+    }
+
+    /**
      * 일정 도메인의 일괄 판정을 위해 매장 상태를 공개 계약으로 투영한다.
      *
      * @param storeIds 조회할 매장 식별자 집합
@@ -259,6 +302,64 @@ public class StoreService {
                 .collect(Collectors.toUnmodifiableMap(
                         StoreServiceProfile::storeId,
                         Function.identity()));
+    }
+
+    /** 다른 도메인의 사용자 표시 문구에 필요한 공개 매장명만 조회한다. */
+    @Transactional(readOnly = true)
+    public Optional<String> findDisplayName(long storeId) {
+        if (storeId <= 0) {
+            return Optional.empty();
+        }
+        return storeRepository.findById(storeId).map(Store::getName);
+    }
+
+    /** 웨이팅 위치 판정에 필요한 승인 기준점만 공개 DTO로 반환한다. */
+    @Transactional(readOnly = true)
+    public StoreWaitingLocationProfile getWaitingLocationProfile(long storeId) {
+        Store store = storeRepository.findById(storeId)
+                .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+        boolean eligible = store.getVerificationStatus() == VerificationStatus.APPROVED
+                && store.getOperationStatus() == OperationStatus.OPEN
+                && store.getGeocodingStatus()
+                == com.miriyum.domain.store.enums.GeocodingStatus.VERIFIED
+                && store.getLatitude() != null
+                && store.getLongitude() != null
+                && store.getGeocodingAddressVersion() != null;
+        return new StoreWaitingLocationProfile(
+                store.getId(),
+                eligible ? store.getLatitude() : null,
+                eligible ? store.getLongitude() : null,
+                eligible ? store.getGeocodingAddressVersion() : 0L,
+                eligible);
+    }
+
+    /**
+     * 웨이팅 일정 해석을 위해 매장 상태를 공개 계약으로 일괄 투영한다.
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, StoreWaitingReceptionProfile> getWaitingReceptionProfiles(
+            Set<Long> storeIds
+    ) {
+        if (storeIds == null || storeIds.isEmpty()) {
+            return Map.of();
+        }
+        return storeRepository.findAllById(storeIds).stream()
+                .map(StoreService::waitingReceptionProfile)
+                .collect(Collectors.toUnmodifiableMap(
+                        StoreWaitingReceptionProfile::storeId,
+                        Function.identity()));
+    }
+
+    /**
+     * 웨이팅 접수 명령을 위해 Store 행을 잠그고 현재 상태를 공개 DTO로 반환한다.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public StoreWaitingReceptionProfile inspectWaitingReceptionForUpdate(
+            long storeId
+    ) {
+        Store store = storeRepository.findByIdForUpdate(storeId)
+                .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+        return waitingReceptionProfile(store);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
@@ -324,6 +425,7 @@ public class StoreService {
         Store store = storeRepository.findById(storeId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
         store.requireManagedBy(operatorAccountId);
+        store.requirePlatformManagementAllowed();
         return store;
     }
 
@@ -339,6 +441,7 @@ public class StoreService {
         Store store = storeRepository.findByIdForUpdate(storeId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
         store.requireManagedBy(operatorAccountId);
+        store.requirePlatformManagementAllowed();
         return store;
     }
 
@@ -373,6 +476,16 @@ public class StoreService {
                 store.getId(),
                 store.getTimeZoneId(),
                 reservationAccepting);
+    }
+
+    private static StoreWaitingReceptionProfile waitingReceptionProfile(Store store) {
+        boolean waitingReceptionEligible =
+                store.getVerificationStatus() == VerificationStatus.APPROVED
+                && store.getOperationStatus() == OperationStatus.OPEN;
+        return new StoreWaitingReceptionProfile(
+                store.getId(),
+                store.getTimeZoneId(),
+                waitingReceptionEligible);
     }
 
     private static BusinessResult<ManagedStoreResponse> success(

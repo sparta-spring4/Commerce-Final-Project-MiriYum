@@ -42,7 +42,7 @@ import org.testcontainers.utility.DockerImageName;
  * 예약 조회 Repository가 실제 MySQL에서 계정·매장 소유 범위와 페이지 순서를 지키는지 검증한다.
  */
 @Tag("integration")
-@Tag("integration-shard-b")
+@Tag("integration-shard-a")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,

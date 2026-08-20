@@ -23,9 +23,9 @@ class PickupOpenApiContractTest {
         Map<String, Object> paths = map(document.get("paths"));
         assertThat(paths).containsKeys(
                 "/api/v1/stores/{storeId}/pickup-availability",
-                "/api/v1/consumers/pickup-reservations",
-                "/api/v1/consumers/pickup-reservations/{pickupReservationId}",
-                "/api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations",
+                "/api/v1/consumers/me/pickup-reservations",
+                "/api/v1/consumers/me/pickup-reservations/{pickupReservationId}",
+                "/api/v1/consumers/me/pickup-reservations/{pickupReservationId}/cancellations",
                 "/api/v1/store-operators/stores/{storeId}/pickup-reservations",
                 "/api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}",
                 "/api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments",
@@ -52,7 +52,7 @@ class PickupOpenApiContractTest {
         Map<String, Object> document = load(CONTRACT);
         Map<String, Object> paths = map(document.get("paths"));
         Map<String, Object> operation = map(map(paths.get(
-                "/api/v1/consumers/pickup-reservations")).get("post"));
+                "/api/v1/consumers/me/pickup-reservations")).get("post"));
         Map<String, Object> operationResponses = map(operation.get("responses"));
         assertThat(map(operationResponses.get("404"))).containsEntry(
                 "$ref", "#/components/responses/PickupCreationNotFound");
@@ -85,6 +85,51 @@ class PickupOpenApiContractTest {
         assertThat(responses.get("PickupCancellationConflict").toString())
                 .contains("COMMON_008");
         assertThat(responses.get("PickupStateConflict").toString()).contains("COMMON_008");
+        assertThat(responses.get("PickupOperatorCancellationConflict").toString())
+                .contains("COMMON_008");
+    }
+
+    @Test
+    void pickupProducersDocumentNotificationSourceEventConflict() throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> paths = map(document.get("paths"));
+        List<Map<String, Object>> producers = List.of(
+                map(map(paths.get("/api/v1/consumers/me/pickup-reservations")).get("post")),
+                map(map(paths.get(
+                        "/api/v1/consumers/me/pickup-reservations/"
+                                + "{pickupReservationId}/cancellations"
+                )).get("post")),
+                map(map(paths.get(
+                        "/api/v1/store-operators/stores/{storeId}/pickup-reservations/"
+                                + "{pickupReservationId}/cancellations"
+                )).get("post"))
+        );
+
+        assertThat(producers).allSatisfy(operation -> {
+            String reference = String.valueOf(
+                    map(map(operation.get("responses")).get("409")).get("$ref")
+            );
+            String responseName = reference.substring("#/components/responses/".length());
+            Map<String, Object> response = map(
+                    map(map(document.get("components")).get("responses")).get(responseName)
+            );
+            assertThat(response.toString()).contains("NOTIFICATION_002");
+        });
+
+        Map<String, Object> fulfillment = map(map(paths.get(
+                "/api/v1/store-operators/stores/{storeId}/pickup-reservations/"
+                        + "{pickupReservationId}/fulfillments"
+        )).get("post"));
+        String fulfillmentConflict = String.valueOf(
+                map(map(fulfillment.get("responses")).get("409")).get("$ref")
+        );
+        assertThat(fulfillmentConflict)
+                .isEqualTo("#/components/responses/PickupStateConflict");
+        Map<String, Object> responses = map(
+                map(document.get("components")).get("responses")
+        );
+        assertThat(responses.get("PickupStateConflict").toString())
+                .doesNotContain("NOTIFICATION_002");
     }
 
     @Test
@@ -94,7 +139,7 @@ class PickupOpenApiContractTest {
         Map<String, Object> paths = map(document.get("paths"));
 
         Map<String, Object> consumerCancellation = map(map(paths.get(
-                "/api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations"))
+                "/api/v1/consumers/me/pickup-reservations/{pickupReservationId}/cancellations"))
                 .get("post"));
         assertThat(map(map(consumerCancellation.get("responses")).get("409")))
                 .containsEntry("$ref", "#/components/responses/PickupCancellationConflict");
@@ -120,15 +165,24 @@ class PickupOpenApiContractTest {
                 paths,
                 "/api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations",
                 "post");
-        assertOperatorStateConflictResponse(
-                paths,
-                "/api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations");
+        Map<String, Object> operatorCancellation = map(map(paths.get(
+                "/api/v1/store-operators/stores/{storeId}/pickup-reservations/"
+                        + "{pickupReservationId}/cancellations"
+        )).get("post"));
+        assertThat(map(map(operatorCancellation.get("responses")).get("409")))
+                .containsEntry(
+                        "$ref",
+                        "#/components/responses/PickupOperatorCancellationConflict"
+                );
 
         Map<String, Object> responses = map(map(document.get("components")).get("responses"));
         assertThat(responses.get("PickupCancellationConflict").toString())
                 .contains("PICKUP_005", "PICKUP_006");
         assertThat(responses.get("PickupStateConflict").toString())
                 .contains("PICKUP_005")
+                .doesNotContain("PICKUP_006");
+        assertThat(responses.get("PickupOperatorCancellationConflict").toString())
+                .contains("PICKUP_005", "NOTIFICATION_002")
                 .doesNotContain("PICKUP_006");
         assertThat(responses.get("StorePickupNotFound").toString())
                 .contains("STORE_001", "PICKUP_001");

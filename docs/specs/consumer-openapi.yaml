@@ -3,14 +3,33 @@ info:
   title: MiriYum MVP1 Consumer API
   version: 1.0.0
   description: Audience-specific entrypoint composed from feature-owned OpenAPI contracts.
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
 servers:
   - url: /
 security: []
 paths:
+  /api/v1/consumers/account-recovery-verifications:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1consumers~1account-recovery-verifications"
+  /api/v1/consumers/account-recovery-cases:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1consumers~1account-recovery-cases"
+  /api/v1/consumers/account-recovery-password-reset-credentials:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1consumers~1account-recovery-password-reset-credentials"
+  /api/v1/consumers/account-recovery-password-resets:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1consumers~1account-recovery-password-resets"
+  /api/v1/consumers/account-sanction-appeals:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1consumers~1account-sanction-appeals"
   /api/v1/consumers/auth/accounts:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1accounts"
   /api/v1/consumers/auth/sessions:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1sessions"
+  /api/v1/consumers/auth/kakao/authorizations:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1kakao~1authorizations"
+  /api/v1/consumers/auth/kakao/sessions:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1kakao~1sessions"
+  /api/v1/consumers/auth/kakao/accounts:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1kakao~1accounts"
   /api/v1/consumers/auth/token-refreshes:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1token-refreshes"
   /api/v1/consumers/auth/csrf-tokens/current:
@@ -21,17 +40,76 @@ paths:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me"
   /api/v1/consumers/me/contact:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1contact"
+  /api/v1/consumers/me/kakao/authorizations:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1kakao~1authorizations"
+  /api/v1/consumers/me/kakao-links:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1kakao-links"
+  /api/v1/consumers/me/notifications:
+    $ref: "./notification/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notifications"
+  /api/v1/consumers/me/notification-events:
+    $ref: "./notification/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notification-events"
+  /api/v1/consumers/me/stores/{storeId}/waiting-availabilities:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1stores~1{storeId}~1waiting-availabilities"
+  /api/v1/consumers/me/stores/{storeId}/waiting-location-proofs:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1stores~1{storeId}~1waiting-location-proofs"
+  /api/v1/consumers/me/stores/{storeId}/waiting-teams:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1stores~1{storeId}~1waiting-teams"
+  /api/v1/consumers/me/waiting-teams/current:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1current"
+  /api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{waitingTeamId}~1cancellations"
+  /api/v1/consumers/me/waiting-invitation-acceptances:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-invitation-acceptances"
+  /api/v1/consumers/me/waiting-teams/{teamId}/invitations:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1invitations"
+  /api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1invitations~1{invitationId}~1revocations"
+  /api/v1/consumers/me/waiting-teams/{teamId}/membership-departures:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1membership-departures"
+  /api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1memberships~1{membershipId}~1removals"
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1representative-transfer-offers"
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/acceptances:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1representative-transfer-offers~1{offerId}~1acceptances"
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/rejections:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1representative-transfer-offers~1{offerId}~1rejections"
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{teamId}~1representative-transfer-offers~1{offerId}~1revocations"
+  /api/v1/consumers/me/waiting-events:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-events"
   /api/v1/consumers/me/reservations:
     $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations"
-  /api/v1/consumers/reservations:
-    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1reservations"
-  /api/v1/consumers/reservations/{reservationId}:
-    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1reservations~1{reservationId}"
-  /api/v1/consumers/reservations/{reservationId}/cancellations:
-    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1reservations~1{reservationId}~1cancellations"
-  /api/v1/consumers/pickup-reservations:
-    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1pickup-reservations"
-  /api/v1/consumers/pickup-reservations/{pickupReservationId}:
-    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1pickup-reservations~1{pickupReservationId}"
-  /api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations:
-    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1pickup-reservations~1{pickupReservationId}~1cancellations"
+  /api/v1/consumers/me/reservations/{reservationId}:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations~1{reservationId}"
+  /api/v1/consumers/me/reservations/{reservationId}/check-in-qr-grants:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations~1{reservationId}~1check-in-qr-grants"
+  /api/v1/consumers/me/reservations/{reservationId}/cancellations:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations~1{reservationId}~1cancellations"
+  /api/v1/consumers/me/reservation-requests/{reservationRequestId}:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservation-requests~1{reservationRequestId}"
+  /api/v1/consumers/me/reservation-requests/{reservationRequestId}/finalizations:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservation-requests~1{reservationRequestId}~1finalizations"
+  /api/v1/consumers/me/reservation-requests/{reservationRequestId}/abandonments:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservation-requests~1{reservationRequestId}~1abandonments"
+  /api/v1/consumers/me/pickup-reservations:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1pickup-reservations"
+  /api/v1/consumers/me/pickup-reservations/{pickupReservationId}:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1pickup-reservations~1{pickupReservationId}"
+  /api/v1/consumers/me/pickup-reservations/{pickupReservationId}/cancellations:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1pickup-reservations~1{pickupReservationId}~1cancellations"
+  /api/v1/consumers/me/payments:
+    $ref: "./payment/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1payments"
+  /api/v1/consumers/me/payments/{paymentId}:
+    $ref: "./payment/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1payments~1{paymentId}"
+  /api/v1/consumers/me/payments/{paymentId}/confirmations:
+    $ref: "./payment/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1payments~1{paymentId}~1confirmations"
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: "./mvp1-common/openapi.yaml#/components/securitySchemes/bearerAuth"
+    consumerRefreshCookie:
+      type: apiKey
+      in: cookie
+      name: MIRIYUM_CONSUMER_REFRESH
+      description: 일반 사용자 Refresh JWT HttpOnly 쿠키

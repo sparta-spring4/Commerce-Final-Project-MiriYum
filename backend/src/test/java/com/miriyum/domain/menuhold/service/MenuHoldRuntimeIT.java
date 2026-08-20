@@ -11,6 +11,7 @@ import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldForfeitCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
@@ -18,10 +19,12 @@ import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
 import com.miriyum.domain.menuhold.dto.MenuSelection;
 import com.miriyum.domain.menuhold.entity.MenuHold;
 import com.miriyum.domain.menuhold.entity.MenuHoldStatus;
+import com.miriyum.domain.menuhold.entity.MenuHoldTransitionAudit;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
+import com.miriyum.domain.menuhold.repository.MenuHoldTransitionAuditRepository;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
@@ -88,11 +91,12 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Tag("integration")
-@Tag("integration-shard-a")
+@Tag("integration-shard-b")
 @Testcontainers
 @SpringBootTest(classes = MiriyumApplication.class, properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
-        "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
+        "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
+        "miriyum.reservation.hold-expiration.enabled=false"
 })
 class MenuHoldRuntimeIT {
 
@@ -111,6 +115,7 @@ class MenuHoldRuntimeIT {
     @Autowired MenuHoldServiceRuntime service;
     @Autowired MenuHoldSnapshotQueryService snapshotQueryService;
     @Autowired MenuHoldRepository holdRepository;
+    @Autowired MenuHoldTransitionAuditRepository transitionAuditRepository;
     @Autowired MenuInventoryBucketRepository bucketRepository;
     @Autowired ReservationRepository reservationRepository;
     @Autowired ConsumerAccountRepository consumerRepository;
@@ -170,6 +175,16 @@ class MenuHoldRuntimeIT {
                 .singleElement().satisfies(hold -> {
             assertThat(hold.getReservationId()).isEqualTo(reservation.getId());
             assertThat(hold.getStatus()).isEqualTo(MenuHoldStatus.CONFIRMED);
+            assertThat(hold.getStatusVersion()).isZero();
+            assertThat(transitionAuditRepository
+                    .findByMenuHoldIdAndOccurredAtLessThanEqualOrderByResultVersionAsc(
+                            hold.getId(), Instant.now().plusSeconds(1)))
+                    .singleElement().satisfies(audit -> {
+                        assertThat(audit.getEventType())
+                                .isEqualTo(MenuHoldTransitionAudit.EventType.CREATED);
+                        assertThat(audit.getResultVersion()).isZero();
+                        assertThat(audit.getAfterStatus()).isEqualTo(MenuHoldStatus.CONFIRMED);
+                    });
         });
         assertThat(bucketRepository.findById(bucket.getId()).orElseThrow().getOnlineHoldRemaining()).isZero();
         assertThat(jdbcTemplate.queryForMap("""
@@ -290,6 +305,22 @@ class MenuHoldRuntimeIT {
                 new MenuHoldReleaseCommand(reservation.getId(), "release-repeat")));
 
         assertThat(holdFor(reservation.getId()).getStatus()).isEqualTo(MenuHoldStatus.RELEASED);
+        MenuHold released = holdFor(reservation.getId());
+        assertThat(released.getStatusVersion()).isEqualTo(1L);
+        assertThat(transitionAuditRepository
+                .findByMenuHoldIdAndOccurredAtLessThanEqualOrderByResultVersionAsc(
+                        released.getId(), Instant.now().plusSeconds(1)))
+                .extracting(
+                        MenuHoldTransitionAudit::getEventType,
+                        MenuHoldTransitionAudit::getResultVersion,
+                        MenuHoldTransitionAudit::getAfterStatus)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                MenuHoldTransitionAudit.EventType.CREATED, 0L,
+                                MenuHoldStatus.CONFIRMED),
+                        org.assertj.core.groups.Tuple.tuple(
+                                MenuHoldTransitionAudit.EventType.TRANSITION, 1L,
+                                MenuHoldStatus.RELEASED));
         assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
                 .getOnlineHoldRemaining()).isEqualTo(1);
         assertThat(restoreLedgerCount("release-acquire")).isEqualTo(1);
@@ -316,6 +347,26 @@ class MenuHoldRuntimeIT {
     }
 
     @Test
+    @DisplayName("노쇼 몰수는 홀드만 종결하고 메뉴 수량과 복구 원장을 변경하지 않는다")
+    void forfeitTerminatesHoldWithoutRestoringInventory() {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "forfeit-acquire")));
+
+        transactions.executeWithoutResult(status -> service.forfeit(
+                new MenuHoldForfeitCommand(reservation.getId(), "forfeit-operation")));
+
+        assertThat(holdFor(reservation.getId()).getStatus())
+                .isEqualTo(MenuHoldStatus.FORFEITED);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isZero();
+        assertThat(restoreLedgerCount("forfeit-acquire")).isZero();
+    }
+
+    @Test
     void terminalCommandsRequireCallerTransaction() {
         assertThatThrownBy(() -> service.lockForTermination(Long.MAX_VALUE))
                 .isInstanceOf(IllegalTransactionStateException.class);
@@ -324,6 +375,9 @@ class MenuHoldRuntimeIT {
                 .isInstanceOf(IllegalTransactionStateException.class);
         assertThatThrownBy(() -> service.fulfill(
                 new MenuHoldFulfillCommand(Long.MAX_VALUE, "no-transaction-fulfill")))
+                .isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> service.forfeit(
+                new MenuHoldForfeitCommand(Long.MAX_VALUE, "no-transaction-forfeit")))
                 .isInstanceOf(IllegalTransactionStateException.class);
     }
 
@@ -529,6 +583,29 @@ class MenuHoldRuntimeIT {
     }
 
     @Test
+    void callerFailureRollsBackForfeitState() {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "rollback-forfeit-acquire")));
+
+        assertThatThrownBy(() -> transactions.executeWithoutResult(status -> {
+            service.forfeit(new MenuHoldForfeitCommand(
+                    reservation.getId(), "rollback-forfeit-operation"));
+            throw new IllegalStateException("caller failure");
+        })).isInstanceOf(IllegalStateException.class)
+                .hasMessage("caller failure");
+
+        assertThat(holdFor(reservation.getId()).getStatus())
+                .isEqualTo(MenuHoldStatus.CONFIRMED);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isZero();
+        assertThat(restoreLedgerCount("rollback-forfeit-acquire")).isZero();
+    }
+
+    @Test
     @DisplayName("수량 복구 오류는 원형 전달되고 홀드 상태도 롤백된다")
     void inventoryRestoreFailurePropagatesAndRollsBackHoldState() {
         MenuInventoryBucket bucket = transactions.execute(status ->
@@ -586,6 +663,37 @@ class MenuHoldRuntimeIT {
     }
 
     @Test
+    @DisplayName("동시 몰수는 둘 다 멱등 성공하고 수량과 복구 원장을 변경하지 않는다")
+    void concurrentForfeitIsIdempotentWithoutRestore() throws Exception {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "concurrent-forfeit-acquire")));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Object> first = executor.submit(() -> forfeitConcurrently(
+                    reservation.getId(), "concurrent-forfeit-1", ready, start));
+            Future<Object> second = executor.submit(() -> forfeitConcurrently(
+                    reservation.getId(), "concurrent-forfeit-2", ready, start));
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            assertThat(List.of(first.get(20, TimeUnit.SECONDS),
+                    second.get(20, TimeUnit.SECONDS)))
+                    .containsOnly(MenuHoldCommandResult.Outcome.FORFEITED);
+        }
+        assertThat(holdFor(reservation.getId()).getStatus())
+                .isEqualTo(MenuHoldStatus.FORFEITED);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isZero();
+        assertThat(restoreLedgerCount("concurrent-forfeit-acquire")).isZero();
+    }
+
+    @Test
     @DisplayName("해제와 이행 경합은 하나의 최종 상태만 확정한다")
     void concurrentReleaseAndFulfillCommitOneTerminalState() throws Exception {
         MenuInventoryBucket bucket = transactions.execute(status ->
@@ -622,6 +730,56 @@ class MenuHoldRuntimeIT {
                     com.miriyum.domain.menuhold.dto.MenuHoldCommandResult.Outcome.FULFILLED);
             assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
                     .getOnlineHoldRemaining()).isZero();
+        }
+    }
+
+    @Test
+    @DisplayName("해제·이행·몰수 경합은 정확히 하나의 최종 상태만 확정한다")
+    void concurrentReleaseFulfillAndForfeitCommitOneTerminalState() throws Exception {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "three-way-terminal-race-acquire")));
+        CountDownLatch ready = new CountDownLatch(3);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Object> results;
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(3)) {
+            Future<Object> release = executor.submit(() -> terminalConcurrently(
+                    reservation.getId(), "three-way-release", true, ready, start));
+            Future<Object> fulfill = executor.submit(() -> terminalConcurrently(
+                    reservation.getId(), "three-way-fulfill", false, ready, start));
+            Future<Object> forfeit = executor.submit(() -> forfeitConcurrently(
+                    reservation.getId(), "three-way-forfeit", ready, start));
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            results = List.of(release.get(20, TimeUnit.SECONDS),
+                    fulfill.get(20, TimeUnit.SECONDS),
+                    forfeit.get(20, TimeUnit.SECONDS));
+        }
+
+        assertThat(results.stream()
+                .filter(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT::equals)
+                .count()).isEqualTo(2L);
+        MenuHoldStatus finalStatus = holdFor(reservation.getId()).getStatus();
+        if (finalStatus == MenuHoldStatus.RELEASED) {
+            assertThat(results).contains(MenuHoldCommandResult.Outcome.RELEASED);
+            assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                    .getOnlineHoldRemaining()).isEqualTo(1);
+            assertThat(restoreLedgerCount("three-way-terminal-race-acquire")).isEqualTo(1);
+        } else if (finalStatus == MenuHoldStatus.FULFILLED) {
+            assertThat(results).contains(MenuHoldCommandResult.Outcome.FULFILLED);
+            assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                    .getOnlineHoldRemaining()).isZero();
+            assertThat(restoreLedgerCount("three-way-terminal-race-acquire")).isZero();
+        } else {
+            assertThat(finalStatus).isEqualTo(MenuHoldStatus.FORFEITED);
+            assertThat(results).contains(MenuHoldCommandResult.Outcome.FORFEITED);
+            assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                    .getOnlineHoldRemaining()).isZero();
+            assertThat(restoreLedgerCount("three-way-terminal-race-acquire")).isZero();
         }
     }
 
@@ -677,13 +835,14 @@ class MenuHoldRuntimeIT {
     }
 
     @Test
-    @DisplayName("V21의 FK·CHECK·유일 인덱스가 실제 MySQL에 정확히 생성된다")
+    @DisplayName("V21과 V34의 FK·CHECK·유일 인덱스가 실제 MySQL에 정확히 생성된다")
     void mysqlSchemaDefinesExactConstraintsAndIndexOrder() {
         assertThat(constraintNames("menu_holds", "FOREIGN KEY"))
                 .containsExactlyInAnyOrder(
                         "fk_menu_holds_reservation",
                         "fk_menu_holds_store",
-                        "fk_menu_holds_consumer");
+                        "fk_menu_holds_consumer",
+                        "fk_menu_holds_reservation_hold_expiration");
         assertThat(constraintNames("menu_hold_items", "FOREIGN KEY"))
                 .containsExactlyInAnyOrder(
                         "fk_menu_hold_items_hold",
@@ -692,7 +851,8 @@ class MenuHoldRuntimeIT {
         assertThat(constraintNames("menu_holds", "CHECK"))
                 .containsExactlyInAnyOrder(
                         "ck_menu_holds_service_interval",
-                        "ck_menu_holds_status");
+                        "ck_menu_holds_parent_and_status",
+                        "ck_menu_holds_status_version");
         assertThat(constraintNames("menu_hold_items", "CHECK"))
                 .containsExactlyInAnyOrder(
                         "ck_menu_hold_items_versions",
@@ -704,10 +864,173 @@ class MenuHoldRuntimeIT {
                 .isEqualTo("reservation_id");
         assertThat(indexColumns("menu_holds", "uk_menu_holds_acquire_operation"))
                 .isEqualTo("acquire_operation_id");
+        assertThat(indexColumns("menu_holds", "uk_menu_holds_reservation_hold"))
+                .isEqualTo("reservation_hold_id");
         assertThat(indexColumns("menu_hold_items", "uk_menu_hold_items_hold_bucket"))
                 .isEqualTo("menu_hold_id,menu_inventory_bucket_id");
         assertThat(indexColumns("menu_hold_items", "idx_menu_hold_items_bucket"))
                 .isEqualTo("menu_inventory_bucket_id,menu_hold_item_id");
+        assertThat(constraintNames("menu_hold_transition_audits", "FOREIGN KEY"))
+                .as("append-only audit history must outlive the MenuHold aggregate")
+                .isEmpty();
+        assertThat(constraintNames("menu_hold_transition_audits", "CHECK"))
+                .containsExactlyInAnyOrder(
+                        "ck_menu_hold_transition_event_type",
+                        "ck_menu_hold_transition_result_version",
+                        "ck_menu_hold_transition_shape");
+        assertThat(indexColumns(
+                "menu_hold_transition_audits", "uk_menu_hold_transition_version"))
+                .isEqualTo("menu_hold_id,result_version");
+    }
+
+    @Test
+    @DisplayName("MenuHold aggregate 삭제 뒤에도 append-only 전이 감사 원장은 보존된다")
+    void deletingMenuHoldPreservesTransitionAuditHistory() {
+        transactions.execute(status -> bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status ->
+                service.create(command(reservation.getId(), 1, "audit-outlives-hold")));
+        Long holdId = jdbcTemplate.queryForObject(
+                "SELECT menu_hold_id FROM menu_holds WHERE reservation_id = ?",
+                Long.class,
+                reservation.getId());
+        Integer auditCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_hold_transition_audits WHERE menu_hold_id = ?",
+                Integer.class,
+                holdId);
+
+        assertThat(auditCount).isPositive();
+        assertThat(jdbcTemplate.update(
+                "DELETE FROM menu_hold_items WHERE menu_hold_id = ?", holdId)).isEqualTo(1);
+        assertThat(jdbcTemplate.update(
+                "DELETE FROM menu_holds WHERE menu_hold_id = ?", holdId)).isEqualTo(1);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_holds WHERE menu_hold_id = ?",
+                Integer.class,
+                holdId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_hold_transition_audits WHERE menu_hold_id = ?",
+                Integer.class,
+                holdId)).isEqualTo(auditCount);
+    }
+
+    @Test
+    @DisplayName("임시 MenuHold의 부모·만료·상태 계약을 실제 MySQL이 강제한다")
+    void mysqlSchemaDefinesTemporaryParentAndStateConstraints() {
+        String operationPrefix = "temporary-schema-" + consumerId + "-";
+        long firstParentId = insertReservationHoldParent(
+                operationPrefix + "parent-1",
+                LocalDateTime.of(2026, 8, 10, 3, 0));
+        long secondParentId = insertReservationHoldParent(
+                operationPrefix + "parent-2",
+                LocalDateTime.of(2026, 8, 10, 4, 0));
+        LocalDateTime firstExpiry = reservationHoldExpiry(firstParentId);
+        LocalDateTime secondExpiry = reservationHoldExpiry(secondParentId);
+
+        assertThat(constraintNames("menu_holds", "FOREIGN KEY"))
+                .as("the composite ReservationHold parent FK must exist")
+                .contains("fk_menu_holds_reservation_hold_expiration");
+        assertThat(foreignKeyColumnMapping(
+                "menu_holds", "fk_menu_holds_reservation_hold_expiration"))
+                .as("the FK must bind both parent identity and exact expiry")
+                .isEqualTo("reservation_hold_id->reservation_hold_id,expires_at->expires_at");
+        assertThat(indexColumns("menu_holds", "uk_menu_holds_reservation_hold"))
+                .as("one ReservationHold must have at most one temporary MenuHold")
+                .isEqualTo("reservation_hold_id");
+        assertThat(constraintNames("menu_holds", "CHECK"))
+                .as("the parent/state/nullability CHECK must replace the legacy status CHECK")
+                .contains("ck_menu_holds_parent_and_status")
+                .doesNotContain("ck_menu_holds_status");
+
+        assertThatThrownBy(() -> insertMenuHold(
+                null,
+                firstParentId,
+                firstExpiry.plusNanos(1_000),
+                operationPrefix + "mismatched-expiry",
+                "ACTIVE"))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("fk_menu_holds_reservation_hold_expiration");
+
+        insertMenuHold(
+                null,
+                firstParentId,
+                firstExpiry,
+                operationPrefix + "valid-temporary",
+                "ACTIVE");
+
+        assertThatThrownBy(() -> insertMenuHold(
+                null,
+                firstParentId,
+                firstExpiry,
+                operationPrefix + "duplicate-parent",
+                "ACTIVE"))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("uk_menu_holds_reservation_hold");
+
+        assertThatThrownBy(() -> insertMenuHold(
+                null,
+                null,
+                null,
+                operationPrefix + "missing-parent",
+                "ACTIVE"))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_menu_holds_parent_and_status");
+        assertThatThrownBy(() -> insertMenuHold(
+                null,
+                secondParentId,
+                null,
+                operationPrefix + "missing-expiry",
+                "ACTIVE"))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_menu_holds_parent_and_status");
+        assertThatThrownBy(() -> insertMenuHold(
+                null,
+                secondParentId,
+                secondExpiry,
+                operationPrefix + "unlinked-confirmed",
+                "CONFIRMED"))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_menu_holds_parent_and_status");
+        assertThatThrownBy(() -> insertMenuHold(
+                null,
+                secondParentId,
+                secondExpiry,
+                operationPrefix + "unlinked-forfeited",
+                "FORFEITED"))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_menu_holds_parent_and_status");
+
+        Reservation linkedTemporaryReservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        insertMenuHold(
+                linkedTemporaryReservation.getId(),
+                secondParentId,
+                secondExpiry,
+                operationPrefix + "linked-forfeited",
+                "FORFEITED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM menu_holds WHERE reservation_id = ?",
+                String.class,
+                linkedTemporaryReservation.getId())).isEqualTo("FORFEITED");
+
+        Reservation legacyReservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        insertMenuHold(
+                legacyReservation.getId(),
+                null,
+                null,
+                operationPrefix + "legacy-confirmed",
+                "CONFIRMED");
+        jdbcTemplate.update(
+                "UPDATE menu_holds SET status = 'RELEASED' WHERE reservation_id = ?",
+                legacyReservation.getId());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM menu_holds WHERE reservation_id = ?",
+                String.class,
+                legacyReservation.getId())).isEqualTo("RELEASED");
     }
 
     @Test
@@ -875,6 +1198,120 @@ class MenuHoldRuntimeIT {
                 """, String.class, tableName, indexName);
     }
 
+    private String foreignKeyColumnMapping(String tableName, String constraintName) {
+        return jdbcTemplate.queryForObject("""
+                SELECT GROUP_CONCAT(
+                           CONCAT(column_name, '->', referenced_column_name)
+                           ORDER BY ordinal_position SEPARATOR ','
+                       )
+                  FROM information_schema.key_column_usage
+                 WHERE table_schema = DATABASE()
+                   AND table_name = ?
+                   AND constraint_name = ?
+                """, String.class, tableName, constraintName);
+    }
+
+    private LocalDateTime reservationHoldExpiry(long reservationHoldId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT expires_at FROM reservation_holds WHERE reservation_hold_id = ?",
+                LocalDateTime.class,
+                reservationHoldId);
+    }
+
+    private long insertReservationHoldParent(String commandId, LocalDateTime createdAt) {
+        LocalDateTime expiresAt = createdAt.plusMinutes(10);
+        jdbcTemplate.update("""
+                INSERT INTO reservation_holds (
+                    consumer_account_id,
+                    store_id,
+                    store_name_snapshot,
+                    service_date,
+                    start_at,
+                    service_end_at,
+                    occupancy_end_at,
+                    time_zone_id_snapshot,
+                    start_offset_seconds,
+                    service_end_offset_seconds,
+                    occupancy_end_offset_seconds,
+                    slot_interval_minutes,
+                    service_duration_minutes,
+                    turnover_duration_minutes,
+                    reservation_time_policy_store_id,
+                    reservation_policy_version,
+                    adult_count,
+                    child_count,
+                    infant_count,
+                    notification_target_reference,
+                    contact_available_at_confirmation,
+                    capacity_policy_version,
+                    cancellation_policy_version,
+                    status,
+                    status_version,
+                    creation_command_id,
+                    created_at,
+                    expires_at
+                ) VALUES (
+                    ?, ?, 'store', ?, ?, ?, ?, 'Asia/Seoul',
+                    32400, 32400, 32400, 30, 60, 0, ?, 1,
+                    2, 0, 0, ?, TRUE, 1, 1, 'ACTIVE', 0, ?, ?, ?
+                )
+                """,
+                consumerId,
+                storeId,
+                LocalDate.of(2026, 8, 10),
+                LocalDateTime.of(2026, 8, 10, 3, 0),
+                LocalDateTime.of(2026, 8, 10, 4, 0),
+                LocalDateTime.of(2026, 8, 10, 4, 0),
+                storeId,
+                "consumer:" + consumerId,
+                commandId,
+                createdAt,
+                expiresAt);
+        return jdbcTemplate.queryForObject("""
+                SELECT reservation_hold_id
+                  FROM reservation_holds
+                 WHERE consumer_account_id = ?
+                   AND creation_command_id = ?
+                """, Long.class, consumerId, commandId);
+    }
+
+    private void insertMenuHold(
+            Long reservationId,
+            Long reservationHoldId,
+            LocalDateTime expiresAt,
+            String operationId,
+            String status
+    ) {
+        jdbcTemplate.update("""
+                INSERT INTO menu_holds (
+                    reservation_id,
+                    reservation_hold_id,
+                    expires_at,
+                    store_id,
+                    consumer_account_id,
+                    service_date,
+                    start_time,
+                    end_date,
+                    end_time,
+                    acquire_operation_id,
+                    status,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """,
+                reservationId,
+                reservationHoldId,
+                expiresAt,
+                storeId,
+                consumerId,
+                LocalDate.of(2026, 8, 10),
+                LocalTime.NOON,
+                LocalDate.of(2026, 8, 10),
+                LocalTime.of(13, 0),
+                operationId,
+                status);
+    }
+
     private Reservation reservation() {
         ReservationTimePolicyVersion policy = ReservationTimePolicyVersion.createDraft(
                 storeId, 1L, 30, 60, 0);
@@ -926,9 +1363,30 @@ class MenuHoldRuntimeIT {
         }
     }
 
+    private Object forfeitConcurrently(
+            long reservationId,
+            String operationId,
+            CountDownLatch ready,
+            CountDownLatch start
+    ) {
+        try {
+            ready.countDown();
+            if (!start.await(10, TimeUnit.SECONDS)) {
+                return AssertionError.class;
+            }
+            return transactions.execute(status -> service.forfeit(
+                    new MenuHoldForfeitCommand(reservationId, operationId)).outcome());
+        } catch (ServiceException exception) {
+            return exception.getErrorCode();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return InterruptedException.class;
+        }
+    }
+
     private MenuHold holdFor(long reservationId) {
         return holdRepository.findAll().stream()
-                .filter(hold -> hold.getReservationId() == reservationId)
+                .filter(hold -> Long.valueOf(reservationId).equals(hold.getReservationId()))
                 .findFirst()
                 .orElseThrow();
     }

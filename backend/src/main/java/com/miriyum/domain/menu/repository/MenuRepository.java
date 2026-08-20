@@ -14,6 +14,56 @@ import org.springframework.data.repository.query.Param;
 
 public interface MenuRepository extends JpaRepository<Menu, Long> {
 
+    @Query(value = """
+            SELECT rms.store_id AS storeId,
+                   rms.version AS version,
+                   rms.status AS status,
+                   m.menu_id AS menuId,
+                   rme.display_order AS displayOrder,
+                   m.published_version_number AS publishedVersionNumber,
+                   mv.name AS name,
+                   mv.price AS price,
+                   m.selling_status AS sellingStatus
+            FROM representative_menu_settings rms
+            LEFT JOIN representative_menu_entries rme
+              ON rme.store_id = rms.store_id
+            LEFT JOIN menus m
+              ON m.menu_id = rme.menu_id
+             AND m.store_id = rms.store_id
+             AND m.retired = FALSE
+             AND m.visibility = 'VISIBLE'
+             AND m.selling_status IN ('SELLING', 'SOLD_OUT')
+            LEFT JOIN menu_versions mv
+              ON mv.menu_id = m.menu_id
+             AND mv.version_number = m.published_version_number
+             AND mv.status = 'PUBLISHED'
+            WHERE rms.store_id = :storeId
+            ORDER BY rme.display_order
+            """, nativeQuery = true)
+    List<RepresentativeMenuRow> findRepresentativeMenuRows(
+            @Param("storeId") long storeId);
+
+    interface RepresentativeMenuRow {
+        Long getStoreId();
+        Long getVersion();
+        String getStatus();
+        Long getMenuId();
+        Integer getDisplayOrder();
+        Integer getPublishedVersionNumber();
+        String getName();
+        Integer getPrice();
+        String getSellingStatus();
+    }
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @EntityGraph(attributePaths = "versions")
+    @Query("select distinct m from Menu m where m.id in :menuIds order by m.id")
+    List<Menu> findAllByIdForUpdate(@Param("menuIds") List<Long> menuIds);
+
+    @EntityGraph(attributePaths = "versions")
+    @Query("select distinct m from Menu m where m.id in :menuIds")
+    List<Menu> findAllManagedByIds(@Param("menuIds") List<Long> menuIds);
+
     @Query("select m.storeId from Menu m where m.id = :menuId")
     Optional<Long> findStoreIdById(@Param("menuId") long menuId);
 

@@ -14,12 +14,17 @@ import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationAttempt;
+import com.miriyum.domain.auth.qrepoch.ConsumerQrLogoutCoordinator;
 import com.miriyum.domain.consumer.dto.auth.ConsumerSignUpRequest;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -27,6 +32,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class ConsumerAuthService {
+
+    private static final Logger log = LoggerFactory.getLogger(ConsumerAuthService.class);
+    private static final String BEARER_PREFIX = "Bearer ";
 
     private final ConsumerAccountRepository consumerAccountRepository;
     private final PasswordEncoder passwordEncoder;
@@ -36,6 +44,8 @@ public class ConsumerAuthService {
     private final LoginDelayGuard loginDelayGuard;
     private final PhoneNumberPolicy phoneNumberPolicy;
     private final ReservationContactReferenceGenerator contactReferenceGenerator;
+    private final RefreshTokenManager refreshTokenManager;
+    private final ConsumerQrLogoutCoordinator consumerQrLogoutCoordinator;
 
     public ConsumerAuthService(
             ConsumerAccountRepository consumerAccountRepository,
@@ -45,7 +55,9 @@ public class ConsumerAuthService {
             PasswordPolicy passwordPolicy,
             LoginDelayGuard loginDelayGuard,
             PhoneNumberPolicy phoneNumberPolicy,
-            ReservationContactReferenceGenerator contactReferenceGenerator
+            ReservationContactReferenceGenerator contactReferenceGenerator,
+            RefreshTokenManager refreshTokenManager,
+            ConsumerQrLogoutCoordinator consumerQrLogoutCoordinator
     ) {
         this.consumerAccountRepository = consumerAccountRepository;
         this.passwordEncoder = passwordEncoder;
@@ -55,6 +67,8 @@ public class ConsumerAuthService {
         this.loginDelayGuard = loginDelayGuard;
         this.phoneNumberPolicy = phoneNumberPolicy;
         this.contactReferenceGenerator = contactReferenceGenerator;
+        this.refreshTokenManager = refreshTokenManager;
+        this.consumerQrLogoutCoordinator = consumerQrLogoutCoordinator;
     }
 
     @Transactional
@@ -104,6 +118,9 @@ public class ConsumerAuthService {
     public TokenPair login(LoginRequest request) {
         ConsumerAccount account = consumerAccountRepository.findByEmail(request.email())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
+        if (account.getPasswordHash() == null) {
+            throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
+        }
 
         LoginAttempt attempt = loginDelayGuard.tryAcquireAttempt(TokenNamespace.CONSUMER, account.getId());
         if (attempt.status() == LoginAttempt.Status.DELAYED) {
@@ -124,10 +141,14 @@ public class ConsumerAuthService {
                 throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
             }
 
-            if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
+            long sessionEpoch = refreshTokenManager.captureSessionEpoch(TokenNamespace.CONSUMER, account.getId());
+            ConsumerAccount currentAccount = consumerAccountRepository.findById(account.getId())
+                    .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
+            if (currentAccount.getStatus() != ConsumerAccountStatus.ACTIVE
+                    || currentAccount.isPasswordResetRequired()) {
                 throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
             }
-            return issueTokenPair(account.getId());
+            return issueTokenPair(currentAccount.getId(), sessionEpoch);
         } finally {
             if (!completed) {
                 loginDelayGuard.releaseAttempt(TokenNamespace.CONSUMER, account.getId(), attempt);
@@ -135,7 +156,6 @@ public class ConsumerAuthService {
         }
     }
 
-    @Transactional(readOnly = true)
     public TokenPair refresh(String refreshToken) {
         if (refreshToken == null || refreshToken.isBlank()) {
             throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_REQUIRED);
@@ -148,28 +168,60 @@ public class ConsumerAuthService {
 
         ConsumerAccount account = consumerAccountRepository.findById(parsed.accountId())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
-        if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
+        RefreshTokenRotationAttempt attempt = refreshTokenManager.attemptRotate(
+                TokenNamespace.CONSUMER, parsed, refreshToken);
+        if (attempt.reused() && isRestricted(account)) {
+            refreshTokenManager.revokeAll(TokenNamespace.CONSUMER, account.getId());
+        }
+        if (!attempt.rotated()) {
+            throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
+        }
+        TokenPair tokenPair = attempt.tokenPair();
+        if (isRestricted(account)) {
+            refreshTokenManager.revokeAll(TokenNamespace.CONSUMER, account.getId());
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
 
-        return issueTokenPair(account.getId());
+        return tokenPair;
     }
 
-    public void logout(String refreshToken) {
+    public void logout(String refreshToken, String authorizationHeader) {
         if (refreshToken == null || refreshToken.isBlank()) {
-            throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_REQUIRED);
+            return;
         }
 
-        ParsedToken parsed = jwtTokenProvider.parseRefreshToken(refreshToken);
-        if (parsed.namespace() != TokenNamespace.CONSUMER) {
-            throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
+        ParsedToken parsed = jwtTokenProvider.parseRefreshTokenForLogout(refreshToken);
+        if (parsed == null || parsed.namespace() != TokenNamespace.CONSUMER) {
+            return;
+        }
+
+        ParsedToken access = parseOptionalAccessToken(authorizationHeader);
+        boolean accessSubjectDiffers = access != null && (access.namespace() != parsed.namespace()
+                || !access.accountId().equals(parsed.accountId()));
+        if (accessSubjectDiffers) {
+            log.info("event=consumer_logout_access_refresh_subject_mismatch");
+        }
+
+        consumerQrLogoutCoordinator.advanceForLogout(TokenNamespace.CONSUMER, parsed, refreshToken);
+    }
+
+    private ParsedToken parseOptionalAccessToken(String authorizationHeader) {
+        if (authorizationHeader == null || !authorizationHeader.startsWith(BEARER_PREFIX)) {
+            return null;
+        }
+        String rawAccessToken = authorizationHeader.substring(BEARER_PREFIX.length());
+        if (rawAccessToken.isBlank()) {
+            return null;
+        }
+        try {
+            return jwtTokenProvider.parseAccessToken(rawAccessToken);
+        } catch (ServiceException ignored) {
+            return null;
         }
     }
 
-    private TokenPair issueTokenPair(Long accountId) {
-        return new TokenPair(
-                jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId),
-                jwtTokenProvider.generateRefreshToken(TokenNamespace.CONSUMER, accountId));
+    private TokenPair issueTokenPair(Long accountId, long sessionEpoch) {
+        return refreshTokenManager.issue(TokenNamespace.CONSUMER, accountId, sessionEpoch);
     }
 
     private boolean matchesPassword(String rawPassword, String encodedPassword) {
@@ -178,5 +230,9 @@ public class ConsumerAuthService {
         } catch (IllegalArgumentException exception) {
             return false;
         }
+    }
+
+    private boolean isRestricted(ConsumerAccount account) {
+        return account.getStatus() != ConsumerAccountStatus.ACTIVE || account.isPasswordResetRequired();
     }
 }

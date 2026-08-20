@@ -1,0 +1,573 @@
+package com.miriyum.global.storage.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.miriyum.global.storage.FileStorageObject;
+import com.miriyum.global.storage.FileStorageOutcomeUnknownException;
+import com.miriyum.global.storage.FileStorageMetadata;
+import com.miriyum.global.storage.FileStorageOwner;
+import com.miriyum.global.storage.FileStoragePort;
+import com.miriyum.global.storage.FileStoragePurpose;
+import com.miriyum.global.storage.FileStorageRequest;
+import com.miriyum.global.storage.FileStorageSaveResult;
+import com.miriyum.global.storage.FileStorageStatus;
+import com.miriyum.global.storage.FileStorageVisibility;
+import com.miriyum.global.storage.entity.FileMetadata;
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
+
+class FileStorageFacadeTest {
+
+    private static final String FILE_CHECKSUM =
+            "3b9c358f36f0a31b6ad3e14f309c7cf198ac9246e8316f9ce543d5b19ac02b80";
+
+    @Test
+    @DisplayName("파일 저장 후 완료 상태 기록이 실패하면 실패 상태로 덮어쓰지 않는다")
+    void keepsPendingWhenConfirmationFails() {
+        // given
+        FileStorageMetadata metadata = pendingMetadata();
+        IllegalStateException confirmationFailure = new IllegalStateException("완료 상태를 기록할 수 없습니다.");
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(confirmationFailure, null);
+        FileStorageFacade facade = new FileStorageFacade(new SuccessfulFileStoragePort(), transactionExecutor);
+
+        // when & then
+        assertThatThrownBy(() -> facade.store(metadata, request(metadata.objectKey())))
+                .isSameAs(confirmationFailure);
+        assertThat(transactionExecutor.failedFileIds()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("지연 공개 저장은 외부 객체를 저장해도 바깥 업무가 확정하기 전에는 대기 상태로 남긴다")
+    void keepsStoredObjectPendingUntilOwnerTransactionConfirmsIt() {
+        FileStorageMetadata metadata = pendingMetadata();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null);
+        RecordingFileStoragePort fileStoragePort = new RecordingFileStoragePort();
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+
+        FileStorageMetadata stored = facade.storePending(metadata, request(metadata.objectKey()));
+
+        assertThat(stored.status()).isEqualTo(FileStorageStatus.PENDING);
+        assertThat(transactionExecutor.pendingFileIds()).containsExactly(metadata.fileId().toString());
+        assertThat(transactionExecutor.confirmationCalls()).isZero();
+        assertThat(fileStoragePort.savedObjectKeys()).containsExactly(metadata.objectKey());
+    }
+
+    @Test
+    @DisplayName("파일 저장 실패 기록도 실패하면 원래 파일 저장 예외를 유지한다")
+    void preservesStorageFailureWhenFailedStatusRecordingFails() {
+        // given
+        FileStorageMetadata metadata = pendingMetadata();
+        IllegalStateException storageFailure = new IllegalStateException("파일 저장소에 연결할 수 없습니다.");
+        IllegalStateException failedStatusFailure = new IllegalStateException("실패 상태를 기록할 수 없습니다.");
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, failedStatusFailure);
+        FileStorageFacade facade = new FileStorageFacade(
+                new FailingFileStoragePort(storageFailure), transactionExecutor);
+
+        // when & then
+        assertThatThrownBy(() -> facade.store(metadata, request(metadata.objectKey())))
+                .isSameAs(storageFailure)
+                .satisfies(exception -> assertThat(exception.getSuppressed()).containsExactly(failedStatusFailure));
+    }
+
+    @Test
+    @DisplayName("업로드 결과를 확정할 수 없으면 PENDING을 유지해 reconciliation 대상으로 남긴다")
+    void keepsPendingWhenUploadOutcomeIsUnknown() {
+        FileStorageMetadata metadata = pendingMetadata();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null);
+        FileStorageFacade facade = new FileStorageFacade(
+                new FailingFileStoragePort(new FileStorageOutcomeUnknownException("outcome unknown", null)),
+                transactionExecutor);
+
+        assertThatThrownBy(() -> facade.storePending(metadata, request(metadata.objectKey())))
+                .isInstanceOf(FileStorageOutcomeUnknownException.class);
+
+        assertThat(transactionExecutor.pendingFileIds()).containsExactly(metadata.fileId().toString());
+        assertThat(transactionExecutor.failedFileIds()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("메타데이터와 저장 요청의 파일 경로가 다르면 저장을 시작하지 않는다")
+    void rejectsDifferentObjectKeysBeforeStorageStarts() {
+        // given
+        FileStorageMetadata metadata = pendingMetadata();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null);
+        RecordingFileStoragePort fileStoragePort = new RecordingFileStoragePort();
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+
+        // when & then
+        assertThatThrownBy(() -> facade.store(metadata, request("public/store/11/store-image/different-object")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(transactionExecutor.pendingFileIds()).isEmpty();
+        assertThat(fileStoragePort.savedObjectKeys()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("완료된 메타데이터로 새 파일 저장을 시작하지 않는다")
+    void rejectsNonPendingMetadataBeforeStorageStarts() {
+        // given
+        FileStorageMetadata pending = pendingMetadata();
+        FileStorageMetadata confirmed = new FileStorageMetadata(
+                pending.fileId(), pending.owner(), pending.purpose(), pending.objectKey(), pending.contentType(),
+                pending.sizeBytes(), pending.checksum(), pending.visibility(), FileStorageStatus.CONFIRMED,
+                pending.retentionPolicy(), pending.createdAt(), null);
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null);
+        RecordingFileStoragePort fileStoragePort = new RecordingFileStoragePort();
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+
+        // when & then
+        assertThatThrownBy(() -> facade.store(confirmed, request(confirmed.objectKey())))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(transactionExecutor.pendingFileIds()).isEmpty();
+        assertThat(fileStoragePort.savedObjectKeys()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("메타데이터와 저장 요청의 MIME 타입이 다르면 저장을 시작하지 않는다")
+    void rejectsDifferentContentTypesBeforeStorageStarts() {
+        FileStorageMetadata metadata = pendingMetadata();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null);
+        RecordingFileStoragePort fileStoragePort = new RecordingFileStoragePort();
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+        FileStorageRequest request = new FileStorageRequest(
+                metadata.objectKey(),
+                "image/png",
+                4L,
+                new ByteArrayInputStream("file".getBytes(StandardCharsets.UTF_8)));
+
+        assertThatThrownBy(() -> facade.store(metadata, request))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(transactionExecutor.pendingFileIds()).isEmpty();
+        assertThat(fileStoragePort.savedObjectKeys()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("메타데이터와 저장 요청의 파일 크기가 다르면 저장을 시작하지 않는다")
+    void rejectsDifferentSizesBeforeStorageStarts() {
+        FileStorageMetadata metadata = pendingMetadata();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null);
+        RecordingFileStoragePort fileStoragePort = new RecordingFileStoragePort();
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+        FileStorageRequest request = new FileStorageRequest(
+                metadata.objectKey(),
+                "image/jpeg",
+                5L,
+                new ByteArrayInputStream("file".getBytes(StandardCharsets.UTF_8)));
+
+        assertThatThrownBy(() -> facade.store(metadata, request))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(transactionExecutor.pendingFileIds()).isEmpty();
+        assertThat(fileStoragePort.savedObjectKeys()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("저장 결과의 MIME 타입이 다르면 실패 상태로 기록한다")
+    void marksFailedWhenStoredContentTypeDiffers() {
+        assertStorageResultMismatch(new FileStorageSaveResult(
+                pendingMetadata().objectKey(), "image/png", 4L, FILE_CHECKSUM));
+    }
+
+    @Test
+    @DisplayName("저장 결과의 파일 크기가 다르면 실패 상태로 기록한다")
+    void marksFailedWhenStoredSizeDiffers() {
+        assertStorageResultMismatch(new FileStorageSaveResult(
+                pendingMetadata().objectKey(), "image/jpeg", 5L, FILE_CHECKSUM));
+    }
+
+    @Test
+    @DisplayName("저장 결과의 SHA-256 체크섬이 다르면 실패 상태로 기록한다")
+    void marksFailedWhenStoredChecksumDiffers() {
+        assertStorageResultMismatch(new FileStorageSaveResult(
+                pendingMetadata().objectKey(), "image/jpeg", 4L, "a".repeat(64)));
+    }
+
+    @Test
+    @DisplayName("저장 완료된 파일은 DB 정본 객체 키로 메타데이터를 먼저 삭제 처리한 뒤 저장소 객체를 삭제한다")
+    void deletesMetadataBeforeStorageObjectUsingAuthoritativeObjectKey() {
+        FileStorageMetadata confirmed = confirmedMetadata();
+        List<String> events = new ArrayList<>();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null, events);
+        RecordingFileStoragePort fileStoragePort = new RecordingFileStoragePort(events);
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+
+        facade.delete(confirmed.fileId(), Instant.parse("2026-08-15T00:00:00Z"));
+
+        assertThat(events).containsExactly(
+                "metadata-delete:" + confirmed.fileId(),
+                "storage-delete:public/store/11/store-image/deleted-object",
+                "metadata-cleanup-complete:" + confirmed.fileId());
+    }
+
+    @Test
+    @DisplayName("저장소 객체 삭제가 실패한 뒤 같은 파일 식별자로 다시 호출하면 삭제를 재시도한다")
+    void retriesStorageDeletionForAlreadyDeletedMetadata() {
+        FileStorageMetadata confirmed = confirmedMetadata();
+        List<String> events = new ArrayList<>();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null, events);
+        IllegalStateException deletionFailure = new IllegalStateException("저장소 삭제 실패");
+        FailingOnceDeleteFileStoragePort fileStoragePort = new FailingOnceDeleteFileStoragePort(events, deletionFailure);
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+
+        assertThatThrownBy(() -> facade.delete(confirmed.fileId(), Instant.parse("2026-08-15T00:00:00Z")))
+                .isSameAs(deletionFailure);
+        assertThat(facade.delete(confirmed.fileId(), Instant.parse("2026-08-15T00:01:00Z")).status())
+                .isEqualTo(FileStorageStatus.DELETED);
+        assertThat(events).containsExactly(
+                "metadata-delete:" + confirmed.fileId(),
+                "storage-delete:public/store/11/store-image/deleted-object",
+                "metadata-delete:" + confirmed.fileId(),
+                "storage-delete:public/store/11/store-image/deleted-object",
+                "metadata-cleanup-complete:" + confirmed.fileId());
+    }
+
+    @Test
+    @DisplayName("대기 파일 보상 삭제가 실패한 뒤 같은 파일 식별자로 다시 호출하면 공개 전 정리를 재시도한다")
+    void retriesPendingCompensationDeletionWithSameFileId() {
+        FileStorageMetadata pending = pendingMetadata();
+        List<String> events = new ArrayList<>();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null, events);
+        IllegalStateException deletionFailure = new IllegalStateException("저장소 삭제 실패");
+        FailingOnceDeleteFileStoragePort fileStoragePort = new FailingOnceDeleteFileStoragePort(events, deletionFailure);
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+
+        assertThatThrownBy(() -> facade.discardPending(pending.fileId(), Instant.parse("2026-08-15T00:00:00Z")))
+                .isSameAs(deletionFailure);
+        assertThat(facade.discardPending(pending.fileId(), Instant.parse("2026-08-15T00:01:00Z")).status())
+                .isEqualTo(FileStorageStatus.DELETED);
+        assertThat(events).containsExactly(
+                "metadata-discard-pending:" + pending.fileId(),
+                "storage-delete:public/store/11/store-image/deleted-object",
+                "metadata-discard-pending:" + pending.fileId(),
+                "storage-delete:public/store/11/store-image/deleted-object",
+                "metadata-cleanup-complete:" + pending.fileId());
+    }
+
+    @Test
+    @DisplayName("저장소 삭제 실패 로그에는 파일 식별자만 남기고 객체 키를 남기지 않는다")
+    void doesNotLogObjectKeyWhenStorageDeletionFails() {
+        FileStorageMetadata confirmed = confirmedMetadata();
+        IllegalStateException deletionFailure = new IllegalStateException("저장소 삭제 실패");
+        FileStorageFacade facade = new FileStorageFacade(
+                new FailingOnceDeleteFileStoragePort(new ArrayList<>(), deletionFailure),
+                new RecordingTransactionExecutor(null, null));
+        Logger logger = (Logger) LoggerFactory.getLogger(FileStorageFacade.class);
+        ListAppender<ILoggingEvent> logAppender = new ListAppender<>();
+        logAppender.start();
+        logger.addAppender(logAppender);
+
+        try {
+            assertThatThrownBy(() -> facade.delete(confirmed.fileId(), Instant.parse("2026-08-15T00:00:00Z")))
+                    .isSameAs(deletionFailure);
+
+            assertThat(logAppender.list)
+                    .extracting(ILoggingEvent::getFormattedMessage)
+                    .contains("event=file_storage_object_delete_failed file_id=" + confirmed.fileId())
+                    .noneMatch(message -> message.contains(confirmed.objectKey()));
+        } finally {
+            logger.detachAppender(logAppender);
+            logAppender.stop();
+        }
+    }
+
+    @Test
+    @DisplayName("reconciliation 삭제 실패는 객체 키가 든 예외여도 개별 로그를 남기지 않는다")
+    void doesNotLogIdentifiersForReconciliationFailure() {
+        FileStorageMetadata deleted = confirmedMetadata();
+        IllegalStateException storageFailure = new IllegalStateException("s3://bucket/" + deleted.objectKey());
+        FileStorageFacade facade = new FileStorageFacade(
+                new FailingOnceDeleteFileStoragePort(new ArrayList<>(), storageFailure),
+                new RecordingTransactionExecutor(null, null));
+        Logger logger = (Logger) LoggerFactory.getLogger(FileStorageFacade.class);
+        ListAppender<ILoggingEvent> logAppender = new ListAppender<>();
+        logAppender.start();
+        logger.addAppender(logAppender);
+
+        try {
+            assertThatThrownBy(() -> facade.deleteForReconciliation(deleted, "claim-token", Instant.now()))
+                    .isSameAs(storageFailure);
+
+            assertThat(logAppender.list).isEmpty();
+        } finally {
+            logger.detachAppender(logAppender);
+            logAppender.stop();
+        }
+    }
+
+    private void assertStorageResultMismatch(FileStorageSaveResult saveResult) {
+        FileStorageMetadata metadata = pendingMetadata();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null);
+        FileStorageFacade facade = new FileStorageFacade(
+                new FixedResultFileStoragePort(saveResult), transactionExecutor);
+
+        assertThatThrownBy(() -> facade.store(metadata, request(metadata.objectKey())))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(transactionExecutor.failedFileIds()).containsExactly(metadata.fileId().toString());
+    }
+
+    private FileStorageMetadata pendingMetadata() {
+        return new FileStorageMetadata(
+                UUID.fromString("c8434be1-6b4d-473d-8e4c-5e0c35b2fbef"),
+                new FileStorageOwner("STORE", 11L),
+                FileStoragePurpose.STORE_IMAGE,
+                "public/store/11/store-image/object-9",
+                "image/jpeg",
+                4L,
+                FILE_CHECKSUM,
+                FileStorageVisibility.PUBLIC,
+                FileStorageStatus.PENDING,
+                "STORE_IMAGE_DEFAULT",
+                Instant.parse("2026-08-10T07:00:00Z"),
+                null);
+    }
+
+    private FileStorageMetadata confirmedMetadata() {
+        FileStorageMetadata pending = pendingMetadata();
+        return new FileStorageMetadata(
+                pending.fileId(), pending.owner(), pending.purpose(), pending.objectKey(), pending.contentType(),
+                pending.sizeBytes(), pending.checksum(), pending.visibility(), FileStorageStatus.CONFIRMED,
+                pending.retentionPolicy(), pending.createdAt(), null);
+    }
+
+    private FileStorageRequest request(String objectKey) {
+        return new FileStorageRequest(
+                objectKey,
+                "image/jpeg",
+                4L,
+                new ByteArrayInputStream("file".getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static final class RecordingTransactionExecutor extends FileMetadataTransactionExecutor {
+
+        private final RuntimeException confirmationFailure;
+        private final RuntimeException failedStatusFailure;
+        private final List<String> pendingFileIds = new ArrayList<>();
+        private final List<String> failedFileIds = new ArrayList<>();
+        private final List<String> events;
+        private int confirmationCalls;
+
+        private RecordingTransactionExecutor(
+                RuntimeException confirmationFailure, RuntimeException failedStatusFailure) {
+            this(confirmationFailure, failedStatusFailure, new ArrayList<>());
+        }
+
+        private RecordingTransactionExecutor(
+                RuntimeException confirmationFailure,
+                RuntimeException failedStatusFailure,
+                List<String> events
+        ) {
+            super(null, List.of());
+            this.confirmationFailure = confirmationFailure;
+            this.failedStatusFailure = failedStatusFailure;
+            this.events = events;
+        }
+
+        @Override
+        public FileMetadata savePending(FileMetadata metadata) {
+            pendingFileIds.add(metadata.getFileId());
+            return metadata;
+        }
+
+        @Override
+        public FileMetadata confirm(String fileId) {
+            confirmationCalls++;
+            if (confirmationFailure != null) {
+                throw confirmationFailure;
+            }
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public FileMetadata fail(String fileId) {
+            failedFileIds.add(fileId);
+            if (failedStatusFailure != null) {
+                throw failedStatusFailure;
+            }
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public FileMetadata deleteOrGetDeleted(String fileId, Instant deletedAt) {
+            events.add("metadata-delete:" + fileId);
+            FileMetadata metadata = FileMetadata.createPending(
+                    fileId,
+                    "STORE",
+                    11L,
+                    FileStoragePurpose.STORE_IMAGE,
+                    "public/store/11/store-image/deleted-object",
+                    "image/jpeg",
+                    4L,
+                    FILE_CHECKSUM,
+                    FileStorageVisibility.PUBLIC,
+                    "STORE_IMAGE_DEFAULT",
+                    Instant.parse("2026-08-10T07:00:00Z"));
+            metadata.confirm();
+            metadata.delete(deletedAt);
+            return metadata;
+        }
+
+        @Override
+        public FileMetadata discardPendingOrGetDeleted(String fileId, Instant deletedAt) {
+            events.add("metadata-discard-pending:" + fileId);
+            FileMetadata metadata = FileMetadata.createPending(
+                    fileId,
+                    "STORE",
+                    11L,
+                    FileStoragePurpose.STORE_IMAGE,
+                    "public/store/11/store-image/deleted-object",
+                    "image/jpeg",
+                    4L,
+                    FILE_CHECKSUM,
+                    FileStorageVisibility.PUBLIC,
+                    "STORE_IMAGE_DEFAULT",
+                    Instant.parse("2026-08-10T07:00:00Z"));
+            metadata.discardPending(deletedAt);
+            return metadata;
+        }
+
+        @Override
+        public FileMetadata completeObjectCleanup(String fileId, Instant completedAt) {
+            events.add("metadata-cleanup-complete:" + fileId);
+            FileMetadata metadata = FileMetadata.createPending(
+                    fileId,
+                    "STORE",
+                    11L,
+                    FileStoragePurpose.STORE_IMAGE,
+                    "public/store/11/store-image/deleted-object",
+                    "image/jpeg",
+                    4L,
+                    FILE_CHECKSUM,
+                    FileStorageVisibility.PUBLIC,
+                    "STORE_IMAGE_DEFAULT",
+                    Instant.parse("2026-08-10T07:00:00Z"));
+            metadata.confirm();
+            metadata.delete(Instant.parse("2026-08-15T00:00:00Z"));
+            metadata.completeObjectCleanup(completedAt);
+            return metadata;
+        }
+
+        private List<String> failedFileIds() {
+            return failedFileIds;
+        }
+
+        private List<String> pendingFileIds() {
+            return pendingFileIds;
+        }
+
+        private int confirmationCalls() {
+            return confirmationCalls;
+        }
+    }
+
+    private static class RecordingFileStoragePort implements FileStoragePort {
+
+        private final List<String> savedObjectKeys = new ArrayList<>();
+        private final List<String> events;
+
+        private RecordingFileStoragePort() {
+            this(new ArrayList<>());
+        }
+
+        private RecordingFileStoragePort(List<String> events) {
+            this.events = events;
+        }
+
+        @Override
+        public FileStorageSaveResult save(FileStorageRequest request) {
+            savedObjectKeys.add(request.objectKey());
+            return new FileStorageSaveResult(
+                    request.objectKey(), request.contentType(), request.sizeBytes(), FILE_CHECKSUM);
+        }
+
+        @Override
+        public FileStorageObject read(String objectKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void delete(String objectKey) {
+            events.add("storage-delete:" + objectKey);
+        }
+
+        private List<String> savedObjectKeys() {
+            return savedObjectKeys;
+        }
+    }
+
+    private static final class SuccessfulFileStoragePort extends RecordingFileStoragePort {
+    }
+
+    private static final class FailingOnceDeleteFileStoragePort implements FileStoragePort {
+
+        private final List<String> events;
+        private final RuntimeException failure;
+        private boolean failed;
+
+        private FailingOnceDeleteFileStoragePort(List<String> events, RuntimeException failure) {
+            this.events = events;
+            this.failure = failure;
+        }
+
+        @Override
+        public FileStorageSaveResult save(FileStorageRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public FileStorageObject read(String objectKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void delete(String objectKey) {
+            events.add("storage-delete:" + objectKey);
+            if (!failed) {
+                failed = true;
+                throw failure;
+            }
+        }
+    }
+
+    private record FixedResultFileStoragePort(FileStorageSaveResult result) implements FileStoragePort {
+
+        @Override
+        public FileStorageSaveResult save(FileStorageRequest request) {
+            return result;
+        }
+
+        @Override
+        public FileStorageObject read(String objectKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void delete(String objectKey) {
+        }
+    }
+
+    private record FailingFileStoragePort(RuntimeException failure) implements FileStoragePort {
+
+        @Override
+        public FileStorageSaveResult save(FileStorageRequest request) {
+            throw failure;
+        }
+
+        @Override
+        public FileStorageObject read(String objectKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void delete(String objectKey) {
+        }
+    }
+}

@@ -11,7 +11,7 @@
 - 인수 조건
 - 검증 계획과 알려진 위험
 
-Issue 제목은 `[Auth]`, `[Store]`, `[Reservation]`, `[MenuHold]`, `[Pickup]`, `[Global]`, `[Docs]` 중 하나의 도메인 접두어로 시작한다. 사소한 문구 변경도 저장소 변경이면 예외가 아니다.
+Issue 제목은 `[Auth]`, `[Store]`, `[Reservation]`, `[MenuHold]`, `[Pickup]`, `[Payment]`, `[Global]`, `[Docs]` 중 하나의 도메인 접두어로 시작한다. 사소한 문구 변경도 저장소 변경이면 예외가 아니다.
 
 둘 이상의 도메인 계약이 필요한 작업은 Issue에 `contract-first`, `blocks`, `blocked by` 관계를 기록한다. 소유자는 동작하는 최소 공개 Service 메서드·DTO·오류·테스트 계약을 먼저 제공하고 선행 PR을 `dev`에 병합한다. 소비자는 최신 `dev`를 반영한 뒤 그 계약을 사용한다. 준비되지 않은 계약은 `return null`, 가짜 성공 응답, 빈 구현 또는 `UnsupportedOperationException`으로 대신하지 않고 `BLOCKED`로 보고한다.
 
@@ -48,7 +48,7 @@ Pull Request는 변경 요약과 구현 과정에서 생성된 증거를 소유�
 커밋과 PR 제목은 `<type>(<scope>): <한글 요약>` 형식을 사용한다.
 
 - type: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `build`, `ci`
-- 선택 scope: `auth`, `store`, `reservation`, `menu-hold`, `pickup`, `global`, `frontend`, `api`, `docs`
+- 선택 scope: `auth`, `store`, `reservation`, `menu-hold`, `pickup`, `payment`, `global`, `frontend`, `api`, `docs`
 - `update`, `add`, `bugfix`, `gitfix`, `script` 같은 임의 분류와 emoji 접두어는 사용하지 않는다.
 
 ### 검토와 승인
@@ -62,7 +62,7 @@ Pull Request는 변경 요약과 구현 과정에서 생성된 증거를 소유�
 
 CI는 자체 실행 출력을 소유한다. 이를 영구 저장소 로그에 옮겨 적지 않는다. 구성된 workflow만으로 현재 PR이 통과했거나 저장소 검사가 필수라는 증거가 되지는 않는다.
 
-현재 `dev` 브랜치에는 `backend-ci` required check가 구성되어 있다. `Backend CI`의 `backend-ci` 집계 job은 `unit-test`, `integration-test`, CD workflow 계약 검증이 모두 성공할 때만 성공한다. 각 PR은 실제 해당 commit의 CI 실행 링크를 증거로 남기며, 존재하지 않는 check를 통과했다고 표시하지 않는다.
+현재 `dev` 브랜치에는 `backend-ci` required check가 구성되어 있다. `Backend CI`의 `backend-ci` 집계 job은 모든 PR에서 실행한다. 백엔드 코드·migration·Gradle·Backend CI 변경, `deploy/deploy.sh`, 미분류 경로는 unit·integration test가 모두 성공해야 하며, OpenAPI와 그 밖의 배포 설정은 unit test와 계약 검증이 성공해야 한다. 프론트·k6·일반 문서·런북 전용 변경은 계약 검증만 성공하면 된다. 각 PR은 실제 해당 commit의 CI 실행 링크를 증거로 남기며, 존재하지 않는 check를 통과했다고 표시하지 않는다.
 
 ## 위임과 인계(handoff)
 
@@ -74,7 +74,7 @@ CI는 자체 실행 출력을 소유한다. 이를 영구 저장소 로그에 �
 
 동작이나 지속적인 결정이 바뀌면 정본 제품, 정책, 아키텍처, 기능 또는 품질 문서를 갱신한다. 해당 규칙을 Issue, Pull Request 또는 AI 작업 흐름(workflow) 문서에 복사하지 말고 소유자 문서로 링크한다.
 
-`README.md`, 이 문서와 `ai/`는 사람·AI의 진입, 라우팅, 명령·증거 경계를 소유하며 제품 사실을 소유하지 않는다. 제품 사실의 활성 정본 allowlist는 `docs/00-index.md`부터 `docs/09-quality-operations-and-rules.md`, 현재 승인 기준과 정렬된 서비스 정책, 현재 유효 ADR, `docs/05` 또는 소유 정책이 연결한 활성 `docs/specs/<feature>/spec.md`로 제한한다. 기능 명세 템플릿, `docs/superpowers/specs/`, `docs/superpowers/plans/`, `miriyum-service-blueprint.md`, `miriyum-service-decisions.md`, `.superpowers/sdd/`의 artifact와 상태가 `Superseded` 또는 `Deprecated`인 ADR은 활성 정본이나 ADR이 링크해도 기본 라우팅에서 절대 제외한다. 사용자가 과거 감사·결정 이력 검토를 명시적으로 요구한 경우에만 읽고 현재 결정·완료 증거로 사용하지 않는다.
+`README.md`, 이 문서와 `ai/`는 사람·AI의 진입, 라우팅, 명령·증거 경계를 소유하며 제품 사실을 소유하지 않는다. 제품 사실의 활성 정본 allowlist는 `docs/00-index.md`부터 `docs/09-quality-operations-and-rules.md`, 현재 승인 기준과 정렬된 서비스 정책, 현재 유효 ADR, `docs/05` 또는 소유 정책이 연결한 활성 `docs/specs/<feature>/spec.md`, 현재 `dev` Flyway 기준 전체 테이블 색인과 주요 업무·논리 관계를 소유하는 `docs/erd/`로 제한한다. 기능 명세 템플릿, `docs/superpowers/specs/`, `docs/superpowers/plans/`, `miriyum-service-blueprint.md`, `miriyum-service-decisions.md`, `.superpowers/sdd/`의 artifact와 상태가 `Superseded` 또는 `Deprecated`인 ADR은 활성 정본이나 ADR이 링크해도 기본 라우팅에서 절대 제외한다. 사용자가 과거 감사·결정 이력 검토를 명시적으로 요구한 경우에만 읽고 현재 결정·완료 증거로 사용하지 않는다.
 
 ## 단계 표기
 

@@ -7,7 +7,8 @@ public record ReservationMenuHoldResult(long reservationId, Outcome outcome) {
         NO_HOLD,
         CONFIRMED,
         RELEASED,
-        FULFILLED
+        FULFILLED,
+        FORFEITED
     }
 
     public ReservationMenuHoldResult {
@@ -33,5 +34,9 @@ public record ReservationMenuHoldResult(long reservationId, Outcome outcome) {
 
     public static ReservationMenuHoldResult fulfilled(long reservationId) {
         return new ReservationMenuHoldResult(reservationId, Outcome.FULFILLED);
+    }
+
+    public static ReservationMenuHoldResult forfeited(long reservationId) {
+        return new ReservationMenuHoldResult(reservationId, Outcome.FORFEITED);
     }
 }

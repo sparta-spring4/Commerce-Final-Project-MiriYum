@@ -1,0 +1,137 @@
+# opt-in 로컬 부하 테스트 override다. 반드시 docker-compose.dev.yml과 함께 사용한다.
+services:
+  backend:
+    environment:
+      MIRIYUM_VALKEY_HOST: valkey
+      MIRIYUM_VALKEY_PORT: 6379
+      MIRIYUM_VALKEY_PASSWORD: ${MIRIYUM_VALKEY_PASSWORD:?MIRIYUM_VALKEY_PASSWORD is required}
+      MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET: ${MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET:?MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET is required}
+      # SSE는 opt-in loadtest stack에서만 활성화하고 연결 수와 유지 시간을 로컬 자원 범위로 제한한다.
+      MIRIYUM_SSE_ENABLED: "true"
+      MIRIYUM_SSE_CURSOR_SECRET: ${MIRIYUM_SSE_CURSOR_SECRET:?MIRIYUM_SSE_CURSOR_SECRET is required}
+      MIRIYUM_SSE_TIMEOUT: ${MIRIYUM_LOADTEST_SSE_TIMEOUT:-PT30S}
+      MIRIYUM_SSE_HEARTBEAT_INTERVAL: ${MIRIYUM_LOADTEST_SSE_HEARTBEAT_INTERVAL:-PT5S}
+      MIRIYUM_SSE_CORRECTION_INTERVAL: PT2S
+      MIRIYUM_SSE_CORRECTION_BATCH_SIZE: "100"
+      MIRIYUM_SSE_MAX_CONNECTIONS_TOTAL: "200"
+      MIRIYUM_SSE_MAX_CONNECTIONS_PER_ACCOUNT: "6"
+      # 부하테스트의 notification fixture가 PENDING에 머물지 않도록 검토된 정책 묶음을 모두 고정한다.
+      MIRIYUM_NOTIFICATION_WORKER_ENABLED: "true"
+      MIRIYUM_NOTIFICATION_WORKER_POLICY_VERSION: notification-worker-v1
+      MIRIYUM_NOTIFICATION_WORKER_ID: local-loadtest-notification-worker-1
+      MIRIYUM_NOTIFICATION_WORKER_BATCH_SIZE: "10"
+      MIRIYUM_NOTIFICATION_WORKER_LEASE_DURATION_MS: "30000"
+      MIRIYUM_NOTIFICATION_WORKER_MAX_ATTEMPTS: "3"
+      MIRIYUM_NOTIFICATION_WORKER_INITIAL_RETRY_DELAY_MS: "5000"
+      MIRIYUM_NOTIFICATION_WORKER_MAX_RETRY_DELAY_MS: "60000"
+      MIRIYUM_NOTIFICATION_WORKER_POLL_DELAY_MS: "1000"
+      MIRIYUM_NOTIFICATION_WORKER_INITIAL_DELAY_MS: "1000"
+      # Fixture preparation may create a store through Kakao geocoding; measured k6 requests do not receive this key.
+      MIRIYUM_STORE_GEOCODING_REST_API_KEY: ${MIRIYUM_STORE_GEOCODING_REST_API_KEY:-}
+      # Login, refresh, and public store read cover the harness maximum arrival rate only here.
+      # CSRF preparation intentionally inherits the backend default; that budget bounds AUTH_MAX_VUS.
+      MIRIYUM_RATE_LIMIT_LOGIN_MAX_REQUESTS: "600000"
+      MIRIYUM_RATE_LIMIT_LOGIN_WINDOW_SECONDS: "600"
+      MIRIYUM_RATE_LIMIT_TOKEN_REFRESH_MAX_REQUESTS: "60000"
+      MIRIYUM_RATE_LIMIT_TOKEN_REFRESH_WINDOW_SECONDS: "60"
+      MIRIYUM_RATE_LIMIT_PUBLIC_STORE_READ_MAX_REQUESTS: "60000"
+      MIRIYUM_RATE_LIMIT_PUBLIC_STORE_READ_WINDOW_SECONDS: "60"
+    depends_on:
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -ec
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/8080;
+          printf 'GET /actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3;
+          IFS= read -r status <&3;
+          [[ "$$status" == *" 200 "* ]]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 30s
+
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    profiles: [loadtest]
+    environment:
+      MIRIYUM_VALKEY_PASSWORD: ${MIRIYUM_VALKEY_PASSWORD:?MIRIYUM_VALKEY_PASSWORD is required}
+    command:
+      - /bin/sh
+      - -ec
+      - exec valkey-server --requirepass "$${MIRIYUM_VALKEY_PASSWORD}"
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$MIRIYUM_VALKEY_PASSWORD\" valkey-cli ping | grep -qx PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  loadtest-proxy:
+    image: caddy:2.10.2-alpine
+    profiles: [loadtest]
+    volumes:
+      - ./Caddyfile.loadtest:/etc/caddy/Caddyfile:ro
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    depends_on:
+      backend:
+        condition: service_healthy
+      sse-proxy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8443"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s
+
+  sse-proxy:
+    image: nginx:1.27-alpine
+    profiles: [loadtest]
+    volumes:
+      - ./nginx.sse.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../nginx/templates/snippets/sse-location.conf:/opt/miriyum-nginx-templates/snippets/sse-location.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8080"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s
+
+  loadtest:
+    image: grafana/k6:2.1.0
+    profiles: [loadtest]
+    volumes:
+      - ../../performance/k6:/scripts:ro
+      - ../../performance/k6/results:/results
+    working_dir: /scripts
+    depends_on:
+      loadtest-proxy:
+        condition: service_healthy
+
+  sse-loadtest:
+    image: miriyum/k6-sse:1.2.2-xk6-sse0.1.12
+    build:
+      context: ../../performance/k6/sse
+      dockerfile: Dockerfile
+    profiles: [loadtest]
+    volumes:
+      - ../../performance/k6:/scripts:ro
+      - ../../performance/k6/results:/results
+    working_dir: /scripts
+    depends_on:
+      loadtest-proxy:
+        condition: service_healthy
+
+  sse-slow-loadtest:
+    extends:
+      service: sse-loadtest
+    profiles: [loadtest]
+    sysctls:
+      net.ipv4.tcp_rmem: "4096 4096 4096"

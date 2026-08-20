@@ -1,0 +1,94 @@
+{
+  "properties": [
+    {
+      "name": "miriyum.kakao.state-secret",
+      "type": "java.lang.String",
+      "description": "카카오 OAuth state 서명에 사용하는 서버 비밀값입니다."
+    },
+    {
+      "name": "miriyum.kakao.sign-up-ticket-secret",
+      "type": "java.lang.String",
+      "description": "카카오 최초 가입 ticket 서명에 사용하는 서버 비밀값입니다."
+    },
+    {
+      "name": "miriyum.kakao.identity-fingerprint-active-key-version",
+      "type": "java.lang.String",
+      "description": "카카오 식별자 fingerprint에 사용하는 현재 키의 버전입니다."
+    },
+    {
+      "name": "miriyum.kakao.identity-fingerprint-active-secret",
+      "type": "java.lang.String",
+      "description": "카카오 식별자 fingerprint에 사용하는 현재 키의 비밀값입니다."
+    },
+    {
+      "name": "miriyum.kakao.identity-fingerprint-previous-key-version",
+      "type": "java.lang.String",
+      "description": "키 교체 기간에만 사용하는 이전 fingerprint 키의 버전입니다."
+    },
+    {
+      "name": "miriyum.kakao.identity-fingerprint-previous-secret",
+      "type": "java.lang.String",
+      "description": "키 교체 기간에만 사용하는 이전 fingerprint 키의 비밀값입니다."
+    },
+    {
+      "name": "miriyum.identity-verification.dev-stub-enabled",
+      "type": "java.lang.Boolean",
+      "description": "개발 환경의 본인 확인 Stub 사용 여부입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.enabled",
+      "type": "java.lang.Boolean",
+      "description": "S3 파일 저장 어댑터 활성화 여부입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.bucket",
+      "type": "java.lang.String",
+      "description": "S3 파일 저장에 사용할 버킷 이름입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.region",
+      "type": "java.lang.String",
+      "description": "S3 파일 저장에 사용할 AWS 리전입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.max-size-bytes",
+      "type": "java.lang.Long",
+      "description": "Maximum file size accepted by the S3 storage adapter in bytes."
+    },
+    {
+      "name": "miriyum.storage.s3.reconciliation.enabled",
+      "type": "java.lang.Boolean",
+      "description": "S3 객체 정리 재시도 작업 활성화 여부입니다. S3 활성화와 함께 true여야 실행됩니다."
+    },
+    {
+      "name": "miriyum.storage.s3.reconciliation.delay-ms",
+      "type": "java.lang.Long",
+      "description": "S3 객체 정리 재시도 작업의 실행 간격(밀리초)입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.reconciliation.batch-size",
+      "type": "java.lang.Integer",
+      "description": "한 주기에 처리할 최대 파일 메타데이터 수입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.reconciliation.pending-min-age-seconds",
+      "type": "java.lang.Long",
+      "description": "보상 정리 대상으로 간주할 PENDING 파일의 최소 경과 시간(초)입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.reconciliation.long-stay-threshold-seconds",
+      "type": "java.lang.Long",
+      "description": "장기 정체 관측 대상으로 간주할 파일의 경과 시간(초)입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.reconciliation.retry-base-delay-seconds",
+      "type": "java.lang.Long",
+      "description": "객체 삭제 실패 후 첫 재시도까지 기다릴 시간(초)입니다. 이후 지수 backoff의 기준값입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.reconciliation.claim-lease-seconds",
+      "type": "java.lang.Long",
+      "description": "동일 객체를 동시에 정리하지 않도록 worker가 보유하는 cleanup lease 시간(초)입니다."
+    }
+  ]
+}

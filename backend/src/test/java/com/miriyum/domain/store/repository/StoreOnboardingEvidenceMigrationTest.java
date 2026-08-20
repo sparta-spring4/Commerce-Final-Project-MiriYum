@@ -17,13 +17,14 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Tag("integration")
-@Tag("integration-shard-b")
+@Tag("integration-shard-d")
 @Testcontainers
 class StoreOnboardingEvidenceMigrationTest {
 
     @Container
     static final MySQLContainer<?> MYSQL =
-            new MySQLContainer<>("mysql:8.0.40");
+            new MySQLContainer<>("mysql:8.0.40")
+                    .withCommand("--log-bin-trust-function-creators=1");
 
     @Test
     @DisplayName("V10은 기존 매장에 입점 동의 증거를 backfill하고 필수화한다")

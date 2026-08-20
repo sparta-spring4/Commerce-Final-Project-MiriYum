@@ -1,0 +1,1835 @@
+openapi: 3.1.0
+info:
+  title: MiriYum Waiting API
+  version: 1.0.0
+  description: 매장 운영자 웨이팅 원장, 소비자 등록·조회·취소와 audience별 변경 신호 계약
+  license:
+    name: All Rights Reserved
+    identifier: LicenseRef-All-Rights-Reserved
+servers:
+  - url: /
+security: []
+tags:
+  - name: Waiting Settings
+    description: Reservation 도메인이 소유하는 매장별 웨이팅 운영 설정
+  - name: Waiting Ledger
+    description: Reservation 도메인이 소유하는 중앙 FIFO 웨이팅 원장 조회와 운영자 전이
+  - name: Consumer Waiting
+    description: 로그인 소비자의 접수 가능 상태 조회, 등록, 현재 웨이팅 조회와 취소
+  - name: Waiting Events
+    description: HTTP/MySQL snapshot 재조회를 유도하는 audience별 최소 변경 신호
+paths:
+  /api/v1/store-operators/stores/{storeId}/waiting-settings:
+    get:
+      tags: [Waiting Settings]
+      summary: 웨이팅 운영 설정 조회
+      description: >-
+        APPROVED 매장의 대표 운영자가 조회한다. OPEN, TEMPORARILY_CLOSED, CLOSED 운영 상태를
+        모두 허용하며 입점 검증 상태를 APPROVED로 확인할 수 없으면 STORE_007로 거절한다.
+      operationId: getWaitingSettings
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      responses:
+        "200":
+          description: 현재 웨이팅 운영 설정. 저장된 설정이 없으면 안전한 기본값을 반환한다.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingSettingSuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingStoreIdBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingStoreForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingStoreNotFound"
+        "409":
+          $ref: "#/components/responses/WaitingStoreStateConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+    put:
+      tags: [Waiting Settings]
+      summary: 웨이팅 운영 설정 전체 교체
+      description: >-
+        APPROVED 매장의 대표 운영자가 OPEN 또는 TEMPORARILY_CLOSED 운영 상태에서만 교체한다.
+        CLOSED는 STORE_005, APPROVED로 확인할 수 없는 입점 검증 상태는 STORE_007로 거절한다.
+      operationId: updateWaitingSettings
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaitingSettingUpdateRequest"
+      responses:
+        "200":
+          description: 새 버전으로 전체 교체된 웨이팅 운영 설정
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingSettingSuccessResponse"
+        "202":
+          description: 설정을 비활성화하고 활성 팀 비동기 일괄 종결 작업을 생성함
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingClosureJobSuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingStoreForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingStoreNotFound"
+        "409":
+          $ref: "#/components/responses/WaitingSettingConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/store-operators/stores/{storeId}/waiting-settings/deactivation-impact:
+    get:
+      tags: [Waiting Settings]
+      summary: 웨이팅 기능 비활성화 영향 조회
+      description: >-
+        APPROVED 매장의 대표 운영자가 조회한다. OPEN, TEMPORARILY_CLOSED, CLOSED 운영 상태를
+        모두 허용하며 입점 검증 상태를 APPROVED로 확인할 수 없으면 STORE_007로 거절한다.
+      operationId: getWaitingDisableImpact
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      responses:
+        "200":
+          description: 현재 설정 버전과 활성 팀 영향
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingDisableImpactSuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingStoreIdBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingStoreForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingStoreNotFound"
+        "409":
+          $ref: "#/components/responses/WaitingStoreStateConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/store-operators/stores/{storeId}/waiting-teams:
+    get:
+      tags: [Waiting Ledger]
+      summary: 웨이팅 팀 FIFO 목록 조회
+      operationId: getWaitingTeams
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/WaitingTeamStatus"
+        - $ref: "#/components/parameters/WaitingQueueCursor"
+        - $ref: "#/components/parameters/WaitingPageSize"
+      responses:
+        "200":
+          description: "(queueSequence, waitingTeamId) 오름차순의 FIFO 페이지"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingTeamPageSuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingLedgerBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingStoreForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingLedgerNotFound"
+        "409":
+          $ref: "#/components/responses/WaitingLedgerConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}:
+    get:
+      tags: [Waiting Ledger]
+      summary: 웨이팅 팀 상세 조회
+      operationId: getWaitingTeam
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/WaitingTeamId"
+      responses:
+        "200":
+          description: 운영자가 안전하게 확인할 수 있는 웨이팅 팀 원장 스냅샷
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingTeamDetailSuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingLedgerBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingStoreForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingLedgerNotFound"
+        "409":
+          $ref: "#/components/responses/WaitingLedgerConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/calls:
+    post:
+      tags: [Waiting Ledger]
+      summary: FIFO 선두 웨이팅 팀 호출
+      operationId: callWaitingTeam
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/WaitingTeamId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaitingTeamTransitionRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/WaitingTeamDetailSuccess"
+        "400":
+          $ref: "#/components/responses/WaitingLedgerBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingStoreForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingLedgerNotFound"
+        "409":
+          $ref: "#/components/responses/WaitingLedgerConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrivals:
+    post:
+      tags: [Waiting Ledger]
+      summary: 호출된 웨이팅 팀 도착 처리
+      operationId: arriveWaitingTeam
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/WaitingTeamId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaitingTeamTransitionRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/WaitingTeamDetailSuccess"
+        "400":
+          $ref: "#/components/responses/WaitingLedgerBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingStoreForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingLedgerNotFound"
+        "409":
+          $ref: "#/components/responses/WaitingLedgerConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-ins:
+    post:
+      tags: [Waiting Ledger]
+      summary: 도착한 웨이팅 팀 입장 처리
+      operationId: checkInWaitingTeam
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/WaitingTeamId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaitingTeamTransitionRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/WaitingTeamDetailSuccess"
+        "400":
+          $ref: "#/components/responses/WaitingLedgerBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingStoreForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingLedgerNotFound"
+        "409":
+          $ref: "#/components/responses/WaitingLedgerConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations:
+    post:
+      tags: [Waiting Ledger]
+      summary: 웨이팅 팀 취소 처리
+      description: >-
+        WAITING, CALLED, ARRIVED 또는 비종결 RESERVATION_CONVERTING 팀을 CANCELLED로 종결한다.
+        RESERVATION_CONVERTING에서는 예약 선점·결제 성공·매장 종료와 조건부 갱신으로 한 결과만
+        확정하고 취소가 먼저 확정되면 필요한 선점 해제 또는 승인 취소·환불 후속 작업을 기록한다.
+      x-allowed-source-statuses: [WAITING, CALLED, ARRIVED, RESERVATION_CONVERTING]
+      x-result-status: CANCELLED
+      operationId: cancelWaitingTeam
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/WaitingTeamId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaitingTeamTransitionRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/WaitingTeamDetailSuccess"
+        "400":
+          $ref: "#/components/responses/WaitingLedgerBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingStoreForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingLedgerNotFound"
+        "409":
+          $ref: "#/components/responses/WaitingLedgerConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}:
+    get:
+      tags: [Waiting Ledger]
+      summary: 활성 웨이팅 팀 종결 작업 조회
+      description: >-
+        #271의 설정 비활성화 명령이 생성한 작업만 조회한다. 이 계약은 작업을 생성하거나
+        #271의 `202 Accepted` 응답을 다시 정의하지 않는다.
+      operationId: getWaitingCloseJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/WaitingCloseJobId"
+      responses:
+        "200":
+          description: 대상 스냅샷과 처리·실패·대사가 필요한 팀 수
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingClosureJobSuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingLedgerBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingStoreForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingLedgerNotFound"
+        "409":
+          $ref: "#/components/responses/WaitingLedgerConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/store-operators/stores/{storeId}/waiting-events:
+    get:
+      tags: [Waiting Events]
+      summary: 매장 운영자 웨이팅 변경 신호 구독
+      description: >-
+        대표 운영 권한을 재검증한 해당 store 범위의 fetch streaming 연결이다. 연결 직후와
+        유효한 Last-Event-ID 재연결 뒤 현재 MySQL high-watermark에 결속된 waiting.changed
+        신호를 보내며, 클라이언트는 해당 store의 웨이팅 목록·상세를 다시 조회한다.
+      operationId: streamStoreWaitingChanges
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/WaitingLastEventId"
+      responses:
+        "200":
+          description: 해당 매장의 팀 생성·공개 상태 변경을 알리는 최소 변경 신호 stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/WaitingStoreOperatorChangedEventStream"
+        "400":
+          $ref: "#/components/responses/WaitingEventCursorBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingStoreForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingStoreNotFound"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/consumers/me/stores/{storeId}/waiting-availabilities:
+    get:
+      tags: [Consumer Waiting]
+      summary: 현재 웨이팅 접수 가능 상태 조회
+      operationId: getConsumerWaitingAvailability
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      responses:
+        "200":
+          description: 현재 중앙 시각 기준 접수 가능 여부와 접수 가능한 영업일
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingReceptionAvailabilitySuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingLedgerBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingConsumerAccountForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingConsumerStoreNotFound"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/consumers/me/stores/{storeId}/waiting-location-proofs:
+    post:
+      tags: [Consumer Waiting]
+      summary: 웨이팅 등록용 GPS 위치 판정
+      operationId: issueConsumerWaitingLocationProof
+      description: >-
+        계정·매장·WAITING_REGISTRATION 목적에 결속된 120초 일회 소비 세션을 발급한다.
+        좌표·원본 정확도·측정 시각·계산 거리는 요청 처리 중에만 사용하고 응답, DB, 감사,
+        로그에 저장하지 않는다. 권한 거부·위치 미수신·낮은 정확도·오래된 측정·조작 의심은
+        성공으로 추정하거나 IP 위치로 대체하지 않고 해당 판정 범주를 HTTP 200으로 반환한다.
+      x-location-raw-retention: none
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaitingLocationProofRequest"
+      responses:
+        "200":
+          description: 위치 원문을 포함하지 않는 판정 세션 snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingLocationProofSuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingLocationProofBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingConsumerAccountForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingConsumerStoreNotFound"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/consumers/me/stores/{storeId}/waiting-teams:
+    post:
+      tags: [Consumer Waiting]
+      summary: 웨이팅 등록
+      operationId: createConsumerWaitingTeam
+      description: >-
+        계정·매장·WAITING_REGISTRATION 목적에 결속된 VERIFIED 위치 증명 세션을
+        팀·순번·대표자 membership 생성과 같은 멱등 트랜잭션에서 한 번만 소비한다.
+      x-location-proof-required: true
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaitingConsumerCreateRequest"
+      responses:
+        "200":
+          description: 생성되거나 같은 멱등 키로 재생된 본인 웨이팅 snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingConsumerSnapshotSuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingLedgerBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingConsumerCreateForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingConsumerStoreNotFound"
+        "409":
+          $ref: "#/components/responses/WaitingConsumerCreateConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/consumers/me/waiting-teams/current:
+    get:
+      tags: [Consumer Waiting]
+      summary: 본인 현재 활성 웨이팅 조회
+      operationId: getCurrentConsumerWaitingTeam
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 본인의 현재 활성 웨이팅 snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingConsumerSnapshotSuccessResponse"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingConsumerAccountForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingConsumerTeamNotFound"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations:
+    post:
+      tags: [Consumer Waiting]
+      summary: 본인 활성 웨이팅 취소
+      operationId: cancelCurrentConsumerWaitingTeam
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WaitingTeamId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaitingTeamTransitionRequest"
+      responses:
+        "200":
+          description: 취소되거나 같은 멱등 키로 재생된 본인 웨이팅 snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingConsumerSnapshotSuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingLedgerBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingConsumerAccountForbidden"
+        "404":
+          $ref: "#/components/responses/WaitingConsumerTeamNotFound"
+        "409":
+          $ref: "#/components/responses/WaitingConsumerCancelConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/consumers/me/waiting-teams/{teamId}/invitations:
+    post:
+      tags: [Consumer Waiting]
+      summary: 일행 초대 발급
+      operationId: issueWaitingPartyInvitation
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingExpectedVersionRequest" }
+      responses:
+        "200":
+          description: 새 초대 또는 멱등 재생
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingInvitationSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations:
+    post:
+      tags: [Consumer Waiting]
+      summary: 일행 초대 철회
+      operationId: revokeWaitingPartyInvitation
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "#/components/parameters/InvitationId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingExpectedVersionRequest" }
+      responses:
+        "200":
+          description: 철회된 초대
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingInvitationSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-invitation-acceptances:
+    post:
+      tags: [Consumer Waiting]
+      summary: 일행 초대 수락
+      operationId: acceptWaitingPartyInvitation
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingInvitationAcceptanceRequest" }
+      responses:
+        "200":
+          description: 참여한 기존 팀 snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingConsumerSnapshotSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCreateConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-teams/{teamId}/membership-departures:
+    post:
+      tags: [Consumer Waiting]
+      summary: 일행 구성원 이탈
+      operationId: departWaitingPartyMembership
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingExpectedVersionRequest" }
+      responses:
+        "200":
+          description: 이탈 후 팀 snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingConsumerSnapshotSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-teams/{teamId}/memberships/{membershipId}/removals:
+    post:
+      tags: [Consumer Waiting]
+      summary: 대표자의 일행 구성원 제거
+      operationId: removeWaitingPartyMembership
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "#/components/parameters/MembershipId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingExpectedVersionRequest" }
+      responses:
+        "200":
+          description: 제거 후 팀 snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingConsumerSnapshotSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers:
+    post:
+      tags: [Consumer Waiting]
+      summary: 대표자 이전 제안
+      operationId: proposeWaitingRepresentativeTransfer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingTransferProposalRequest" }
+      responses:
+        "200":
+          description: 5분 동안 유효한 대표자 이전 제안
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingTransferOfferSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/acceptances:
+    post:
+      tags: [Consumer Waiting]
+      summary: 대상 구성원의 대표자 이전 수락
+      operationId: acceptWaitingRepresentativeTransfer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "#/components/parameters/TransferOfferId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingExpectedVersionRequest" }
+      responses:
+        "200":
+          description: 대표자가 변경된 팀 snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingConsumerSnapshotSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/rejections:
+    post:
+      tags: [Consumer Waiting]
+      summary: 대상 구성원의 대표자 이전 거절
+      operationId: rejectWaitingRepresentativeTransfer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "#/components/parameters/TransferOfferId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingExpectedVersionRequest" }
+      responses:
+        "200":
+          description: 거절된 제안
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingTransferOfferSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-teams/{teamId}/representative-transfer-offers/{offerId}/revocations:
+    post:
+      tags: [Consumer Waiting]
+      summary: 기존 대표자의 대표자 이전 철회
+      operationId: revokeWaitingRepresentativeTransfer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PartyTeamId"
+        - $ref: "#/components/parameters/TransferOfferId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitingExpectedVersionRequest" }
+      responses:
+        "200":
+          description: 철회된 제안
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitingTransferOfferSuccessResponse" }
+        "400": { $ref: "#/components/responses/WaitingLedgerBadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WaitingConsumerAccountForbidden" }
+        "404": { $ref: "#/components/responses/WaitingConsumerTeamNotFound" }
+        "409": { $ref: "#/components/responses/WaitingConsumerCancelConflict" }
+        "429": { $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests" }
+  /api/v1/consumers/me/waiting-events:
+    get:
+      tags: [Waiting Events]
+      summary: 본인 웨이팅 변경 신호 구독
+      description: >-
+        consumer Bearer 인증을 사용하는 fetch streaming 연결이다. 연결 직후와 유효한
+        Last-Event-ID 재연결 뒤 현재 MySQL high-watermark에 결속된 waiting.changed 신호를
+        보내며, 클라이언트는 본인의 현재 웨이팅 snapshot을 다시 조회한다.
+      operationId: streamMyWaitingChanges
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WaitingLastEventId"
+      responses:
+        "200":
+          description: 본인 팀과 teamsAhead에 영향을 주는 최소 변경 신호 stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/WaitingConsumerChangedEventStream"
+        "400":
+          $ref: "#/components/responses/WaitingEventCursorBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingConsumerAccountForbidden"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: "../mvp1-common/openapi.yaml#/components/securitySchemes/bearerAuth"
+  parameters:
+    StoreId:
+      name: storeId
+      in: path
+      required: true
+      description: 권한을 확인할 대상 매장의 공개 문자열 ID
+      schema:
+        $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+    WaitingTeamId:
+      name: waitingTeamId
+      in: path
+      required: true
+      description: 조회하거나 전이할 웨이팅 팀의 공개 문자열 ID
+      schema:
+        $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+    PartyTeamId:
+      name: teamId
+      in: path
+      required: true
+      schema: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+    InvitationId:
+      name: invitationId
+      in: path
+      required: true
+      schema: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+    MembershipId:
+      name: membershipId
+      in: path
+      required: true
+      schema: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+    TransferOfferId:
+      name: offerId
+      in: path
+      required: true
+      schema: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+    WaitingCloseJobId:
+      name: jobId
+      in: path
+      required: true
+      description: "#271의 비활성화 명령이 만든 웨이팅 종결 작업의 공개 문자열 ID"
+      schema:
+        $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+    WaitingTeamStatus:
+      name: status
+      in: query
+      required: false
+      description: 지정하면 해당 상태의 팀만 반환한다.
+      schema:
+        $ref: "#/components/schemas/WaitingTeamStatus"
+    WaitingQueueCursor:
+      name: cursor
+      in: query
+      required: false
+      description: 직전 페이지 마지막 항목의 opaque `(queueSequence, waitingTeamId)` cursor
+      schema:
+        $ref: "#/components/schemas/WaitingQueueCursor"
+    WaitingPageSize:
+      name: size
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    WaitingLastEventId:
+      name: Last-Event-ID
+      in: header
+      required: false
+      description: >-
+        서버가 발급하고 audience·인증 계정·필요한 store scope·계약 version에 결속한 무결성
+        보호 opaque cursor. 없으면 최초 연결이며 클라이언트가 해석하거나 수정하지 않는다.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 512
+        pattern: "^[A-Za-z0-9_-]+$"
+  schemas:
+    WaitingConsumerChangedEventStream:
+      type: string
+      description: >-
+        UTF-8 SSE stream. 업무 event는 waiting.changed이고 id는 다음 Last-Event-ID로 그대로
+        재사용할 opaque cursor다. 최초 연결·유효한 재연결은 현재 MySQL high-watermark 수렴
+        신호를 한 번 보내고 이후에는 본인 팀 생성·상태 변경과 같은 매장·영업일의 앞선 활성 팀
+        변화로 teamsAhead가 달라질 수 있을 때 신호를 보낸다. 각 업무 frame은 빈 줄(\n\n)로
+        종료한다. 수신 뒤
+        GET /api/v1/consumers/me/waiting-teams/current를 다시 조회한다. keepalive comment는 업무
+        event가 아니며 cursor를 전진시키지 않는다.
+      example: |+
+        id: opaque-waiting-cursor
+        event: waiting.changed
+        data: {}
+
+    WaitingStoreOperatorChangedEventStream:
+      type: string
+      description: >-
+        UTF-8 SSE stream. 업무 event는 waiting.changed이고 id는 다음 Last-Event-ID로 그대로
+        재사용할 opaque cursor다. 최초 연결·유효한 재연결은 현재 MySQL high-watermark 수렴
+        신호를 한 번 보내고 이후에는 해당 store의 팀 생성·공개 상태 변경을 알린다. 각 업무
+        frame은 빈 줄(\n\n)로 종료한다. 수신 뒤 해당 store 웨이팅 목록·상세를 다시 조회한다.
+        설정과 AUTO·알림 worker 내부 상태는 신호가 아니다. keepalive comment는 업무 event가
+        아니며 cursor를 전진시키지 않는다.
+      example: |+
+        id: opaque-waiting-cursor
+        event: waiting.changed
+        data: {}
+
+    WaitingReceptionMode:
+      type: string
+      enum: [AUTO, MANUAL, PAUSED]
+      description: 자동 접수, 수동 접수 또는 신규 접수 일시중지
+    WaitingDisableAction:
+      type: string
+      enum: [KEEP_ACTIVE, CLOSE_ACTIVE_TEAMS]
+      description: >-
+        비활성화 시 기존 활성 팀을 유지하거나 비동기 일괄 종결하도록 요청하는 명시적 intent.
+        enabled=false인 요청에서만 허용하며 활성 팀이 있으면 필수다.
+    WaitingSetting:
+      type: object
+      additionalProperties: false
+      required:
+        - storeId
+        - enabled
+        - receptionMode
+        - advanceOpenMinutes
+        - version
+      properties:
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        enabled:
+          type: boolean
+        receptionMode:
+          $ref: "#/components/schemas/WaitingReceptionMode"
+        advanceOpenMinutes:
+          type: integer
+          minimum: 0
+          maximum: 180
+          description: 자동 접수를 영업 시작보다 먼저 여는 시간(분)
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 설정이 없으면 0이며 성공한 새 교체마다 단조 증가한다.
+      allOf:
+        - if:
+            properties:
+              enabled:
+                const: false
+            required: [enabled]
+          then:
+            properties:
+              receptionMode:
+                const: PAUSED
+    WaitingSettingUpdateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - expectedVersion
+        - enabled
+        - receptionMode
+        - advanceOpenMinutes
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 마지막으로 조회한 현재 설정 버전
+        enabled:
+          type: boolean
+        receptionMode:
+          $ref: "#/components/schemas/WaitingReceptionMode"
+        advanceOpenMinutes:
+          type: integer
+          minimum: 0
+          maximum: 180
+        disableAction:
+          $ref: "#/components/schemas/WaitingDisableAction"
+      allOf:
+        - if:
+            properties:
+              enabled:
+                const: false
+            required: [enabled]
+          then:
+            properties:
+              receptionMode:
+                const: PAUSED
+        - if:
+            properties:
+              disableAction: {}
+            required: [disableAction]
+          then:
+            properties:
+              enabled:
+                const: false
+    WaitingDisableImpact:
+      type: object
+      additionalProperties: false
+      required:
+        - storeId
+        - version
+        - activeTeamCount
+      properties:
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 설정 조회·수정 응답과 같은 현재 설정 버전
+        activeTeamCount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: WAITING, CALLED, ARRIVED, RESERVATION_CONVERTING 상태의 현재 팀 수
+          x-counted-statuses: [WAITING, CALLED, ARRIVED, RESERVATION_CONVERTING]
+    WaitingSettingSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/WaitingSetting"
+    WaitingDisableImpactSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/WaitingDisableImpact"
+    WaitingTeamStatus:
+      type: string
+      enum:
+        - WAITING
+        - CALLED
+        - ARRIVED
+        - CHECKED_IN
+        - CANCELLED
+        - NO_SHOW
+        - CLOSED_BY_STORE
+        - RESERVATION_CONVERTING
+        - RESERVATION_CONVERTED
+      description: >-
+        웨이팅 원장의 팀 상태. RESERVATION_CONVERTING은 비종결이며 예약 전환 결과가 확정될
+        때까지 계정 활성 membership 유지 상태다. 전환 실패로 WAITING 복귀해도 같은 membership을
+        유지한다. RESERVATION_CONVERTED는 결제 기반 예약 전환이 최종 Reservation scalar ID로
+        완료된 종결 상태다. RESERVATION_CONVERTING은 운영자 cancel만 허용한다.
+    WaitingTeamTransitionRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 마지막으로 조회한 대상 웨이팅 팀의 원장 버전
+    WaitingConsumerCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [businessDate, partySize, locationProofSessionId]
+      properties:
+        businessDate:
+          type: string
+          format: date
+          description: 직전 접수 가능 상태 조회에서 서버가 반환한 영업일
+        partySize:
+          type: integer
+          minimum: 1
+          description: 대표자가 등록하는 팀 인원수
+        locationProofSessionId:
+          type: string
+          format: uuid
+          description: 같은 계정·매장·등록 목적에 결속된 미소비 VERIFIED 위치 증명 세션
+    WaitingLocationProofRequest:
+      type: object
+      additionalProperties: false
+      required: [measurementStatus, integrityStatus]
+      properties:
+        measurementStatus:
+          type: string
+          enum: [MEASURED, PERMISSION_DENIED, POSITION_UNAVAILABLE]
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+        accuracyMeters:
+          type: number
+          exclusiveMinimum: 0
+        measuredAt:
+          type: string
+          format: date-time
+        integrityStatus:
+          type: string
+          enum: [CLEAR, MANIPULATION_SUSPECTED]
+      oneOf:
+        - properties:
+            measurementStatus:
+              const: MEASURED
+          required: [latitude, longitude, accuracyMeters, measuredAt]
+        - properties:
+            measurementStatus:
+              enum: [PERMISSION_DENIED, POSITION_UNAVAILABLE]
+            latitude: false
+            longitude: false
+            accuracyMeters: false
+            measuredAt: false
+    WaitingLocationProofSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - proofSessionId
+        - resultCategory
+        - accuracyCategory
+        - policyVersion
+        - storeCoordinateVersion
+        - issuedAt
+        - judgedAt
+        - expiresAt
+      properties:
+        proofSessionId:
+          type: string
+          format: uuid
+        resultCategory:
+          type: string
+          enum:
+            - VERIFIED
+            - OUTSIDE_RADIUS
+            - ACCURACY_INSUFFICIENT
+            - PERMISSION_DENIED
+            - MEASUREMENT_STALE
+            - POSITION_UNAVAILABLE
+            - MANIPULATION_SUSPECTED
+        accuracyCategory:
+          type: string
+          enum: [ACCEPTABLE, INSUFFICIENT, NOT_APPLICABLE]
+        policyVersion:
+          type: string
+          enum: [WAITING_LOCATION_V1]
+        storeCoordinateVersion:
+          type: integer
+          format: int64
+          minimum: 0
+        issuedAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        judgedAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        expiresAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+    WaitingReceptionAvailability:
+      type: object
+      additionalProperties: false
+      required: [storeId, accepting, businessDate]
+      properties:
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        accepting:
+          type: boolean
+        businessDate:
+          type: [string, "null"]
+          format: date
+          description: accepting=true일 때 등록 요청에 사용할 현재 영업일
+    WaitingConsumerSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - waitingTeamId
+        - storeId
+        - businessDate
+        - status
+        - queueSequence
+        - teamsAhead
+        - partySize
+        - createdAt
+        - calledAt
+        - arrivalDeadline
+        - arrivedAt
+        - cancelledAt
+        - version
+        - memberships
+      properties:
+        waitingTeamId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        businessDate:
+          type: string
+          format: date
+        status:
+          $ref: "#/components/schemas/WaitingTeamStatus"
+        queueSequence:
+          type: integer
+          format: int64
+          minimum: 1
+        teamsAhead:
+          type: integer
+          format: int64
+          minimum: 0
+        partySize:
+          type: integer
+          minimum: 1
+        createdAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        calledAt:
+          type: [string, "null"]
+          format: date-time
+        arrivalDeadline:
+          type: [string, "null"]
+          format: date-time
+        arrivedAt:
+          type: [string, "null"]
+          format: date-time
+        cancelledAt:
+          type: [string, "null"]
+          format: date-time
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+        memberships:
+          type: array
+          items: { $ref: "#/components/schemas/WaitingPartyMember" }
+    WaitingExpectedVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion: { type: integer, format: int64, minimum: 0 }
+    WaitingInvitationAcceptanceRequest:
+      type: object
+      additionalProperties: false
+      required: [invitationCode]
+      properties:
+        invitationCode: { type: string, minLength: 1, maxLength: 128 }
+    WaitingPartyMember:
+      type: object
+      additionalProperties: false
+      required: [membershipId, role, joinedAt, self]
+      properties:
+        membershipId: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+        role: { type: string, enum: [REPRESENTATIVE, MEMBER] }
+        joinedAt: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime" }
+        self: { type: boolean }
+    WaitingInvitation:
+      type: object
+      additionalProperties: false
+      required: [invitationId, expiresAt, invitationCode]
+      properties:
+        invitationId: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+        expiresAt: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime" }
+        invitationCode: { type: [string, "null"], description: 신규 발급 응답에서만 반환 }
+    WaitingInvitationSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code: { type: string, const: SUCCESS }
+        message: { type: string }
+        data: { $ref: "#/components/schemas/WaitingInvitation" }
+    WaitingTransferProposalRequest:
+      type: object
+      additionalProperties: false
+      required: [targetMembershipId, expectedVersion]
+      properties:
+        targetMembershipId: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+        expectedVersion: { type: integer, format: int64, minimum: 0 }
+    WaitingTransferOffer:
+      type: object
+      additionalProperties: false
+      required: [offerId, targetMembershipId, status, proposedAt, expiresAt]
+      properties:
+        offerId: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+        targetMembershipId: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId" }
+        status: { type: string, enum: [PROPOSED, ACCEPTED, REJECTED, REVOKED, EXPIRED] }
+        proposedAt: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime" }
+        expiresAt: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime" }
+    WaitingTransferOfferSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code: { type: string, const: SUCCESS }
+        message: { type: string }
+        data: { $ref: "#/components/schemas/WaitingTransferOffer" }
+    WaitingTeamListItem:
+      type: object
+      additionalProperties: false
+      required:
+        - waitingTeamId
+        - status
+        - queueSequence
+        - partySize
+        - createdAt
+        - version
+      properties:
+        waitingTeamId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        status:
+          $ref: "#/components/schemas/WaitingTeamStatus"
+        queueSequence:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 매장과 KST 영업일 안에서 단조 증가하는 중앙 FIFO 순번
+        partySize:
+          type: integer
+          minimum: 1
+        createdAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+    WaitingTeamDetail:
+      type: object
+      additionalProperties: false
+      required:
+        - waitingTeamId
+        - storeId
+        - status
+        - queueSequence
+        - partySize
+        - createdAt
+        - version
+      properties:
+        waitingTeamId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        status:
+          $ref: "#/components/schemas/WaitingTeamStatus"
+        queueSequence:
+          type: integer
+          format: int64
+          minimum: 1
+        partySize:
+          type: integer
+          minimum: 1
+        createdAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        calledAt:
+          type: [string, "null"]
+          format: date-time
+        arrivedAt:
+          type: [string, "null"]
+          format: date-time
+        checkedInAt:
+          type: [string, "null"]
+          format: date-time
+        cancelledAt:
+          type: [string, "null"]
+          format: date-time
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+    WaitingQueueCursor:
+      type: string
+      description: >-
+        서버가 발급하는 opaque cursor. 목록은 `(queueSequence, waitingTeamId)` 오름차순으로
+        정렬하며, 다음 페이지는 이 복합 키보다 큰 항목부터 시작한다.
+    WaitingTeamPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/WaitingTeamListItem"
+        nextCursor:
+          type: [string, "null"]
+          description: 다음 페이지가 없으면 null인 opaque cursor
+    WaitingClosureJobStatus:
+      type: string
+      enum: [PENDING, PROCESSING, COMPLETED, RECONCILIATION_REQUIRED]
+      description: 종결 대상 스냅샷 처리 작업의 현재 상태
+    WaitingClosureJob:
+      type: object
+      additionalProperties: false
+      required:
+        - jobId
+        - storeId
+        - status
+        - totalTeamCount
+        - completedTeamCount
+        - failedTeamCount
+        - reconciliationRequiredTeamCount
+        - createdAt
+      properties:
+        jobId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        status:
+          $ref: "#/components/schemas/WaitingClosureJobStatus"
+        totalTeamCount:
+          type: integer
+          format: int64
+          minimum: 0
+        completedTeamCount:
+          type: integer
+          format: int64
+          minimum: 0
+        failedTeamCount:
+          type: integer
+          format: int64
+          minimum: 0
+        reconciliationRequiredTeamCount:
+          type: integer
+          format: int64
+          minimum: 0
+        createdAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        completedAt:
+          type: [string, "null"]
+          format: date-time
+    WaitingTeamPageSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/WaitingTeamPage"
+    WaitingTeamDetailSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/WaitingTeamDetail"
+    WaitingClosureJobSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/WaitingClosureJob"
+    WaitingReceptionAvailabilitySuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/WaitingReceptionAvailability"
+    WaitingLocationProofSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/WaitingLocationProofSnapshot"
+    WaitingConsumerSnapshotSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/WaitingConsumerSnapshot"
+  responses:
+    WaitingLocationProofBadRequest:
+      description: storeId, 조건부 위치 측정 본문 또는 JSON 형식이 올바르지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            validationFailed:
+              value:
+                code: COMMON_001
+                message: 입력값이 올바르지 않습니다.
+            malformedRequest:
+              value:
+                code: COMMON_002
+                message: 요청 본문을 읽을 수 없습니다.
+    WaitingEventCursorBadRequest:
+      description: Last-Event-ID 형식·무결성 또는 audience·계정·store 결속이 유효하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: COMMON_001
+            message: 입력값이 올바르지 않습니다.
+    WaitingStoreIdBadRequest:
+      description: storeId가 양의 정수 문자열 PublicId 형식이 아님
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: COMMON_001
+            message: 입력값이 올바르지 않습니다.
+            details:
+              - field: storeId
+                reason: 양의 정수 문자열이어야 합니다.
+    WaitingBadRequest:
+      description: storeId·본문 검증, JSON 역직렬화 또는 필수 멱등성 헤더가 올바르지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            invalidStoreId:
+              value:
+                code: COMMON_001
+                message: 입력값이 올바르지 않습니다.
+                details:
+                  - field: storeId
+                    reason: 양의 정수 문자열이어야 합니다.
+            validationFailed:
+              value:
+                code: COMMON_001
+                message: 입력값이 올바르지 않습니다.
+                details:
+                  - field: advanceOpenMinutes
+                    reason: 0 이상 180 이하여야 합니다.
+            malformedRequest:
+              value:
+                code: COMMON_002
+                message: 요청 본문을 읽을 수 없습니다.
+            idempotencyKeyRequired:
+              value:
+                code: COMMON_003
+                message: Idempotency-Key 헤더가 필요합니다.
+            invalidIdempotencyKey:
+              value:
+                code: COMMON_004
+                message: Idempotency-Key 형식이 올바르지 않습니다.
+    WaitingStoreForbidden:
+      description: 현재 계정 상태가 제한됐거나 대상 매장의 현재 대표 운영자가 아님
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            accountRestricted:
+              value:
+                code: AUTH_011
+                message: 현재 계정 상태로 이용할 수 없습니다.
+            storeAccessDenied:
+              value:
+                code: STORE_003
+                message: 대상 매장의 운영 권한이 없습니다.
+    WaitingStoreNotFound:
+      description: 대상 매장이 실제로 존재하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_001
+            message: 매장을 찾을 수 없습니다.
+    WaitingStoreStateConflict:
+      description: 조회 시 대상 매장의 입점 검증 상태를 APPROVED로 확인할 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_007
+            message: 현재 입점 검증 상태에서 운영할 수 없습니다.
+    WaitingSettingConflict:
+      description: 설정 버전, 비활성화 action, Store 상태, 멱등성 또는 동시 요청 충돌
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            staleVersion:
+              value:
+                code: WAITING_001
+                message: 웨이팅 설정이 변경되었습니다. 최신 설정을 다시 확인해 주세요.
+            disableActionRequired:
+              value:
+                code: WAITING_002
+                message: 활성 대기 팀의 처리 방법을 선택해 주세요.
+            idempotencyKeyReused:
+              value:
+                code: COMMON_007
+                message: 동일한 Idempotency-Key를 다른 요청에 사용할 수 없습니다.
+            concurrentModification:
+              value:
+                code: COMMON_008
+                message: 동시 요청 충돌로 처리하지 못했습니다. 다시 시도해 주세요.
+            invalidStoreState:
+              value:
+                code: STORE_005
+                message: 현재 매장 상태에서 요청한 작업을 수행할 수 없습니다.
+            invalidVerificationState:
+              value:
+                code: STORE_007
+                message: 현재 입점 검증 상태에서 운영할 수 없습니다.
+    WaitingTeamDetailSuccess:
+      description: 전이 뒤의 현재 웨이팅 팀 원장 스냅샷
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WaitingTeamDetailSuccessResponse"
+    WaitingLedgerBadRequest:
+      description: path·query·본문 또는 멱등성 헤더가 유효하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            invalidIdentifier:
+              value:
+                code: COMMON_001
+                message: 입력값이 올바르지 않습니다.
+            malformedRequest:
+              value:
+                code: COMMON_002
+                message: 요청 본문을 읽을 수 없습니다.
+            idempotencyKeyRequired:
+              value:
+                code: COMMON_003
+                message: Idempotency-Key 헤더가 필요합니다.
+            invalidIdempotencyKey:
+              value:
+                code: COMMON_004
+                message: Idempotency-Key 형식이 올바르지 않습니다.
+    WaitingLedgerNotFound:
+      description: 대상 매장, 웨이팅 팀 또는 종결 작업을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            storeNotFound:
+              value:
+                code: STORE_001
+                message: 매장을 찾을 수 없습니다.
+            waitingTeamNotFound:
+              value:
+                code: WAITING_003
+                message: 웨이팅 팀을 찾을 수 없습니다.
+            waitingCloseJobNotFound:
+              value:
+                code: WAITING_004
+                message: 웨이팅 종결 작업을 찾을 수 없습니다.
+    WaitingLedgerConflict:
+      description: >-
+        웨이팅 팀의 현재 상태·버전·FIFO 선두 조건·활성 membership·종결 작업 결과 또는 Store 상태와
+        충돌했거나, 멱등 키가 다른 요청 지문에 재사용되었거나 동시 변경이 발생했다.
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            staleTeamVersion:
+              value:
+                code: WAITING_005
+                message: 웨이팅 팀이 변경되었습니다. 최신 상태를 다시 확인해 주세요.
+            invalidTransition:
+              value:
+                code: WAITING_006
+                message: 현재 상태에서는 요청한 전이를 수행할 수 없습니다.
+            fifoHeadRequired:
+              value:
+                code: WAITING_007
+                message: FIFO 선두 웨이팅 팀만 호출할 수 있습니다.
+            activeMembershipConflict:
+              value:
+                code: WAITING_008
+                message: 활성 웨이팅 멤버십과 요청 전제가 충돌합니다.
+            closureJobFailed:
+              value:
+                code: WAITING_010
+                message: 웨이팅 종결 작업에 실패한 팀이 있습니다.
+            closureJobReconciliationRequired:
+              value:
+                code: WAITING_009
+                message: 웨이팅 종결 결과의 대사가 필요합니다.
+            idempotencyKeyReused:
+              value:
+                code: COMMON_007
+                message: 동일한 Idempotency-Key를 다른 요청에 사용할 수 없습니다.
+            concurrentModification:
+              value:
+                code: COMMON_008
+                message: 동시 요청 충돌로 처리하지 못했습니다. 다시 시도해 주세요.
+    WaitingConsumerStoreNotFound:
+      description: 대상 매장을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_001
+            message: 매장을 찾을 수 없습니다.
+    WaitingConsumerTeamNotFound:
+      description: 본인 소유 웨이팅 팀을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: WAITING_003
+            message: 웨이팅 팀을 찾을 수 없습니다.
+    WaitingConsumerAccountForbidden:
+      description: 현재 소비자 계정 상태가 이용을 허용하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_011
+            message: 현재 계정 상태로는 이용할 수 없습니다.
+    WaitingConsumerCreateForbidden:
+      description: 소비자 계정이 제한됐거나 매장 웨이팅 기능이 제재로 제한됨
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            accountRestricted:
+              value:
+                code: AUTH_011
+                message: 현재 계정 상태로는 이용할 수 없습니다.
+            waitingFeatureRestricted:
+              value:
+                code: STORE_015
+                message: 제재로 제한된 매장 기능입니다.
+    WaitingConsumerCreateConflict:
+      description: 매장·입점·접수 상태, 단일 활성 웨이팅, 멱등성 또는 동시 요청 충돌
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            storeStateConflict:
+              value:
+                code: STORE_005
+                message: 현재 매장 상태에서 요청한 작업을 수행할 수 없습니다.
+            verificationStateConflict:
+              value:
+                code: STORE_007
+                message: 현재 입점 검증 상태에서 운영할 수 없습니다.
+            accountActiveWaitingExists:
+              value:
+                code: WAITING_011
+                message: 계정에 이미 활성 웨이팅이 있습니다. 기존 웨이팅을 종료한 후 다시 시도해 주세요.
+            receptionClosed:
+              value:
+                code: WAITING_012
+                message: 현재 매장은 신규 웨이팅 접수를 받지 않습니다.
+            idempotencyKeyReused:
+              value:
+                code: COMMON_007
+                message: 동일한 Idempotency-Key를 다른 요청에 사용할 수 없습니다.
+            concurrentModification:
+              value:
+                code: COMMON_008
+                message: 동시 요청 충돌로 처리하지 못했습니다. 다시 시도해 주세요.
+    WaitingConsumerCancelConflict:
+      description: 팀 버전·상태, 활성 membership, 멱등성 또는 동시 요청 충돌
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            staleTeamVersion:
+              value:
+                code: WAITING_005
+                message: 웨이팅 팀이 변경되었습니다. 최신 상태를 다시 확인해 주세요.
+            invalidTransition:
+              value:
+                code: WAITING_006
+                message: 현재 상태에서는 요청한 전이를 수행할 수 없습니다.
+            activeMembershipConflict:
+              value:
+                code: WAITING_008
+                message: 활성 웨이팅 멤버십과 요청 전제가 충돌합니다.
+            idempotencyKeyReused:
+              value:
+                code: COMMON_007
+                message: 동일한 Idempotency-Key를 다른 요청에 사용할 수 없습니다.
+            concurrentModification:
+              value:
+                code: COMMON_008
+                message: 동시 요청 충돌로 처리하지 못했습니다. 다시 시도해 주세요.

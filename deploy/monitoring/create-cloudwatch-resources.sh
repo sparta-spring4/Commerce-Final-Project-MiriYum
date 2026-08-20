@@ -30,6 +30,70 @@ aws logs put-retention-policy \
   --log-group-name "$LOG_GROUP_NAME" \
   --retention-in-days 7
 
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-risk-event-delivery-stalled \
+  --filter-pattern '"event=refresh_token_risk_event_delivery_stalled"' \
+  --metric-transformations \
+    "metricName=RefreshTokenRiskEventDeliveryStalled,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-risk-event-marker-long-stay \
+  --filter-pattern '"event=refresh_token_risk_event_marker_long_stay"' \
+  --metric-transformations \
+    "metricName=RefreshTokenRiskEventMarkerLongStay,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-risk-event-pending-count \
+  --filter-pattern '[..., marker = refresh_token_risk_event_pending_count, label = pending_count, pending_count]' \
+  --metric-transformations \
+    'metricName=RefreshTokenRiskEventPendingCount,metricNamespace='"$NAMESPACE"',metricValue=$pending_count'
+
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-risk-event-marker-malformed \
+  --filter-pattern '"event=refresh_token_risk_event_marker_malformed"' \
+  --metric-transformations \
+    "metricName=RefreshTokenRiskEventMarkerMalformed,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-token-absolute-lifetime-cap-applied \
+  --filter-pattern '"event=refresh_token_absolute_lifetime_cap_applied"' \
+  --metric-transformations \
+    "metricName=RefreshTokenAbsoluteLifetimeCapApplied,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-risk-event-marker-quarantine-failed \
+  --filter-pattern '"event=refresh_token_risk_event_marker_quarantine_failed"' \
+  --metric-transformations \
+    "metricName=RefreshTokenRiskEventMarkerQuarantineFailed,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-risk-event-stale-index-cleanup-failed \
+  --filter-pattern '"event=refresh_token_risk_event_stale_index_cleanup_failed"' \
+  --metric-transformations \
+    "metricName=RefreshTokenRiskEventStaleIndexCleanupFailed,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-reservation-hold-reconciliation-stalled \
+  --filter-pattern '"event=reservation_hold_reconciliation_stalled"' \
+  --metric-transformations \
+    "metricName=ReservationHoldReconciliationStalled,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
 topic_arn=$(aws sns create-topic \
   --region "$AWS_REGION" \
   --name "$TOPIC_NAME" \
@@ -60,6 +124,18 @@ put_alarm() {
     --alarm-actions "$topic_arn" \
     --ok-actions "$topic_arn" \
     --treat-missing-data notBreaching \
+    "$@"
+}
+
+put_missing_data_alarm() {
+  local name="$1"
+  shift
+  aws cloudwatch put-metric-alarm \
+    --region "$AWS_REGION" \
+    --alarm-name "$name" \
+    --alarm-actions "$topic_arn" \
+    --ok-actions "$topic_arn" \
+    --treat-missing-data breaching \
     "$@"
 }
 
@@ -111,6 +187,53 @@ put_alarm "miriyum-staging-deployment-health-failed" \
   --evaluation-periods 1 \
   --threshold 0.5 \
   --comparison-operator LessThanThreshold
+
+put_alarm "miriyum-staging-refresh-risk-event-delivery-stalled" \
+  --namespace "$NAMESPACE" \
+  --metric-name RefreshTokenRiskEventDeliveryStalled \
+  --statistic Sum \
+  --period 300 \
+  --evaluation-periods 1 \
+  --threshold 0 \
+  --comparison-operator GreaterThanThreshold
+
+put_alarm "miriyum-staging-refresh-risk-event-marker-long-stay" \
+  --namespace "$NAMESPACE" \
+  --metric-name RefreshTokenRiskEventMarkerLongStay \
+  --statistic Sum \
+  --period 300 \
+  --evaluation-periods 1 \
+  --threshold 0 \
+  --comparison-operator GreaterThanThreshold
+
+put_alarm "miriyum-staging-auth-valkey-memory-collection-failed" \
+  --namespace "$NAMESPACE" \
+  --metric-name AuthValkeyMemoryCollectionFailure \
+  --dimensions "Name=InstanceId,Value=$EC2_INSTANCE_ID" \
+  --statistic Sum \
+  --period 300 \
+  --evaluation-periods 1 \
+  --threshold 0 \
+  --comparison-operator GreaterThanThreshold
+
+put_missing_data_alarm "miriyum-staging-auth-valkey-memory-collection-missing" \
+  --namespace "$NAMESPACE" \
+  --metric-name AuthValkeyMemoryCollectionHeartbeat \
+  --dimensions "Name=InstanceId,Value=$EC2_INSTANCE_ID" \
+  --statistic Minimum \
+  --period 300 \
+  --evaluation-periods 1 \
+  --threshold 0.5 \
+  --comparison-operator LessThanThreshold
+
+put_alarm "miriyum-staging-reservation-hold-reconciliation-stalled" \
+  --namespace "$NAMESPACE" \
+  --metric-name ReservationHoldReconciliationStalled \
+  --statistic Sum \
+  --period 300 \
+  --evaluation-periods 1 \
+  --threshold 0 \
+  --comparison-operator GreaterThanThreshold
 
 dashboard_body=$(cat <<EOF
 {
@@ -166,6 +289,112 @@ dashboard_body=$(cat <<EOF
         "stat": "Minimum",
         "metrics": [
           ["MiriYum/Staging", "DeploymentHealth"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum pending refresh risk event index members",
+        "period": 300,
+        "stat": "Maximum",
+        "metrics": [
+          ["MiriYum/Staging", "RefreshTokenRiskEventPendingCount"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 12,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum refresh risk marker integrity failures",
+        "period": 300,
+        "stat": "Sum",
+        "metrics": [
+          ["MiriYum/Staging", "RefreshTokenRiskEventMarkerMalformed"],
+          [".", "RefreshTokenRiskEventMarkerQuarantineFailed"],
+          [".", "RefreshTokenRiskEventStaleIndexCleanupFailed"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 18,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum refresh risk marker long-stay signal",
+        "period": 300,
+        "stat": "Sum",
+        "metrics": [
+          ["MiriYum/Staging", "RefreshTokenRiskEventMarkerLongStay"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 18,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum Auth Valkey memory capacity",
+        "period": 60,
+        "stat": "Maximum",
+        "metrics": [
+          ["MiriYum/Staging", "AuthValkeyUsedMemoryBytes", "InstanceId", "$EC2_INSTANCE_ID"],
+          [".", "AuthValkeyMaxMemoryBytes", ".", "."]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 24,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum Auth Valkey memory utilization",
+        "period": 60,
+        "stat": "Maximum",
+        "metrics": [
+          ["MiriYum/Staging", "AuthValkeyMemoryUtilizationPercent", "InstanceId", "$EC2_INSTANCE_ID"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 30,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum Auth Valkey memory collection health",
+        "period": 60,
+        "stat": "Sum",
+        "metrics": [
+          ["MiriYum/Staging", "AuthValkeyMemoryCollectionHeartbeat", "InstanceId", "$EC2_INSTANCE_ID"],
+          [".", "AuthValkeyMemoryCollectionFailure", ".", "."]
         ]
       }
     }

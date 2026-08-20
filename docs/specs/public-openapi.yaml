@@ -7,14 +7,18 @@ servers:
   - url: /
 security: []
 paths:
+  /api/v1/payments/webhooks/portone:
+    $ref: "./payment/openapi.yaml#/paths/~1api~1v1~1payments~1webhooks~1portone"
   /api/v1/stores:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores"
   /api/v1/stores/{storeId}:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}"
   /api/v1/stores/{storeId}/menus:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1menus"
-  /api/v1/stores/{storeId}/menus/{menuId}/alternatives/search:
-    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1menus~1{menuId}~1alternatives~1search"
+  /api/v1/stores/{storeId}/menus/{menuId}/alternative-searches:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1menus~1{menuId}~1alternative-searches"
+  /api/v1/public-files/{imageId}:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1public-files~1{imageId}"
   /api/v1/store-categories:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-categories"
   /api/v1/menu-categories:

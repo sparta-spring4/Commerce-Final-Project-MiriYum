@@ -26,20 +26,27 @@ import com.miriyum.domain.reservation.dto.response.ReservationMenuSelectionRespo
 import com.miriyum.domain.reservation.dto.response.ReservationPartyResponse;
 import com.miriyum.domain.reservation.dto.response.StoreReservationPageResponse;
 import com.miriyum.domain.reservation.dto.response.StoreReservationSummaryResponse;
+import com.miriyum.domain.reservation.dto.response.StoreReservationPaymentStatusResponse;
+import com.miriyum.domain.reservation.dto.response.StoreReservationPaymentStatusResponse.StorePaymentResult;
+import com.miriyum.domain.reservation.dto.response.StoreReservationPaymentStatusResponse.StoreReservationPayment;
+import com.miriyum.domain.reservation.dto.response.StoreReservationPaymentStatusResponse.StoreReservationRefund;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandResult;
 import com.miriyum.domain.reservation.service.ReservationFulfillmentCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationFulfillmentCommandResult;
 import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.reservation.service.StoreReservationPaymentStatusQueryService;
 import com.miriyum.domain.store.config.StoreManagementSecurityConfig;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.ErrorCode;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.PageMetadata;
 import java.time.LocalDate;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.stream.Stream;
@@ -72,6 +79,7 @@ class StoreReservationControllerTest {
     private static final String DETAIL_URL = BASE_URL + "/77";
     private static final String CANCELLATION_URL = DETAIL_URL + "/cancellations";
     private static final String FULFILLMENT_URL = DETAIL_URL + "/fulfillments";
+    private static final String PAYMENT_STATUS_URL = DETAIL_URL + "/payment-status";
     private static final String IDEMPOTENCY_KEY = "550e8400-e29b-41d4-a716-446655440000";
 
     @Autowired
@@ -87,7 +95,118 @@ class StoreReservationControllerTest {
     private ReservationFulfillmentCommandFacade fulfillmentFacade;
 
     @MockitoBean
+    private StoreReservationPaymentStatusQueryService paymentStatusQueryService;
+
+    @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
+
+    @Test
+    void returnsStoredPaymentStatusInTheCommonEnvelope() throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+        given(paymentStatusQueryService.get(OPERATOR_ID, STORE_ID, RESERVATION_ID))
+                .willReturn(paymentStatusResponse());
+
+        mockMvc.perform(get(PAYMENT_STATUS_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.reservationId").value("77"))
+                .andExpect(jsonPath("$.data.result").value("COMPLETED"))
+                .andExpect(jsonPath("$.data.reconciliationRequired").value(false))
+                .andExpect(jsonPath("$.data.payment.paymentId")
+                        .value("900000000000000001"))
+                .andExpect(jsonPath("$.data.payment.amountMinor").value(30_000))
+                .andExpect(jsonPath("$.data.payment.currency").value("KRW"))
+                .andExpect(jsonPath("$.data.payment.refunds[0].refundId")
+                        .value("910000000000000001"))
+                .andExpect(jsonPath("$.data.payment.portOnePaymentId").doesNotExist())
+                .andExpect(jsonPath("$.data.payment.consumerAccountId").doesNotExist())
+                .andExpect(jsonPath("$.data.payment.paymentMethod").doesNotExist());
+
+        then(paymentStatusQueryService).should().get(OPERATOR_ID, STORE_ID, RESERVATION_ID);
+    }
+
+    @Test
+    void returnsNotApplicableWithAnExplicitNullPayment() throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+        given(paymentStatusQueryService.get(OPERATOR_ID, STORE_ID, RESERVATION_ID))
+                .willReturn(new StoreReservationPaymentStatusResponse(
+                        "77", StorePaymentResult.NOT_APPLICABLE, false,
+                        Instant.parse("2026-08-19T01:00:00Z"), null));
+
+        mockMvc.perform(get(PAYMENT_STATUS_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.result").value("NOT_APPLICABLE"))
+                .andExpect(jsonPath("$.data.payment").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "-1"})
+    void rejectsNonPositivePaymentStatusPathIds(String invalidId) throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+
+        mockMvc.perform(get(
+                        "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/payment-status",
+                        invalidId,
+                        invalidId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(paymentStatusQueryService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void rejectsUnauthenticatedAndConsumerPaymentStatusReads() throws Exception {
+        mockMvc.perform(get(PAYMENT_STATUS_URL))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_001"));
+        given(jwtTokenProvider.parseAccessToken("consumer-token"))
+                .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
+        mockMvc.perform(get(PAYMENT_STATUS_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_006"));
+
+        then(paymentStatusQueryService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void deniesUnsupportedPaymentStatusMethodBeforeControllerDispatch() throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+
+        mockMvc.perform(post(PAYMENT_STATUS_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_006"));
+
+        then(paymentStatusQueryService).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @MethodSource("paymentStatusPassthroughErrors")
+    void passesThroughConcealedAndIntegrityPaymentStatusErrors(
+            ErrorCode errorCode,
+            int expectedStatus
+    ) throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+        reset(paymentStatusQueryService);
+        given(paymentStatusQueryService.get(OPERATOR_ID, STORE_ID, RESERVATION_ID))
+                .willThrow(new ServiceException(errorCode));
+
+        mockMvc.perform(get(PAYMENT_STATUS_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().is(expectedStatus))
+                .andExpect(jsonPath("$.code").value(errorCode.getCode()));
+    }
+
+    private static Stream<Arguments> paymentStatusPassthroughErrors() {
+        return Stream.of(
+                Arguments.of(StoreErrorCode.STORE_NOT_FOUND, 404),
+                Arguments.of(ReservationErrorCode.RESERVATION_NOT_FOUND, 404),
+                Arguments.of(CommonErrorCode.SERVICE_UNAVAILABLE, 503));
+    }
 
     @Test
     @DisplayName("인증 토큰이 없으면 운영자 예약 목록을 조회할 수 없다")
@@ -152,6 +271,27 @@ class StoreReservationControllerTest {
         assertThat(request.page()).isEqualTo(1);
         assertThat(request.size()).isEqualTo(10);
         assertThat(request.order()).isEqualTo(StoreReservationSearchRequest.Order.CREATED_AT_DESC);
+    }
+
+    @Test
+    @DisplayName("운영자 예약 목록은 NO_SHOW 상태를 조회 조건으로 전달한다")
+    void acceptsNoShowStoreReservationStatus() throws Exception {
+        authenticateStoreOperator(33L);
+        given(reservationService.getStoreReservations(
+                eq(33L), eq(22L), any(StoreReservationSearchRequest.class)))
+                .willReturn(emptyStoreReservationPage());
+
+        mockMvc.perform(get(BASE_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .param("status", "NO_SHOW"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<StoreReservationSearchRequest> requestCaptor =
+                ArgumentCaptor.forClass(StoreReservationSearchRequest.class);
+        then(reservationService).should()
+                .getStoreReservations(eq(33L), eq(22L), requestCaptor.capture());
+        assertThat(requestCaptor.getValue().status())
+                .isEqualTo(StoreReservationSearchRequest.Status.NO_SHOW);
     }
 
     @Test
@@ -758,6 +898,34 @@ class StoreReservationControllerTest {
                 )),
                 new PageMetadata(1, 10, 11, 2, false)
         );
+    }
+
+    private StoreReservationPaymentStatusResponse paymentStatusResponse() {
+        Instant observedAt = Instant.parse("2026-08-19T01:00:00Z");
+        return new StoreReservationPaymentStatusResponse(
+                "77",
+                StorePaymentResult.COMPLETED,
+                false,
+                observedAt,
+                new StoreReservationPayment(
+                        "900000000000000001",
+                        30_000L,
+                        10_000L,
+                        20_000L,
+                        "KRW",
+                        com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus
+                                .PARTIALLY_REFUNDED,
+                        com.miriyum.domain.payment.dto.PaymentContracts.PaymentAttemptStatus.PAID,
+                        observedAt.minusSeconds(120),
+                        observedAt.minusSeconds(90),
+                        observedAt,
+                        List.of(new StoreReservationRefund(
+                                "910000000000000001",
+                                10_000L,
+                                com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus
+                                        .COMPLETED,
+                                observedAt.minusSeconds(30),
+                                observedAt))));
     }
 
     private StoreReservationPageResponse emptyStoreReservationPage() {

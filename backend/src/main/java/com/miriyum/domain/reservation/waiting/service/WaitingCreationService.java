@@ -1,0 +1,408 @@
+package com.miriyum.domain.reservation.waiting.service;
+
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
+import com.miriyum.domain.reservation.waiting.dto.WaitingTeamSnapshot;
+import com.miriyum.domain.reservation.waiting.entity.WaitingActiveMembership;
+import com.miriyum.domain.reservation.waiting.entity.WaitingActorType;
+import com.miriyum.domain.reservation.waiting.entity.WaitingQueueSequence;
+import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession;
+import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession.Purpose;
+import com.miriyum.domain.reservation.waiting.entity.WaitingReceptionMode;
+import com.miriyum.domain.reservation.waiting.entity.WaitingSetting;
+import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
+import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
+import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
+import com.miriyum.domain.reservation.waiting.entity.WaitingTransitionAudit;
+import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingQueueSequenceRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingLocationProofSessionRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingSettingRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
+import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
+import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.idempotency.BusinessResult;
+import com.miriyum.global.idempotency.IdempotencyCommand;
+import com.miriyum.global.idempotency.IdempotencyExecutor;
+import com.miriyum.global.idempotency.IdempotencyKey;
+import com.miriyum.global.idempotency.IdempotentOutcome;
+import com.miriyum.global.idempotency.RequestFingerprint;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.function.Supplier;
+import java.util.function.Function;
+import java.util.function.IntToLongFunction;
+import java.util.concurrent.ThreadLocalRandom;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
+
+/** 검증된 입력으로 중앙 FIFO 팀과 활성 membership을 원자적으로 생성한다. */
+@Service
+public class WaitingCreationService {
+
+    private static final int MAX_ATTEMPTS = 3;
+
+    private final WaitingQueueSequenceRepository sequenceRepository;
+    private final WaitingTeamRepository teamRepository;
+    private final WaitingActiveMembershipRepository membershipRepository;
+    private final WaitingTransitionAuditRepository auditRepository;
+    private final WaitingStatusEventAppender eventAppender;
+    private final WaitingLocationProofSessionRepository proofRepository;
+    private final ReceptionCheck receptionCheck;
+    private final IdempotencyExecutor idempotencyExecutor;
+    private final WaitingCreationTransactionExecutor transactionExecutor;
+    private final StoreTransactionEligibilityService storeEligibility;
+    private final ObjectMapper objectMapper;
+    private final Clock clock;
+    private final IntToLongFunction retryDelayMillis;
+    private final RetrySleeper retrySleeper;
+
+    @FunctionalInterface interface RetrySleeper { void sleep(long millis) throws InterruptedException; }
+    @FunctionalInterface interface ReceptionCheck {
+        void requireOpen(long storeId, LocalDate businessDate, Instant now);
+    }
+
+    @Autowired
+    public WaitingCreationService(
+            WaitingQueueSequenceRepository sequenceRepository,
+            WaitingTeamRepository teamRepository,
+            WaitingActiveMembershipRepository membershipRepository,
+            WaitingTransitionAuditRepository auditRepository,
+            WaitingStatusEventAppender eventAppender,
+            WaitingLocationProofSessionRepository proofRepository,
+            WaitingReceptionGate receptionGate,
+            IdempotencyExecutor idempotencyExecutor,
+            WaitingCreationTransactionExecutor transactionExecutor,
+            StoreTransactionEligibilityService storeEligibility,
+            ObjectMapper objectMapper,
+            Clock clock
+    ) {
+        this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
+                eventAppender, proofRepository, receptionGate::requireOpen,
+                idempotencyExecutor, transactionExecutor,
+                storeEligibility,
+                objectMapper, clock,
+                WaitingCreationService::defaultDelayMillis, Thread::sleep);
+    }
+
+    WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
+            WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventAppender eventAppender,
+            WaitingLocationProofSessionRepository proofRepository,
+            WaitingReceptionGate receptionGate,
+            IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
+            StoreTransactionEligibilityService storeEligibility,
+            ObjectMapper objectMapper, Clock clock, IntToLongFunction retryDelayMillis,
+            RetrySleeper retrySleeper) {
+        this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
+                eventAppender, proofRepository, receptionGate::requireOpen, idempotencyExecutor,
+                transactionExecutor, storeEligibility, objectMapper, clock, retryDelayMillis, retrySleeper);
+    }
+
+    WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
+            WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventAppender eventAppender,
+            WaitingReceptionGate receptionGate,
+            IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
+            StoreTransactionEligibilityService storeEligibility,
+            ObjectMapper objectMapper, Clock clock, IntToLongFunction retryDelayMillis,
+            RetrySleeper retrySleeper) {
+        this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
+                eventAppender, null, receptionGate::requireOpen, idempotencyExecutor,
+                transactionExecutor, storeEligibility, objectMapper, clock, retryDelayMillis, retrySleeper);
+    }
+
+    /** 기존 failure-classifier 단위 테스트의 생성자 호환 전용 경로다. */
+    WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
+            WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventAppender eventAppender,
+            WaitingSettingRepository settingRepository,
+            IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
+            StoreTransactionEligibilityService storeEligibility, ObjectMapper objectMapper,
+            Clock clock, IntToLongFunction retryDelayMillis,
+            RetrySleeper retrySleeper) {
+        this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
+                eventAppender, null, legacyReceptionCheck(settingRepository), idempotencyExecutor,
+                transactionExecutor, storeEligibility, objectMapper, clock, retryDelayMillis, retrySleeper);
+    }
+
+    private WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
+            WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventAppender eventAppender,
+            WaitingLocationProofSessionRepository proofRepository,
+            ReceptionCheck receptionCheck,
+            IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
+            StoreTransactionEligibilityService storeEligibility,
+            ObjectMapper objectMapper, Clock clock, IntToLongFunction retryDelayMillis,
+            RetrySleeper retrySleeper) {
+        this.sequenceRepository = Objects.requireNonNull(sequenceRepository);
+        this.teamRepository = Objects.requireNonNull(teamRepository);
+        this.membershipRepository = Objects.requireNonNull(membershipRepository);
+        this.auditRepository = Objects.requireNonNull(auditRepository);
+        this.eventAppender = Objects.requireNonNull(eventAppender);
+        this.proofRepository = proofRepository;
+        this.receptionCheck = Objects.requireNonNull(receptionCheck);
+        this.idempotencyExecutor = Objects.requireNonNull(idempotencyExecutor);
+        this.transactionExecutor = Objects.requireNonNull(transactionExecutor);
+        this.storeEligibility = Objects.requireNonNull(storeEligibility);
+        this.objectMapper = Objects.requireNonNull(objectMapper);
+        this.clock = Objects.requireNonNull(clock);
+        this.retryDelayMillis = Objects.requireNonNull(retryDelayMillis);
+        this.retrySleeper = Objects.requireNonNull(retrySleeper);
+    }
+
+    /**
+     * 현재 매장 설정이 활성이고 PAUSED가 아닐 때 중앙 FIFO 팀을 멱등 생성한다.
+     *
+     * <p>설정 행을 팀·membership·순번 생성과 같은 트랜잭션에서 잠그므로, 설정 비활성화와
+     * 경합하면 먼저 확정된 명령만 효력을 갖는다.
+     *
+     * @param storeId 접수할 매장 ID
+     * @param consumerAccountId 접수하는 소비자 계정 ID
+     * @param businessDate 순번이 귀속되는 영업일
+     * @param partySize 방문 인원
+     * @param source 접수 출처
+     * @param key 소비자 생성 명령 멱등 키
+     * @return 생성되거나 replay된 웨이팅 팀
+     */
+    public WaitingCommandResult create(
+            long storeId,
+            long consumerAccountId,
+            LocalDate businessDate,
+            int partySize,
+            WaitingSource source,
+            IdempotencyKey key
+    ) {
+        Objects.requireNonNull(businessDate, "businessDate must not be null");
+        Objects.requireNonNull(source, "source must not be null");
+        Objects.requireNonNull(key, "key must not be null");
+        IdempotencyCommand command = createCommand(
+                storeId, consumerAccountId, businessDate, partySize, source, key);
+        Instant occurredAt = clock.instant();
+        IdempotentOutcome outcome = executeWithRetry(() -> createInTransaction(
+                storeId, consumerAccountId, businessDate, partySize, source, command, occurredAt,
+                WaitingTeamSnapshot::from, null));
+        return new WaitingCommandResult(outcome.httpStatus(),
+                objectMapper.treeToValue(outcome.data(), WaitingTeamSnapshot.class));
+    }
+
+    /** 최초 소비자 공개 snapshot 전체를 저장해 같은 키 재요청에 그대로 재생한다. */
+    public WaitingConsumerCommandResult createForConsumer(
+            long storeId,
+            long consumerAccountId,
+            LocalDate businessDate,
+            int partySize,
+            WaitingSource source,
+            IdempotencyKey key,
+            UUID locationProofSessionId
+    ) {
+        Objects.requireNonNull(businessDate, "businessDate must not be null");
+        Objects.requireNonNull(source, "source must not be null");
+        Objects.requireNonNull(key, "key must not be null");
+        Objects.requireNonNull(locationProofSessionId, "locationProofSessionId must not be null");
+        IdempotencyCommand command = createCommand(
+                storeId, consumerAccountId, businessDate, partySize, source, key,
+                locationProofSessionId);
+        Instant occurredAt = clock.instant();
+        IdempotentOutcome outcome = executeWithRetry(() -> createInTransaction(
+                storeId, consumerAccountId, businessDate, partySize, source, command, occurredAt,
+                team -> consumerSnapshot(team, consumerAccountId),
+                locationProofSessionId));
+        return new WaitingConsumerCommandResult(outcome.httpStatus(),
+                objectMapper.treeToValue(outcome.data(), WaitingConsumerSnapshot.class));
+    }
+
+    private <T> IdempotentOutcome createInTransaction(
+            long storeId,
+            long consumerAccountId,
+            LocalDate businessDate,
+            int partySize,
+            WaitingSource source,
+            IdempotencyCommand command,
+            Instant occurredAt,
+            Function<WaitingTeam, T> snapshotFactory,
+            UUID locationProofSessionId
+    ) {
+        return transactionExecutor.execute(() -> {
+            return idempotencyExecutor.execute(command, () -> {
+                    Instant attemptAt = clock.instant();
+                    WaitingLocationProofSession proof = locationProofSessionId == null
+                            ? null
+                            : lockLocationProof(
+                                    locationProofSessionId, consumerAccountId, storeId, attemptAt);
+                    storeEligibility.requireWaitingTransactionEligibility(storeId);
+                    receptionCheck.requireOpen(storeId, businessDate, attemptAt);
+                    if (membershipRepository.findByConsumerAccountId(consumerAccountId).isPresent()) {
+                        throw membershipConflict();
+                    }
+                    WaitingQueueSequence sequence = lockSequence(storeId, businessDate);
+                    WaitingTeam team = teamRepository.saveAndFlush(WaitingTeam.create(
+                            storeId, consumerAccountId, businessDate, partySize, source,
+                            sequence.allocate(), occurredAt));
+                    membershipRepository.saveAndFlush(WaitingActiveMembership.create(
+                            storeId, consumerAccountId, team.getId(), occurredAt));
+                    if (proof != null) {
+                        proof.consume(consumerAccountId, storeId, Purpose.WAITING_REGISTRATION,
+                                team.getId(), attemptAt);
+                    }
+                    String commandId = "consumer:" + consumerAccountId
+                            + ":WAITING_TEAM_CREATE:" + command.idempotencyKey();
+                    auditRepository.save(WaitingTransitionAudit.record(
+                            team.getId(), WaitingActorType.CONSUMER, consumerAccountId,
+                            null, WaitingTeamStatus.WAITING, -1L, "WAITING_CREATED",
+                            commandId, occurredAt, clock.instant()));
+                    eventAppender.append(team, occurredAt);
+                    return new BusinessResult<>(HttpStatus.OK.value(), "SUCCESS",
+                            "WAITING_TEAM", Long.toString(team.getId()), snapshotFactory.apply(team));
+            });
+        });
+    }
+
+    private WaitingConsumerSnapshot consumerSnapshot(WaitingTeam team, long viewerAccountId) {
+        long teamsAhead = teamRepository.countActiveAhead(
+                team.getStoreId(), team.getBusinessDate(), team.getQueueSequence());
+        return WaitingConsumerSnapshot.from(team, teamsAhead,
+                membershipRepository.findAllByWaitingTeamIdOrderById(team.getId()),
+                viewerAccountId);
+    }
+
+    private static IdempotencyCommand createCommand(
+            long storeId,
+            long consumerAccountId,
+            LocalDate businessDate,
+            int partySize,
+            WaitingSource source,
+            IdempotencyKey key
+    ) {
+        return createCommand(storeId, consumerAccountId, businessDate, partySize, source, key, null);
+    }
+
+    private static IdempotencyCommand createCommand(
+            long storeId,
+            long consumerAccountId,
+            LocalDate businessDate,
+            int partySize,
+            WaitingSource source,
+            IdempotencyKey key,
+            UUID locationProofSessionId
+    ) {
+        return new IdempotencyCommand(
+                "consumer",
+                consumerAccountId,
+                "WAITING_TEAM_CREATE",
+                key.value(),
+                RequestFingerprint.of("storeId=" + storeId
+                        + "|consumerAccountId=" + consumerAccountId
+                        + "|businessDate=" + businessDate
+                        + "|partySize=" + partySize
+                        + "|source=" + source
+                        + (locationProofSessionId == null
+                                ? ""
+                                : "|locationProofSessionId=" + locationProofSessionId)));
+    }
+
+    private WaitingLocationProofSession lockLocationProof(
+            UUID proofId, long accountId, long storeId, Instant now) {
+        if (proofRepository == null) {
+            throw new IllegalStateException("location proof repository is required");
+        }
+        WaitingLocationProofSession proof = proofRepository.findByIdForUpdate(proofId)
+                .orElseThrow(WaitingCreationService::locationProofInvalid);
+        try {
+            proof.requireConsumable(accountId, storeId, Purpose.WAITING_REGISTRATION, now);
+            return proof;
+        } catch (IllegalStateException invalid) {
+            throw locationProofInvalid();
+        }
+    }
+
+    private WaitingQueueSequence lockSequence(long storeId, LocalDate businessDate) {
+        WaitingQueueSequence.Key key = new WaitingQueueSequence.Key(storeId, businessDate);
+        if (!sequenceRepository.existsById(key)) {
+            try {
+                sequenceRepository.saveAndFlush(WaitingQueueSequence.create(storeId, businessDate));
+            } catch (DataIntegrityViolationException ignoredConcurrentBootstrap) {
+                // A concurrent creator committed the same sequence row; the outer retry reloads it.
+                throw ignoredConcurrentBootstrap;
+            }
+        }
+        return sequenceRepository.findByStoreIdAndBusinessDateForUpdate(storeId, businessDate)
+                .orElseThrow(() -> new IllegalStateException("waiting sequence row not visible"));
+    }
+
+    private <T> T executeWithRetry(Supplier<T> work) {
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                return work.get();
+            } catch (DataIntegrityViolationException failure) {
+                if (WaitingCreationFailureClassifier.isMembershipConflict(failure)) {
+                    throw membershipConflict();
+                }
+                if (!WaitingCreationFailureClassifier.isRetryable(failure)) throw failure;
+                last = failure;
+            } catch (RuntimeException failure) {
+                if (!WaitingCreationFailureClassifier.isRetryable(failure)) {
+                    throw failure;
+                }
+                last = failure;
+            }
+            if (attempt < MAX_ATTEMPTS) sleepBeforeRetry(attempt, last);
+        }
+        ServiceException conflict = new ServiceException(
+                com.miriyum.global.exception.CommonErrorCode.CONCURRENT_MODIFICATION);
+        conflict.initCause(last);
+        throw conflict;
+    }
+
+    private void sleepBeforeRetry(int attempt, RuntimeException failure) {
+        try { retrySleeper.sleep(retryDelayMillis.applyAsLong(attempt)); }
+        catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt(); interrupted.addSuppressed(failure);
+            ServiceException conflict = new ServiceException(
+                    com.miriyum.global.exception.CommonErrorCode.CONCURRENT_MODIFICATION);
+            conflict.initCause(interrupted); throw conflict;
+        }
+    }
+
+    static long defaultDelayMillis(int attempt) {
+        return switch (attempt) {
+            case 1 -> ThreadLocalRandom.current().nextLong(100, 201);
+            case 2 -> ThreadLocalRandom.current().nextLong(300, 501);
+            default -> throw new IllegalArgumentException("unsupported retry attempt");
+        };
+    }
+
+    private static ServiceException membershipConflict() {
+        return new ServiceException(ReservationErrorCode.ACCOUNT_ACTIVE_WAITING_EXISTS);
+    }
+
+    private static ServiceException locationProofInvalid() {
+        return new ServiceException(ReservationErrorCode.LOCATION_PROOF_INVALID);
+    }
+
+    private static ServiceException receptionClosed() {
+        return new ServiceException(ReservationErrorCode.WAITING_RECEPTION_CLOSED);
+    }
+
+    private static ReceptionCheck legacyReceptionCheck(WaitingSettingRepository repository) {
+        Objects.requireNonNull(repository);
+        return (storeId, businessDate, now) -> {
+            WaitingSetting setting = repository.findByStoreIdForUpdate(storeId)
+                    .orElseThrow(WaitingCreationService::receptionClosed);
+            if (!setting.isEnabled()
+                    || setting.getReceptionMode() == WaitingReceptionMode.PAUSED) {
+                throw receptionClosed();
+            }
+        };
+    }
+}

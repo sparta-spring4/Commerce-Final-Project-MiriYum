@@ -1,0 +1,106 @@
+openapi: 3.1.0
+info:
+  title: MiriYum Platform Operator API
+  version: 1.0.0
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+  description: 고도화 feature flag로 활성화하는 플랫폼 운영자 전용 audience entrypoint다.
+servers:
+  - url: /
+security: []
+paths:
+  /api/v1/platform-operators/auth/sessions:
+    $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1sessions"
+  /api/v1/platform-operators/auth/token-refreshes:
+    $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1token-refreshes"
+  /api/v1/platform-operators/auth/csrf-tokens/current:
+    $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1csrf-tokens~1current"
+  /api/v1/platform-operators/auth/sessions/current:
+    $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1sessions~1current"
+  /api/v1/platform-operators/auth/initial-password:
+    $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1initial-password"
+  /api/v1/platform-operators/reauthentication-approvals:
+    $ref: "./platform-operator-authorization/openapi.yaml#/paths/~1api~1v1~1platform-operators~1reauthentication-approvals"
+  /api/v1/platform-operators/me:
+    $ref: "./platform-operator-capabilities/openapi.yaml#/paths/~1api~1v1~1platform-operators~1me"
+  /api/v1/platform-operators/members:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1members"
+  /api/v1/platform-operators/members/{accountType}/{accountId}:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1members~1{accountType}~1{accountId}"
+  /api/v1/platform-operators/member-support-cases:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1member-support-cases"
+  /api/v1/platform-operators/member-support-cases/{caseId}:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1member-support-cases~1{caseId}"
+  /api/v1/platform-operators/member-support-cases/{caseId}/assignments:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1member-support-cases~1{caseId}~1assignments"
+  /api/v1/platform-operators/member-support-cases/{caseId}/decisions:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1member-support-cases~1{caseId}~1decisions"
+  /api/v1/platform-operators/members/{accountType}/{accountId}/sanctions:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1members~1{accountType}~1{accountId}~1sanctions"
+  /api/v1/platform-operators/member-sanctions/{sanctionId}/additional-approvals:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1member-sanctions~1{sanctionId}~1additional-approvals"
+  /api/v1/platform-operators/member-sanctions/pending-additional-approvals:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1member-sanctions~1pending-additional-approvals"
+  /api/v1/platform-operators/accounts:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1accounts"
+  /api/v1/platform-operators/accounts/{operatorId}:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1accounts~1{operatorId}"
+  /api/v1/platform-operators/accounts/{operatorId}/authority:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1accounts~1{operatorId}~1authority"
+  /api/v1/platform-operators/accounts/{operatorId}/suspension:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1accounts~1{operatorId}~1suspension"
+  /api/v1/platform-operators/audit-events:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1audit-events"
+  /api/v1/platform-operators/audit-events/{eventKey}:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1audit-events~1{eventKey}"
+  /api/v1/platform-operators/audit-events/{eventKey}/corrections:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1audit-events~1{eventKey}~1corrections"
+  /api/v1/platform-operators/stores:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores"
+  /api/v1/platform-operators/stores/{storeId}:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}"
+  /api/v1/platform-operators/stores/{storeId}/sanction-cases:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases"
+  /api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/assignments:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases~1{caseId}~1assignments"
+  /api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases~1{caseId}"
+  /api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/impact-previews:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases~1{caseId}~1impact-previews"
+  /api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases~1{caseId}~1sanctions"
+  /api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions/{sanctionId}/approvals:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases~1{caseId}~1sanctions~1{sanctionId}~1approvals"
+  /api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions/{sanctionId}/releases:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases~1{caseId}~1sanctions~1{sanctionId}~1releases"
+  /api/v1/platform-operators/monitoring-cases:
+    $ref: "./admin-monitoring/openapi.yaml#/paths/~1api~1v1~1platform-operators~1monitoring-cases"
+  /api/v1/platform-operators/monitoring-cases/{caseType}/{caseId}:
+    $ref: "./admin-monitoring/openapi.yaml#/paths/~1api~1v1~1platform-operators~1monitoring-cases~1{caseType}~1{caseId}"
+  /api/v1/platform-operators/payment-recovery-cases:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases"
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}"
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/assignments:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}~1assignments"
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/requeries:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}~1requeries"
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}~1proposals"
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals/{proposalVersion}/approvals:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}~1proposals~1{proposalVersion}~1approvals"
+  /api/v1/platform-operators/payment-recovery-cases/{caseId}/failed-unresolved-closures:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}~1failed-unresolved-closures"
+components:
+  securitySchemes:
+    platformOperatorBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Platform operator access JWT
+    platformOperatorRefreshCookie:
+      type: apiKey
+      in: cookie
+      name: MIRIYUM_PLATFORM_OPERATOR_REFRESH
+      description: HttpOnly platform operator refresh JWT cookie

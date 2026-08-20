@@ -1,5 +1,16 @@
 # 09. 품질·운영·규칙
 
+플랫폼 운영자 고위험 명령은 실제 MySQL에서 권한 회수 경합, 사건 재배정, 일회 승인 동시 재사용과 단일 슈퍼관리자 제약을 검증한다. 운영자 관리·감사는 실제 MySQL trigger의 UPDATE·DELETE 거부, 권한 변경 경합, 연결 보정 보존과 허용·거부 조회 감사를 검증한다. 단위·HTTP·OpenAPI만으로 다중 인스턴스 권한·감사 안전성을 완료로 판단하지 않는다.
+
+회원지원은 실제 MySQL에서 복구 승인과 제재 적용 경합, 영구 정지 다른 승인자, 이의 결정의 단일 전이를 검증한다. 권한 없는 요청이 계정 lookup을 수행하지 않는지와 없음·계정 유형 불일치가 같은 HTTP 결과인지도 검증하며 mock 확인 원문·인증 비밀·불필요한 개인정보가 응답·로그·감사에 없는지 검사한다.
+
+## 플랫폼 운영자 인증 검증 게이트
+
+- 기능 플래그 OFF의 Controller 부재와 실제 404를 HTTP 통합 테스트로 검증한다.
+- 로그인·최초 비밀번호 변경·refresh·logout·CSRF와 제한 세션의 업무 API 403을 실제 MySQL·Valkey 흐름으로 검증한다.
+- 최초 비밀번호 변경 경합은 실제 MySQL 두 트랜잭션으로, 세션 교체·회전·재사용 회수는 실제 Valkey Lua 연산으로 검증한다.
+- `platform-operator-openapi.yaml`의 활성 인증·권한·현재 capabilities·회원지원·운영자 관리·감사 경로는 아키텍처·OpenAPI 드리프트 테스트로 고정한다.
+
 ## 증거 원칙
 
 검증 기록은 정확한 명령, 환경·정책·스키마 버전, 결과와 증거를 남긴다. 상태는 `PASS`, `FAIL`, `BLOCKED`, `NOT RUN`, `NOT CONFIGURED`, `NOT APPLICABLE` 가운데 하나를 사용한다. 실행 파일·외부 환경·기능이 없으면 성공으로 추측하지 않는다.
@@ -18,7 +29,8 @@
 
 - 방식 A의 단일 Spring Boot·단일 MySQL 경계를 확인한다.
 - 모듈 간 repository/entity 직접 접근과 controller→repository 직접 호출을 구조 테스트로 차단한다. 순환 baseline은 빈 집합이며, 구조 테스트는 전체 도메인 그래프의 상호 도달 쌍과 실제 순환 edge가 모두 0건인지 검사한다.
-- `AudienceOpenApiContractTest`는 기능별 OpenAPI 원본을 자동 탐색해 public·consumer·store-operator path 집합의 무중복 분할과 전체 노출 또는 승인된 미노출을 검증한다. 1차 MVP aggregate와 명시된 이후 단계 audience path의 합집합은 전체 audience path와 일치해야 하며, 이후 단계 path는 aggregate에 포함될 수 없다. 진입점에는 구 URL이 없고 모든 path item은 단일 `$ref`여야 한다.
+- `AudienceOpenApiContractTest`는 기능별 OpenAPI 원본을 자동 탐색해 public·consumer·store-operator·platform-operator path 집합의 무중복 분할과 전체 노출을 검증한다. 1차 MVP aggregate와 명시된 이후 단계인 platform-operator audience path의 합집합은 전체 audience path와 일치해야 하며, platform-operator path는 aggregate에 포함될 수 없다. 진입점에는 구 URL이 없고 모든 path item은 단일 `$ref`여야 한다.
+- `ApiUrlConventionTest`는 실제 Spring mapping의 audience namespace, `/me` 범위, lowercase kebab-case와 복수 사건 리소스를 검증한다. `ControllerOpenApiContractTest`는 조건부 Controller를 포함한 Spring route와 feature OpenAPI operation을 양방향 비교하고, 누락·초과·method 차이·stale `contract-only` 또는 잘못된 소유 Issue 메타데이터가 있으면 실패한다.
 - 1차 MVP에서는 일반 사용자·매장 운영자의 테이블·PK·principal·토큰 namespace가 분리됐는지 확인한다. 플랫폼 운영자 계정·JWT 검증 gate는 해당 기능을 구현하는 고도화에서 추가한다.
 - 교차 namespace JWT, 클라이언트 역할 값, 이메일·외부 로그인에 의한 자가 승격을 거부한다.
 - 매장 명령이 현재 계정 상태, 대상 매장의 `store_operator_account_id` 일치와 매장 상태를 MySQL에서 재검증하는지 확인한다.
@@ -45,8 +57,9 @@
 
 - 순수 JUnit·Mockito 및 `@WebMvcTest` slice 테스트는 태그 없이 빠른 `test` task에서 실행한다.
 - `@SpringBootTest`, `@Testcontainers` 또는 `MySQLContainer`를 사용하는 테스트 클래스에는 class-level `@Tag("integration")`을 선언한다.
-- `integrationTest` task는 `@Tag("integration")` 테스트를 모두 실행하며, CI 전용 `integrationTestShardA/B` task는 각각 `integration-shard-a/b` 태그를 실행한다. `test` task는 integration 태그를 제외하고, `build`는 전체 통합 테스트를 포함한다.
-- `Backend CI`는 unit job과 두 integration shard job을 병렬 실행하고, 모두 성공한 뒤에만 required check 이름인 `backend-ci`를 성공 처리한다. 새 통합 테스트가 기본 태그 또는 정확히 하나의 shard 태그를 빠뜨리면 Gradle 검증 task가 실패한다.
+- `integrationTest` task는 `@Tag("integration")` 테스트를 모두 실행하며, CI 전용 `integrationTestShardA`~`integrationTestShardD` task는 각각 `integration-shard-a`~`integration-shard-d` 태그를 실행한다. `test` task는 integration 태그를 제외하고, `build`는 전체 통합 테스트를 포함한다.
+- `Backend CI`의 required check 이름인 `backend-ci`는 모든 PR에서 실행한다. 백엔드 코드·migration·Gradle·Backend CI 변경, `deploy/deploy.sh`, 미분류 경로는 unit job과 네 integration shard job이 모두 성공해야 한다. OpenAPI와 그 밖의 `deploy/` 변경은 unit test와 계약 검증이 성공해야 하며, 프론트·k6·일반 문서·런북 전용 변경은 계약 검증만 성공하면 된다. 새 통합 테스트가 기본 태그 또는 정확히 하나의 shard 태그를 빠뜨리면 Gradle 검증 task가 실패한다.
+- 새 통합 테스트의 shard는 최근 CI 실행 시간과 테스트 구성 정보를 함께 보고 균형 있게 고른다. `@SpringBootTest` 속성·`@AutoConfigureMockMvc`·`@Testcontainers` 조합은 배치 힌트일 뿐, 실제 Spring ApplicationContext 캐시 키는 `@DynamicPropertySource`, `@MockitoBean` 등 context customizer까지 포함하므로 정적 어노테이션만으로 컨텍스트 공유를 단정하지 않는다. 컨텍스트 재사용을 근거로 배치하려면 cache debug log 또는 동등한 실행 증거를 남긴다. Gradle 검증 task는 태그 개수만 확인하고 shard별 균형은 검사하지 않으므로 새 테스트 추가 뒤 한 shard의 실측 시간이 치우치면 재배치한다(#288).
 - 위 marker를 직접 사용하지 않아도 외부 DB, Docker 또는 느린 Spring runtime에 의존하는 테스트는 통합 테스트로 분류하고 그 근거를 PR에 기록한다.
 
 ## `1차 MVP` 검증 gate
@@ -80,7 +93,11 @@
 - 동일 MySQL 스냅샷에서 Java 점수 계산이 같은 순위·설명을 만든다.
 - 품절 대안은 같은 매장을 먼저 검증한다. 같은 매장 후보가 없을 때 원 매장의 검증된 저장 좌표·bounding box·Haversine을 사용해 3km 경계값은 포함하고 3km 초과 후보는 거부하는지 회귀 테스트한다.
 - 추천 중 외부 지도 호출과 사용자 현재 위치 요청·저장·사용이 없는지 검사한다.
-- AI/LLM·Spring AI·벡터 DB·검색 클러스터·메시지 브로커 의존성이 없는지 확인한다.
+- 날짜·시각·인원이 독립적으로 해석되고 날짜 없는 검색은 Reservation을 호출하지 않는지 검증한다.
+- OpenAI 요청이 잔여 표현 또는 공개 메뉴 문맥, 승인 모델, 엄격한 최대 8개 문자열 schema만 포함하고 사용자 ID·연락처·정밀 위치·예약 이력·알레르기 정보를 포함하지 않는지 계약 테스트한다.
+- LLM 개념 후보의 stale 게시 버전·비공개 메뉴·폐점 매장이 현재 MySQL QueryDSL 조회와 응답 직전 재검증에서 제거되는지 실제 MySQL로 검증한다.
+- OpenAI timeout·429·오류·거절·형식 불일치에 정확 MySQL 검색 또는 일반 대체 후보가 유지되고 자동 재시도로 요청 비용을 증폭하지 않는지 검증한다.
+- 외부 호출 수·성공/실패 사유·지연·입출력 토큰과 정확 검색 폴백을 목적별 저카디널리티 지표로 관측하고 원문·응답·Secret은 로그에 남기지 않는다.
 
 ## `고도화` 검증 gate
 
@@ -145,7 +162,7 @@ Kafka, 범용 Outbox, 마이크로서비스, WebSocket과 검색 클러스터가
 
 배포 자동화나 AWS·Terraform은 핵심 흐름, Flyway, 비밀 분리, 상태 확인, Docker 실행, 백업·복원과 비용 책임이 검증된 뒤 승인한다. S3를 `고도화`에서 사용한다는 결정만으로 전체 AWS 배포·Terraform을 활성화하지 않는다.
 
-[#120](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/120)의 ECR·SSM 백엔드 API 사전 배포는 `staging` EC2만 대상으로 하며 프론트엔드 사용자 shell과 최종 same-origin 배포를 대체하지 않는다. 이 경로는 ECR 이미지의 SHA 추적, 비밀의 서버 분리, SSM 배포, Docker 실행과 loopback health 확인만 증명한다. `dev`에 통합된 뒤 CI가 성공한 SHA만 staging에 배포한다. 실제 `dev` 배포 실행·ECR push·SSM command·EC2 health의 성공 증거가 없으면 각각 `NOT CONFIGURED` 또는 `NOT RUN`으로 기록하며, 프론트엔드 소유자가 `/` 정적 제공과 `/api` 프록시를 포함한 후속 범위를 승인할 때까지 핵심 사용자 흐름 배포 성공으로 선언하지 않는다. 운영 배포는 이 경로와 분리해 `main` 전용 workflow, 별도 EC2·IAM 역할·GitHub Environment 승인으로 구성한다.
+staging EC2 Compose는 같은 Git SHA의 frontend 정적 이미지와 backend 이미지를 배포하고, Nginx가 `/` SPA shell과 `/api` backend proxy를 함께 제공한다. `dev`에 통합된 뒤 CI가 성공한 SHA만 staging에 배포한다. 실제 배포 실행·ECR push·SSM command·EC2 loopback health의 성공 증거가 없으면 각각 `NOT CONFIGURED` 또는 `NOT RUN`으로 기록하며, browser smoke는 별도 사용자 흐름 증거로 남긴다. 운영 ECS 전환의 근거·검증·rollback은 [ADR-003](adr/ADR-003-aws-after-verification.md)의 2026-08-17 개정을 따른다. `production` Environment 보호 규칙, `PRODUCTION_ECS_DEPLOYMENT_ENABLED=true`, ECR `IMMUTABLE` 태그 정책이 모두 준비되기 전에는 production deploy job을 실행하지 않는다.
 
 ### staging 비용 가드레일과 종료 체크리스트
 

@@ -1,0 +1,162 @@
+openapi: 3.1.0
+info:
+  title: MiriYum Platform Operator Authorization API
+  version: 1.0.0
+  description: 플랫폼 운영자 현재 비밀번호 재인증과 목적·대상·세션 결속 일회 승인 계약이다.
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+servers:
+  - url: /
+security: []
+paths:
+  /api/v1/platform-operators/reauthentication-approvals:
+    post:
+      tags: [Platform Operator Authorization]
+      summary: 고위험 명령용 현재 비밀번호 재인증 승인 발급
+      description: 현재 플랫폼 운영자 비밀번호를 확인하고 목적·대상·세션·권한 version에 결속된 5분 일회 승인을 발급한다.
+      operationId: createPlatformOperatorReauthenticationApproval
+      security:
+        - platformOperatorBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReauthenticationApprovalRequest"
+      responses:
+        "200":
+          description: 현재 세션에 결속된 일회 승인
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReauthenticationApprovalSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/ReauthenticationUnauthorized"
+        "403":
+          $ref: "#/components/responses/AuthorizationDenied"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+components:
+  securitySchemes:
+    platformOperatorBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: audience와 namespace가 platform-operator이고 중앙 세션 검증을 통과한 Access JWT
+  parameters:
+    AdminReauthentication:
+      name: X-Admin-Reauthentication
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 43
+        maxLength: 512
+      description: 목적·대상·현재 플랫폼 운영자 세션에 결속된 5분 일회 승인값
+  schemas:
+    CurrentPassword:
+      type: string
+      format: password
+      minLength: 8
+      maxLength: 64
+    AdminCommandPurpose:
+      type: string
+      enum:
+        - ONBOARDING_DECISION
+        - MEMBER_RECOVERY
+        - ACCOUNT_SANCTION
+        - ACCOUNT_APPEAL_DECISION
+        - PERMANENT_ACCOUNT_SANCTION_APPROVAL
+        - STORE_SANCTION
+        - PAYMENT_RECOVERY
+        - OPERATOR_CREATION
+        - OPERATOR_AUTHORITY_CHANGE
+        - OPERATOR_SUSPENSION
+        - AUDIT_CORRECTION
+        - INCIDENT_RESPONSE
+    AdminTargetType:
+      type: string
+      enum:
+        - ONBOARDING_APPLICATION
+        - CONSUMER_ACCOUNT
+        - STORE_OPERATOR_ACCOUNT
+        - STORE
+        - PAYMENT_RECOVERY_CASE
+        - PLATFORM_OPERATOR_ACCOUNT
+        - AUDIT_EVENT
+        - INCIDENT
+    PublicId:
+      type: string
+      minLength: 1
+      maxLength: 100
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$"
+    ReauthenticationApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, purpose, targetType, targetId]
+      properties:
+        currentPassword:
+          $ref: "#/components/schemas/CurrentPassword"
+        purpose:
+          $ref: "#/components/schemas/AdminCommandPurpose"
+        targetType:
+          $ref: "#/components/schemas/AdminTargetType"
+        targetId:
+          $ref: "#/components/schemas/PublicId"
+    ReauthenticationApprovalData:
+      type: object
+      additionalProperties: false
+      required: [approval, expiresAt]
+      properties:
+        approval:
+          type: string
+          minLength: 43
+          maxLength: 512
+          description: 응답 한 번에만 공개되는 opaque 승인값
+        expiresAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+    ReauthenticationApprovalSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/ReauthenticationApprovalData"
+  responses:
+    ReauthenticationUnauthorized:
+      description: Access Token·중앙 세션·권한 version 또는 현재 비밀번호가 유효하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            SessionInvalid:
+              value:
+                code: AUTH_015
+                message: 플랫폼 운영자 세션이 더 이상 유효하지 않습니다.
+            PasswordMismatch:
+              value:
+                code: ADMIN_002
+                message: 현재 비밀번호 재인증에 실패했습니다.
+    AuthorizationDenied:
+      description: 정상 플랫폼 운영자 세션이 아니거나 고위험 명령 승인 전제조건이 충족되지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            InitialPasswordChangeRequired:
+              value:
+                code: AUTH_012
+                message: 최초 비밀번호 변경이 필요합니다.
+            AuthorizationDenied:
+              value:
+                code: ADMIN_001
+                message: 요청한 운영 명령을 승인할 수 없습니다.

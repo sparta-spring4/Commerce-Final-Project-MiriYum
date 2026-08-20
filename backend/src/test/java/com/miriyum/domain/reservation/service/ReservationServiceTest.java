@@ -14,6 +14,7 @@ import static org.mockito.BDDMockito.willAnswer;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
@@ -23,6 +24,18 @@ import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.consumer.dto.contract.ReservationContactResult;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
+import com.miriyum.domain.menu.dto.contract.RepresentativeMenuSnapshot;
+import com.miriyum.domain.menu.dto.contract.RepresentativeMenuItem;
+import com.miriyum.domain.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.menu.enums.RepresentativeMenuSettingStatus;
+import com.miriyum.domain.menu.service.RepresentativeMenuQueryService;
+import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
+import com.miriyum.domain.notification.dto.source.NotificationTaskReceipt;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
+import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
+import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
+import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDepositCommand;
+import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
@@ -33,7 +46,9 @@ import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
+import com.miriyum.domain.reservation.dto.response.ReservationDepositDispositionResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationHistoryPageResponse;
+import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionResult;
 import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionStatus;
 import com.miriyum.domain.reservation.dto.response.StoreReservationPageResponse;
@@ -46,11 +61,17 @@ import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationFulfillmentAudit;
+import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
+import com.miriyum.domain.reservation.entity.ReservationDepositProcessStatus;
+import com.miriyum.domain.reservation.entity.ReservationDepositDispositionObligation;
+import com.miriyum.domain.reservation.entity.ReservationHold;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.notification.ReservationNotificationEventFactory;
+import com.miriyum.domain.reservation.notification.ReservationNotificationPublisher;
 import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldCreateCommand;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldItemSnapshot;
@@ -60,11 +81,16 @@ import com.miriyum.domain.reservation.repository.ReservationCapacityBucketReposi
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCancellationAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationFulfillmentAuditRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositDispositionObligationRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.store.service.StoreService;
+import com.miriyum.domain.store.service.StoreReservationDepositPolicyQueryService;
 import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
+import com.miriyum.domain.store.dto.contract.StoreReservationDepositPolicy;
+import com.miriyum.domain.store.dto.contract.StoreReservationDepositPolicy.Status;
 import com.miriyum.domain.store.dto.contract.StoreReservationTransactionEligibility;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.schedule.dto.contract.StoreReservationWindowResult;
@@ -86,13 +112,17 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Collection;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -183,6 +213,27 @@ class ReservationServiceTest {
     private StoreTransactionEligibilityService storeTransactionEligibilityService;
 
     @Mock
+    private StoreReservationDepositPolicyQueryService depositPolicyQueryService;
+
+    @Mock
+    private RepresentativeMenuQueryService representativeMenuQueryService;
+
+    @Mock
+    private ReservationHoldCreationPrimitive holdCreationPrimitive;
+
+    @Mock
+    private PaymentService paymentService;
+
+    @Mock
+    private ReservationDepositProcessRepository depositProcessRepository;
+
+    @Mock
+    private ReservationDepositDispositionObligationRepository dispositionObligationRepository;
+
+    @Mock
+    private ReservationHold depositHold;
+
+    @Mock
     private ReservationCapacityAllocationRepository capacityAllocationRepository;
 
     @Mock
@@ -202,15 +253,33 @@ class ReservationServiceTest {
 
     private ReservationService reservationService;
     private ReservationTimeResolutionService timeResolutionService;
+    private List<NotificationSourceEventV1> notificationEvents;
 
     @BeforeEach
     void setUp() {
         lenient().when(clock.instant()).thenReturn(NOW);
+        lenient().when(depositPolicyQueryService.getCurrent(STORE_ID))
+                .thenReturn(new StoreReservationDepositPolicy(
+                        STORE_ID,
+                        Status.UNCONFIGURED,
+                        OptionalInt.empty(),
+                        OptionalLong.empty()));
         timeResolutionService = new ReservationTimeResolutionService(
                 storeScheduleService,
                 storeServiceIntervalValidationService,
                 timePolicyRepository,
                 clock);
+        notificationEvents = new ArrayList<>();
+        ReservationNotificationPublisher notificationPublisher =
+                new ReservationNotificationPublisher(
+                        new ReservationNotificationEventFactory(),
+                        event -> {
+                            notificationEvents.add(event);
+                            return new NotificationTaskReceipt(
+                                    Long.toString(500L + notificationEvents.size()), false
+                            );
+                        }
+                );
         reservationService = new ReservationService(
                 storeScheduleService,
                 storeServiceIntervalValidationService,
@@ -230,7 +299,15 @@ class ReservationServiceTest {
                 cancellationPolicySelector,
                 cancellationAuditRepository,
                 cancellationPolicyEvaluator,
-                fulfillmentAuditRepository
+                fulfillmentAuditRepository,
+                notificationPublisher,
+                depositPolicyQueryService,
+                representativeMenuQueryService,
+                new ReservationDepositCalculator(),
+                holdCreationPrimitive,
+                paymentService,
+                depositProcessRepository,
+                dispositionObligationRepository
         );
     }
 
@@ -388,6 +465,186 @@ class ReservationServiceTest {
         assertThat(reservationCaptor.getValue().getCapacityPolicyVersion()).isEqualTo(7L);
         then(capacityAllocationRepository).should().saveAll(any());
         then(menuHoldPort).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
+        assertThat(notificationEvents).singleElement().satisfies(event -> {
+            assertThat(event.purpose()).isEqualTo(NotificationPurpose.RESERVATION_CONFIRMED);
+            assertThat(event.resourceId()).isEqualTo("77");
+            assertThat(event.resourceVersion()).isEqualTo(1L);
+            assertThat(event.correlationId())
+                    .isEqualTo("550e8400-e29b-41d4-a716-446655440000");
+        });
+    }
+
+    @Test
+    @DisplayName("예약금 정책이 DISABLED면 대표 메뉴를 조회하지 않고 기존 201을 유지한다")
+    void keepsImmediateCreationWithoutRepresentativeMenuQueryWhenDepositIsDisabled() {
+        ReservationCapacityBucket bucket = ReservationCapacityBucket.create(
+                STORE_ID, SERVICE_DATE, START_TIME, LocalTime.of(19, 0),
+                10, 3, 0, 0, 1, 6, true, 7L);
+        ReflectionTestUtils.setField(bucket, "id", 301L);
+        stubSuccessfulCreation(bucket, activePolicy(STORE_ID, 30, 60, 0));
+        given(depositPolicyQueryService.getCurrent(STORE_ID))
+                .willReturn(new StoreReservationDepositPolicy(
+                        STORE_ID,
+                        Status.DISABLED,
+                        OptionalInt.of(20),
+                        OptionalLong.of(91L)));
+
+        ReservationCreationCommandResult result = reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                creationRequest(2, 0, 0));
+
+        assertThat(result.httpStatus()).isEqualTo(201);
+        then(depositPolicyQueryService).should().getCurrent(STORE_ID);
+        then(representativeMenuQueryService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("예약금 ENABLED의 비구성 대표 메뉴는 첫 자원 접근 전에 STORE_010이다")
+    void rejectsUnconfiguredRepresentativeMenusBeforeResourceAccessWhenDepositIsEnabled() {
+        given(consumerAccountService.getReservationContact(11L))
+                .willReturn(new ReservationContactResult(
+                        "consumer:11:channel:primary", true));
+        given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
+            Supplier<BusinessResult<?>> work = invocation.getArgument(1);
+            return work.get();
+        });
+        given(storeTransactionEligibilityService
+                .requireReservationTransactionEligibility(STORE_ID))
+                .willReturn(new StoreReservationTransactionEligibility(
+                        STORE_ID, "미리윰 식당"));
+        given(depositPolicyQueryService.getCurrent(STORE_ID))
+                .willReturn(new StoreReservationDepositPolicy(
+                        STORE_ID,
+                        Status.ENABLED,
+                        OptionalInt.of(20),
+                        OptionalLong.of(91L)));
+        given(representativeMenuQueryService.getCurrent(STORE_ID))
+                .willReturn(RepresentativeMenuSnapshot.unconfigured(STORE_ID));
+
+        assertThatThrownBy(() -> reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                creationRequest(2, 0, 0)))
+                .isInstanceOfSatisfying(ServiceException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(StoreErrorCode.MENU_STATE_CONFLICT));
+
+        InOrder order = inOrder(
+                storeTransactionEligibilityService,
+                depositPolicyQueryService,
+                representativeMenuQueryService);
+        order.verify(storeTransactionEligibilityService)
+                .requireReservationTransactionEligibility(STORE_ID);
+        order.verify(depositPolicyQueryService).getCurrent(STORE_ID);
+        order.verify(representativeMenuQueryService).getCurrent(STORE_ID);
+        then(storeScheduleService).shouldHaveNoInteractions();
+        then(reservationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(capacityAllocationRepository).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("예약금 ENABLED 생성은 Hold와 Payment 준비 및 process를 기록하고 202를 반환한다")
+    void createsDepositHoldPaymentAndProcessBeforeReturningAccepted() {
+        IdempotencyKey key = IdempotencyKey.parse(
+                "550e8400-e29b-41d4-a716-446655440000");
+        Instant expiresAt = NOW.plusSeconds(600);
+        given(consumerAccountService.getReservationContact(11L))
+                .willReturn(new ReservationContactResult(
+                        "consumer:11:channel:primary", true));
+        given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
+            Supplier<BusinessResult<?>> work = invocation.getArgument(1);
+            BusinessResult<?> businessResult = work.get();
+            return new IdempotentOutcome(
+                    false,
+                    businessResult.httpStatus(),
+                    businessResult.responseCode(),
+                    businessResult.resourceType(),
+                    businessResult.resourceId(),
+                    new ObjectMapper().valueToTree(businessResult.data()));
+        });
+        given(storeTransactionEligibilityService
+                .requireReservationTransactionEligibility(STORE_ID))
+                .willReturn(new StoreReservationTransactionEligibility(
+                        STORE_ID, "미리윰 식당"));
+        given(depositPolicyQueryService.getCurrent(STORE_ID))
+                .willReturn(new StoreReservationDepositPolicy(
+                        STORE_ID,
+                        Status.ENABLED,
+                        OptionalInt.of(20),
+                        OptionalLong.of(91L)));
+        given(representativeMenuQueryService.getCurrent(STORE_ID))
+                .willReturn(new RepresentativeMenuSnapshot(
+                        Long.toString(STORE_ID),
+                        13L,
+                        RepresentativeMenuSettingStatus.CONFIGURED,
+                        List.of(
+                                new RepresentativeMenuItem(
+                                        "101", 1, 4, "첫 메뉴", 18_000,
+                                        MenuSellingStatus.SELLING),
+                                new RepresentativeMenuItem(
+                                        "102", 2, 8, "둘째 메뉴", 22_000,
+                                        MenuSellingStatus.SOLD_OUT))));
+        given(depositHold.getId()).willReturn(77L);
+        given(depositHold.getExpiresAt()).willReturn(expiresAt);
+        given(holdCreationPrimitive.createDeposit(any())).willReturn(depositHold);
+        PaymentPreparation preparation = new PaymentPreparation(
+                "pay_77",
+                "portone_77",
+                "미리윰 식당 예약금",
+                8_000L,
+                "KRW",
+                expiresAt,
+                PaymentStatus.READY);
+        given(paymentService.prepareReservationDeposit(any())).willReturn(preparation);
+        given(depositProcessRepository.saveAndFlush(any()))
+                .willAnswer(invocation -> {
+                    ReservationDepositProcess process = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(process, "id", 901L);
+                    return process;
+                });
+
+        ReservationCreationCommandResult result = reservationService.createReservation(
+                11L, key, creationRequest(2, 0, 0));
+
+        assertThat(result.httpStatus()).isEqualTo(202);
+        assertThat(result.responseData())
+                .isInstanceOfSatisfying(ReservationRequestResponse.class, response -> {
+                    assertThat(response.reservationRequestId()).isEqualTo("901");
+                    assertThat(response.status())
+                            .isEqualTo(ReservationDepositProcessStatus.AWAITING_PAYMENT);
+                    assertThat(response.expiresAt())
+                            .isEqualTo(OffsetDateTime.parse("2026-08-03T00:10:00Z"));
+                    assertThat(response.paymentPreparation().paymentId())
+                            .isEqualTo("pay_77");
+                    assertThat(response.paymentPreparation().amountMinor()).isEqualTo(8_000L);
+                    assertThat(response.paymentPreparation().status()).isEqualTo("READY");
+                    assertThat(response.abandonmentRequested()).isFalse();
+                    assertThat(response.reservation()).isNull();
+                });
+        ArgumentCaptor<PrepareReservationDepositCommand> paymentCommand =
+                ArgumentCaptor.forClass(PrepareReservationDepositCommand.class);
+        then(paymentService).should().prepareReservationDeposit(paymentCommand.capture());
+        assertThat(paymentCommand.getValue()).isEqualTo(
+                new PrepareReservationDepositCommand(
+                        "77", 22L, 11L, 8_000L, "KRW", expiresAt, 1L, key.value()));
+        ArgumentCaptor<ReservationDepositProcess> processCaptor =
+                ArgumentCaptor.forClass(ReservationDepositProcess.class);
+        then(depositProcessRepository).should().saveAndFlush(processCaptor.capture());
+        assertThat(processCaptor.getValue().getReservationHoldId()).isEqualTo(77L);
+        assertThat(processCaptor.getValue().getCalculationSnapshot().getStorePolicyVersion())
+                .isEqualTo(91L);
+        InOrder order = inOrder(
+                holdCreationPrimitive, paymentService, depositProcessRepository);
+        order.verify(holdCreationPrimitive).createDeposit(any());
+        order.verify(paymentService).prepareReservationDeposit(any());
+        order.verify(depositProcessRepository).saveAndFlush(any());
+        then(reservationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(capacityAllocationRepository).shouldHaveNoInteractions();
         then(menuHoldPort).shouldHaveNoInteractions();
     }
 
@@ -1992,6 +2249,209 @@ class ReservationServiceTest {
     }
 
     @Test
+    @DisplayName("알림 publisher가 없는 부분 배선 서비스는 예약 취소 변경 전에 명시적으로 실패한다")
+    void cancellationRequiresNotificationPublisherBeforeMutation() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        Reservation reservation = confirmedReservation();
+        stubFreshIdempotency(command, null);
+        given(reservationRepository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
+                .willReturn(Optional.of(reservation));
+        ReflectionTestUtils.setField(reservationService, "notificationPublisher", null);
+
+        assertThatThrownBy(() -> invokeConsumerCancellation(
+                command,
+                null,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        ))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("reservation cancellation dependencies are required");
+
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        then(cancellationPolicyEvaluator).shouldHaveNoInteractions();
+        then(capacityAllocationRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("V2 소비자 취소는 process scalar를 먼저 검증하고 PENDING 처분 의무를 원자 저장한다")
+    void v2CancellationCreatesPendingDispositionAfterResourceRecovery() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        CancellationFixture fixture = stubSuccessfulCancellation(
+                command, ReservationMenuHoldTerminationPresence.NO_HOLD);
+        ReflectionTestUtils.setField(
+                fixture.reservation(), "cancellationPolicyVersion", 2L);
+        given(cancellationPolicyEvaluator.evaluate(
+                2L,
+                ReservationCancellationActorType.CONSUMER,
+                ReservationStatus.CONFIRMED,
+                fixture.reservation().getStartAt(),
+                REQUESTED_AT
+        )).willReturn(ReservationCancellationDecision.ALLOWED);
+        ReservationDepositDispositionDecision decision =
+                new ReservationDepositDispositionDecision(
+                        2L,
+                        ReservationDepositDispositionDecision.Responsibility.CONSUMER,
+                        0);
+        given(cancellationPolicyEvaluator.evaluateDepositDisposition(
+                2L,
+                ReservationDepositDispositionDecision.Responsibility.CONSUMER,
+                fixture.reservation().getCreatedAt(),
+                fixture.reservation().getStartAt(),
+                REQUESTED_AT
+        )).willReturn(decision);
+        ReservationDepositProcessRepository.DepositProcessLink link =
+                mock(ReservationDepositProcessRepository.DepositProcessLink.class);
+        given(link.getProcessId()).willReturn(31L);
+        given(link.getStatus()).willReturn(ReservationDepositProcessStatus.COMPLETED);
+        given(link.getFinalReservationId()).willReturn(77L);
+        given(link.getPaymentId()).willReturn("51");
+        given(depositProcessRepository.findDepositProcessLinkByFinalReservationId(77L))
+                .willReturn(Optional.of(link));
+        given(dispositionObligationRepository.saveAndFlush(
+                any(ReservationDepositDispositionObligation.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+
+        Object result = invokeConsumerCancellation(
+                command,
+                null,
+                REQUESTED_AT,
+                CONSUMER_CANCELLATION_CORRELATION);
+
+        ReservationDepositDispositionResponse projection =
+                cancellationData(result).depositDisposition();
+        assertThat(projection).isNotNull();
+        assertThat(projection.policyVersion()).isEqualTo(2L);
+        assertThat(projection.responsibilityCode()).isEqualTo("CONSUMER");
+        assertThat(projection.targetRefundRateBasisPoints()).isZero();
+        assertThat(projection.status()).isEqualTo("PENDING");
+        assertThat(projection.originalAmountMinor()).isNull();
+        assertThat(projection.completedRefundAmountMinor()).isNull();
+
+        ArgumentCaptor<ReservationDepositDispositionObligation> obligationCaptor =
+                ArgumentCaptor.forClass(ReservationDepositDispositionObligation.class);
+        then(dispositionObligationRepository).should()
+                .saveAndFlush(obligationCaptor.capture());
+        ReservationDepositDispositionObligation obligation = obligationCaptor.getValue();
+        assertThat(obligation.getReservationDepositProcessId()).isEqualTo(31L);
+        assertThat(obligation.getReservationId()).isEqualTo(77L);
+        assertThat(obligation.getPaymentId()).isEqualTo("51");
+        assertThat(obligation.getSourceEventId())
+                .isEqualTo(CONSUMER_CANCELLATION_CORRELATION);
+        assertThat(obligation.getCancellationIdempotencyKey())
+                .isEqualTo(CANCELLATION_KEY);
+        assertThat(obligation.getObligationKey()).matches(
+                "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+
+        InOrder order = inOrder(
+                depositProcessRepository,
+                menuHoldPort,
+                cancellationAuditRepository,
+                dispositionObligationRepository);
+        order.verify(depositProcessRepository)
+                .findDepositProcessLinkByFinalReservationId(77L);
+        order.verify(menuHoldPort).lockForTermination(77L);
+        order.verify(cancellationAuditRepository)
+                .saveAndFlush(any(ReservationCancellationAudit.class));
+        order.verify(dispositionObligationRepository)
+                .saveAndFlush(any(ReservationDepositDispositionObligation.class));
+        then(paymentService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("V2 취소 POST replay는 저장 PENDING을 반환하고 최신 obligation을 조회하지 않는다")
+    void v2CancellationReplayKeepsFrozenPendingProjection() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        Reservation cancelled = reservation(77L, 11L);
+        ReflectionTestUtils.setField(cancelled, "cancellationPolicyVersion", 2L);
+        cancelled.cancel(NOW.minusSeconds(1));
+        ReservationDepositDispositionObligation pending = pendingDispositionObligation();
+        ReservationDetailResponse stored = ReservationDetailResponse.from(
+                cancelled,
+                List.of(),
+                ReservationCancellationActorType.CONSUMER,
+                null,
+                ReservationDepositDispositionResponse.from(pending));
+        given(idempotencyExecutor.execute(eq(command), any())).willReturn(
+                new IdempotentOutcome(
+                        true,
+                        200,
+                        "SUCCESS",
+                        "RESERVATION",
+                        "77",
+                        new ObjectMapper().valueToTree(stored)));
+
+        Object replay = invokeConsumerCancellation(
+                command,
+                null,
+                REQUESTED_AT,
+                CONSUMER_CANCELLATION_CORRELATION);
+
+        assertThat(cancellationData(replay).depositDisposition().status())
+                .isEqualTo("PENDING");
+        then(dispositionObligationRepository).shouldHaveNoInteractions();
+        then(paymentService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("V2 GET detail은 저장된 최신 COMPLETED projection만 반환한다")
+    void v2DetailReadsLatestCompletedDispositionWithoutPaymentCall() {
+        Reservation reservation = reservation(77L, 11L);
+        ReflectionTestUtils.setField(reservation, "cancellationPolicyVersion", 2L);
+        ReservationDepositDispositionObligation completed = pendingDispositionObligation();
+        completed.claim("worker", NOW, NOW.plusSeconds(30));
+        completed.complete(
+                "worker",
+                1L,
+                NOW.plusSeconds(1),
+                new ReservationDepositDispositionObligation.PaymentSnapshot(
+                        "550e8400-e29b-41d4-a716-446655440239",
+                        null,
+                        10_001L,
+                        0L,
+                        0L,
+                        0L,
+                        10_001L,
+                        "KRW",
+                        "COMPLETED",
+                        null,
+                        NOW,
+                        NOW.plusSeconds(1),
+                        NOW.plusSeconds(1)));
+        given(reservationRepository.findByIdAndConsumerAccountId(77L, 11L))
+                .willReturn(Optional.of(reservation));
+        given(menuHoldPort.findSnapshots(77L)).willReturn(List.of());
+        given(cancellationAuditRepository.findByReservationId(77L))
+                .willReturn(Optional.empty());
+        given(dispositionObligationRepository.findFirstByReservationIdOrderByIdDesc(77L))
+                .willReturn(Optional.of(completed));
+
+        ReservationDetailResponse response =
+                reservationService.getConsumerReservation(11L, 77L);
+
+        assertThat(response.depositDisposition().status()).isEqualTo("COMPLETED");
+        assertThat(response.depositDisposition().originalAmountMinor()).isEqualTo(10_001L);
+        assertThat(response.depositDisposition().completedRefundAmountMinor()).isZero();
+        assertThat(response.depositDisposition().withheldAmountMinor()).isEqualTo(10_001L);
+        then(paymentService).shouldHaveNoInteractions();
+    }
+
+    private static ReservationDepositDispositionObligation pendingDispositionObligation() {
+        return ReservationDepositDispositionObligation.pending(
+                31L,
+                77L,
+                "51",
+                CONSUMER_CANCELLATION_CORRELATION,
+                "RESERVATION_CANCELLED",
+                null,
+                2L,
+                "CONSUMER",
+                0,
+                "550e8400-e29b-41d4-a716-446655440239",
+                CANCELLATION_KEY,
+                NOW);
+    }
+
+    @Test
     @DisplayName("최신 정책에 겹치는 버킷이 없으면 원본 점유만 복구해 취소한다")
     void cancellationAllowsEmptyCurrentBucketsForNewerPolicy() {
         IdempotencyCommand command = cancellationCommand("consumer", 11L);
@@ -2764,6 +3224,12 @@ class ReservationServiceTest {
         assertThat(audit.getCapacityPolicyVersion()).isEqualTo(3L);
         assertThat(audit.getCommandId()).isEqualTo(CONSUMER_CANCELLATION_CORRELATION);
         assertThat(fixture.reservation().getCancelledAt()).isSameAs(audit.getOccurredAt());
+        assertThat(notificationEvents).singleElement().satisfies(event -> {
+            assertThat(event.purpose()).isEqualTo(NotificationPurpose.RESERVATION_CANCELLED);
+            assertThat(event.resourceVersion()).isEqualTo(2L);
+            assertThat(event.occurredAt().toInstant()).isEqualTo(audit.getOccurredAt());
+            assertThat(event.correlationId()).isEqualTo(CONSUMER_CANCELLATION_CORRELATION);
+        });
     }
 
     @Test
@@ -2790,6 +3256,10 @@ class ReservationServiceTest {
                 .isEqualTo(OPERATOR_CANCELLATION_CORRELATION);
         assertThat(cancellationData(result).cancelledBy()).isEqualTo("STORE_OPERATOR");
         assertThat(cancellationData(result).cancellationReason()).isEqualTo(" ");
+        assertThat(notificationEvents).singleElement().satisfies(event -> {
+            assertThat(event.purpose()).isEqualTo(NotificationPurpose.RESERVATION_CANCELLED);
+            assertThat(event.correlationId()).isEqualTo(OPERATOR_CANCELLATION_CORRELATION);
+        });
     }
 
     @Test
@@ -2872,6 +3342,7 @@ class ReservationServiceTest {
 
         assertThat(succeeded).hasNullValue();
         assertThat(fixture.reservation().getCancelledAt()).isEqualTo(NOW);
+        assertThat(notificationEvents).isEmpty();
         then(menuHoldPort).should(never()).findSnapshots(anyLong());
     }
 
@@ -3536,8 +4007,72 @@ class ReservationServiceTest {
 
         assertThat(result.httpStatus()).isEqualTo(200);
         assertThat(result.data().status()).isEqualTo("FULFILLED");
+        assertThat(notificationEvents).singleElement().satisfies(event -> {
+            assertThat(event.purpose())
+                    .isEqualTo(NotificationPurpose.RESERVATION_VISIT_COMPLETED);
+            assertThat(event.sourceEventId())
+                    .isEqualTo("reservation:" + RESERVATION_ID + ":visit-completed");
+            assertThat(event.resourceVersion()).isEqualTo(2L);
+        });
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(capacityAllocationRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("V2 직접 방문 완료는 Long 캐시 밖 ID의 전액 환불 obligation을 함께 저장한다")
+    void v2FulfillmentCreatesPendingFullRefundDisposition() {
+        long reservationId = 1_000L;
+        Reservation reservation = confirmedReservation();
+        ReflectionTestUtils.setField(reservation, "id", reservationId);
+        ReflectionTestUtils.setField(reservation, "cancellationPolicyVersion", 2L);
+        stubFreshIdempotency(fulfillmentCommand(), null);
+        given(reservationRepository.findByIdAndStoreIdForUpdate(
+                reservationId,
+                STORE_ID
+        )).willReturn(Optional.of(reservation));
+        given(menuHoldPort.lockForTermination(reservationId))
+                .willReturn(ReservationMenuHoldTerminationPresence.NO_HOLD);
+        given(fulfillmentAuditRepository.saveAndFlush(any()))
+                .willAnswer(invocation -> invocation.getArgument(0));
+        ReservationDepositProcessRepository.DepositProcessLink link =
+                mock(ReservationDepositProcessRepository.DepositProcessLink.class);
+        given(link.getProcessId()).willReturn(31L);
+        given(link.getStatus()).willReturn(ReservationDepositProcessStatus.COMPLETED);
+        given(link.getFinalReservationId()).willReturn(reservationId);
+        given(link.getPaymentId()).willReturn("51");
+        given(depositProcessRepository.findDepositProcessLinkByFinalReservationId(
+                reservationId
+        )).willReturn(Optional.of(link));
+        given(dispositionObligationRepository.saveAndFlush(any()))
+                .willAnswer(invocation -> invocation.getArgument(0));
+
+        ReservationFulfillmentCommandResult result =
+                reservationService.fulfillStoreReservation(
+                        OPERATOR_ID,
+                        STORE_ID,
+                        reservationId,
+                        fulfillmentCommand(),
+                        REQUESTED_AT,
+                        FULFILLMENT_CORRELATION
+                );
+
+        assertThat(result.data().depositDisposition()).isNotNull();
+        assertThat(result.data().depositDisposition().policyVersion()).isEqualTo(2L);
+        assertThat(result.data().depositDisposition().responsibilityCode())
+                .isEqualTo("CONSUMER");
+        assertThat(result.data().depositDisposition().targetRefundRateBasisPoints())
+                .isEqualTo(10_000);
+        assertThat(result.data().depositDisposition().status()).isEqualTo("PENDING");
+
+        ArgumentCaptor<ReservationDepositDispositionObligation> obligationCaptor =
+                ArgumentCaptor.forClass(ReservationDepositDispositionObligation.class);
+        then(dispositionObligationRepository).should()
+                .saveAndFlush(obligationCaptor.capture());
+        ReservationDepositDispositionObligation obligation = obligationCaptor.getValue();
+        assertThat(obligation.getSourceEventId()).isEqualTo(FULFILLMENT_CORRELATION);
+        assertThat(obligation.getSourceEventType()).isEqualTo("RESERVATION_FULFILLED");
+        assertThat(obligation.getPaymentId()).isEqualTo("51");
+        then(paymentService).shouldHaveNoInteractions();
     }
 
     @Test
@@ -3830,6 +4365,7 @@ class ReservationServiceTest {
             }
             case CANCELLED -> reservation.cancel(OCCURRED_AT);
             case FULFILLED -> reservation.fulfill(OCCURRED_AT);
+            case NO_SHOW -> reservation.markNoShow(OCCURRED_AT);
         }
         return reservation;
     }
@@ -3978,13 +4514,13 @@ class ReservationServiceTest {
             given(reservationRepository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
                     .willReturn(Optional.of(reservation));
         }
-        given(cancellationPolicyEvaluator.evaluate(
+        lenient().when(cancellationPolicyEvaluator.evaluate(
                 1L,
                 actorType,
                 ReservationStatus.CONFIRMED,
                 reservation.getStartAt(),
                 NOW.minusSeconds(10)
-        )).willReturn(ReservationCancellationDecision.ALLOWED);
+        )).thenReturn(ReservationCancellationDecision.ALLOWED);
         given(menuHoldPort.lockForTermination(77L)).willReturn(presence);
         given(capacityAllocationRepository
                 .findAllByReservationIdOrderByCapacityBucketIdAsc(77L))

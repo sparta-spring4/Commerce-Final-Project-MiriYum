@@ -1,0 +1,824 @@
+openapi: 3.1.0
+info:
+  title: MiriYum Platform Operator Management and Audit API
+  version: 1.0.0
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+  description: 단일 슈퍼관리자의 비슈퍼관리자 계정 관리와 최소 권한 감사 조회·보정 계약이다.
+servers:
+  - url: /
+security: []
+paths:
+  /api/v1/platform-operators/accounts:
+    get:
+      tags: [Platform Operator Management]
+      summary: 플랫폼 운영자 계정 목록 조회
+      operationId: searchPlatformOperatorAccounts
+      security:
+        - platformOperatorBearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/OperatorAccountStatus"
+        - name: role
+          in: query
+          schema:
+            $ref: "#/components/schemas/OperatorRole"
+        - name: query
+          in: query
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: ["operatorId,asc", "operatorId,desc", "displayName,asc", "displayName,desc", "status,asc", "status,desc", "lastLoginAt,asc", "lastLoginAt,desc"]
+            default: "operatorId,asc"
+      responses:
+        "200":
+          $ref: "#/components/responses/OperatorAccountSearchResult"
+        "400":
+          $ref: "#/components/responses/ManagementBadRequest"
+        "401":
+          $ref: "#/components/responses/SessionUnauthorized"
+        "403":
+          $ref: "#/components/responses/AuthorizationDenied"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+    post:
+      tags: [Platform Operator Management]
+      summary: 비슈퍼관리자 플랫폼 운영자 생성
+      operationId: createPlatformOperatorAccount
+      security:
+        - platformOperatorBearerAuth: []
+      parameters:
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+        - $ref: "../platform-operator-authorization/openapi.yaml#/components/parameters/AdminReauthentication"
+        - $ref: "#/components/parameters/AdminCaseId"
+        - $ref: "#/components/parameters/AdminCaseVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountCreateRequest"
+      responses:
+        "201":
+          $ref: "#/components/responses/AccountCreated"
+        "400":
+          $ref: "#/components/responses/ManagementBadRequest"
+        "401":
+          $ref: "#/components/responses/SessionUnauthorized"
+        "403":
+          $ref: "#/components/responses/AuthorizationDenied"
+        "409":
+          $ref: "#/components/responses/ManagementConflict"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/platform-operators/accounts/{operatorId}:
+    get:
+      tags: [Platform Operator Management]
+      summary: 플랫폼 운영자 계정과 유효 권한 상세 조회
+      operationId: getPlatformOperatorAccount
+      security:
+        - platformOperatorBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OperatorId"
+      responses:
+        "200":
+          $ref: "#/components/responses/OperatorAccountDetailResult"
+        "400":
+          $ref: "#/components/responses/ManagementBadRequest"
+        "401":
+          $ref: "#/components/responses/SessionUnauthorized"
+        "403":
+          $ref: "#/components/responses/AuthorizationDenied"
+        "404":
+          $ref: "#/components/responses/OperatorAccountNotFound"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/platform-operators/accounts/{operatorId}/authority:
+    put:
+      tags: [Platform Operator Management]
+      summary: 비슈퍼관리자 역할·직접 권한 전체 교체
+      operationId: replacePlatformOperatorAuthority
+      security:
+        - platformOperatorBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OperatorId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+        - $ref: "../platform-operator-authorization/openapi.yaml#/components/parameters/AdminReauthentication"
+        - $ref: "#/components/parameters/AdminCaseId"
+        - $ref: "#/components/parameters/AdminCaseVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthorityReplaceRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/AccountChanged"
+        "400":
+          $ref: "#/components/responses/ManagementBadRequest"
+        "401":
+          $ref: "#/components/responses/SessionUnauthorized"
+        "403":
+          $ref: "#/components/responses/AuthorizationDenied"
+        "409":
+          $ref: "#/components/responses/ManagementConflict"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/platform-operators/accounts/{operatorId}/suspension:
+    put:
+      tags: [Platform Operator Management]
+      summary: 비슈퍼관리자 계정 중지
+      operationId: suspendPlatformOperatorAccount
+      security:
+        - platformOperatorBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OperatorId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+        - $ref: "../platform-operator-authorization/openapi.yaml#/components/parameters/AdminReauthentication"
+        - $ref: "#/components/parameters/AdminCaseId"
+        - $ref: "#/components/parameters/AdminCaseVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SuspensionRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/AccountChanged"
+        "400":
+          $ref: "#/components/responses/ManagementBadRequest"
+        "401":
+          $ref: "#/components/responses/SessionUnauthorized"
+        "403":
+          $ref: "#/components/responses/AuthorizationDenied"
+        "409":
+          $ref: "#/components/responses/ManagementConflict"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/platform-operators/audit-events:
+    get:
+      tags: [Platform Operator Audit]
+      summary: 최소 권한 감사 사건 검색
+      operationId: searchPlatformOperatorAuditEvents
+      security:
+        - platformOperatorBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AdminCaseId"
+        - $ref: "#/components/parameters/AdminCaseVersion"
+        - $ref: "#/components/parameters/AdminReasonCode"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Page"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Size"
+        - name: source
+          in: query
+          schema:
+            $ref: "#/components/schemas/EventSource"
+        - name: action
+          in: query
+          schema:
+            $ref: "#/components/schemas/AuditAction"
+        - name: outcome
+          in: query
+          schema:
+            $ref: "#/components/schemas/AuditOutcome"
+        - name: actorOperatorId
+          in: query
+          schema:
+            $ref: "#/components/schemas/PublicId"
+        - name: targetType
+          in: query
+          schema:
+            type: string
+        - name: targetId
+          in: query
+          schema:
+            $ref: "#/components/schemas/PublicId"
+        - name: occurredFrom
+          in: query
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        - name: occurredTo
+          in: query
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        - name: originalEventKey
+          in: query
+          schema:
+            $ref: "#/components/schemas/EventKey"
+      responses:
+        "200":
+          $ref: "#/components/responses/AuditSearchResult"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/SessionUnauthorized"
+        "403":
+          $ref: "#/components/responses/AuthorizationDenied"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/platform-operators/audit-events/{eventKey}:
+    get:
+      tags: [Platform Operator Audit]
+      summary: 감사 사건 상세와 보정 이력 조회
+      operationId: getPlatformOperatorAuditEvent
+      security:
+        - platformOperatorBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/EventKey"
+        - $ref: "#/components/parameters/AdminCaseId"
+        - $ref: "#/components/parameters/AdminCaseVersion"
+        - $ref: "#/components/parameters/AdminReasonCode"
+      responses:
+        "200":
+          $ref: "#/components/responses/AuditDetailResult"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/SessionUnauthorized"
+        "403":
+          $ref: "#/components/responses/AuthorizationDenied"
+        "404":
+          $ref: "#/components/responses/AuditEventNotFound"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/platform-operators/audit-events/{eventKey}/corrections:
+    post:
+      tags: [Platform Operator Audit]
+      summary: 원 사건을 보존하는 연결 보정 사건 추가
+      operationId: createPlatformOperatorAuditCorrection
+      security:
+        - platformOperatorBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/EventKey"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+        - $ref: "../platform-operator-authorization/openapi.yaml#/components/parameters/AdminReauthentication"
+        - $ref: "#/components/parameters/AdminCaseId"
+        - $ref: "#/components/parameters/AdminCaseVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CorrectionRequest"
+      responses:
+        "201":
+          $ref: "#/components/responses/AuditCorrectionCreated"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/SessionUnauthorized"
+        "403":
+          $ref: "#/components/responses/AuthorizationDenied"
+        "404":
+          $ref: "#/components/responses/AuditEventNotFound"
+        "409":
+          $ref: "#/components/responses/AuditCorrectionConflict"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+components:
+  securitySchemes:
+    platformOperatorBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    OperatorId:
+      name: operatorId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/PublicId"
+    EventKey:
+      name: eventKey
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/EventKey"
+    AdminCaseId:
+      name: X-Admin-Case-Id
+      in: header
+      required: true
+      schema:
+        $ref: "#/components/schemas/PublicId"
+    AdminCaseVersion:
+      name: X-Admin-Case-Version
+      in: header
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    AdminReasonCode:
+      name: X-Admin-Reason-Code
+      in: header
+      required: true
+      schema:
+        $ref: "#/components/schemas/AuditReason"
+  schemas:
+    PublicId:
+      type: string
+      minLength: 1
+      maxLength: 100
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$"
+    OperatorAccountStatus:
+      type: string
+      enum: [ACTIVE, SUSPENDED]
+    OperatorRole:
+      type: string
+      enum: [SUPER_ADMIN, ONBOARDING_REVIEWER, MEMBER_SUPPORT_OPERATOR, ENFORCEMENT_OPERATOR, PAYMENT_RECOVERY_OPERATOR, OPERATIONS_MONITOR, AUDIT_READER, INCIDENT_RESPONDER]
+    OperatorPermission:
+      type: string
+      enum: [OPERATOR_CREATE, OPERATOR_AUTHORITY_MANAGE, OPERATOR_SUSPEND, ONBOARDING_REVIEW, ONBOARDING_EVIDENCE_READ, MEMBER_READ_MINIMAL, MEMBER_RECOVERY, ACCOUNT_SANCTION, ACCOUNT_PERMANENT_SANCTION_APPROVE, ACCOUNT_APPEAL_REVIEW, STORE_READ_MINIMAL, STORE_SANCTION, OPERATIONS_MONITOR_READ, PAYMENT_RECOVERY_EXECUTE, PAYMENT_RECOVERY_HIGH_VALUE_APPROVE, AUDIT_READ, INCIDENT_RESPOND, BREAK_GLASS_APPROVE]
+    MaskedEmail:
+      type: string
+      minLength: 3
+      maxLength: 254
+    EventKey:
+      type: string
+      maxLength: 25
+      pattern: "^(?:AUTH|ADMIN):[1-9][0-9]{0,18}$"
+    NonSuperAdminRole:
+      type: string
+      enum: [ONBOARDING_REVIEWER, MEMBER_SUPPORT_OPERATOR, ENFORCEMENT_OPERATOR, PAYMENT_RECOVERY_OPERATOR, OPERATIONS_MONITOR, AUDIT_READER, INCIDENT_RESPONDER]
+    NonCorePermission:
+      type: string
+      enum: [ONBOARDING_REVIEW, ONBOARDING_EVIDENCE_READ, MEMBER_READ_MINIMAL, MEMBER_RECOVERY, ACCOUNT_SANCTION, ACCOUNT_APPEAL_REVIEW, STORE_READ_MINIMAL, STORE_SANCTION, OPERATIONS_MONITOR_READ, PAYMENT_RECOVERY_EXECUTE, AUDIT_READ, INCIDENT_RESPOND]
+    AuditReason:
+      type: string
+      enum: [AUTHENTICATION_EVENT, ACCOUNT_PROVISIONING, RESPONSIBILITY_CHANGE, EMPLOYMENT_END, SECURITY_RESPONSE, AUDIT_VERIFICATION, RECORD_CORRECTION, STORE_ENFORCEMENT]
+    EventSource:
+      type: string
+      enum: [AUTH, ADMIN]
+    AuditAction:
+      type: string
+      enum: [LOGIN, REAUTHENTICATION, LOGOUT, REFRESH, INITIAL_PASSWORD_CHANGED, SESSION_REVOKED, ACCOUNT_CREATED, AUTHORITY_REPLACED, ACCOUNT_SUSPENDED, AUDIT_SEARCH, AUDIT_DETAIL_READ, AUDIT_CORRECTION]
+    AuditOutcome:
+      type: string
+      enum: [SUCCESS, DENIED, FAILED]
+    AccountCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [provisioningId, email, displayName, temporaryPassword, roles, directPermissions, reason]
+      properties:
+        provisioningId:
+          type: string
+          format: uuid
+        email:
+          $ref: "../platform-operator-auth/openapi.yaml#/components/schemas/Email"
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 50
+        temporaryPassword:
+          $ref: "../platform-operator-auth/openapi.yaml#/components/schemas/Password"
+        roles:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/NonSuperAdminRole"
+        directPermissions:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/NonCorePermission"
+        reason:
+          $ref: "#/components/schemas/AuditReason"
+    AuthorityReplaceRequest:
+      type: object
+      additionalProperties: false
+      required: [roles, directPermissions, reason]
+      properties:
+        roles:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/NonSuperAdminRole"
+        directPermissions:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/NonCorePermission"
+        reason:
+          $ref: "#/components/schemas/AuditReason"
+    SuspensionRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          $ref: "#/components/schemas/AuditReason"
+    AccountData:
+      type: object
+      additionalProperties: false
+      required: [operatorId, email, displayName, status, passwordChangeRequired, authorityVersion, roles, directPermissions]
+      properties:
+        operatorId:
+          $ref: "#/components/schemas/PublicId"
+        email:
+          $ref: "../platform-operator-auth/openapi.yaml#/components/schemas/Email"
+        displayName:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, SUSPENDED]
+        passwordChangeRequired:
+          type: boolean
+        authorityVersion:
+          type: integer
+          format: int64
+          minimum: 1
+        roles:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/NonSuperAdminRole"
+        directPermissions:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/NonCorePermission"
+    OperatorAccountSummary:
+      type: object
+      additionalProperties: false
+      required: [operatorId, email, displayName, status, passwordChangeRequired, authorityVersion, roles, lastLoginAt]
+      properties:
+        operatorId:
+          $ref: "#/components/schemas/PublicId"
+        email:
+          $ref: "#/components/schemas/MaskedEmail"
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 50
+        status:
+          $ref: "#/components/schemas/OperatorAccountStatus"
+        passwordChangeRequired:
+          type: boolean
+        authorityVersion:
+          type: integer
+          format: int64
+          minimum: 1
+        roles:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/OperatorRole"
+        lastLoginAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+    OperatorAccountPage:
+      type: object
+      additionalProperties: false
+      required: [content, page]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperatorAccountSummary"
+        page:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PageMetadata"
+    OperatorAccountDetail:
+      type: object
+      additionalProperties: false
+      required: [operatorId, email, displayName, status, passwordChangeRequired, authorityVersion, roles, directPermissions, effectivePermissions, lastLoginAt]
+      properties:
+        operatorId:
+          $ref: "#/components/schemas/PublicId"
+        email:
+          $ref: "#/components/schemas/MaskedEmail"
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 50
+        status:
+          $ref: "#/components/schemas/OperatorAccountStatus"
+        passwordChangeRequired:
+          type: boolean
+        authorityVersion:
+          type: integer
+          format: int64
+          minimum: 1
+        roles:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/OperatorRole"
+        directPermissions:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/OperatorPermission"
+        effectivePermissions:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/OperatorPermission"
+        lastLoginAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+    AuditEventData:
+      type: object
+      additionalProperties: false
+      required: [eventKey, source, action, outcome, actorOperatorId, authorityVersion, roles, permissions, beforeRoles, afterRoles, beforePermissions, afterPermissions, targetType, targetId, reason, occurredAt]
+      properties:
+        eventKey:
+          $ref: "#/components/schemas/EventKey"
+        source:
+          $ref: "#/components/schemas/EventSource"
+        action:
+          type: string
+        outcome:
+          $ref: "#/components/schemas/AuditOutcome"
+        actorOperatorId:
+          $ref: "#/components/schemas/PublicId"
+        authorityVersion:
+          type: integer
+          format: int64
+          minimum: 1
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        beforeStatus:
+          type: [string, "null"]
+        afterStatus:
+          type: [string, "null"]
+        beforeRoles:
+          type: array
+          items:
+            type: string
+        afterRoles:
+          type: array
+          items:
+            type: string
+        beforePermissions:
+          type: array
+          items:
+            type: string
+        afterPermissions:
+          type: array
+          items:
+            type: string
+        targetType:
+          type: string
+        targetId:
+          $ref: "#/components/schemas/PublicId"
+        reason:
+          type: string
+        correctedAction:
+          type: [string, "null"]
+        correctedOutcome:
+          oneOf:
+            - $ref: "#/components/schemas/AuditOutcome"
+            - type: "null"
+        correctedTargetType:
+          type: [string, "null"]
+        correctedTargetId:
+          type: [string, "null"]
+        correctedReason:
+          oneOf:
+            - $ref: "#/components/schemas/AuditReason"
+            - type: "null"
+        correlationId:
+          type: string
+        originalEventKey:
+          oneOf:
+            - $ref: "#/components/schemas/EventKey"
+            - type: "null"
+        occurredAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+    CorrectionRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      minProperties: 2
+      properties:
+        reason:
+          type: string
+          const: RECORD_CORRECTION
+        correctedAction:
+          $ref: "#/components/schemas/AuditAction"
+        correctedOutcome:
+          $ref: "#/components/schemas/AuditOutcome"
+        correctedTargetType:
+          type: string
+        correctedTargetId:
+          $ref: "#/components/schemas/PublicId"
+        correctedReason:
+          $ref: "#/components/schemas/AuditReason"
+    AccountResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/AccountData"
+    OperatorAccountSearchResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/OperatorAccountPage"
+    OperatorAccountDetailResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/OperatorAccountDetail"
+    AuditEventResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/AuditEventData"
+    AuditSearchResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          type: object
+          additionalProperties: false
+          required: [content, page]
+          properties:
+            content:
+              type: array
+              items:
+                $ref: "#/components/schemas/AuditEventData"
+            page:
+              $ref: "../mvp1-common/openapi.yaml#/components/schemas/PageMetadata"
+    AuditDetailResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          type: object
+          additionalProperties: false
+          required: [original, corrections]
+          properties:
+            original:
+              $ref: "#/components/schemas/AuditEventData"
+            corrections:
+              type: array
+              items:
+                $ref: "#/components/schemas/AuditEventData"
+  responses:
+    OperatorAccountSearchResult:
+      description: 마스킹된 운영자 계정 페이지
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OperatorAccountSearchResponse"
+    OperatorAccountDetailResult:
+      description: 마스킹된 운영자 계정과 부여·유효 권한
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OperatorAccountDetailResponse"
+    AccountCreated:
+      description: 생성된 비슈퍼관리자 계정
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AccountResponse"
+    AccountChanged:
+      description: 변경된 비슈퍼관리자 계정
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AccountResponse"
+    AuditSearchResult:
+      description: 안전 projection 기반 검색 결과
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AuditSearchResponse"
+    AuditDetailResult:
+      description: 원 사건과 시간순 보정 사건
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AuditDetailResponse"
+    AuditCorrectionCreated:
+      description: 원 사건에 연결된 보정 사건
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AuditEventResponse"
+    SessionUnauthorized:
+      description: 플랫폼 운영자 세션 또는 authority version이 유효하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example: {code: AUTH_015, message: 플랫폼 운영자 세션이 더 이상 유효하지 않습니다.}
+    AuthorizationDenied:
+      description: 최초 비밀번호 변경 제한 또는 singleton·권한·배정·재인증·조회 범위가 유효하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            InitialPasswordChangeRequired:
+              value: {code: AUTH_012, message: 최초 비밀번호 변경이 필요합니다.}
+            AuthorizationDenied:
+              value: {code: ADMIN_001, message: 요청한 운영 명령을 승인할 수 없습니다.}
+    ManagementBadRequest:
+      description: 입력 또는 역할·권한 조합이 유효하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            Validation:
+              value: {code: COMMON_001, message: 입력값이 올바르지 않습니다.}
+            ForbiddenGrant:
+              value: {code: ADMIN_004, message: 허용되지 않은 운영자 역할 또는 권한입니다.}
+    ManagementConflict:
+      description: singleton·이메일·멱등성 또는 동시 변경 충돌
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            SuperAdminImmutable:
+              value: {code: ADMIN_003, message: 단일 슈퍼관리자는 변경할 수 없습니다.}
+            EmailConflict:
+              value: {code: ADMIN_005, message: 이미 사용 중인 플랫폼 운영자 이메일입니다.}
+    AuditEventNotFound:
+      description: 감사 사건이 존재하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example: {code: ADMIN_006, message: 감사 사건을 찾을 수 없습니다.}
+    AuditCorrectionConflict:
+      description: 보정 대상·필드 또는 원 사건 연결이 유효하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example: {code: ADMIN_007, message: 감사 보정 사건을 추가할 수 없습니다.}
+    OperatorAccountNotFound:
+      description: 조회 권한 확인 뒤 대상 운영자 계정이 존재하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example: {code: ADMIN_008, message: 운영자 계정을 찾을 수 없습니다.}

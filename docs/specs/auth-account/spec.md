@@ -20,7 +20,7 @@
 ### 제외
 
 - 플랫폼 운영자 가입·로그인·API
-- 카카오와 그 밖의 소셜 로그인
+- 그 밖의 소셜 로그인(카카오 외 제공자)
 - Valkey Refresh Token 회전·폐기·재사용 탐지
 - 활성 로그인 목록·기기별 종료·전체 로그인 종료
 - 비밀번호 재설정·수동 복구·회원 탈퇴
@@ -95,7 +95,7 @@
 | --- | --- | --- |
 | Access JWT namespace | `consumer` | `store-operator` |
 | subject | `consumer:{id}` | `store-operator:{id}` |
-| Access JWT 수명 | 1시간 | 1시간 |
+| Access JWT 수명 | 15분 | 15분 |
 | Refresh JWT 수명 | 14일 | 14일 |
 | Refresh 쿠키 | `MIRIYUM_CONSUMER_REFRESH` | `MIRIYUM_STORE_OPERATOR_REFRESH` |
 | Refresh 쿠키 Path | `/api/v1/consumers/auth` | `/api/v1/store-operators/auth` |
@@ -111,9 +111,40 @@
 - 1차 MVP 로그아웃은 서버에 저장된 Refresh 상태를 폐기했다고 응답하지 않는다.
 - 일반 보호 API는 Refresh 쿠키를 Access JWT 대체 수단으로 사용하지 않는다.
 
+### 고도화 Consumer QR epoch 로그아웃
+
+- `DELETE /api/v1/consumers/auth/sessions/current`는 CSRF 통과 뒤 Refresh 쿠키를 항상 만료한다. 현재 ACTIVE Consumer Refresh가 namespace·account·family·current token ID·원문 hash까지 일치할 때만 서버 family 폐기와 계정 QR epoch 증가를 한 Valkey Lua에서 확정한다.
+- 현재 ACTIVE Refresh가 로그아웃 mutation의 유일한 권한이다. 선택적 Bearer Access JWT는 감사 보조값일 뿐이다. `/auth/**` 공개 SecurityFilterChain은 Authorization을 자동 파싱하지 않으므로 controller가 원문 헤더를 Auth service에 전달하고 service가 정확한 Bearer 형식만 `JwtTokenProvider`로 직접 선택 파싱한다. Access 파싱 중 발생한 모든 `ServiceException`은 Access 부재로 취급하되 예상하지 못한 `RuntimeException`은 숨기지 않는다. 각각 유효한 Access·Refresh subject가 달라도 민감 식별자 없는 감사 event만 남기고 현재 Refresh의 mutation을 계속한다. Access-only나 Refresh 부재·무효·만료·회전·폐기·저장소 없음은 브라우저 cleanup-only `200`이다.
+- 응답 유실 뒤 회전 전 Refresh R1으로 로그아웃해도 ACTIVE R2 family를 찾아 폐기하지 않는다. family가 이미 사라졌다면 account index를 조회·정리하지 않으므로 stale member는 index의 기존 TTL까지 남을 수 있다. 두 경우 모두 이번 계약에서는 cleanup-only이며 QR epoch도 증가시키지 않는다.
+- Auth 공개 Java 계약은 `ConsumerQrEpochSnapshot(Long accountId, String opaqueVersion)`, `captureCurrent(Long accountId)`, `requireCurrent(Long expectedAccountId, ConsumerQrEpochSnapshot snapshot)`이다. expected accountId는 Reservation 원장 값이며 account/epoch 불일치는 `AUTH_017`로 통합하고 현재 값을 노출하지 않는다.
+- QR epoch는 generation namespace별 TTL 없는 salt·counter hash다. backend가 Java `SecureRandom`으로 128-bit 후보 salt를 만들고 Lua는 최초 후보만 원자적으로 선점한다. 외부 opaqueVersion은 비공개 salt를 포함한 generation·accountId·salt·counter 직렬화의 `v1.` + SHA-256 base64url digest이며 equality-only다. 원문 연결값의 단순 Base64 인코딩은 사용하지 않는다. 최초 capture와 missing-epoch logout 초기화는 Lua로 원자화한다.
+- `MIRIYUM_QR_STORAGE_GENERATION`은 `^[A-Za-z0-9._-]{1,64}$`이고 모든 backend instance에서 같아야 한다. 정상 재시작에는 유지하고 과거 Valkey snapshot 복원 전에는 미사용 새 값으로 바꾸며 이전 값을 다시 사용하지 않는다.
+- 다른 기기의 Refresh·Access는 유지한다. 사용자는 명시적으로 새 QR을 받을 수 있지만 폐기된 QR grant는 자동 승격·재발급하지 않는다. 일반 보호 API에는 QR epoch 조회를 추가하지 않는다.
+
 ### CSRF 토큰 준비
 
 각 shell은 `GET .../csrf-tokens/current`로 namespace별 CSRF 토큰을 준비한다. 응답 `data.token`과 같은 값이 해당 namespace의 CSRF 쿠키에 설정된다. CSRF 토큰은 인증 자격이나 비밀 값이 아니며 Refresh JWT와 분리한다.
+
+### 고도화 Kakao identity fingerprint 운영 경계
+
+- Kakao provider subject 원문은 계정 link 원장·응답·로그에 저장하지 않는다. Auth는
+  key version을 포함한 HMAC fingerprint로만 link를 찾고 저장한다.
+- Kakao 로그인을 켤 때 active key version과 active secret은 둘 다 필요하다. 둘 중
+  하나라도 비어 있으면 인증 흐름은 `COMMON_012`로 실패 폐쇄한다. 값 자체는
+  source control, task definition 일반 environment, 로그, Issue와 PR에 남기지
+  않는다.
+- key rotation은 새 active version/secret을 설치하고, 직전 version/secret을
+  previous pair로 함께 제공하는 기간에만 허용한다. previous version과 secret은
+  모두 비어 있거나 모두 설정돼야 하며, 한쪽만 설정하면 요청을 성공으로
+  처리하지 않는다.
+- 이전 fingerprint로 찾은 link는 같은 provider subject에 대한 active fingerprint로
+  원자적으로 이행한다. 이전 pair를 제거하기 전에는 실행 중인 모든 backend가 새
+  active pair와 동일한 previous pair를 사용하고, 이전 link의 이행 근거를 확인한다.
+- "기존 계정이 가입 화면으로 감"은 browser Kakao session, account link, deployed
+  image, active key version을 분리해 진단한다. browser session 문제를 해결하려고
+  fingerprint secret을 임의 교체하지 않는다. 상세 점검 절차는
+  [staging runtime troubleshooting](../../deployment/staging-runtime-troubleshooting.md)을
+  따른다.
 
 ## 멱등성과 요청 제한
 
@@ -170,6 +201,31 @@
 - 예약 도메인은 상태·날짜 필터, 정렬, 예약 스냅샷 DTO와 개인 자원 404 규칙을 소유한다.
 - 다른 사용자의 예약이나 매장 전체 예약을 이 경로로 조회할 수 없다.
 - 결과가 없으면 `200 OK`, `items: []`와 페이지 메타데이터를 반환한다.
+
+### 마이페이지 조합 경계
+
+- 일반 사용자 보호 route `/mypage`는 consumer shell의 인증 guard 뒤에서만 연다.
+  인증되지 않은 요청은 로그인 흐름으로 이동하며, URL이나 요청 본문으로 다른
+  `consumerAccountId`를 선택하지 않는다.
+- Account가 소유하는 화면은 `GET /api/v1/consumers/me` 프로필, 닉네임 수정
+  `PATCH /api/v1/consumers/me`, 그리고 `phoneNumber=null`일 때의 최초 연락처
+  등록 `PUT /api/v1/consumers/me/contact`이다. 이메일·등록된 연락처·비밀번호의
+  변경 UI는 이 범위에 없다.
+- 닉네임 수정과 최초 연락처 등록은 각각 같은 사용자 의도의 재시도에 같은
+  `Idempotency-Key`를 유지한다. 결과가 불명인 뒤 입력을 바꾼 새 요청은 자동
+  전송하지 않고 사용자가 새로고침해 현재 상태를 확인하도록 안내한다.
+- 마이페이지는 [예약 명세](../reservation/spec.md)의 내 예약 링크,
+  [결제 명세](../payment/spec.md)의 최근 결제 읽기,
+  [웨이팅 명세](../waiting/spec.md)의 현재 상태 읽기,
+  [알림 명세](../notification/spec.md)의 알림 이력 링크를 조합한다. 각
+  도메인의 API DTO, 상태 전이, 빈 결과 의미와 오류 코드는 원 소유 명세가
+  유지한다.
+- 프로필·최근 결제·현재 웨이팅은 서로 독립적으로 로딩·빈 상태·오류·재시도를
+  표시한다. 결제 내역이 비어 있거나 현재 웨이팅이 없다는 성공 응답은 오류로
+  표시하지 않는다. 과거 웨이팅, 픽업 내역, 환불 내역, 비밀번호 변경처럼 공개
+  계약 또는 route가 없는 항목은 빈 카드나 준비 중 버튼으로 노출하지 않는다.
+- 휴대전화는 서버가 마스킹한 값만 표시한다. 마이페이지 화면은 Access/Refresh
+  토큰, CSRF 값, Kakao 식별자, 연락처 원문을 표시·로그·분석에 남기지 않는다.
 - `status` 필터는 1차 MVP의 영속·공개 상태인 `CONFIRMED`, `CANCELLED`, `FULFILLED`만 공개한다.
 - 결제·환불·노쇼·체크인 필드는 포함하지 않는다.
 
@@ -188,6 +244,8 @@
 | `AUTH_009` | 403 | CSRF 토큰 검증 실패 |
 | `AUTH_010` | 403 | Origin·Referer 검증 실패 |
 | `AUTH_011` | 403 | 현재 계정 상태가 이용을 허용하지 않음 |
+| `AUTH_016` | 미발행(회수) | 과거 Consumer 로그아웃의 Access/Refresh subject 불일치에 사용했으며, 현재는 발행하지 않고 영구 재사용하지 않음 |
+| `AUTH_017` | 409 | QR account 또는 epoch가 현재 Auth 원본과 불일치 |
 | `ACCOUNT_001` | 409 | 같은 계정 유형의 이메일 중복 |
 | `ACCOUNT_002` | 409 | 같은 계정 유형의 휴대전화 중복 |
 | `ACCOUNT_003` | 400 | 이메일 확인 참조가 없거나 유효하지 않음 |
@@ -223,9 +281,11 @@
 - Access JWT는 응답 본문과 Bearer 헤더, Refresh JWT는 namespace별 쿠키에만 존재한다.
 - 다른 namespace 쿠키·JWT로 갱신하거나 보호 API를 호출하면 `401`이다.
 - 로그아웃의 CSRF 검증 실패와 재발급의 교차 Origin 요청은 `403`이다.
+- 현재 Consumer Refresh 로그아웃은 같은 자격의 중복·동시 요청에도 QR epoch를 한 번만 증가시키며, 다른 기기 일반 로그인은 유지한다.
+- QR account·epoch 불일치는 같은 `AUTH_017`로 실패하고 현재 epoch를 노출하지 않는다. generation·Valkey 상태를 확인할 수 없으면 `COMMON_012`로 실패 폐쇄한다.
 - 일반 사용자 닉네임 수정과 매장 운영자 표시 이름 수정이 상대 계정 테이블을 변경하지 않는다.
 - 마이페이지 예약 내역이 예약 도메인의 공개 조회 계약을 사용하고 빈 결과를 200으로 반환한다.
-- OpenAPI와 코드에 플랫폼 운영자·카카오·Valkey·결제·노쇼 API가 없다.
+- 1차 MVP OpenAPI와 코드에는 플랫폼 운영자·결제·노쇼 API가 없고, 카카오 로그인과 Valkey Refresh Token은 고도화 분기에서만 추가한다.
 
 ## 추천안 결정 이력
 
