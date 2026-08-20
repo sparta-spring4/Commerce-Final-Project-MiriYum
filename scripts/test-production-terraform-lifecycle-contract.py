@@ -45,13 +45,32 @@ class ProductionTerraformLifecycleContractTest(unittest.TestCase):
         source = UP_SCRIPT.read_text(encoding="utf-8")
 
         self.assertLess(
-            source.index("Assert-BackendServiceFamily\n$rdsStatus"),
+            source.index("Assert-BackendAutoScalingConfiguration\n$rdsStatus"),
             source.index("start-db-instance"),
         )
         self.assertLess(
-            source.index("Assert-BackendServiceFamily\n$rdsStatus"),
+            source.index("Assert-BackendAutoScalingConfiguration\n$rdsStatus"),
             source.index("update-service"),
         )
+
+    def test_autoscaling_preflight_blocks_mutations_without_target_or_cpu_policy(self) -> None:
+        for script, rds_mutation, autoscaling_mutation in (
+            (DOWN_SCRIPT, "stop-db-instance", "Suspend-BackendAutoScaling"),
+            (UP_SCRIPT, "start-db-instance", "Restore-BackendAutoScalingCapacity"),
+        ):
+            source = script.read_text(encoding="utf-8")
+            preflight = source.index("Assert-BackendAutoScalingConfiguration\n$rdsStatus")
+
+            self.assertIn("describe-scalable-targets", source)
+            self.assertIn("--resource-ids $AutoscalingResourceId", source)
+            self.assertIn('Expected exactly one ECS Auto Scaling target', source)
+            self.assertIn("describe-scaling-policies", source)
+            self.assertIn("--policy-names $AutoscalingPolicyName", source)
+            self.assertIn("TargetTrackingScaling", source)
+            self.assertIn("ECSServiceAverageCPUUtilization", source)
+            self.assertLess(preflight, source.rindex(autoscaling_mutation))
+            self.assertLess(preflight, source.index("update-service"))
+            self.assertLess(preflight, source.index(rds_mutation))
 
     def test_scripts_converge_rds_transitional_states_before_mutation(self) -> None:
         up_source = UP_SCRIPT.read_text(encoding="utf-8")
