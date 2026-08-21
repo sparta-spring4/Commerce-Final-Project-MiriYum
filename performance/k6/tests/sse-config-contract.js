@@ -1,6 +1,6 @@
 import { check } from 'k6'
 
-import { loadSseConfig } from '../sse/config.js'
+import { loadSseConfig, requiredSmokeEndpointKinds } from '../sse/config.js'
 
 export const options = {
   thresholds: {
@@ -47,6 +47,9 @@ function errorMessage(action) {
 
 export default function () {
   check(null, {
+    'recovery requires smoke proof for all SSE endpoint kinds': () =>
+      requiredSmokeEndpointKinds('recovery', ['waiting-store-operator']).join(',')
+        === 'notification-consumer,waiting-consumer,waiting-store-operator',
     'production host is rejected before SSE resolution': () => {
       const message = errorMessage(() => loadSseConfig(validEnv({
         TARGET_ENV: 'staging',
@@ -73,7 +76,7 @@ export default function () {
       return message !== null && message.includes('SSE_SMOKE_PROOF_PATH')
     },
     'all SSE profiles are accepted with their required evidence': () => {
-      const profiles = ['smoke', 'reconnect', 'steady', 'slow-client', 'capacity']
+      const profiles = ['smoke', 'reconnect', 'steady', 'slow-client', 'capacity', 'recovery']
       return profiles.every((profile) => {
         const config = loadSseConfig(validEnv({
           SSE_PROFILE: profile,
@@ -89,9 +92,35 @@ export default function () {
             SSE_CONNECTIONS_PER_ACCOUNT: '7',
             SSE_ENDPOINT_KINDS: 'notification-consumer',
           } : {}),
+          ...(profile === 'recovery' ? {
+            SSE_CONNECTIONS: '1',
+            SSE_ENDPOINT_KINDS: 'waiting-store-operator',
+            SSE_RECOVERY_ARM_DELAY_SECONDS: '15',
+            SSE_RECOVERY_MAX_SECONDS: '6',
+            SSE_RECOVERY_TRIGGER_APPROVED: 'true',
+            SSE_RECOVERY_TRIGGER_IDEMPOTENCY_KEY: '123e4567-e89b-12d3-a456-426614174000',
+            SSE_RECOVERY_CLEANUP_IDEMPOTENCY_KEY: '223e4567-e89b-12d3-a456-426614174000',
+          } : {}),
         }))
         return config.profile === profile
       })
+    },
+    'recovery profile is single-scope bounded and explicitly approved': () => {
+      const config = loadSseConfig(validEnv({
+        SSE_PROFILE: 'recovery',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_CONNECTIONS: '1',
+        SSE_ENDPOINT_KINDS: 'waiting-store-operator',
+        SSE_RECOVERY_ARM_DELAY_SECONDS: '15',
+        SSE_RECOVERY_MAX_SECONDS: '6',
+        SSE_RECOVERY_TRIGGER_APPROVED: 'true',
+        SSE_RECOVERY_TRIGGER_IDEMPOTENCY_KEY: '123e4567-e89b-12d3-a456-426614174000',
+        SSE_RECOVERY_CLEANUP_IDEMPOTENCY_KEY: '223e4567-e89b-12d3-a456-426614174000',
+      }))
+      return config.profile === 'recovery'
+        && config.recoveryArmDelaySeconds === 15
+        && config.recoveryMaxSeconds === 6
+        && config.recoveryTriggerIdempotencyKey !== config.recoveryCleanupIdempotencyKey
     },
     'capacity profile requires a single-account overflow shape': () => {
       const wrongKinds = errorMessage(() => loadSseConfig(validEnv({

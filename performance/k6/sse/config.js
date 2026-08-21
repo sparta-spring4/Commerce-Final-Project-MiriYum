@@ -1,13 +1,17 @@
 import { validateShaEvidence } from '../config.js'
 import { assertSafeTarget, parsePositiveInt } from '../lib/safety.js'
 
-const PROFILES = new Set(['smoke', 'reconnect', 'steady', 'slow-client', 'capacity'])
+const PROFILES = new Set(['smoke', 'reconnect', 'steady', 'slow-client', 'capacity', 'recovery'])
 export const SSE_ENDPOINT_KINDS = Object.freeze([
   'notification-consumer',
   'waiting-consumer',
   'waiting-store-operator',
 ])
 const ENDPOINT_KINDS = new Set(SSE_ENDPOINT_KINDS)
+
+export function requiredSmokeEndpointKinds(profile, endpointKinds) {
+  return profile === 'recovery' ? SSE_ENDPOINT_KINDS : endpointKinds
+}
 
 function requireText(name, rawValue) {
   if (typeof rawValue !== 'string' || rawValue.trim() === '') {
@@ -74,7 +78,7 @@ export function loadSseConfig(env) {
 
   const profile = requireText('SSE_PROFILE', env.SSE_PROFILE)
   if (!PROFILES.has(profile)) {
-    throw new Error('SSE_PROFILE must be smoke, reconnect, steady, slow-client, or capacity')
+    throw new Error('SSE_PROFILE must be smoke, reconnect, steady, slow-client, capacity, or recovery')
   }
   if (targetEnv === 'staging' && env.STAGING_APPROVED !== 'true') {
     throw new Error('staging SSE execution requires STAGING_APPROVED=true')
@@ -90,10 +94,10 @@ export function loadSseConfig(env) {
 
   const connections = parsePositiveInt('SSE_CONNECTIONS', env.SSE_CONNECTIONS, 200)
   const endpointKinds = parseEndpointKinds(env.SSE_ENDPOINT_KINDS)
-  const httpProbeRate = profile === 'smoke'
+  const httpProbeRate = profile === 'smoke' || profile === 'recovery'
     ? null
     : parsePositiveInt('SSE_HTTP_PROBE_RATE', env.SSE_HTTP_PROBE_RATE, 100)
-  const httpMaxP95Ratio = profile === 'smoke'
+  const httpMaxP95Ratio = profile === 'smoke' || profile === 'recovery'
     ? null
     : parsePositiveInt('SSE_HTTP_MAX_P95_RATIO', env.SSE_HTTP_MAX_P95_RATIO, 10)
   const holdDurationSeconds = parsePositiveInt(
@@ -111,6 +115,10 @@ export function loadSseConfig(env) {
   let slowClientIdempotencyKey = null
   let slowClientMaxCleanupSeconds = null
   let companionMinLifetimeSeconds = null
+  let recoveryArmDelaySeconds = null
+  let recoveryMaxSeconds = null
+  let recoveryTriggerIdempotencyKey = null
+  let recoveryCleanupIdempotencyKey = null
   if (profile === 'slow-client') {
     if (endpointKinds.length !== 1 || endpointKinds[0] !== 'waiting-store-operator') {
       throw new Error('slow-client requires only waiting-store-operator')
@@ -150,6 +158,31 @@ export function loadSseConfig(env) {
       throw new Error('slow-client timing windows must be strictly ordered')
     }
   }
+  if (profile === 'recovery') {
+    if (connections !== 1
+      || endpointKinds.length !== 1
+      || endpointKinds[0] !== 'waiting-store-operator') {
+      throw new Error('recovery requires one waiting-store-operator connection')
+    }
+    if (env.SSE_RECOVERY_TRIGGER_APPROVED !== 'true') {
+      throw new Error('recovery requires SSE_RECOVERY_TRIGGER_APPROVED=true')
+    }
+    recoveryArmDelaySeconds = parsePositiveInt(
+      'SSE_RECOVERY_ARM_DELAY_SECONDS', env.SSE_RECOVERY_ARM_DELAY_SECONDS, 60,
+    )
+    recoveryMaxSeconds = parsePositiveInt(
+      'SSE_RECOVERY_MAX_SECONDS', env.SSE_RECOVERY_MAX_SECONDS, 60,
+    )
+    recoveryTriggerIdempotencyKey = requireUuid(
+      'SSE_RECOVERY_TRIGGER_IDEMPOTENCY_KEY', env.SSE_RECOVERY_TRIGGER_IDEMPOTENCY_KEY,
+    )
+    recoveryCleanupIdempotencyKey = requireUuid(
+      'SSE_RECOVERY_CLEANUP_IDEMPOTENCY_KEY', env.SSE_RECOVERY_CLEANUP_IDEMPOTENCY_KEY,
+    )
+    if (recoveryTriggerIdempotencyKey === recoveryCleanupIdempotencyKey) {
+      throw new Error('recovery trigger and cleanup idempotency keys must differ')
+    }
+  }
 
   const connectionsPerAccount = parsePositiveInt(
     'SSE_CONNECTIONS_PER_ACCOUNT',
@@ -186,6 +219,10 @@ export function loadSseConfig(env) {
     slowClientIdempotencyKey,
     slowClientMaxCleanupSeconds,
     companionMinLifetimeSeconds,
+    recoveryArmDelaySeconds,
+    recoveryMaxSeconds,
+    recoveryTriggerIdempotencyKey,
+    recoveryCleanupIdempotencyKey,
     ...shaEvidence,
   })
 }

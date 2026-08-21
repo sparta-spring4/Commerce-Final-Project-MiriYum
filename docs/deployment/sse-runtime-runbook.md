@@ -212,7 +212,42 @@ probe도 계속 성공해야 한다. burst 입력 복원 전에 다음 profile�
 
 ## Valkey 중단과 backend 교체
 
-장애 전 synthetic 계정의 세션과 승인된 public owner mutation을 준비한다. 해당 mutation이 없거나 owner 승인이 없으면 이 단계를 `BLOCKED`로 기록하고 임의 DB seed나 test-only endpoint를 만들지 않는다.
+장애 전 synthetic 계정의 세션과 승인된 public owner mutation을 준비한다. 해당 mutation이 없거나 owner 승인이 없으면 이 단계를 `BLOCKED`로 기록하고 임의 DB seed나 test-only endpoint를 만들지 않는다. `recovery` 프로필은 매장 운영자 scope 한 개만 사용하며, FIFO 선두 합성 팀을 `WAITING → CALLED`로 변경한 뒤 HTTP 상세에서 MySQL 상태를 확인하고 반드시 `CANCELLED`로 정리한다.
+
+먼저 세 endpoint smoke를 통과한 동일 SHA·fixture를 사용한다. 아래 실행은 로그인과 refresh session cleanup을 먼저 끝낸 뒤 `SSE_RECOVERY_READY`를 출력하고 15초 동안 대기한다. 운영자는 이 문구를 확인한 뒤 Valkey를 중단해야 하며, 중단 명령과 완료 시각은 별도 staging 실행 증거로 남긴다. Valkey 중단 증거가 없으면 빠른 두 번째 신호를 MySQL correction 결과로 해석하지 않는다.
+
+```powershell
+$recoveryRunId = 'staging-sse-recovery-YYYYMMDD-NN'
+$triggerKey = '<승인된 호출 UUID>'
+$cleanupKey = '<호출 UUID와 다른 승인된 취소 UUID>'
+
+docker compose --env-file deploy/local/.env `
+  -f deploy/local/docker-compose.dev.yml `
+  -f deploy/local/docker-compose.loadtest.yml `
+  --profile loadtest run --rm --env-from-file $credentialFile sse-loadtest run `
+  -e TARGET_ENV=local `
+  -e BASE_URL=https://loadtest-proxy:8443 `
+  -e ALLOWED_HOSTS=loadtest-proxy `
+  -e SSE_PROFILE=recovery `
+  -e SSE_FIXTURE_PATH=$fixturePath `
+  -e SSE_RUN_ID=$recoveryRunId `
+  -e SSE_SMOKE_PROOF_PATH=/results/$smokeRunId.json `
+  -e COMMIT_SHA=$commitSha `
+  -e HARNESS_COMMIT_SHA=$commitSha `
+  -e SSE_CONNECTIONS=1 `
+  -e SSE_CONNECTIONS_PER_ACCOUNT=1 `
+  -e SSE_HOLD_DURATION_SECONDS=30 `
+  -e SSE_SLOW_CLIENT_DELAY_SECONDS=1 `
+  -e SSE_ENDPOINT_KINDS=waiting-store-operator `
+  -e SSE_RECOVERY_ARM_DELAY_SECONDS=15 `
+  -e SSE_RECOVERY_MAX_SECONDS=6 `
+  -e SSE_RECOVERY_TRIGGER_APPROVED=true `
+  -e SSE_RECOVERY_TRIGGER_IDEMPOTENCY_KEY=$triggerKey `
+  -e SSE_RECOVERY_CLEANUP_IDEMPOTENCY_KEY=$cleanupKey `
+  /scripts/sse/main.js
+```
+
+staging에서는 위와 같은 입력을 승인된 staging host·SHA·clean harness gate로 바꾼다. summary의 `recoveryDuration.max`, `recoveryHttpVerified.count=1`, `recoveryCleanupSuccessful.count=1`과 threshold 전체 성공을 기록한다. 계정·매장·팀·cursor·Token·idempotency key 원문은 기록하지 않는다.
 
 ```powershell
 docker compose --env-file deploy/local/.env `

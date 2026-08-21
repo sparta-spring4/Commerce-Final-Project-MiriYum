@@ -108,6 +108,24 @@ export default function () {
       return opened.result.classification === 'success'
         && opened.transport.closeCount === 0
     },
+    'recovery closes only after the second validated changed frame': () => {
+      let firstCallbacks = 0
+      let recoveredCallbacks = 0
+      const opened = openWith({
+        transport: fakeTransport({ events: [validEvent(), validEvent('notifications.changed', 'opaque_cursor-2')] }),
+        behavior: {
+          mode: 'recovery',
+          minimumValidEvents: 2,
+          onFirstValidEvent: () => { firstCallbacks += 1 },
+          onRecoveryValidEvent: () => { recoveredCallbacks += 1 },
+        },
+      })
+      return opened.result.classification === 'success'
+        && opened.result.validEvents === 2
+        && opened.transport.closeCount === 1
+        && firstCallbacks === 1
+        && recoveredCallbacks === 1
+    },
     'slow client accepts server cleanup after pausing on the initial changed frame': () => {
       const delays = []
       let firstValidCallbacks = 0
