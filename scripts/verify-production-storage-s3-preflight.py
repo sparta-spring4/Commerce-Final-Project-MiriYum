@@ -16,15 +16,24 @@ def list_value(value):
     return value if isinstance(value, list) else [value]
 
 
-def has_statement(policy, sid, actions, resources):
-    for statement in statements(policy):
-        if statement.get("Sid") != sid or statement.get("Effect") != "Allow":
-            continue
-        if set(actions).issubset(set(list_value(statement.get("Action", [])))) and set(resources).issubset(
-            set(list_value(statement.get("Resource", [])))
-        ):
-            return True
-    return False
+def has_exact_allow_policy(policy, expected_statements):
+    allow_statements = [
+        statement for statement in statements(policy) if statement.get("Effect") == "Allow"
+    ]
+    if len(allow_statements) != len(expected_statements):
+        return False
+
+    for statement in allow_statements:
+        sid = statement.get("Sid")
+        expected = expected_statements.get(sid)
+        if expected is None or set(statement) != {"Sid", "Effect", "Action", "Resource"}:
+            return False
+        actions, resources = expected
+        if set(list_value(statement["Action"])) != set(actions):
+            return False
+        if set(list_value(statement["Resource"])) != set(resources):
+            return False
+    return True
 
 
 def tls_only(policy, bucket_arn):
@@ -75,8 +84,20 @@ def main():
         .get("ApplyServerSideEncryptionByDefault", {}).get("SSEAlgorithm") == "AES256",
         all(public_access.get(name) is True for name in ["BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets"]),
         tls_only(bucket_policy, bucket_arn),
-        has_statement(task_policy, "ManagePublicImageObjects", ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], [f"{bucket_arn}/public/stores/*", f"{bucket_arn}/public/menus/*"]),
-        has_statement(execution_policy, "ReadProductionStorageBucketParameter", ["ssm:GetParameters"], [parameter_arn]),
+        has_exact_allow_policy(
+            task_policy,
+            {
+                "ReadBucketVersioning": (["s3:GetBucketVersioning"], [bucket_arn]),
+                "ManagePublicImageObjects": (
+                    ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+                    [f"{bucket_arn}/public/stores/*", f"{bucket_arn}/public/menus/*"],
+                ),
+            },
+        ),
+        has_exact_allow_policy(
+            execution_policy,
+            {"ReadProductionStorageBucketParameter": (["ssm:GetParameters"], [parameter_arn])},
+        ),
     ]
     if not all(valid):
         print("Production S3 activation preflight failed.", file=sys.stderr)

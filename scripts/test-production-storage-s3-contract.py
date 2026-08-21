@@ -66,7 +66,10 @@ class ProductionS3StorageContractTest(unittest.TestCase):
                 "public_access": {"PublicAccessBlockConfiguration": {"BlockPublicAcls": True, "IgnorePublicAcls": True, "BlockPublicPolicy": True, "RestrictPublicBuckets": True}},
                 "policy": {"Policy": json.dumps({"Statement": [{"Sid": "DenyInsecureTransport", "Effect": "Deny", "Action": "s3:*", "Resource": [f"arn:aws:s3:::{bucket}", f"arn:aws:s3:::{bucket}/*"], "Condition": {"Bool": {"aws:SecureTransport": "false"}}}]})},
             },
-            "task_policy": {"Statement": [{"Sid": "ManagePublicImageObjects", "Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], "Resource": [f"arn:aws:s3:::{bucket}/public/stores/*", f"arn:aws:s3:::{bucket}/public/menus/*"]}]},
+            "task_policy": {"Statement": [
+                {"Sid": "ReadBucketVersioning", "Effect": "Allow", "Action": ["s3:GetBucketVersioning"], "Resource": f"arn:aws:s3:::{bucket}"},
+                {"Sid": "ManagePublicImageObjects", "Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], "Resource": [f"arn:aws:s3:::{bucket}/public/stores/*", f"arn:aws:s3:::{bucket}/public/menus/*"]},
+            ]},
             "execution_policy": {"Statement": [{"Sid": "ReadProductionStorageBucketParameter", "Effect": "Allow", "Action": ["ssm:GetParameters"], "Resource": f"arn:aws:ssm:{region}:{account_id}:parameter/miriyum/production/storage-s3-bucket"}]},
         }
 
@@ -102,11 +105,29 @@ class ProductionS3StorageContractTest(unittest.TestCase):
             drift["parameter"]["Value"] = "unexpected-bucket"
             self.assertNotEqual(0, run(drift).returncode)
             wrong_prefix = json.loads(json.dumps(valid))
-            wrong_prefix["task_policy"]["Statement"][0]["Resource"][1] = f"arn:aws:s3:::{bucket}/public/other/*"
+            wrong_prefix["task_policy"]["Statement"][1]["Resource"][1] = f"arn:aws:s3:::{bucket}/public/other/*"
             self.assertNotEqual(0, run(wrong_prefix).returncode)
             missing_ssm = json.loads(json.dumps(valid))
             missing_ssm["execution_policy"]["Statement"][0]["Action"] = []
             self.assertNotEqual(0, run(missing_ssm).returncode)
+            extra_action = json.loads(json.dumps(valid))
+            extra_action["task_policy"]["Statement"][1]["Action"].append("s3:ListBucket")
+            self.assertNotEqual(0, run(extra_action).returncode)
+            extra_resource = json.loads(json.dumps(valid))
+            extra_resource["task_policy"]["Statement"][1]["Resource"].append(
+                f"arn:aws:s3:::{bucket}/public/other/*"
+            )
+            self.assertNotEqual(0, run(extra_resource).returncode)
+            extra_allow_statement = json.loads(json.dumps(valid))
+            extra_allow_statement["task_policy"]["Statement"].append(
+                {
+                    "Sid": "UnexpectedImageRead",
+                    "Effect": "Allow",
+                    "Action": "s3:GetObject",
+                    "Resource": f"arn:aws:s3:::{bucket}/public/other/*",
+                }
+            )
+            self.assertNotEqual(0, run(extra_allow_statement).returncode)
 
 
 if __name__ == "__main__":
