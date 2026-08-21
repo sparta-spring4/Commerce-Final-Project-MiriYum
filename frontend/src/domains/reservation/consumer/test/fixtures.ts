@@ -2,11 +2,13 @@ import { http } from 'msw'
 import { successResponse } from '../../../../test/msw/envelope'
 import type { components as MenuHoldComponents } from '../../../../shared/api/generated/menu-hold-pickup'
 import { storeDetail } from '../../../store/public/test/fixtures'
+import type { components as ReservationComponents } from '../../../../shared/api/generated/reservation'
 import type { ReservationDetail } from '../model/draft'
 
 export const STORE_ID = '01JBQ8Z4T7K2N9V6M3P5R8W1XA'
 export const MENU_ID = '01JBQ8Z4T7K2N9V6M3P5R8W1MA'
 export const RESERVATION_ID = '01JBQ8Z4T7K2N9V6M3P5R8W1R1'
+export const RESERVATION_REQUEST_ID = '01JBQ8Z4T7K2N9V6M3P5R8W1Q1'
 
 export const RESERVATIONS_PATH = '/api/v1/consumers/me/reservations'
 export const RESERVATION_DETAIL_PATH =
@@ -81,6 +83,30 @@ export function reservationDetail(
     cancellationReason: null,
     depositDisposition: null,
     createdAt: '2026-08-11T10:00:00+09:00',
+    ...overrides,
+  }
+}
+
+type ReservationRequest = ReservationComponents['schemas']['ReservationRequest']
+
+export function reservationRequest(
+  overrides: Partial<ReservationRequest> = {},
+): ReservationRequest {
+  return {
+    reservationRequestId: RESERVATION_REQUEST_ID,
+    status: 'AWAITING_PAYMENT',
+    expiresAt: '2026-09-01T18:50:00+09:00',
+    paymentPreparation: {
+      paymentId: '910000000000000001',
+      portOnePaymentId: 'payment-reservation-910000000000000001',
+      orderName: '파스타 마스터즈 예약금',
+      amountMinor: 10000,
+      currency: 'KRW',
+      sourceExpiresAt: '2026-09-01T18:50:00+09:00',
+      status: 'READY',
+    },
+    abandonmentRequested: false,
+    reservation: null,
     ...overrides,
   }
 }

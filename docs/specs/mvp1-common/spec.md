@@ -62,7 +62,7 @@
 
 ### 확정값
 
-- Access JWT 유효기간은 발급 시각부터 1시간이다.
+- AUTH-007의 2026-08-13 확정에 따라 Access JWT 유효기간은 발급 시각부터 15분이다. 이 값은 2026-07-28의 1시간 결정을 대체한다.
 - Refresh JWT 유효기간은 발급 시각부터 14일이다.
 - 1차 MVP의 일반 사용자·매장 운영자 토큰 namespace에 같은 유효기간을 적용한다. 플랫폼 운영자 인증은 고도화 구현 시 같은 기본 수명을 적용한다.
 - 로컬·개발·운영 런타임 프로필은 같은 유효기간을 사용한다. 만료 경계 검증을 위한 테스트 설정만 더 짧은 값을 주입할 수 있다.
@@ -76,7 +76,7 @@
 
 ### 참고 기준
 
-- Agora 운영·Docker 프로필의 Access Token 1시간과 Refresh Token 14일 설정을 수치 참고 기준으로 사용했다.
+- Agora 운영·Docker 프로필의 Access Token 1시간과 Refresh Token 14일 설정은 과거 참고값이며, 현재 계약값은 Access 15분·Refresh 14일이다.
 - Agora 로컬 프로필의 Access Token 10시간 값은 환경별 계약 불일치를 만들기 때문에 적용하지 않았다.
 
 ## D-003 브라우저 토큰 전달·저장과 CSRF 경계
@@ -109,7 +109,7 @@
 
 ### 단계 경계와 인수 조건
 
-- Access JWT는 1시간, Refresh JWT는 14일의 기존 D-002 수명을 유지한다.
+- Access JWT는 15분, Refresh JWT는 14일의 D-002 확정 수명을 유지한다.
 - `1차 MVP`의 Access·Refresh JWT는 서버 정상 목록·폐기 목록 없이 검증한다. Refresh Token 회전·폐기·재사용 탐지와 Valkey 상태 관리는 기존대로 `고도화` 범위다.
 - 로그인·재발급 응답과 브라우저 저장소에 Refresh Token 원문이 노출되지 않는다.
 - 페이지 새로고침 뒤 유효한 Refresh Token 쿠키로 같은 계정 shell의 Access JWT만 복구된다.
