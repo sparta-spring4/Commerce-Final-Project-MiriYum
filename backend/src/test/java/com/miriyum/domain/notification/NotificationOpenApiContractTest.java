@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import com.miriyum.domain.notification.dto.source.NotificationResourceType;
 import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
+import com.miriyum.domain.notification.exception.NotificationErrorCode;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -21,6 +22,12 @@ class NotificationOpenApiContractTest {
             "..", "docs", "specs", "notification", "openapi.yaml");
     private static final String NOTIFICATION_EVENTS_PATH =
             "/api/v1/consumers/me/notification-events";
+    private static final String UNREAD_COUNT_PATH =
+            "/api/v1/consumers/me/notifications/unread-count";
+    private static final String NOTIFICATION_READ_PATH =
+            "/api/v1/consumers/me/notifications/{notificationId}/reads";
+    private static final String ALL_NOTIFICATION_READS_PATH =
+            "/api/v1/consumers/me/notifications/reads";
     private static final Set<String> WAITING_PURPOSES = Set.of(
             "WAITING_ENTRY_IMMINENT",
             "WAITING_CALLED",
@@ -107,6 +114,8 @@ class NotificationOpenApiContractTest {
                         "현재 MySQL high-watermark",
                         "한 번",
                         "GET /api/v1/consumers/me/notifications",
+                        "미확인 개수",
+                        "읽음 변경",
                         "keepalive",
                         "PENDING·실패·취소 작업은 신호 대상이 아니다");
         assertThat(streamSchema.get("example").toString())
@@ -140,6 +149,50 @@ class NotificationOpenApiContractTest {
                 "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse");
         assertThat(map(invalidCursorJson.get("example")))
                 .containsEntry("code", "COMMON_001");
+    }
+
+    @Test
+    void readContractsRemainContractOnlyUntilTheDeploymentGateCompletes()
+            throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> paths = map(document.get("paths"));
+
+        assertContractOnly(paths, UNREAD_COUNT_PATH, "get");
+        assertContractOnly(paths, NOTIFICATION_READ_PATH, "post");
+        assertContractOnly(paths, ALL_NOTIFICATION_READS_PATH, "post");
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> historyItem = map(schemas.get("NotificationHistoryItem"));
+        assertThat(list(historyItem.get("required"))).contains("readAt");
+        assertThat(list(map(map(historyItem.get("properties")).get("readAt")).get("oneOf")))
+                .extracting(candidate -> map(candidate).get("type"))
+                .contains("null");
+
+        Map<String, Object> unreadData = map(schemas.get("NotificationUnreadCountData"));
+        assertThat(list(unreadData.get("required"))).containsExactly("unreadCount");
+        assertThat(map(map(unreadData.get("properties")).get("unreadCount")))
+                .containsEntry("minimum", 0);
+
+        Map<String, Object> readResponses = map(map(paths.get(NOTIFICATION_READ_PATH))
+                .get("post"));
+        assertThat(map(readResponses.get("responses"))).containsKey("404");
+        assertThat(NotificationErrorCode.valueOf("NOTIFICATION_NOT_FOUND").getCode())
+                .isEqualTo("NOTIFICATION_003");
+    }
+
+    private static void assertContractOnly(
+            Map<String, Object> paths,
+            String path,
+            String method
+    ) {
+        assertThat(paths).containsKey(path);
+        Map<String, Object> pathItem = map(paths.get(path));
+        assertThat(pathItem)
+                .containsEntry("x-miriyum-runtime-status", "contract-only")
+                .containsEntry("x-miriyum-owner-issue", 500)
+                .containsKey(method);
+        assertThat(list(map(pathItem.get(method)).get("security")))
+                .containsExactly(Map.of("bearerAuth", List.of()));
     }
 
     @Test

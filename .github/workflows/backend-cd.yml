@@ -28,6 +28,7 @@ env:
   ECR_REPOSITORY: ${{ vars.AWS_ECR_REPOSITORY }}
   EC2_INSTANCE_ID: ${{ vars.AWS_EC2_INSTANCE_ID }}
   BACKEND_DEPLOYMENT_ENVIRONMENT: staging-backend
+  NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA: 515531e122ebbce13d8eead4a3ff15a94c25e0b3
 
 jobs:
   verify-source:
@@ -54,7 +55,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Verify automatic deployment uses the current dev revision
         id: source
@@ -172,17 +173,30 @@ jobs:
 
           echo "tag=$image_tag" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout successful CI revision
-        if: github.event_name == 'workflow_run'
+      - name: Checkout trusted deployment control revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.workflow_sha }}
 
-      - name: Checkout manual deployment revision
-        if: github.event_name == 'workflow_dispatch'
+      - name: Preserve trusted notification read deployment controls
+        run: |
+          cp scripts/test-notification-read-deployment-gate.py \
+            "$RUNNER_TEMP/notification-read-deployment-gate.py"
+          cp deploy/deploy.sh "$RUNNER_TEMP/notification-read-deploy.sh"
+
+      - name: Checkout selected deployment revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.image_tag }}
+          ref: ${{ steps.image.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Verify notification read minimum compatible writer revision
+        env:
+          DEPLOY_SHA: ${{ steps.image.outputs.tag }}
+        run: |
+          python3 "$RUNNER_TEMP/notification-read-deployment-gate.py" verify-ancestor \
+            --minimum-sha "$NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA" \
+            --candidate-sha "$DEPLOY_SHA"
 
       - name: Configure AWS credentials through OIDC
         uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5.1.0
@@ -331,7 +345,7 @@ jobs:
           nginx_https_base64=$(base64 --wrap=0 deploy/nginx/templates/https.conf.template)
           nginx_sse_base64=$(base64 --wrap=0 deploy/nginx/templates/snippets/sse-location.conf)
           nginx_entrypoint_base64=$(base64 --wrap=0 deploy/nginx/entrypoint/40-select-server-config.sh)
-          script_base64=$(base64 --wrap=0 deploy/deploy.sh)
+          script_base64=$(base64 --wrap=0 "$RUNNER_TEMP/notification-read-deploy.sh")
           certbot_script_base64=$(base64 --wrap=0 deploy/certbot.sh)
           cloudwatch_base64=$(base64 --wrap=0 deploy/monitoring/cloudwatch-agent-config.json)
           valkey_memory_metrics_base64=$(base64 --wrap=0 deploy/monitoring/publish-valkey-memory-metrics.sh)

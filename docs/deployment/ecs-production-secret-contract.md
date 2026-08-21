@@ -26,11 +26,18 @@ Create one JSON secret named `miriyum/production/application` after team approva
   "MIRIYUM_JWT_SECRET": "...",
   "MIRIYUM_STORE_GEOCODING_REST_API_KEY": "...",
   "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET": "...",
+  "MIRIYUM_WAITING_HISTORY_CURSOR_SECRET": "...",
   "MIRIYUM_VALKEY_PASSWORD": "..."
 }
 ```
 
 Do not commit values, the final secret ARN, database endpoints, ALB domain names, or task role ARNs.
+
+Generate `MIRIYUM_WAITING_HISTORY_CURSOR_SECRET` as a dedicated random value of at least 32
+characters. Keep it stable across ordinary deployments and backend instances. Rotating it is
+allowed, but every cursor issued with the previous value becomes invalid and clients must restart
+pagination without a cursor. Do not reuse the JWT, notification-history cursor, or other signing
+secrets.
 
 ## Store geocoding key migration
 
@@ -78,6 +85,8 @@ Before registering the task definition, replace these placeholders through the a
 `MIRIYUM_VALKEY_SSL_ENABLED=true` is a reviewed non-secret task environment value, not a JSON secret key. It is required because the production ElastiCache Valkey connection uses TLS; the local and staging default remains `false` for the Docker Compose Valkey container.
 
 The execution role needs `secretsmanager:GetSecretValue` for the application secret ARN. Add the separate runtime config secret ARN only after the runtime config flag is explicitly enabled. The task role receives only the runtime permissions the application needs; it must not receive broad Secrets Manager access.
+
+Before deploying the #467 image, complete [#543](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/543): add the dedicated waiting-history cursor key to the production application secret and register a live backend task revision with exactly one matching `MIRIYUM_WAITING_HISTORY_CURSOR_SECRET` secret mapping. Production CD reads only the current task definition metadata and rejects a missing or duplicate mapping, a base ARN different from the existing `MIRIYUM_DB_URL` application secret mapping, or a mismatched JSON key selector before ECR login and image rollout. It does not fetch or log the secret value and does not add the mapping automatically.
 
 ## Central runtime config
 
