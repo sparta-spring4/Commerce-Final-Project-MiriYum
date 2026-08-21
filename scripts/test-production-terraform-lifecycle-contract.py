@@ -11,6 +11,7 @@ DOWN_SCRIPT = REPOSITORY_ROOT / "infra/terraform/production/scripts/production-d
 UP_SCRIPT = REPOSITORY_ROOT / "infra/terraform/production/scripts/production-up.ps1"
 AUTOSCALING_CONFIGURATION = REPOSITORY_ROOT / "infra/terraform/production/autoscaling.tf"
 TERRAFORM_VERSIONS = REPOSITORY_ROOT / "infra/terraform/production/versions.tf"
+RUNTIME_IMPORTS = REPOSITORY_ROOT / "infra/terraform/production/imports.tf"
 
 
 class ProductionTerraformLifecycleContractTest(unittest.TestCase):
@@ -121,10 +122,18 @@ class ProductionTerraformLifecycleContractTest(unittest.TestCase):
             "generated-rds.tf",
             "generated-routes.tf",
             "generated-security-groups.tf",
-            "imports.tf",
             "moved.tf",
         ):
             self.assertFalse((AUTOSCALING_CONFIGURATION.parent / filename).exists(), filename)
+
+    def test_runtime_state_imports_only_existing_autoscaling_resources(self) -> None:
+        source = RUNTIME_IMPORTS.read_text(encoding="utf-8")
+
+        self.assertEqual(2, source.count("import {"))
+        self.assertIn("to = aws_appautoscaling_target.production_backend", source)
+        self.assertIn("to = aws_appautoscaling_policy.production_backend_cpu", source)
+        self.assertNotIn("aws_ecs_service", source)
+        self.assertNotIn("aws_db_instance", source)
 
     def test_terraform_apply_preserves_runtime_off_state(self) -> None:
         source = AUTOSCALING_CONFIGURATION.read_text(encoding="utf-8")
