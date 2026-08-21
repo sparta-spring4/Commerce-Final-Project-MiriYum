@@ -38,7 +38,8 @@
     {
       "name": "miriyum.store.onboarding.dev-stub-enabled",
       "type": "java.lang.Boolean",
-      "description": "개발·테스트 환경에서만 사업자등록 자동검사 Stub을 활성화합니다."
+      "description": "사업자등록 자동검사 Mock 사용 여부입니다. false이면 검사를 fail-closed합니다.",
+      "defaultValue": true
     },
     {
       "name": "miriyum.storage.s3.enabled",

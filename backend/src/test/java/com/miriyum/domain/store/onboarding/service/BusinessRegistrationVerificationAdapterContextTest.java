@@ -13,26 +13,28 @@ class BusinessRegistrationVerificationAdapterContextTest {
                     UnavailableBusinessRegistrationVerificationAdapter.class);
 
     @Test
-    void defaultVerifierFailsClosed() {
+    void defaultVerifierUsesMock() {
         context.run(result -> {
-            assertThat(result).doesNotHaveBean(MockBusinessRegistrationVerificationAdapter.class);
             assertThat(result).hasSingleBean(BusinessRegistrationVerificationPort.class);
+            assertThat(result).hasSingleBean(MockBusinessRegistrationVerificationAdapter.class);
             assertThat(result.getBean(BusinessRegistrationVerificationPort.class))
-                    .isInstanceOf(UnavailableBusinessRegistrationVerificationAdapter.class);
-            assertThat(result.getBean(BusinessRegistrationVerificationPort.class)
-                    .verify(null).outcome())
-                    .isEqualTo(BusinessRegistrationVerificationPort.Outcome.RETRYABLE_FAILURE);
+                    .isInstanceOf(MockBusinessRegistrationVerificationAdapter.class);
+            assertThat(result)
+                    .doesNotHaveBean(UnavailableBusinessRegistrationVerificationAdapter.class);
         });
     }
 
     @Test
-    void mockVerifierRequiresExplicitDevelopmentSetting() {
-        context.withPropertyValues("miriyum.store.onboarding.dev-stub-enabled=true")
+    void explicitFalseDisablesMockAndFailsClosed() {
+        context.withPropertyValues("miriyum.store.onboarding.dev-stub-enabled=false")
                 .run(result -> {
                     assertThat(result).hasSingleBean(BusinessRegistrationVerificationPort.class);
-                    assertThat(result).hasSingleBean(MockBusinessRegistrationVerificationAdapter.class);
-                    assertThat(result)
-                            .doesNotHaveBean(UnavailableBusinessRegistrationVerificationAdapter.class);
+                    assertThat(result).doesNotHaveBean(MockBusinessRegistrationVerificationAdapter.class);
+                    assertThat(result.getBean(BusinessRegistrationVerificationPort.class))
+                            .isInstanceOf(UnavailableBusinessRegistrationVerificationAdapter.class);
+                    assertThat(result.getBean(BusinessRegistrationVerificationPort.class)
+                            .verify(null).outcome())
+                            .isEqualTo(BusinessRegistrationVerificationPort.Outcome.RETRYABLE_FAILURE);
                 });
     }
 }

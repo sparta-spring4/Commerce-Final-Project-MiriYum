@@ -10,7 +10,8 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(
         prefix = "miriyum.store.onboarding",
         name = "dev-stub-enabled",
-        havingValue = "true")
+        havingValue = "true",
+        matchIfMissing = true)
 public class MockBusinessRegistrationVerificationAdapter
         implements BusinessRegistrationVerificationPort {
 

@@ -10,8 +10,7 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(
         prefix = "miriyum.store.onboarding",
         name = "dev-stub-enabled",
-        havingValue = "false",
-        matchIfMissing = true)
+        havingValue = "false")
 public class UnavailableBusinessRegistrationVerificationAdapter
         implements BusinessRegistrationVerificationPort {
 
