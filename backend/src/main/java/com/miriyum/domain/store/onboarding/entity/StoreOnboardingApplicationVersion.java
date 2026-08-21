@@ -12,6 +12,11 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.time.LocalDate;
+import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
+import com.miriyum.domain.store.model.VerifiedStoreGeocoding;
+import java.math.BigDecimal;
+import tools.jackson.databind.ObjectMapper;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -63,6 +68,18 @@ public class StoreOnboardingApplicationVersion {
     @Column(name = "address", nullable = false, length = 300)
     private String address;
 
+    @Column(name = "latitude", nullable = false, precision = 18, scale = 15)
+    private BigDecimal latitude;
+
+    @Column(name = "longitude", nullable = false, precision = 18, scale = 15)
+    private BigDecimal longitude;
+
+    @Column(name = "verified_address", nullable = false, length = 300)
+    private String verifiedAddress;
+
+    @Column(name = "geocoding_verified_at", nullable = false)
+    private Instant geocodingVerifiedAt;
+
     @Column(name = "time_zone_id", nullable = false, length = 64)
     private String timeZoneId;
 
@@ -81,6 +98,21 @@ public class StoreOnboardingApplicationVersion {
 
     @Column(name = "pickup_enabled", nullable = false)
     private boolean pickupEnabled;
+
+    @Column(name = "legal_business_name", nullable = false, length = 200)
+    private String legalBusinessName;
+
+    @Column(name = "representative_name", nullable = false, length = 100)
+    private String representativeName;
+
+    @Column(name = "opening_date", nullable = false)
+    private LocalDate openingDate;
+
+    @Column(name = "primary_business_category", nullable = false, length = 100)
+    private String primaryBusinessCategory;
+
+    @Column(name = "primary_business_item", nullable = false, length = 100)
+    private String primaryBusinessItem;
 
     @Column(name = "applicant_self_attested_at", nullable = false)
     private Instant applicantSelfAttestedAt;
@@ -102,4 +134,55 @@ public class StoreOnboardingApplicationVersion {
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
+
+    public static StoreOnboardingApplicationVersion snapshot(
+            long applicationId,
+            long version,
+            String supplementKey,
+            String fingerprint,
+            String evidenceId,
+            StoreCreateRequest request,
+            VerifiedStoreGeocoding geocoding,
+            boolean reviewRequired,
+            String automaticPolicyVersion,
+            String manualPolicyVersion,
+            Instant now,
+            ObjectMapper objectMapper
+    ) {
+        StoreOnboardingApplicationVersion snapshot = new StoreOnboardingApplicationVersion();
+        snapshot.storeOnboardingApplicationId = applicationId;
+        snapshot.applicationVersion = version;
+        snapshot.supplementIdempotencyKey = supplementKey;
+        snapshot.requestFingerprint = fingerprint;
+        snapshot.businessRegistrationEvidenceId = evidenceId;
+        snapshot.businessRegistrationNumber = request.businessRegistrationNumber();
+        snapshot.businessType = request.businessType();
+        snapshot.name = request.name();
+        snapshot.description = request.description();
+        snapshot.region = request.region();
+        snapshot.address = request.address();
+        snapshot.latitude = geocoding.latitude();
+        snapshot.longitude = geocoding.longitude();
+        snapshot.verifiedAddress = geocoding.verifiedAddress();
+        snapshot.geocodingVerifiedAt = geocoding.verifiedAt();
+        snapshot.timeZoneId = request.timeZoneId();
+        snapshot.storeCategoryCode = request.storeCategoryCode();
+        snapshot.tagCodesJson = objectMapper.writeValueAsString(request.tagCodes());
+        snapshot.reservationEnabled = request.modes().reservationEnabled();
+        snapshot.menuHoldEnabled = request.modes().menuHoldEnabled();
+        snapshot.pickupEnabled = request.modes().pickupEnabled();
+        snapshot.legalBusinessName = request.legalBusinessName();
+        snapshot.representativeName = request.representativeName();
+        snapshot.openingDate = request.openingDate();
+        snapshot.primaryBusinessCategory = request.primaryBusinessCategory();
+        snapshot.primaryBusinessItem = request.primaryBusinessItem();
+        snapshot.applicantSelfAttestedAt = now;
+        snapshot.requiredTermsAgreedAt = now;
+        snapshot.requiredTermsVersion = "STORE_ONBOARDING_REQUIRED_TERMS_V1";
+        snapshot.reviewRequired = reviewRequired;
+        snapshot.automaticCheckPolicyVersion = automaticPolicyVersion;
+        snapshot.manualReviewPolicyVersion = manualPolicyVersion;
+        snapshot.createdAt = now;
+        return snapshot;
+    }
 }

@@ -34,7 +34,21 @@ public class BusinessRegistrationEvidenceUploadService {
         if (applicationId <= 0 || applicationVersion <= 0) {
             throw new IllegalArgumentException("application id and version must be positive");
         }
-        ValidatedBusinessRegistrationEvidence validated = validator.validate(upload);
+        return storePending(applicationId, applicationVersion, validator.validate(upload));
+    }
+
+    public ValidatedBusinessRegistrationEvidence validate(MultipartFile upload) {
+        return validator.validate(upload);
+    }
+
+    public PendingEvidence storePending(
+            long applicationId,
+            long applicationVersion,
+            ValidatedBusinessRegistrationEvidence validated
+    ) {
+        if (applicationId <= 0 || applicationVersion <= 0 || validated == null) {
+            throw new IllegalArgumentException("application id, version, and evidence are required");
+        }
         byte[] bytes = validated.bytes();
         String objectKey = "private/store-onboarding/" + applicationId + "/versions/"
                 + applicationVersion + "/" + validated.sha256();

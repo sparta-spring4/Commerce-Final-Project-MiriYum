@@ -63,4 +63,25 @@ public class StoreOnboardingAutomaticCheckJob {
     @Version
     @Column(name = "row_version", nullable = false)
     private Long rowVersion;
+
+    public static StoreOnboardingAutomaticCheckJob pending(
+            long applicationId,
+            long applicationVersion,
+            Instant now,
+            Instant nextAttemptAt
+    ) {
+        if (applicationId <= 0 || applicationVersion <= 0 || now == null || nextAttemptAt == null) {
+            throw new IllegalArgumentException("automatic check job fields are required");
+        }
+        StoreOnboardingAutomaticCheckJob job = new StoreOnboardingAutomaticCheckJob();
+        job.storeOnboardingApplicationId = applicationId;
+        job.applicationVersion = applicationVersion;
+        job.status = AutomaticCheckStatus.PENDING;
+        job.leaseToken = 0L;
+        job.attemptCount = 0;
+        job.nextAttemptAt = nextAttemptAt;
+        job.createdAt = now;
+        job.updatedAt = now;
+        return job;
+    }
 }

@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -23,11 +24,13 @@ import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.enums.VerificationStatus;
 import com.miriyum.domain.store.service.StoreCommandResult;
 import com.miriyum.domain.store.service.StoreService;
+import com.miriyum.domain.store.onboarding.service.StoreOnboardingSubmissionService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
+import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -43,6 +46,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockMultipartFile;
+import tools.jackson.databind.ObjectMapper;
 
 @WebMvcTest(StoreController.class)
 @Import({StoreManagementSecurityConfig.class, GlobalExceptionHandler.class})
@@ -55,6 +60,9 @@ class StoreControllerTest {
 
     @MockitoBean
     private StoreService storeService;
+
+    @MockitoBean
+    private StoreOnboardingSubmissionService onboardingSubmissionService;
 
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
@@ -78,7 +86,7 @@ class StoreControllerTest {
     }
 
     @Test
-    void createReturnsCreatedEnvelope() throws Exception {
+    void legacyJsonCreateIsRejected() throws Exception {
         authenticateStoreOperator(11L);
         given(storeService.create(eq(11L), any(IdempotencyKey.class), any()))
                 .willReturn(new StoreCommandResult(201, managedStore(7L)));
@@ -88,16 +96,39 @@ class StoreControllerTest {
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validCreateJson()))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.storeId").isString())
-                .andExpect(jsonPath("$.data.storeId").value("7"))
-                .andExpect(jsonPath("$.data.operationStatus").value("OPEN"))
-                .andExpect(jsonPath("$.data.geocoding.status").value("VERIFIED"))
-                .andExpect(jsonPath("$.data.geocoding.latitude").value(37.566826))
-                .andExpect(jsonPath("$.data.geocoding.longitude").value(126.9786567))
-                .andExpect(jsonPath("$.data.geocoding.addressVersion").value(1))
-                .andExpect(jsonPath("$.data.geocoding.provider").doesNotExist());
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("COMMON_009"));
+    }
+
+    @Test
+    void createAcceptsMultipartEvidenceAndReturnsApplication() throws Exception {
+        authenticateStoreOperator(11L);
+        var data = new ObjectMapper().createObjectNode()
+                .put("applicationId", "41")
+                .put("applicationVersion", 1)
+                .put("status", "AUTO_CHECKING")
+                .put("reviewRequired", true)
+                .put("nextAction", "WAIT_FOR_REVIEW");
+        given(onboardingSubmissionService.submit(
+                eq(11L), any(IdempotencyKey.class), any(), any()))
+                .willReturn(new IdempotentOutcome(
+                        false, 202, "SUCCESS", "STORE_ONBOARDING_APPLICATION", "41", data));
+        MockMultipartFile application = new MockMultipartFile(
+                "application", "", MediaType.APPLICATION_JSON_VALUE,
+                validCreateJson().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        MockMultipartFile evidence = new MockMultipartFile(
+                "businessRegistrationEvidence", "license.pdf", "application/pdf",
+                "%PDF-1.7\n%%EOF".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        mockMvc.perform(multipart("/api/v1/store-operators/stores")
+                        .file(application)
+                        .file(evidence)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.applicationVersion").value(1))
+                .andExpect(jsonPath("$.data.status").value("AUTO_CHECKING"))
+                .andExpect(jsonPath("$.data.storeId").doesNotExist());
     }
 
     @Test
@@ -111,8 +142,8 @@ class StoreControllerTest {
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validCreateJson()))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("COMMON_001"));
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("COMMON_009"));
     }
 
     @Test
@@ -126,8 +157,8 @@ class StoreControllerTest {
                         .content(validCreateJson().replace(
                                 "Asia/Seoul",
                                 "Mars/Olympus")))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("COMMON_001"));
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("COMMON_009"));
 
         then(storeService).shouldHaveNoInteractions();
     }
@@ -149,8 +180,8 @@ class StoreControllerTest {
                                         }
                                         """,
                                 "")))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("COMMON_001"));
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("COMMON_009"));
 
         then(storeService).shouldHaveNoInteractions();
     }
@@ -176,8 +207,8 @@ class StoreControllerTest {
                                           "applicantSelfAttested": true,
                                           "requiredTermsAgreed": false
                                         """)))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("COMMON_001"));
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("COMMON_009"));
 
         then(storeService).shouldHaveNoInteractions();
     }
@@ -332,8 +363,8 @@ class StoreControllerTest {
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createJsonWithModes(modesJson)))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("COMMON_001"));
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("COMMON_009"));
     }
 
     @ParameterizedTest
@@ -363,8 +394,8 @@ class StoreControllerTest {
                         .header("Idempotency-Key", "bad-key")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validCreateJson()))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("COMMON_004"));
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("COMMON_009"));
     }
 
     @Test
@@ -432,6 +463,11 @@ class StoreControllerTest {
                   "storeCategoryCode": "CAFE_BAKERY",
                   "tagCodes": ["DATE"],
                   "modes": %s%s
+                  ,"legalBusinessName": "미리윰 주식회사",
+                  "representativeName": "김대표",
+                  "openingDate": "2026-08-21",
+                  "primaryBusinessCategory": "음식점업",
+                  "primaryBusinessItem": "카페"
                 }
                 """.formatted(modesJson, declarationsJson);
     }

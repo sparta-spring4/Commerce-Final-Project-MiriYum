@@ -35,6 +35,12 @@ public class StoreOnboardingApplication {
     @Column(name = "submission_fingerprint", nullable = false, length = 64)
     private String submissionFingerprint;
 
+    @Column(name = "current_request_idempotency_key", nullable = false, length = 100)
+    private String currentRequestIdempotencyKey;
+
+    @Column(name = "current_request_fingerprint", nullable = false, length = 64)
+    private String currentRequestFingerprint;
+
     @Column(name = "current_version", nullable = false)
     private long currentVersion;
 
@@ -70,6 +76,8 @@ public class StoreOnboardingApplication {
         application.storeOperatorAccountId = operatorId;
         application.submissionIdempotencyKey = requireText(idempotencyKey, "idempotency key");
         application.submissionFingerprint = requireText(fingerprint, "submission fingerprint");
+        application.currentRequestIdempotencyKey = application.submissionIdempotencyKey;
+        application.currentRequestFingerprint = application.submissionFingerprint;
         application.currentVersion = 1L;
         application.status = ApplicationStatus.RECEIVED;
         application.reviewRequired = reviewRequired;
@@ -80,6 +88,7 @@ public class StoreOnboardingApplication {
 
     public void beginEvidenceUpload(long expectedVersion) {
         requireCurrentVersion(expectedVersion);
+        if (status == ApplicationStatus.EVIDENCE_PENDING) return;
         requireStatus(ApplicationStatus.RECEIVED);
         status = ApplicationStatus.EVIDENCE_PENDING;
     }
@@ -110,8 +119,8 @@ public class StoreOnboardingApplication {
     ) {
         requireCurrentVersion(expectedVersion);
         requireStatus(ApplicationStatus.CHANGES_REQUESTED);
-        requireText(idempotencyKey, "idempotency key");
-        requireText(fingerprint, "submission fingerprint");
+        currentRequestIdempotencyKey = requireText(idempotencyKey, "idempotency key");
+        currentRequestFingerprint = requireText(fingerprint, "submission fingerprint");
         currentVersion = Math.addExact(currentVersion, 1L);
         status = ApplicationStatus.EVIDENCE_PENDING;
         updatedAt = requireTime(now);

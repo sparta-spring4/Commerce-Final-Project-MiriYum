@@ -26,7 +26,9 @@ public enum StoreErrorCode implements ErrorCode {
     ONBOARDING_EVIDENCE_SIZE_EXCEEDED(
             HttpStatus.PAYLOAD_TOO_LARGE, "STORE_017", "사업자등록증 파일 크기가 제한을 초과했습니다."),
     ONBOARDING_EVIDENCE_INTEGRITY_FAILED(
-            HttpStatus.SERVICE_UNAVAILABLE, "STORE_018", "사업자등록증 파일 무결성을 확인할 수 없습니다.");
+            HttpStatus.SERVICE_UNAVAILABLE, "STORE_018", "사업자등록증 파일 무결성을 확인할 수 없습니다."),
+    ONBOARDING_APPLICATION_NOT_FOUND(
+            HttpStatus.NOT_FOUND, "STORE_019", "입점 신청을 찾을 수 없습니다.");
 
     private final HttpStatus httpStatus;
     private final String code;

@@ -23,6 +23,11 @@ public final class StoreCommandFingerprint {
         append(canonical, "storeCategoryCode", request.storeCategoryCode());
         appendSorted(canonical, "tagCodes", request.tagCodes());
         appendModes(canonical, request.modes());
+        append(canonical, "legalBusinessName", request.legalBusinessName());
+        append(canonical, "representativeName", request.representativeName());
+        append(canonical, "openingDate", request.openingDate().toString());
+        append(canonical, "primaryBusinessCategory", request.primaryBusinessCategory());
+        append(canonical, "primaryBusinessItem", request.primaryBusinessItem());
         append(
                 canonical,
                 "applicantSelfAttested",
