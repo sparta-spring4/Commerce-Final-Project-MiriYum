@@ -107,7 +107,7 @@ class DefaultStoreOnboardingReviewWorkflow implements StoreOnboardingReviewWorkf
         decisions.saveAndFlush(StoreOnboardingDecision.record(
                 reviewCase.getCasePublicId(), command.expectedCaseVersion(),
                 command.context().operatorId(), persistedAction, command.reasonCode(), null,
-                clock.instant()));
+                command.idempotencyKey(), clock.instant()));
         if (command.action() == ReviewDecisionAction.APPROVE) {
             reviewCase.approve(command.expectedCaseVersion(), clock.instant());
             finalizer.finalizeApproved(

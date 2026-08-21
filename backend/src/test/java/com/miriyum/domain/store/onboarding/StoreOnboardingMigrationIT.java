@@ -49,6 +49,10 @@ class StoreOnboardingMigrationIT {
                 assertThat(columns(connection, "store_onboarding_automatic_check_jobs")).contains(
                         "lease_owner", "lease_token", "lease_expires_at",
                         "attempt_count", "next_attempt_at", "row_version");
+                assertThat(columns(connection, "store_onboarding_decisions"))
+                        .contains("idempotency_key");
+                assertThat(constraints(connection))
+                        .contains("uk_store_onboarding_decision_idempotency");
                 assertThat(triggers(connection)).contains(
                         "trg_store_onboarding_versions_no_update",
                         "trg_store_onboarding_versions_no_delete",

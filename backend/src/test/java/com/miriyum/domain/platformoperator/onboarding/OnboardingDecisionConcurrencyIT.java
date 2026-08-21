@@ -64,12 +64,14 @@ class OnboardingDecisionConcurrencyIT {
                 var statement = connection.prepareStatement("""
                         INSERT INTO store_onboarding_decisions (
                             decision_public_id, case_public_id, case_version,
-                            decided_by_platform_operator_id, decision_type, reason_code, created_at
-                        ) VALUES (?, '550e8400-e29b-41d4-a716-446655440277', 2, 91, ?, 'TEST', NOW(6))
+                            decided_by_platform_operator_id, decision_type, reason_code,
+                            idempotency_key, created_at
+                        ) VALUES (?, '550e8400-e29b-41d4-a716-446655440277', 2, 91, ?, 'TEST', ?, NOW(6))
                         """)) {
             connection.createStatement().execute("SET FOREIGN_KEY_CHECKS=0");
             statement.setString(1, UUID.randomUUID().toString());
             statement.setString(2, decision);
+            statement.setString(3, UUID.randomUUID().toString());
             try {
                 statement.executeUpdate();
                 return true;

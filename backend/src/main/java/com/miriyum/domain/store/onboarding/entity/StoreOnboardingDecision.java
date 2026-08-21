@@ -49,6 +49,9 @@ public class StoreOnboardingDecision {
     @Column(name = "reason_detail", length = 1000)
     private String reasonDetail;
 
+    @Column(name = "idempotency_key", nullable = false, length = 36)
+    private String idempotencyKey;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -59,6 +62,7 @@ public class StoreOnboardingDecision {
             DecisionType type,
             String reasonCode,
             String reasonDetail,
+            String idempotencyKey,
             Instant now
     ) {
         StoreOnboardingDecision decision = new StoreOnboardingDecision();
@@ -72,6 +76,7 @@ public class StoreOnboardingDecision {
         decision.decisionType = java.util.Objects.requireNonNull(type, "decision type is required");
         decision.reasonCode = requireText(reasonCode, "reason code");
         decision.reasonDetail = reasonDetail;
+        decision.idempotencyKey = requireText(idempotencyKey, "idempotency key");
         decision.createdAt = java.util.Objects.requireNonNull(now, "created at is required");
         return decision;
     }

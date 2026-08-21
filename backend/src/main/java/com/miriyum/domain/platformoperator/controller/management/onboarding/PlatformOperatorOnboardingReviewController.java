@@ -7,14 +7,16 @@ import com.miriyum.domain.platformoperator.onboarding.service.OnboardingReviewCo
 import com.miriyum.domain.platformoperator.onboarding.service.OnboardingEvidenceAccessService;
 import com.miriyum.domain.platformoperator.onboarding.service.OnboardingReviewQueryService;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
-import com.miriyum.domain.store.onboarding.dto.StoreOnboardingContracts.ApplicationData;
 import com.miriyum.domain.store.onboarding.dto.StoreOnboardingContracts.ReviewCaseDetail;
 import com.miriyum.domain.store.onboarding.dto.StoreOnboardingContracts.ReviewCasePage;
 import com.miriyum.domain.store.onboarding.dto.StoreOnboardingContracts.ReviewStatus;
 import com.miriyum.domain.store.onboarding.dto.StoreOnboardingContracts.ReviewType;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyKey;
+import com.miriyum.global.idempotency.IdempotentOutcome;
+import com.miriyum.global.idempotency.RequestFingerprint;
 import com.miriyum.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -35,6 +37,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import tools.jackson.databind.JsonNode;
 
 @RestController
 @Validated
@@ -67,39 +70,62 @@ public class PlatformOperatorOnboardingReviewController {
     }
 
     @PostMapping("/{caseId}/assignments")
-    public ApiResponse<ReviewCaseDetail> assign(
+    public ResponseEntity<ApiResponse<JsonNode>> assign(
             @AuthenticationPrincipal PlatformOperatorPrincipal principal,
             @PathVariable String caseId,
             @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
             @RequestHeader("X-Admin-Reauthentication") String approval,
             @RequestHeader("X-Correlation-Id") String correlationId,
             @Valid @RequestBody AssignmentRequest request) {
-        return ApiResponse.success("입점 심사 사건을 배정했습니다.", commands.assign(
-                principal, uuid(caseId), request, approval, correlationId, IdempotencyKey.parse(rawKey)));
+        String normalizedCaseId = uuid(caseId);
+        IdempotencyKey key = IdempotencyKey.parse(rawKey);
+        String canonical = "POST /api/v1/platform-operators/onboarding-review-cases/"
+                + normalizedCaseId + "/assignments\nexpectedCaseVersion="
+                + request.expectedCaseVersion();
+        return response(commands.assign(
+                command(principal, "ONBOARDING_ASSIGN", key, canonical),
+                principal, normalizedCaseId, request, approval, correlationId),
+                "입점 심사 사건을 배정했습니다.");
     }
 
     @PostMapping("/{caseId}/reassignments")
-    public ApiResponse<ReviewCaseDetail> reassign(
+    public ResponseEntity<ApiResponse<JsonNode>> reassign(
             @AuthenticationPrincipal PlatformOperatorPrincipal principal,
             @PathVariable String caseId,
             @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
             @RequestHeader("X-Admin-Reauthentication") String approval,
             @RequestHeader("X-Correlation-Id") String correlationId,
             @Valid @RequestBody ReassignmentRequest request) {
-        return ApiResponse.success("입점 심사 사건을 재배정했습니다.", commands.reassign(
-                principal, uuid(caseId), request, approval, correlationId, IdempotencyKey.parse(rawKey)));
+        String normalizedCaseId = uuid(caseId);
+        IdempotencyKey key = IdempotencyKey.parse(rawKey);
+        String canonical = "POST /api/v1/platform-operators/onboarding-review-cases/"
+                + normalizedCaseId + "/reassignments\nexpectedCaseVersion="
+                + request.expectedCaseVersion() + "\nnextOperatorId=" + request.nextOperatorId();
+        return response(commands.reassign(
+                command(principal, "ONBOARDING_REASSIGN", key, canonical),
+                principal, normalizedCaseId, request, approval, correlationId),
+                "입점 심사 사건을 재배정했습니다.");
     }
 
     @PostMapping("/{caseId}/decisions")
-    public ApiResponse<ApplicationData> decide(
+    public ResponseEntity<ApiResponse<JsonNode>> decide(
             @AuthenticationPrincipal PlatformOperatorPrincipal principal,
             @PathVariable String caseId,
             @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
             @RequestHeader("X-Admin-Reauthentication") String approval,
             @RequestHeader("X-Correlation-Id") String correlationId,
             @Valid @RequestBody DecisionRequest request) {
-        return ApiResponse.success("입점 심사 결정을 기록했습니다.", commands.decide(
-                principal, uuid(caseId), request, approval, correlationId, IdempotencyKey.parse(rawKey)));
+        String normalizedCaseId = uuid(caseId);
+        IdempotencyKey key = IdempotencyKey.parse(rawKey);
+        String canonical = "POST /api/v1/platform-operators/onboarding-review-cases/"
+                + normalizedCaseId + "/decisions\naction=" + request.action().name()
+                + "\nexpectedApplicationVersion=" + request.expectedApplicationVersion()
+                + "\nexpectedCaseVersion=" + request.expectedCaseVersion()
+                + "\nreasonCode=" + request.reasonCode();
+        return response(commands.decide(
+                command(principal, "ONBOARDING_DECIDE", key, canonical),
+                principal, normalizedCaseId, request, approval, correlationId),
+                "입점 심사 결정을 기록했습니다.");
     }
 
     @GetMapping("/{caseId}/evidence")
@@ -123,5 +149,19 @@ public class PlatformOperatorOnboardingReviewController {
         } catch (RuntimeException exception) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
+    }
+
+    private static IdempotencyCommand command(
+            PlatformOperatorPrincipal principal, String type,
+            IdempotencyKey key, String canonical) {
+        return new IdempotencyCommand(
+                "platform-operator", principal.accountId(), type,
+                key.value(), RequestFingerprint.of(canonical));
+    }
+
+    private static ResponseEntity<ApiResponse<JsonNode>> response(
+            IdempotentOutcome outcome, String message) {
+        return ResponseEntity.status(outcome.httpStatus())
+                .body(ApiResponse.success(message, outcome.data()));
     }
 }

@@ -182,10 +182,13 @@ CREATE TABLE store_onboarding_decisions (
     decision_type                   VARCHAR(30)  NOT NULL,
     reason_code                     VARCHAR(50)  NOT NULL,
     reason_detail                   VARCHAR(1000) NULL,
+    idempotency_key                 CHAR(36)     COLLATE utf8mb4_0900_as_cs NOT NULL,
     created_at                      DATETIME(6)  NOT NULL,
     PRIMARY KEY (store_onboarding_decision_id),
     CONSTRAINT uk_store_onboarding_decision_public_id UNIQUE (decision_public_id),
     CONSTRAINT uk_store_onboarding_terminal_decision UNIQUE (case_public_id, case_version),
+    CONSTRAINT uk_store_onboarding_decision_idempotency
+        UNIQUE (decided_by_platform_operator_id, idempotency_key),
     CONSTRAINT fk_store_onboarding_decision_case
         FOREIGN KEY (case_public_id)
         REFERENCES store_onboarding_review_cases (case_public_id),
