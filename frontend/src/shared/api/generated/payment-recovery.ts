@@ -8,6 +8,10 @@ export interface paths {
   "/api/v1/platform-operators/payment-recovery-cases": {
     get: operations["listPaymentRecoveryCases"];
   };
+  "/api/v1/platform-operators/payment-recovery-cases/pending-additional-approvals": {
+    /** @description 다른 운영자가 제안한 고액 복구 중 현재 superadmin이 추가 승인할 수 있는 사건만 반환한다. */
+    get: operations["listPendingPaymentRecoveryApprovals"];
+  };
   "/api/v1/platform-operators/payment-recovery-cases/{caseId}": {
     get: operations["getPaymentRecoveryCase"];
   };
@@ -179,6 +183,14 @@ export interface components {
       totalElements: number;
       totalPages: number;
     };
+    PendingApprovalPage: {
+      content: components["schemas"]["CaseDetail"][];
+      page: number;
+      size: number;
+      /** Format: int64 */
+      totalElements: number;
+      totalPages: number;
+    };
     CaseEnvelope: {
       code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
@@ -193,6 +205,11 @@ export interface components {
       code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["CasePage"];
+    };
+    PendingApprovalPageEnvelope: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["PendingApprovalPage"];
     };
     ProposalEnvelope: {
       code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
@@ -216,10 +233,16 @@ export interface components {
         "application/json": components["schemas"]["CasePageEnvelope"];
       };
     };
-    /** @description 배정된 결제 복구 사건 상세 */
+    /** @description 현재 담당자 또는 별도 추가 승인자가 조회하는 결제 복구 사건 상세 */
     CaseDetailResult: {
       content: {
         "application/json": components["schemas"]["CaseDetailEnvelope"];
+      };
+    };
+    /** @description 현재 superadmin이 추가 승인할 수 있는 결제 복구 사건 목록 */
+    PendingApprovalPageResult: {
+      content: {
+        "application/json": components["schemas"]["PendingApprovalPageEnvelope"];
       };
     };
     /** @description 변경된 결제 복구 사건 */
@@ -436,6 +459,20 @@ export interface operations {
     };
     responses: {
       200: components["responses"]["CasePageResult"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+    };
+  };
+  /** @description 다른 운영자가 제안한 고액 복구 중 현재 superadmin이 추가 승인할 수 있는 사건만 반환한다. */
+  listPendingPaymentRecoveryApprovals: {
+    parameters: {
+      query?: {
+        page?: components["parameters"]["Page"];
+        size?: components["parameters"]["Size"];
+      };
+    };
+    responses: {
+      200: components["responses"]["PendingApprovalPageResult"];
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
     };

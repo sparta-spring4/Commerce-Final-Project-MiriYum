@@ -69,4 +69,9 @@ public final class PaymentRecoveryResponses {
                            long totalElements, int totalPages) {
         public CasePage { content = List.copyOf(content); }
     }
+
+    public record PendingApprovalPage(List<CaseDetail> content, int page, int size,
+                                      long totalElements, int totalPages) {
+        public PendingApprovalPage { content = List.copyOf(content); }
+    }
 }

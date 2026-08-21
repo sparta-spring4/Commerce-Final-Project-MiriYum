@@ -102,6 +102,7 @@ describe('사용자별 route 계약', () => {
       audit: '/admin/audit',
       auditDetail: '/admin/audit/:eventKey',
       paymentRecoveryCases: '/admin/payment-recovery-cases',
+      paymentRecoveryApprovals: '/admin/payment-recovery-approvals',
       paymentRecoveryDetail: '/admin/payment-recovery-cases/:caseId',
     })
   })
@@ -175,6 +176,11 @@ describe('사용자별 navigation 계약', () => {
         label: '결제 복구',
         path: '/admin/payment-recovery-cases',
         permissions: ['PAYMENT_RECOVERY_EXECUTE'],
+      },
+      {
+        label: '결제 복구 승인',
+        path: '/admin/payment-recovery-approvals',
+        permissions: ['PAYMENT_RECOVERY_HIGH_VALUE_APPROVE'],
       },
       {
         label: '회원 관리',

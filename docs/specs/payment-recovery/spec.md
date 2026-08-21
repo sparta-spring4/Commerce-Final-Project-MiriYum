@@ -155,6 +155,8 @@ Assignments reuse `admin_case_assignments`; no payment-recovery assignment table
 The #281 API provides only:
 
 - list and detail recovery cases, including `caseVersion`, `handoffVersion`, `paymentVersion`, and `recoveryVersion` required by follow-up commands;
+- expose the current, unexpired central assignment operator ID in list and detail summaries so an assigned operator can re-enter a case without issuing a conflicting reassignment;
+- list pending additional approvals only to a different `SUPER_ADMIN` with `PAYMENT_RECOVERY_HIGH_VALUE_APPROVE`, and allow that eligible approver to read the exact case/proposal versions without inheriting the requester's assignment;
 - request an exact provider-result requery;
 - create a recovery proposal;
 - approve a proposal when the additional tier is required;

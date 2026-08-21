@@ -56,6 +56,10 @@ export default function PlatformOperatorConsole() {
               element={<PaymentRecoveryCaseListPage />}
             />
             <Route
+              path={relative(PLATFORM_OPERATOR_PATHS.paymentRecoveryApprovals)}
+              element={<PaymentRecoveryCaseListPage approvalsOnly />}
+            />
+            <Route
               path={relative(PLATFORM_OPERATOR_PATHS.paymentRecoveryDetail)}
               element={<PaymentRecoveryCaseDetailPage />}
             />

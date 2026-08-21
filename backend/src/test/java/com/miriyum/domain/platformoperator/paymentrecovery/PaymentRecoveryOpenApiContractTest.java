@@ -17,6 +17,7 @@ class PaymentRecoveryOpenApiContractTest {
             "..", "docs", "specs", "payment-recovery", "openapi.yaml");
     private static final Set<String> PATHS = Set.of(
             "/api/v1/platform-operators/payment-recovery-cases",
+            "/api/v1/platform-operators/payment-recovery-cases/pending-additional-approvals",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}/assignments",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}/requeries",
@@ -35,6 +36,9 @@ class PaymentRecoveryOpenApiContractTest {
         assertThat(map(paths.get("/api/v1/platform-operators/payment-recovery-cases")))
                 .containsOnlyKeys("get");
         assertThat(map(paths.get("/api/v1/platform-operators/payment-recovery-cases/{caseId}")))
+                .containsOnlyKeys("get");
+        assertThat(map(paths.get(
+                "/api/v1/platform-operators/payment-recovery-cases/pending-additional-approvals")))
                 .containsOnlyKeys("get");
     }
 

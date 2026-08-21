@@ -499,6 +499,7 @@ Runtime은 immutable 사건 high-watermark를 독립적으로 소비하며 이 p
 | `/api/v1/consumers/me/stores/{storeId}/waiting-availabilities` | `GET` | 중앙 시각 기준 접수 가능 여부와 등록에 사용할 `businessDate` 조회 |
 | `/api/v1/consumers/me/stores/{storeId}/waiting-teams` | `POST` | #409 위치 증명 연결 뒤 `businessDate`, `partySize`로 원격 웨이팅 등록 |
 | `/api/v1/consumers/me/waiting-teams/current` | `GET` | 인증 소비자의 단일 활성 웨이팅 조회 |
+| `/api/v1/consumers/me/waiting-team-histories` | `GET` | 인증 소비자가 대표자 또는 일행으로 참여했던 종결 웨이팅을 최신 종결 시각순으로 조회 |
 | `/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations` | `POST` | 본인 웨이팅을 `expectedVersion`으로 취소 |
 
 등록과 취소는 표준 UUID `Idempotency-Key`가 필수다. 같은 키와 같은 요청 지문은 최초 HTTP
@@ -529,6 +530,11 @@ call/cancel이 같은 version으로 경합하면 팀 row lock에서 먼저 확�
 포함한다. `teamsAhead`는 같은 매장·영업일의 앞선 활성 FIFO 팀 수를 조회 시점에 계산한다.
 다른 소비자의 팀은 존재 여부와 소유권을 구분하지 않고 `404 WAITING_003`으로 응답한다. 계정 ID,
 연락처, 운영 메모, 좌표, 원본 식별자, 멱등 키는 반환하지 않는다.
+
+이력 조회는 현재 계정이 대표자 또는 구성원으로 참여했던 종결 팀만 반환하며 활성 팀은 포함하지
+않는다. `cancelledAt`, `checkedInAt`, `arrivedAt`, `calledAt`, `createdAt` 순으로 확인한 종결 기준
+시각을 최신순 정렬하고 같은 시각에는 `waitingTeamId` 역순으로 안정화한다. 목록에는 다른 구성원의
+계정 식별자나 연락처를 포함하지 않는다.
 
 플랫폼 3km 정책은 유지하고 위치 판정·좌표 수집 구현은 #409가 소유한다. 위치 원문은 판정 호출
 스택에서만 사용하며 위치 판정 발급에는 전역 멱등 지문을 만들지 않는다. DB에는 계정·매장·목적,

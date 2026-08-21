@@ -14,6 +14,11 @@ export const PLATFORM_OPERATOR_NAVIGATION: readonly PlatformOperatorNavigationIt
     permissions: ['PAYMENT_RECOVERY_EXECUTE'],
   },
   {
+    label: '결제 복구 승인',
+    path: PLATFORM_OPERATOR_PATHS.paymentRecoveryApprovals,
+    permissions: ['PAYMENT_RECOVERY_HIGH_VALUE_APPROVE'],
+  },
+  {
     label: '회원 관리',
     path: PLATFORM_OPERATOR_PATHS.members,
     permissions: ['MEMBER_READ_MINIMAL'],

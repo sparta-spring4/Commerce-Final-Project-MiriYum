@@ -8,7 +8,7 @@ import { Button } from '../../../../shared/ui/Button'
 import { Alert } from '../../../../shared/ui/Feedback'
 import { EmptyState, ErrorState, Loading } from '../../../../shared/ui/Feedback'
 import { Pagination } from '../../../../shared/ui/Pagination'
-import { assignPaymentRecoveryCase, usePaymentRecoveryCases, type PaymentRecoveryCaseSummary } from '../api/paymentRecoveryApi'
+import { assignPaymentRecoveryCase, usePaymentRecoveryCases, usePendingPaymentRecoveryApprovals, type PaymentRecoveryCaseSummary } from '../api/paymentRecoveryApi'
 import { ReauthenticationDialog } from './ReauthenticationDialog'
 
 const KIND: Record<PaymentRecoveryCaseSummary['kind'], string> = {
@@ -16,7 +16,7 @@ const KIND: Record<PaymentRecoveryCaseSummary['kind'], string> = {
   REFUND_RESULT_UNKNOWN: '환불 결과 불명', REFUND_FAILED: '환불 실패',
 }
 
-export function PaymentRecoveryCaseListPage() {
+export function PaymentRecoveryCaseListPage({ approvalsOnly = false }: { approvalsOnly?: boolean }) {
   const { apiClient } = usePlatformOperatorAuth()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -25,11 +25,13 @@ export function PaymentRecoveryCaseListPage() {
   const [assignError, setAssignError] = useState<string | null>(null)
   const parsed = Number.parseInt(searchParams.get('page') ?? '', 10)
   const page = Number.isInteger(parsed) && parsed > 0 ? parsed : 0
-  const cases = usePaymentRecoveryCases(undefined, page)
+  const regularCases = usePaymentRecoveryCases(undefined, page, !approvalsOnly)
+  const pendingApprovals = usePendingPaymentRecoveryApprovals(page, approvalsOnly)
+  const cases = approvalsOnly ? pendingApprovals : regularCases
 
   return (
     <main className="po-page">
-      <header className="po-page__head"><h1>결제 복구 사건</h1><p>결과 불명·실패 결제를 조사하고 복구 상태를 확인합니다.</p></header>
+      <header className="po-page__head"><h1>{approvalsOnly ? '결제 복구 추가 승인' : '결제 복구 사건'}</h1><p>{approvalsOnly ? '다른 운영자가 제안한 고액 복구 중 추가 승인 가능한 사건만 확인합니다.' : '결과 불명·실패 결제를 조사하고 복구 상태를 확인합니다.'}</p></header>
       {cases.isPending && <Loading label="결제 복구 사건을 불러오는 중입니다." />}
       {cases.isError && <ErrorState error={cases.error} onRetry={() => void cases.refetch()} />}
       {cases.isSuccess && cases.data.content.length === 0 && <EmptyState title="결제 복구 사건이 없습니다." />}
@@ -42,7 +44,7 @@ export function PaymentRecoveryCaseListPage() {
                 <p>남은 환불 가능액 {item.remainingRefundableAmountMinor.toLocaleString('ko-KR')} {item.currency}</p>
                 <small>{item.maskedProviderReference ?? '결제사 참조 없음'}</small>
                 <div className="po-recovery-list__actions">
-                  {item.assignedOperatorId == null ? (
+                  {!approvalsOnly && item.assignedOperatorId == null ? (
                     <Button type="button" variant="secondary" loading={assigning && assignment?.caseId === item.caseId} onClick={() => { setAssignError(null); setAssignment(item) }}>나에게 배정</Button>
                   ) : (
                     <Link className="mi-button mi-button--ghost" to={PLATFORM_OPERATOR_PATHS.paymentRecoveryDetail.replace(':caseId', item.caseId)}>사건 상세</Link>

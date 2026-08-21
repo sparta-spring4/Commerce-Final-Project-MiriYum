@@ -6,6 +6,7 @@ import { PLATFORM_OPERATOR_PROTECTED_QUERY_ROOTS } from '../../../../app/shells/
 
 export type PaymentRecoveryCaseSummary = components['schemas']['CaseSummary']
 export type PaymentRecoveryCaseDetail = components['schemas']['CaseDetail']
+export type PendingPaymentRecoveryApprovalPage = components['schemas']['PendingApprovalPage']
 
 export const paymentRecoveryKeys = {
   all: PLATFORM_OPERATOR_PROTECTED_QUERY_ROOTS.paymentRecoveryCases,
@@ -13,9 +14,15 @@ export const paymentRecoveryKeys = {
     [...PLATFORM_OPERATOR_PROTECTED_QUERY_ROOTS.paymentRecoveryCases, 'list', status ?? 'ALL', page] as const,
   detail: (caseId: string) =>
     [...PLATFORM_OPERATOR_PROTECTED_QUERY_ROOTS.paymentRecoveryCases, 'detail', caseId] as const,
+  pendingApprovals: (page: number) =>
+    [...PLATFORM_OPERATOR_PROTECTED_QUERY_ROOTS.paymentRecoveryCases, 'pending-approvals', page] as const,
 }
 
-export function usePaymentRecoveryCases(status: PaymentRecoveryCaseSummary['status'] | undefined, page: number) {
+export function usePaymentRecoveryCases(
+  status: PaymentRecoveryCaseSummary['status'] | undefined,
+  page: number,
+  enabled = true,
+) {
   const { apiClient } = usePlatformOperatorAuth()
   return useQuery({
     queryKey: paymentRecoveryKeys.list(status, page),
@@ -25,6 +32,22 @@ export function usePaymentRecoveryCases(status: PaymentRecoveryCaseSummary['stat
       })
       return response.data
     },
+    enabled,
+  })
+}
+
+export function usePendingPaymentRecoveryApprovals(page: number, enabled = true) {
+  const { apiClient } = usePlatformOperatorAuth()
+  return useQuery({
+    queryKey: paymentRecoveryKeys.pendingApprovals(page),
+    queryFn: async ({ signal }) => {
+      const response = await apiClient(
+        '/api/v1/platform-operators/payment-recovery-cases/pending-additional-approvals',
+        { method: 'get', query: { page, size: 20 }, signal },
+      )
+      return response.data
+    },
+    enabled,
   })
 }
 
@@ -70,6 +93,8 @@ export async function proposePaymentRecoveryRefund(
   apiClient: ApiClient,
   item: PaymentRecoveryCaseDetail,
   approval: string,
+  idempotencyKey: string,
+  correlationId: string,
 ) {
   const response = await apiClient(
     '/api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals',
@@ -83,8 +108,8 @@ export async function proposePaymentRecoveryRefund(
         expectedPaymentVersion: item.paymentVersion,
         expectedRecoveryVersion: item.recoveryVersion,
       },
-      idempotencyKey: crypto.randomUUID(),
-      correlationId: crypto.randomUUID(),
+      idempotencyKey,
+      correlationId,
       adminReauthentication: approval,
     },
   )
@@ -96,6 +121,8 @@ export async function approvePaymentRecoveryProposal(
   item: PaymentRecoveryCaseDetail,
   proposalVersion: number,
   approval: string,
+  idempotencyKey: string,
+  correlationId: string,
 ) {
   const response = await apiClient(
     '/api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals/{proposalVersion}/approvals',
@@ -103,8 +130,34 @@ export async function approvePaymentRecoveryProposal(
       method: 'post',
       pathParams: { caseId: item.caseId, proposalVersion },
       body: { expectedCaseVersion: item.caseVersion, expectedProposalVersion: proposalVersion },
-      idempotencyKey: crypto.randomUUID(),
-      correlationId: crypto.randomUUID(),
+      idempotencyKey,
+      correlationId,
+      adminReauthentication: approval,
+    },
+  )
+  return response.data
+}
+
+export async function requeryPaymentRecoveryProviderResult(
+  apiClient: ApiClient,
+  item: PaymentRecoveryCaseDetail,
+  approval: string,
+  idempotencyKey: string,
+  correlationId: string,
+) {
+  const response = await apiClient(
+    '/api/v1/platform-operators/payment-recovery-cases/{caseId}/requeries',
+    {
+      method: 'post',
+      pathParams: { caseId: item.caseId },
+      body: {
+        expectedCaseVersion: item.caseVersion,
+        expectedHandoffVersion: item.handoffVersion,
+        expectedPaymentVersion: item.paymentVersion,
+        expectedRecoveryVersion: item.recoveryVersion,
+      },
+      idempotencyKey,
+      correlationId,
       adminReauthentication: approval,
     },
   )

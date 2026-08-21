@@ -15,5 +15,6 @@ export const PLATFORM_OPERATOR_PATHS = {
   audit: '/admin/audit',
   auditDetail: '/admin/audit/:eventKey',
   paymentRecoveryCases: '/admin/payment-recovery-cases',
+  paymentRecoveryApprovals: '/admin/payment-recovery-approvals',
   paymentRecoveryDetail: '/admin/payment-recovery-cases/:caseId',
 } as const
