@@ -20,6 +20,10 @@ export interface paths {
     /** 매장 공개 메뉴 조회 */
     get: operations["getStoreMenus"];
   };
+  "/api/v1/stores/{storeId}/images": {
+    /** 매장 공개 이미지 조회 */
+    get: operations["getStoreImages"];
+  };
   "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches": {
     /** 품절 메뉴 대안 검색 */
     post: operations["searchMenuAlternatives"];
@@ -656,6 +660,12 @@ export interface components {
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["PublicImage"][];
     };
+    PublicStoreImageListSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      /** @description CONFIRMED 이미지 중 createdAt 오름차순, 동률이면 파일 ID 오름차순으로 선택한 대표 이미지 한 장 */
+      data: components["schemas"]["PublicImage"][];
+    };
     MenuPublicationRequest: WithRequired<{
       /** @enum {string} */
       mode: "IMMEDIATE" | "SCHEDULED";
@@ -1090,6 +1100,24 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["MenuListSuccessResponse"];
+        };
+      };
+      404: components["responses"]["StoreNotFound"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 매장 공개 이미지 조회 */
+  getStoreImages: {
+    parameters: {
+      path: {
+        storeId: components["parameters"]["StoreId"];
+      };
+    };
+    responses: {
+      /** @description CONFIRMED 이미지 중 생성 시각이 가장 이른 대표 공개 이미지 한 장 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PublicStoreImageListSuccessResponse"];
         };
       };
       404: components["responses"]["StoreNotFound"];

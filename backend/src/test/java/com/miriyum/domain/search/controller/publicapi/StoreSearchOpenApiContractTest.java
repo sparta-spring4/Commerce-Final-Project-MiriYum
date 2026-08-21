@@ -29,6 +29,7 @@ class StoreSearchOpenApiContractTest {
                 "/api/v1/stores",
                 "/api/v1/stores/{storeId}",
                 "/api/v1/stores/{storeId}/menus",
+                "/api/v1/stores/{storeId}/images",
                 "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches");
         Map<String, Object> alternativePath = map(paths.get(
                 "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches"));
@@ -45,6 +46,14 @@ class StoreSearchOpenApiContractTest {
                 .isEqualTo(TOO_MANY_REQUESTS_RESPONSE);
         assertThat(responseReference(paths, "/api/v1/stores/{storeId}/menus", "429"))
                 .isEqualTo(TOO_MANY_REQUESTS_RESPONSE);
+        assertThat(responseReference(paths, "/api/v1/stores/{storeId}/images", "429"))
+                .isEqualTo(TOO_MANY_REQUESTS_RESPONSE);
+        Map<String, Object> publicImageSchema = map(map(map(map(
+                map(map(paths.get("/api/v1/stores/{storeId}/images")).get("get"))
+                .get("responses")).get("200")).get("content"))
+                .get("application/json"));
+        assertThat(map(publicImageSchema.get("schema")))
+                .containsEntry("$ref", "#/components/schemas/PublicStoreImageListSuccessResponse");
         assertThat(parameterNames(map(map(paths.get("/api/v1/stores")).get("get"))))
                 .contains("serviceDate", "startTime", "partySize", "includesInfants",
                         "availableOnly", "sort", "searchInput", "cursor");
@@ -86,6 +95,9 @@ class StoreSearchOpenApiContractTest {
                 .contains("serviceDate", "startTime", "partySize", "includesInfants");
 
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> publicStoreImageData = map(map(map(
+                schemas.get("PublicStoreImageListSuccessResponse")).get("properties")).get("data"));
+        assertThat(publicStoreImageData).containsEntry("maxItems", 1);
         assertThat(list(map(schemas.get("MenuAlternativeMode")).get("enum")))
                 .containsExactly("SAME_STORE", "NEARBY_STORE", "NO_ALTERNATIVE",
                         "REGION_SELECTION_REQUIRED");

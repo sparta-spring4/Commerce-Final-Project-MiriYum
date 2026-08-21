@@ -25,6 +25,7 @@ import com.miriyum.domain.search.dto.publicapi.PublicStoreCoordinates;
 import com.miriyum.domain.search.dto.publicapi.PublicStoreModes;
 import com.miriyum.domain.search.dto.publicapi.PublicStoreSummary;
 import com.miriyum.domain.search.dto.publicapi.ReservationAvailability;
+import com.miriyum.domain.store.dto.image.PublicImageResponse;
 import com.miriyum.domain.search.service.IntegratedStoreSearchService;
 import com.miriyum.domain.search.service.StorePublicQueryService;
 import com.miriyum.domain.search.service.StoreSearchCoreService;
@@ -34,6 +35,7 @@ import com.miriyum.global.exception.ServiceException;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -219,6 +221,19 @@ class StoreSearchControllerTest {
                 .andExpect(jsonPath("$.data.items[0].menuId").value("11"))
                 .andExpect(jsonPath("$.data.items[0].imageUrl").isEmpty())
                 .andExpect(jsonPath("$.data.items[0].saleStatus").value("SELLING"));
+    }
+
+    @Test
+    void anonymousStoreImagesReturnConfirmedPublicImageEnvelope() throws Exception {
+        UUID imageId = UUID.fromString("d2719d4a-6174-4f23-ae57-18b7e4eeab40");
+        given(publicQueryService.getImages(7L)).willReturn(List.of(
+                new PublicImageResponse(imageId, "/api/v1/public-files/" + imageId)));
+
+        mockMvc.perform(get("/api/v1/stores/7/images"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data[0].imageId").value(imageId.toString()))
+                .andExpect(jsonPath("$.data[0].url").value("/api/v1/public-files/" + imageId));
     }
 
     @Test

@@ -13,6 +13,8 @@ paths:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores"
   /api/v1/stores/{storeId}:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}"
+  /api/v1/stores/{storeId}/images:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1images"
   /api/v1/stores/{storeId}/menus:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1menus"
   /api/v1/stores/{storeId}/menus/{menuId}/alternative-searches:

@@ -8,6 +8,7 @@ import com.miriyum.domain.search.model.StoreSearchQuery;
 import com.miriyum.domain.search.service.IntegratedStoreSearchService;
 import com.miriyum.domain.search.service.StorePublicQueryService;
 import com.miriyum.domain.search.service.StoreSearchCoreService;
+import com.miriyum.domain.store.dto.image.PublicImageResponse;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
@@ -18,6 +19,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.List;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -136,5 +138,12 @@ public class StoreSearchController {
         return ApiResponse.success(
                 "메뉴를 조회했습니다.",
                 new PublicMenuList(publicQueryService.getMenus(storeId)));
+    }
+
+    @GetMapping("/{storeId}/images")
+    public ApiResponse<List<PublicImageResponse>> images(@PathVariable @Positive long storeId) {
+        return ApiResponse.success(
+                "매장 이미지를 조회했습니다.",
+                publicQueryService.getImages(storeId));
     }
 }
