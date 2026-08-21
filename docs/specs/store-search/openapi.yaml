@@ -304,6 +304,24 @@ paths:
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/store-operators/stores:
+    get:
+      tags: [Store Management]
+      summary: 현재 운영자의 소유 매장 목록 조회
+      description: 현재 인증 계정이 소유한 매장만 storeId 오름차순으로 반환하며, 소유 매장이 없으면 빈 배열을 반환한다.
+      operationId: listManagedStores
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 현재 운영자의 소유 매장 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedStoreListSuccessResponse"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
     post:
       tags: [Store Management]
       summary: 매장 등록
@@ -2808,6 +2826,19 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
         data:
           $ref: "#/components/schemas/ManagedStore"
+    ManagedStoreListSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ManagedStore"
     OperatingHoursSuccessResponse:
       type: object
       additionalProperties: false

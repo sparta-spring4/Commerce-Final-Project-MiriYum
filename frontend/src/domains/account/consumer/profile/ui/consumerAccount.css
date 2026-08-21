@@ -222,6 +222,18 @@
   text-align: right;
 }
 
+/* 현재 웨이팅 상세로 가는 줄. 카드 안 마지막 줄이라 위 여백만 준다. */
+.mypage__waiting-link {
+  margin-block: var(--space-2) 0;
+}
+
+.mypage__waiting-link a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 600;
+}
+
 @media (min-width: 48rem) {
   .mypage__links {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -7,10 +7,11 @@ import {
   waitFor,
   within,
 } from '@testing-library/react'
-import { http } from 'msw'
+import { http, HttpResponse } from 'msw'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { errorResponse, successResponse } from '../../../../test/msw/envelope'
+import { SUCCESS_CODE } from '../../../../shared/api/envelope'
 import { server } from '../../../../test/msw/server'
 import { ConsumerAuthProvider } from '../../../account/consumer/auth'
 import { AccountErrorCode } from '../../../../shared/auth/authErrors'
@@ -24,6 +25,7 @@ import {
   STORE_DETAIL_PATH,
   menuHoldAvailability,
   reservationDetail,
+  reservationRequest,
   storeWithMenuHold,
 } from '../test/fixtures'
 import { storeDetail } from '../../../store/public/test/fixtures'
@@ -52,6 +54,10 @@ function renderCreate(search = SCHEDULE_QUERY) {
             />
             <Route
               path={CONSUMER_PATHS.reservationComplete}
+              element={<LocationProbe />}
+            />
+            <Route
+              path="/reservation-requests/:reservationRequestId/payment"
               element={<LocationProbe />}
             />
             <Route
@@ -163,6 +169,31 @@ describe('예약 생성 화면', () => {
     await waitFor(() =>
       expect(screen.getByTestId('location')).toHaveTextContent(
         '/reservations/01JBQ8Z4T7K2N9V6M3P5R8W1R1/complete',
+      ),
+    )
+  })
+
+  it('예약금이 필요한 202 응답은 결제 화면으로 이동한다', async () => {
+    respondCreateWith(() =>
+      HttpResponse.json(
+        {
+          code: SUCCESS_CODE,
+          message: '예약금 결제가 필요합니다.',
+          data: reservationRequest(),
+        },
+        { status: 202 },
+      ),
+    )
+
+    renderCreate()
+    await advanceToSubmit()
+    await screen.findByRole('button', { name: '다음' })
+    fireEvent.click(screen.getByRole('button', { name: '다음' }))
+    fireEvent.click(screen.getByRole('button', { name: '예약하기' }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(
+        '/reservation-requests/01JBQ8Z4T7K2N9V6M3P5R8W1Q1/payment',
       ),
     )
   })

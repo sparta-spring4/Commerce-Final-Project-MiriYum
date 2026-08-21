@@ -14,6 +14,35 @@ import org.yaml.snakeyaml.Yaml;
 class StoreOpenApiContractTest {
 
     @Test
+    void managedStoreCollectionDefinesOwnedStoreListResponse() throws IOException {
+        Path contract = Path.of("..", "docs", "specs", "store-search", "openapi.yaml");
+        Map<String, Object> document;
+        try (InputStream input = Files.newInputStream(contract)) {
+            document = new Yaml().load(input);
+        }
+
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> collection =
+                map(paths.get("/api/v1/store-operators/stores"));
+        assertThat(collection).containsKey("get");
+
+        Map<String, Object> listOperation = map(collection.get("get"));
+        Map<String, Object> success =
+                map(map(listOperation.get("responses")).get("200"));
+        Map<String, Object> responseSchema = map(map(
+                map(success.get("content")).get("application/json")).get("schema"));
+        assertThat(responseSchema)
+                .containsEntry("$ref", "#/components/schemas/ManagedStoreListSuccessResponse");
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> listResponse = map(schemas.get("ManagedStoreListSuccessResponse"));
+        Map<String, Object> data = map(map(listResponse.get("properties")).get("data"));
+        assertThat(data).containsEntry("type", "array");
+        assertThat(map(data.get("items")))
+                .containsEntry("$ref", "#/components/schemas/ManagedStore");
+    }
+
+    @Test
     void managedStoreGeocodingAndFailureResponsesMatchControllerContract()
             throws IOException {
         Path contract = Path.of("..", "docs", "specs", "store-search", "openapi.yaml");
