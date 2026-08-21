@@ -36,11 +36,11 @@ ECS 안정화 확인 뒤 별도 증거 단계에서 다음을 다시 조회한�
 
 1. PRIMARY deployment와 service task definition이 새 task definition과 정확히 같고 rollout이 `COMPLETED`여야 한다.
 2. `runningCount == desiredCount`, `pendingCount == 0`이어야 한다.
-3. service update 직전에 기존 task ARN을 캡처한다. 교체 뒤 각 task를 직접 조회해 모두 `desiredStatus=STOPPED`, `lastStatus=STOPPED`인지 확인한다. 누락되거나 `DEACTIVATING`, `STOPPING`, `RUNNING` 등 종료 중인 task가 있으면 실패한다.
-4. 교체 뒤 service의 `desiredStatus=RUNNING` task를 다시 조회하고 전부 새 task definition의 `RUNNING` task이며 수가 desired count와 같은지 확인한다.
-5. service가 사용하는 모든 target group을 조회하고 target 수가 service desired count와 같으며 전부 `healthy`여야 한다. `draining`, `unused`, `unhealthy` 또는 누락된 target health는 deregistration 미완료로 판정한다.
+3. service update 직전에 service가 단일 완료 rollout이고 `runningCount == desiredCount`, `pendingCount == 0`인지 확인한 뒤 `desiredStatus=RUNNING` task와 `desiredStatus=STOPPED` task를 함께 조회한다. `STOPPED` 요청 task 중 `lastStatus=RUNNING`, `DEACTIVATING`, `STOPPING`처럼 아직 실제 종료되지 않은 task를 기존 RUNNING task와 합친다. task identity·service task definition·desired count가 5초 간격의 연속 두 snapshot에서 같을 때만 교체 전 identity로 확정한다. 교체 뒤 각 task를 직접 조회해 모두 `desiredStatus=STOPPED`, `lastStatus=STOPPED`인지 확인하며, 누락되거나 종료 중인 task가 있으면 실패한다. 이미 `lastStatus=STOPPED`인 과거 이력은 캡처 대상에서 제외한다.
+4. 교체 뒤 service의 `desiredStatus=RUNNING` task를 다시 조회하고 전부 새 task definition의 `RUNNING` task이며 수가 desired count와 같은지 확인한다. 각 task의 `ATTACHED` ENI에서 단일 `privateIPv4Address`도 함께 확보한다.
+5. service가 사용하는 모든 target group을 조회하고 target 수가 service desired count와 같으며 전부 `healthy`여야 한다. 또한 각 target group의 healthy `Target.Id` 집합은 현재 task의 private IPv4 집합과 정확히 같아야 한다. 새 task 미등록, stale/manual target 혼입, `draining`, `unused`, `unhealthy` 또는 누락된 target health는 deregistration 미완료로 판정한다.
 
-AWS 조회 실패, task lookup failure, target group 누락 또는 빈 증거는 모두 실패다. 임시 증거 JSON은 실행 종료 시 삭제하며 ARN, task ID, target 주소를 로그로 출력하지 않는다.
+AWS 조회 실패, task lookup failure, target group 누락 또는 빈 증거는 모두 실패다. 임시 증거 JSON은 소유자만 읽고 쓸 수 있게 생성하며 성공·실패와 관계없이 실행 종료 시 삭제한다. ARN, task ID, target 주소는 로그로 출력하지 않는다.
 
 ## 롤백
 
