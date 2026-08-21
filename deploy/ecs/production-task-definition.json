@@ -33,6 +33,7 @@
         {"name": "MIRIYUM_STORAGE_S3_REGION", "value": "ap-northeast-2"},
         {"name": "MIRIYUM_STORE_SEARCH_LLM_ENABLED", "value": "true"},
         {"name": "MIRIYUM_STORE_SEARCH_LLM_MODEL", "value": "gpt-4o-mini"},
+        {"name": "MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS", "value": "5000"},
         {"name": "MIRIYUM_CLOUDWATCH_METRICS_ENABLED", "value": "true"},
         {"name": "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE", "value": "MiriYum/Production"},
         {"name": "MIRIYUM_PAYMENT_ENABLED", "value": "false"},

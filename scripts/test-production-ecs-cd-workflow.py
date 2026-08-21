@@ -77,6 +77,15 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertNotIn('| .value][0] // "true"', self.workflow)
         self.assertNotIn('{name: "MIRIYUM_STORE_SEARCH_LLM_ENABLED", value: "true"}', self.workflow)
 
+    def test_cd_replaces_the_live_llm_timeout_with_the_approved_production_value(self):
+        self.assertIn(
+            '.name != "MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS"', self.workflow
+        )
+        self.assertIn(
+            '{name: "MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS", value: "5000"}',
+            self.workflow,
+        )
+
     def test_cd_validates_and_replaces_the_live_qr_storage_generation(self):
         self.assertIn(
             'QR_STORAGE_GENERATION: ${{ vars.MIRIYUM_QR_STORAGE_GENERATION }}',
