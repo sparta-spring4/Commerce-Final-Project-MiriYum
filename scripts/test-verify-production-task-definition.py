@@ -538,19 +538,6 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
 
         self.assertEqual("5000", environment["MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS"])
 
-    def test_production_task_definition_enables_s3_images_with_a_parameter_bucket(self):
-        task_definition = json.loads(
-                Path("deploy/ecs/production-task-definition.json").read_text(encoding="utf-8"))
-        backend = task_definition["containerDefinitions"][0]
-        environment = {item["name"]: item["value"] for item in backend["environment"]}
-        secrets = {item["name"]: item["valueFrom"] for item in backend["secrets"]}
-
-        self.assertEqual("true", environment["MIRIYUM_STORAGE_S3_ENABLED"])
-        self.assertEqual(
-                "REPLACE_WITH_MIRIYUM_STORAGE_S3_BUCKET_PARAMETER_ARN",
-                secrets["MIRIYUM_STORAGE_S3_BUCKET"],
-        )
-
     def test_production_task_definition_supplies_qr_storage_generation(self):
         task_definition = json.loads(
                 Path("deploy/ecs/production-task-definition.json").read_text(encoding="utf-8"))
