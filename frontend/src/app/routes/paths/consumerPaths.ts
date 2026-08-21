@@ -5,10 +5,13 @@ export const CONSUMER_PATHS = {
   kakaoSignUp: '/auth/kakao/sign-up',
   myPage: '/mypage',
   myReservations: '/mypage/reservations',
+  myPickups: '/mypage/pickups',
+  waitingHistory: '/mypage/waiting-history',
   notificationHistory: '/mypage/notifications',
   reservationCreate: '/stores/:storeId/reserve',
   reservationDetail: '/reservations/:reservationId',
   reservationComplete: '/reservations/:reservationId/complete',
+  reservationCheckIn: '/reservations/:reservationId/check-in',
   reservationRequestPayment:
     '/reservation-requests/:reservationRequestId/payment',
   pickupCreate: '/stores/:storeId/pickup',

@@ -22,6 +22,17 @@ export type ReservationStatus = components['schemas']['ReservationStatus']
 export type ReservationSummary = components['schemas']['ReservationSummary']
 export type ReservationDetail = components['schemas']['ReservationDetail']
 export type ReservationPageData = components['schemas']['ReservationPageData']
+export type ReservationCheckInRequest =
+  components['schemas']['ReservationCheckInRequest']
+export type ReservationNoShowReason =
+  components['schemas']['ReservationNoShowReason']
+
+export const RESERVATION_NO_SHOW_REASON_LABEL: Record<ReservationNoShowReason, string> = {
+  USER_CAUSE_CANDIDATE: '고객 사유 후보',
+  STORE_CAUSE_CANDIDATE: '매장 사유 후보',
+  PLATFORM_EXTERNAL_CAUSE_CANDIDATE: '플랫폼·외부 사유 후보',
+  UNCLEAR: '사유 불명확',
+}
 
 /** 목록 정렬. 계약이 허용한 조합만 노출한다. */
 export type ReservationSort =
@@ -33,9 +44,8 @@ export type ReservationSort =
 /**
  * 예약 상태 문구.
  *
- * `NO_SHOW`는 운영자가 누르는 상태가 아니다. 서버가 `startAt + 5분`에 미방문을
- * 원자 확정하며, 이 화면에는 결과만 내려온다. 그래서 처리 패널에 버튼을 만들지
- * 않고 목록·상세의 표시와 필터에만 넣는다.
+ * `NO_SHOW`는 운영자가 `startAt + 5분` 이후 후보 사유와 함께 확정한다.
+ * 시간 경계와 상태 전이의 최종 판정은 서버가 맡는다.
  */
 export const RESERVATION_STATUS_LABEL: Record<ReservationStatus, string> = {
   CONFIRMED: '예약 확정',

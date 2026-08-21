@@ -1,8 +1,41 @@
 /* 픽업 예약 화면 배치. 토큰은 shared/ui/theme.css가 소유한다. */
 
 .pickup-create,
-.pickup-detail {
+.pickup-detail,
+.pickup-history {
   padding-bottom: var(--space-8);
+}
+
+.pickup-history__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.pickup-history__head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.pickup-history__head h2 {
+  margin-top: var(--space-1);
+  font-size: var(--font-size-headline-md);
+}
+
+.pickup-history__head time,
+.pickup-history__menus {
+  color: var(--color-on-surface-variant);
+}
+
+.pickup-history__head time {
+  flex-shrink: 0;
+  font-size: var(--font-size-label-md);
+}
+
+.pickup-history__menus {
+  margin: var(--space-2) 0;
 }
 
 .pickup-create__header {

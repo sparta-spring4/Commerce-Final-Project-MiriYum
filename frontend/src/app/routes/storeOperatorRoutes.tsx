@@ -8,7 +8,14 @@ import {
   StoreCreatePage,
   StoreInfoPage,
   StoreOperatorHomePage,
+  RepresentativeMenusPage,
 } from '../../domains/store/store-operator'
+import { MenuInventoryPage } from '../../domains/menu-hold/store-operator'
+import { StoreDashboardStatisticsPage } from '../../domains/analytics/store-operator'
+import {
+  PickupReservationDetailPage,
+  PickupReservationsPage,
+} from '../../domains/pickup/store-operator'
 import { StoreOperatorSignInPage } from '../../domains/account/store-operator/auth/ui/StoreOperatorSignInPage'
 import { StoreOperatorSignUpPage } from '../../domains/account/store-operator/auth/ui/StoreOperatorSignUpPage'
 import {
@@ -16,6 +23,7 @@ import {
   ReservationTimePolicyPage,
   StoreReservationDetailPage,
   StoreReservationsPage,
+  ReservationVisitOperationsPage,
 } from '../../domains/reservation/store-operator'
 import {
   WaitingSettingsPage,
@@ -25,6 +33,7 @@ import {
 import { StoreOperatorBoundary } from '../shells/store-operator/StoreOperatorBoundary'
 import { RequireStoreOperatorAuth } from '../shells/store-operator/RequireStoreOperatorAuth'
 import { StoreOperatorLayout } from '../shells/store-operator/StoreOperatorLayout'
+import { RequirePickupEnabled } from '../shells/store-operator/RequirePickupEnabled'
 import { STORE_OPERATOR_PATHS } from './paths/storeOperatorPaths'
 
 export const storeOperatorRoutes = (
@@ -42,10 +51,18 @@ export const storeOperatorRoutes = (
         <Route path={STORE_OPERATOR_PATHS.menus} element={<MenuListPage />} />
         <Route path={STORE_OPERATOR_PATHS.menuCreate} element={<MenuEditorPage />} />
         <Route path={STORE_OPERATOR_PATHS.menu} element={<MenuEditorPage />} />
+        <Route path={STORE_OPERATOR_PATHS.menuInventory} element={<MenuInventoryPage />} />
+        <Route path={STORE_OPERATOR_PATHS.representativeMenus} element={<RepresentativeMenusPage />} />
+        <Route path={STORE_OPERATOR_PATHS.dashboardStatistics} element={<StoreDashboardStatisticsPage />} />
         <Route path={STORE_OPERATOR_PATHS.reservationCapacities} element={<ReservationCapacityPage />} />
         <Route path={STORE_OPERATOR_PATHS.reservationTimePolicy} element={<ReservationTimePolicyPage />} />
         <Route path={STORE_OPERATOR_PATHS.reservations} element={<StoreReservationsPage />} />
         <Route path={STORE_OPERATOR_PATHS.reservation} element={<StoreReservationDetailPage />} />
+        <Route path={STORE_OPERATOR_PATHS.reservationVisits} element={<ReservationVisitOperationsPage />} />
+        <Route element={<RequirePickupEnabled />}>
+          <Route path={STORE_OPERATOR_PATHS.pickupReservations} element={<PickupReservationsPage />} />
+          <Route path={STORE_OPERATOR_PATHS.pickupReservation} element={<PickupReservationDetailPage />} />
+        </Route>
         <Route path={STORE_OPERATOR_PATHS.waitingSettings} element={<WaitingSettingsPage />} />
         <Route path={STORE_OPERATOR_PATHS.waitingTeams} element={<WaitingTeamsPage />} />
         <Route path={STORE_OPERATOR_PATHS.waitingTeam} element={<WaitingTeamDetailPage />} />

@@ -9,6 +9,7 @@ import { useStoreOperatorAuth } from './StoreOperatorAuthProvider'
 import { useManagedStore } from '../../../domains/store/store-operator/api/queries'
 import { OPERATION_STATUS_LABEL } from '../../../domains/store/store-operator/model/types'
 import { OPERATOR_NAV_ICONS, OperatorIcon } from './OperatorIcon'
+import type { ManagedStore } from '../../../domains/store/store-operator/model/types'
 
 /**
  * 매장 운영자 보호 화면의 공통 셸.
@@ -46,10 +47,13 @@ export function StoreOperatorLayout() {
       : undefined
 
   const storeId = routeStoreId ?? currentStoreId
+  const storeQuery = useManagedStore(storeId ?? '', storeId !== null && storeId !== undefined)
   const items: NavigationItem[] =
     storeId === null || storeId === undefined
       ? []
-      : storeOperatorNavigation(storeId)
+      : storeOperatorNavigation(storeId, {
+          pickupEnabled: storeQuery.data?.modes.pickupEnabled ?? false,
+        })
 
   return (
     <div className="op-shell">
@@ -147,7 +151,7 @@ export function StoreOperatorLayout() {
 
         <div className="op-shell__main">
           <div className="op-topbar">
-            <CurrentStoreSummary storeId={storeId ?? null} />
+            <CurrentStoreSummary storeId={storeId ?? null} store={storeQuery.data} />
             <span className="op-topbar__spacer" />
             <div className="op-topbar__actions">
               <StoreOperatorAccountMenu />
@@ -169,10 +173,7 @@ export function StoreOperatorLayout() {
  * 매장 ID를 알 때만 단건 조회한다. 조회 실패는 이 영역에서 오류 화면을 띄우지
  * 않는다. 본문이 같은 실패를 이미 설명하고, 머리말이 두 번 알릴 필요는 없다.
  */
-function CurrentStoreSummary({ storeId }: { storeId: string | null }) {
-  const query = useManagedStore(storeId ?? '', storeId !== null)
-  const store = storeId === null ? undefined : query.data
-
+function CurrentStoreSummary({ storeId, store }: { storeId: string | null; store?: ManagedStore }) {
   if (storeId === null) {
     return (
       <p className="op-topbar__store">

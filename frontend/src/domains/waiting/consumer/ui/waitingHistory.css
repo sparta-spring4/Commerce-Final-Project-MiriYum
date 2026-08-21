@@ -1,0 +1,11 @@
+.waiting-history { padding-bottom: var(--space-8); }
+.waiting-history__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.waiting-history__head { display: flex; justify-content: space-between; gap: var(--space-2); }
+.waiting-history__head time, .waiting-history__item p { color: var(--color-on-surface-variant); }
+.waiting-history__item h2 { margin: var(--space-2) 0 var(--space-1); font-size: var(--font-size-headline-md); }
+.waiting-history__item .mi-button { margin-top: var(--space-2); }
