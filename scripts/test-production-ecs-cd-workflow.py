@@ -84,6 +84,24 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
             self.workflow.index("- name: Log in to Amazon ECR"),
         )
 
+    def test_live_waiting_history_cursor_secret_uses_the_application_secret_arn(self):
+        preflight = self.workflow.split(
+            "- name: Verify live waiting history cursor secret mapping", 1
+        )[1].split("- name:", 1)[0]
+
+        self.assertIn('select(.name == "MIRIYUM_DB_URL")', preflight)
+        self.assertIn("application_secret_mapping_count", preflight)
+        self.assertIn('[ "$application_secret_mapping_count" != "1" ]', preflight)
+        self.assertIn("application_secret_arn", preflight)
+        self.assertIn(
+            '"${application_secret_arn}:MIRIYUM_WAITING_HISTORY_CURSOR_SECRET::"',
+            preflight,
+        )
+        self.assertIn(
+            "Waiting history cursor secret must use the production application secret ARN",
+            preflight,
+        )
+
     def test_task_definition_rejects_missing_or_wrong_backend_container(self):
         self.assertIn("Expected exactly one $ECS_CONTAINER_NAME container", self.workflow)
         self.assertIn("updated_container_count", self.workflow)

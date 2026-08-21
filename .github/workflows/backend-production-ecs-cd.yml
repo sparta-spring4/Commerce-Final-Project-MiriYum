@@ -191,16 +191,37 @@ jobs:
             --query 'services[0].taskDefinition' \
             --output text)
 
-          waiting_cursor_mappings=$(aws ecs describe-task-definition \
+          live_task_definition=$(aws ecs describe-task-definition \
             --task-definition "$current_task_definition" \
             --query taskDefinition \
-            --output json \
-            | jq -c --arg container "$ECS_CONTAINER_NAME" '
+            --output json)
+
+          application_secret_mappings=$(jq -c --arg container "$ECS_CONTAINER_NAME" '
+              [.containerDefinitions[]
+                | select(.name == $container)
+                | .secrets[]?
+                | select(.name == "MIRIYUM_DB_URL")]
+            ' <<< "$live_task_definition")
+          application_secret_mapping_count=$(jq 'length' <<< "$application_secret_mappings")
+          if [ "$application_secret_mapping_count" != "1" ]; then
+            echo "::error::Production live task must map exactly one MIRIYUM_DB_URL application secret reference."
+            exit 1
+          fi
+
+          application_secret_value_from=$(jq -r '.[0].valueFrom // ""' <<< "$application_secret_mappings")
+          if [[ "$application_secret_value_from" =~ ^(arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+):MIRIYUM_DB_URL::$ ]]; then
+            application_secret_arn="${BASH_REMATCH[1]}"
+          else
+            echo "::error::Production live task MIRIYUM_DB_URL must select its matching Secrets Manager JSON key."
+            exit 1
+          fi
+
+          waiting_cursor_mappings=$(jq -c --arg container "$ECS_CONTAINER_NAME" '
                 [.containerDefinitions[]
                   | select(.name == $container)
                   | .secrets[]?
                   | select(.name == "MIRIYUM_WAITING_HISTORY_CURSOR_SECRET")]
-              ')
+              ' <<< "$live_task_definition")
           waiting_cursor_mapping_count=$(jq 'length' <<< "$waiting_cursor_mappings")
           if [ "$waiting_cursor_mapping_count" != "1" ]; then
             echo "::error::Production live task must map exactly one waiting history cursor secret. Complete #543 before image rollout."
@@ -208,8 +229,9 @@ jobs:
           fi
 
           waiting_cursor_value_from=$(jq -r '.[0].valueFrom // ""' <<< "$waiting_cursor_mappings")
-          if ! [[ "$waiting_cursor_value_from" =~ ^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+:MIRIYUM_WAITING_HISTORY_CURSOR_SECRET::$ ]]; then
-            echo "::error::Production live task waiting history cursor mapping must select its matching Secrets Manager JSON key."
+          expected_waiting_cursor_value_from="${application_secret_arn}:MIRIYUM_WAITING_HISTORY_CURSOR_SECRET::"
+          if [ "$waiting_cursor_value_from" != "$expected_waiting_cursor_value_from" ]; then
+            echo "::error::Waiting history cursor secret must use the production application secret ARN and its matching JSON key."
             exit 1
           fi
 
