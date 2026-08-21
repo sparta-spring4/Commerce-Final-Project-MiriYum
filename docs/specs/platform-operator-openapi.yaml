@@ -94,6 +94,18 @@ paths:
     $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}~1proposals~1{proposalVersion}~1approvals"
   /api/v1/platform-operators/payment-recovery-cases/{caseId}/failed-unresolved-closures:
     $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}~1failed-unresolved-closures"
+  /api/v1/platform-operators/onboarding-review-cases:
+    $ref: "./platform-operator-onboarding-review/openapi.yaml#/paths/~1api~1v1~1platform-operators~1onboarding-review-cases"
+  /api/v1/platform-operators/onboarding-review-cases/{caseId}:
+    $ref: "./platform-operator-onboarding-review/openapi.yaml#/paths/~1api~1v1~1platform-operators~1onboarding-review-cases~1{caseId}"
+  /api/v1/platform-operators/onboarding-review-cases/{caseId}/assignments:
+    $ref: "./platform-operator-onboarding-review/openapi.yaml#/paths/~1api~1v1~1platform-operators~1onboarding-review-cases~1{caseId}~1assignments"
+  /api/v1/platform-operators/onboarding-review-cases/{caseId}/reassignments:
+    $ref: "./platform-operator-onboarding-review/openapi.yaml#/paths/~1api~1v1~1platform-operators~1onboarding-review-cases~1{caseId}~1reassignments"
+  /api/v1/platform-operators/onboarding-review-cases/{caseId}/decisions:
+    $ref: "./platform-operator-onboarding-review/openapi.yaml#/paths/~1api~1v1~1platform-operators~1onboarding-review-cases~1{caseId}~1decisions"
+  /api/v1/platform-operators/onboarding-review-cases/{caseId}/evidence:
+    $ref: "./platform-operator-onboarding-review/openapi.yaml#/paths/~1api~1v1~1platform-operators~1onboarding-review-cases~1{caseId}~1evidence"
 components:
   securitySchemes:
     platformOperatorBearerAuth:

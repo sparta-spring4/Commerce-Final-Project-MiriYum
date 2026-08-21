@@ -3,6 +3,8 @@ package com.miriyum.domain.platformoperator.enums;
 /** 현재 비밀번호 일회 승인이 결속될 수 있는 고위험 명령 목적이다. */
 public enum AdminCommandPurpose {
     ONBOARDING_DECISION,
+    ONBOARDING_ASSIGNMENT,
+    ONBOARDING_EVIDENCE_ACCESS,
     MEMBER_RECOVERY,
     ACCOUNT_SANCTION,
     ACCOUNT_APPEAL_DECISION,

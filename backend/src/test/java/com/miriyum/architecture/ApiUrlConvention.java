@@ -13,7 +13,7 @@ final class ApiUrlConvention {
             "auth", "me", "current", "contact", "visibility", "selling-status",
             "end-at", "menu-hold-availability", "pickup-availability",
             "deactivation-impact", "initial-password", "portone", "kakao",
-            "authority", "suspension", "unread-count");
+            "authority", "suspension", "unread-count", "evidence");
     private static final Set<String> LEGACY_COMMAND_SEGMENTS = Set.of(
             "publication", "publication-cancellation", "retirement", "cancellation",
             "call", "arrive", "check-in", "cancel");
@@ -89,7 +89,8 @@ final class ApiUrlConvention {
         } else if (audience.equals("store-operators")) {
             if (segments.size() < 4
                     || (!Set.of("me", "auth", "stores").contains(segments.get(3))
-                    && !isMemberSupportSegment(segments.get(3)))) {
+                    && !isMemberSupportSegment(segments.get(3))
+                    && !segments.get(3).equals("onboarding-applications"))) {
                 return "store-operator routes require /me, /auth, or /stores scope";
             }
         }
