@@ -245,11 +245,11 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 - 업로드 경로는 `POST /api/v1/store-operators/stores/{storeId}/images`, `PUT`·`DELETE /api/v1/store-operators/stores/{storeId}/images/{imageId}`이다. 모든 변경 요청은 `Idempotency-Key`를 사용한다.
 - JPEG·PNG·WebP만 허용한다. 서버는 요청의 MIME 타입뿐 아니라 파일 시그니처와 크기를 검증한 뒤 공통 저장소를 호출한다.
 - 공통 저장소 메타데이터는 `ownerType=STORE`, `purpose=STORE_IMAGE`, `visibility=PUBLIC`을 사용한다.
-- 공개 응답은 `imageId`와 애플리케이션의 `/api/v1/public-files/{imageId}` 경로만 반환한다. S3 버킷·객체 키·체크섬·원본 파일명은 반환하거나 로그에 기록하지 않는다.
+- 공개 응답은 메타데이터 `fileId`를 외부 공개 식별자 `imageId`로 표현하고, 애플리케이션의 `/api/v1/public-files/{imageId}` 경로만 반환한다. S3 버킷·객체 키·체크섬·원본 파일명과 그 밖의 내부 메타데이터는 반환하거나 로그에 기록하지 않는다.
 - 교체 중 새 파일 저장 또는 검증이 실패하면 새 파일은 공개하지 않고 기존 공개 이미지를 유지한다. 파일 메타데이터는 `PENDING`으로 시작하고 새 객체 저장, 현재 권한·메뉴 상태 재확인, 멱등 결과와 `CONFIRMED` 전이를 순서대로 처리한다. S3 저장·삭제 같은 외부 호출은 Store·Menu 잠금 또는 업무 DB 트랜잭션 밖에서 실행한다.
 - 새 객체 저장 뒤 DB 확정이 실패하면 새 파일은 `PENDING`으로 남아 공개 조회에서 제외된다. 보상 삭제가 가능하면 `DELETED`로 전이한 뒤 물리 삭제를 시도하고, 물리 삭제가 실패해도 `DELETED`를 유지해 공개하지 않는다. 객체 저장 호출 전의 확정적 검증·권한 실패 또는 객체가 생성되지 않았음이 확인된 실패만 `FAILED`로 끝낸다. `PutObject` 뒤 HEAD 검증 실패처럼 생성 여부가 불명확하거나 안전한 보상 삭제가 불가능한 실패는 `PENDING`으로 남겨 reconciliation 대상으로 처리하며 성공으로 추측하지 않는다.
 - 기존 파일의 물리 삭제는 새 결과와 멱등 기록이 `CONFIRMED`로 커밋된 뒤에만 시작한다. 삭제 실패는 성공 응답과 기존 공개본을 되돌리지 않는다. 같은 멱등 키 재생은 자신이 만든 정리를 다시 시도할 수 있지만, 오래된 `PENDING`·`DELETED`는 별도 reconciliation이 제한된 batch로 멱등 회수한다. reconciliation 성공·재시도 가능 실패·장기 체류는 식별자 없는 집계 관측으로 남긴다.
-- 동시 교체·삭제와 재시도에도 현재 공개 조회에는 `CONFIRMED` 이미지 중 `createdAt` 오름차순(동률이면 파일 ID 오름차순) 대표 한 장만 보이며, `PENDING`·`FAILED`·`DELETED` 메타데이터와 해당 객체는 공개하지 않는다. 파일 ID·객체 키·버킷·체크섬·원본 파일명은 공개 응답과 관측 로그에 넣지 않는다.
+- 동시 교체·삭제와 재시도에도 현재 공개 조회에는 `CONFIRMED` 이미지 중 `createdAt` 오름차순(동률이면 `fileId` 오름차순) 대표 한 장만 보이며, `PENDING`·`FAILED`·`DELETED` 메타데이터와 해당 객체는 공개하지 않는다. 공개 식별자 `imageId` 외의 내부 메타데이터, 객체 키·버킷·체크섬·원본 파일명은 공개 응답과 관측 로그에 넣지 않는다.
 - 공개 파일을 읽을 때는 메타데이터의 객체 키·MIME 타입·크기·SHA-256 체크섬과 실제 저장 객체를 대조한다. 하나라도 다르면 공개하지 않고 `COMMON_012`로 실패한다.
 - 사업자등록증은 이 계약에 포함하지 않는다. PRIVATE 접근 제어와 보존·파기 기준을 확정하는 #344에서 별도 처리한다.
 
