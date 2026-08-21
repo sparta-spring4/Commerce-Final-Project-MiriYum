@@ -51,6 +51,8 @@ export const MAX_PARTY_SIZE = 100
 
 /** 계약의 keyword 길이. */
 const MAX_KEYWORD_LENGTH = 100
+const MAX_SEARCH_INPUT_LENGTH = 100
+const MAX_CURSOR_LENGTH = 1024
 
 /**
  * 화면이 다루는 검색 조건. URL search params가 유일한 원본이고
@@ -67,6 +69,7 @@ export interface StoreSearchFilters {
   includesInfants: boolean
   availableOnly: boolean
   page: number
+  cursor: string
   sort: SortOption
 }
 
@@ -80,6 +83,7 @@ export const EMPTY_FILTERS: StoreSearchFilters = {
   includesInfants: false,
   availableOnly: false,
   page: 0,
+  cursor: '',
   sort: DEFAULT_SORT,
 }
 
@@ -111,6 +115,7 @@ export function readFilters(search: URLSearchParams): StoreSearchFilters {
     includesInfants: search.get('includesInfants') === 'true',
     availableOnly: search.get('availableOnly') === 'true',
     page: Number.isInteger(page) && page > 0 ? page : 0,
+    cursor: (search.get('cursor') ?? '').slice(0, MAX_CURSOR_LENGTH),
     sort: sort !== null && SORT_SET.has(sort) ? (sort as SortOption) : DEFAULT_SORT,
   }
 }
@@ -153,6 +158,7 @@ export function writeFilters(filters: StoreSearchFilters): URLSearchParams {
   if (filters.page > 0) {
     search.append('page', String(filters.page))
   }
+  appendIf(search, 'cursor', filters.cursor)
   if (filters.sort !== DEFAULT_SORT) {
     search.append('sort', filters.sort)
   }
@@ -213,20 +219,39 @@ export type StoreSearchQuery = Record<
  */
 export function toSearchQuery(filters: StoreSearchFilters): StoreSearchQuery {
   const complete = reservationConditionState(filters) === 'complete'
-  const keyword = filters.keyword.trim()
+  const structuredTerms = [
+    filters.region,
+    filters.storeCategoryCode,
+    ...(complete
+      ? [
+          filters.serviceDate,
+          filters.startTime,
+          `${filters.partySize}명`,
+        ]
+      : []),
+  ]
+    .filter((value): value is string => value !== null && value.length > 0)
+    .join(' ')
+  const keywordLimit = Math.max(
+    0,
+    MAX_SEARCH_INPUT_LENGTH -
+      structuredTerms.length -
+      (structuredTerms.length > 0 ? 1 : 0),
+  )
+  const keyword = filters.keyword.trim().slice(0, keywordLimit)
+  const searchInput = [keyword, structuredTerms]
+    .filter((value) => value.length > 0)
+    .join(' ')
+  const integrated = searchInput.length > 0
 
   return {
-    keyword: keyword.length > 0 ? keyword : undefined,
-    region: filters.region ?? undefined,
-    storeCategoryCode: filters.storeCategoryCode ?? undefined,
-    serviceDate: complete ? filters.serviceDate : undefined,
-    startTime: complete ? filters.startTime : undefined,
-    partySize: complete ? Number(filters.partySize) : undefined,
+    searchInput: integrated ? searchInput : undefined,
     includesInfants: complete && filters.includesInfants ? true : undefined,
     availableOnly: complete && filters.availableOnly ? true : undefined,
-    page: filters.page > 0 ? filters.page : undefined,
+    page: !integrated && filters.page > 0 ? filters.page : undefined,
+    cursor: integrated && filters.cursor.length > 0 ? filters.cursor : undefined,
     size: DEFAULT_PAGE_SIZE,
-    sort: filters.sort !== DEFAULT_SORT ? filters.sort : undefined,
+    sort: integrated || filters.sort !== DEFAULT_SORT ? filters.sort : undefined,
   }
 }
 

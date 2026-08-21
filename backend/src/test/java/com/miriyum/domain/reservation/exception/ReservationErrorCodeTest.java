@@ -31,7 +31,7 @@ class ReservationErrorCodeTest {
     @DisplayName("예약 오류 외부 코드는 중복되지 않는다")
     void doesNotContainDuplicateExternalCodes() {
         // when & then
-        assertThat(ReservationErrorCode.values()).hasSize(32);
+        assertThat(ReservationErrorCode.values()).hasSize(33);
         assertThat(ReservationErrorCode.values())
                 .extracting(ReservationErrorCode::getCode)
                 .doesNotHaveDuplicates();
@@ -125,7 +125,10 @@ class ReservationErrorCodeTest {
                         "일행 참여 인원이 등록 인원을 초과합니다."),
                 Arguments.of(ReservationErrorCode.WAITING_MONITORING_UNAVAILABLE,
                         HttpStatus.SERVICE_UNAVAILABLE, "WAITING_018",
-                        "웨이팅 모니터링 원장을 조회할 수 없습니다.")
+                        "웨이팅 모니터링 원장을 조회할 수 없습니다."),
+                Arguments.of(ReservationErrorCode.WAITING_HISTORY_CURSOR_INVALID,
+                        HttpStatus.BAD_REQUEST, "WAITING_019",
+                        "웨이팅 이력 cursor가 올바르지 않습니다.")
         );
     }
 }
