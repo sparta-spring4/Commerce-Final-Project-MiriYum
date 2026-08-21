@@ -212,6 +212,7 @@ public class ReservationSecurityConfig {
                         .requestMatchers(HttpMethod.GET, CONSUMER_WAITING_AVAILABILITY).authenticated()
                         .requestMatchers(HttpMethod.POST, CONSUMER_WAITING_LOCATION_PROOF).authenticated()
                         .requestMatchers(HttpMethod.POST, CONSUMER_WAITING_STORE_ROOT).authenticated()
+                        .requestMatchers(HttpMethod.GET, CONSUMER_WAITING_ME_ROOT).authenticated()
                         .requestMatchers(HttpMethod.GET,
                                 CONSUMER_WAITING_ME_ROOT + "/current").authenticated()
                         .requestMatchers(HttpMethod.POST,

@@ -134,6 +134,8 @@ miriyum:
     max-connections-total: ${MIRIYUM_SSE_MAX_CONNECTIONS_TOTAL:0}
     max-connections-per-account: ${MIRIYUM_SSE_MAX_CONNECTIONS_PER_ACCOUNT:0}
   waiting:
+    history:
+      cursor-secret: ${MIRIYUM_WAITING_HISTORY_CURSOR_SECRET:}
     auto-open:
       enabled: ${MIRIYUM_WAITING_AUTO_OPEN_ENABLED:false}
       worker-id: ${MIRIYUM_WAITING_AUTO_OPEN_WORKER_ID:}
