@@ -40,8 +40,6 @@ paths:
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/consumers/me/notifications/unread-count:
-    x-miriyum-runtime-status: contract-only
-    x-miriyum-owner-issue: 500
     get:
       tags: [Notification]
       summary: 본인 미확인 알림 개수 조회
@@ -62,8 +60,6 @@ paths:
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/consumers/me/notifications/{notificationId}/reads:
-    x-miriyum-runtime-status: contract-only
-    x-miriyum-owner-issue: 500
     post:
       tags: [Notification]
       summary: 본인 알림 개별 읽음 처리
@@ -88,8 +84,6 @@ paths:
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/consumers/me/notifications/reads:
-    x-miriyum-runtime-status: contract-only
-    x-miriyum-owner-issue: 500
     post:
       tags: [Notification]
       summary: 본인 알림 전체 읽음 처리
