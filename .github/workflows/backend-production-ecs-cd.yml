@@ -277,6 +277,53 @@ jobs:
             exit 1
           fi
 
+          preflight_directory=$(mktemp -d)
+          trap 'rm -rf "$preflight_directory"' EXIT
+          aws ssm get-parameter \
+            --name /miriyum/production/storage-s3-bucket \
+            --query 'Parameter' \
+            --output json > "$preflight_directory/parameter.json"
+          bucket_name=$(jq -r '.Value // empty' "$preflight_directory/parameter.json")
+          if [ -z "$bucket_name" ]; then
+            echo "::error::Production S3 bucket Parameter is empty."
+            exit 1
+          fi
+          aws s3api get-bucket-location \
+            --bucket "$bucket_name" \
+            --output json > "$preflight_directory/location.json"
+          aws s3api get-bucket-versioning \
+            --bucket "$bucket_name" \
+            --output json > "$preflight_directory/versioning.json"
+          aws s3api get-bucket-encryption \
+            --bucket "$bucket_name" \
+            --output json > "$preflight_directory/encryption.json"
+          aws s3api get-public-access-block \
+            --bucket "$bucket_name" \
+            --output json > "$preflight_directory/public-access.json"
+          aws s3api get-bucket-policy \
+            --bucket "$bucket_name" \
+            --output json > "$preflight_directory/bucket-policy.json"
+          aws iam get-role-policy \
+            --role-name miriyum-prod-ecs-task-role \
+            --policy-name MiriyumProductionS3FileAccess \
+            --query 'PolicyDocument' \
+            --output json > "$preflight_directory/task-policy.json"
+          aws iam get-role-policy \
+            --role-name miriyum-prod-ecs-task-execution-role \
+            --policy-name MiriyumProductionStorageParameterRead \
+            --query 'PolicyDocument' \
+            --output json > "$preflight_directory/execution-policy.json"
+          python3 scripts/verify-production-storage-s3-preflight.py \
+            --account-id "$account_id" --region "$AWS_REGION" \
+            --parameter-json "$preflight_directory/parameter.json" \
+            --location-json "$preflight_directory/location.json" \
+            --versioning-json "$preflight_directory/versioning.json" \
+            --encryption-json "$preflight_directory/encryption.json" \
+            --public-access-json "$preflight_directory/public-access.json" \
+            --bucket-policy-json "$preflight_directory/bucket-policy.json" \
+            --task-policy-json "$preflight_directory/task-policy.json" \
+            --execution-policy-json "$preflight_directory/execution-policy.json"
+
       - name: Verify live waiting history cursor secret mapping
         run: |
           current_task_definition=$(aws ecs describe-services \
