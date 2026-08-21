@@ -128,9 +128,60 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("did not stabilize within the 20-minute deployment budget", stability_step)
         self.assertNotIn("aws ecs wait services-stable", stability_step)
 
+    def test_automatic_and_manual_sources_enforce_the_notification_writer_floor(self):
+        self.assertIn(
+            "NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA: "
+            "515531e122ebbce13d8eead4a3ff15a94c25e0b3",
+            self.workflow,
+        )
+        self.assertGreaterEqual(
+            self.workflow.count("verify-ancestor"),
+            2,
+        )
+        self.assertGreaterEqual(
+            self.workflow.count("fetch-depth: 0"),
+            2,
+        )
+
+    def test_completed_rollout_requires_task_and_target_lifecycle_evidence(self):
+        capture_step = self.workflow.split(
+            "- name: Capture previous ECS task identities", 1
+        )[1].split("- name: Update ECS service", 1)[0]
+        evidence_step = self.workflow.split(
+            "- name: Verify production ECS replacement evidence", 1
+        )[1]
+
+        self.assertIn("aws ecs list-tasks", capture_step)
+        self.assertIn("--desired-status RUNNING", capture_step)
+        self.assertIn("notification-read-previous-task-arns.json", capture_step)
+        self.assertIn("aws ecs list-tasks", evidence_step)
+        self.assertIn("--desired-status RUNNING", evidence_step)
+        self.assertNotIn("--desired-status PENDING", evidence_step)
+        self.assertIn("aws ecs describe-tasks", evidence_step)
+        self.assertIn("previous-task-arns.json", evidence_step)
+        self.assertIn("previous-tasks.json", evidence_step)
+        self.assertIn("aws elbv2 describe-target-health", evidence_step)
+        self.assertIn("verify-production-ecs", evidence_step)
+        self.assertIn("--expected-task-definition", evidence_step)
+
+    def test_revision_gate_runs_from_the_trusted_workflow_revision(self):
+        self.assertGreaterEqual(self.workflow.count("github.workflow_sha"), 2)
+        self.assertGreaterEqual(
+            self.workflow.count("$RUNNER_TEMP/notification-read-deployment-gate.py"),
+            4,
+        )
+        self.assertNotIn(
+            "python3 scripts/test-notification-read-deployment-gate.py verify-ancestor",
+            self.workflow,
+        )
+
     def test_backend_ci_runs_the_workflow_contract_test(self):
         self.assertIn("Verify production ECS CD workflow contract", self.backend_ci)
         self.assertIn("python3 scripts/test-production-ecs-cd-workflow.py", self.backend_ci)
+        self.assertIn(
+            "python3 scripts/test-notification-read-deployment-gate.py",
+            self.backend_ci,
+        )
 
 
 if __name__ == "__main__":
