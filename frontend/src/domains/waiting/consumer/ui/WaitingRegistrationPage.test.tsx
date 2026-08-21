@@ -311,15 +311,15 @@ describe('웨이팅 등록 화면 - 등록 성공', () => {
     expect(success).toHaveTextContent('4명')
   })
 
-  it('마이페이지에서 확인하는 이동 버튼을 제공한다', () => {
+  it('현재 웨이팅 상세로 가는 이동 버튼을 제공한다', () => {
     renderPage({
       progress: 'succeeded',
       result: { queueSequence: 1, teamsAhead: 0, partySize: 2 },
     })
 
     expect(
-      screen.getByRole('link', { name: '마이페이지에서 확인' }),
-    ).toHaveAttribute('href', '/mypage')
+      screen.getByRole('link', { name: '현재 웨이팅 보기' }),
+    ).toHaveAttribute('href', '/waiting/current')
   })
 
   it('성공한 뒤에는 등록 폼을 다시 두지 않는다', () => {

@@ -14,6 +14,7 @@ export const CONSUMER_PATHS = {
   pickupCreate: '/stores/:storeId/pickup',
   pickupDetail: '/pickup-reservations/:pickupReservationId',
   pickupComplete: '/pickup-reservations/:pickupReservationId/complete',
-  waitingInvitationAccept: '/waiting/invitations/accept',
   waitingRegister: '/stores/:storeId/waiting',
+  waitingCurrent: '/waiting/current',
+  waitingInvitationAccept: '/waiting/invitations/accept',
 } as const

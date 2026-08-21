@@ -79,12 +79,17 @@ function WaitingPartyPanelStateful({ snapshot }: Props) {
   const runningRef = useRef<CommandAttempt | null>(null)
   const activeRef = useRef(true)
 
-  useEffect(
-    () => () => {
+  /*
+   * mount마다 다시 켠다. cleanup만 두면 StrictMode의 mount→unmount→mount에서
+   * 두 번째 mount가 꺼진 ref를 물려받아 모든 명령 결과가 조용히 버려진다.
+   * 단위 테스트는 StrictMode로 렌더하지 않아 이 차이를 잡지 못한다.
+   */
+  useEffect(() => {
+    activeRef.current = true
+    return () => {
       activeRef.current = false
-    },
-    [],
-  )
+    }
+  }, [])
 
   useEffect(() => {
     // version이 바뀌면 이전 expectedVersion과 멱등 키를 새 명령에 재사용하지 않는다.

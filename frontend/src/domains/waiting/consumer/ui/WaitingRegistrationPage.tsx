@@ -335,9 +335,9 @@ function RegistrationResult({
         <div className="waiting-register__result-actions">
           <Link
             className="mi-button mi-button--primary"
-            to={CONSUMER_PATHS.myPage}
+            to={CONSUMER_PATHS.waitingCurrent}
           >
-            마이페이지에서 확인
+            현재 웨이팅 보기
           </Link>
           <Link className="mi-button mi-button--ghost" to={storeDetailPath}>
             매장 상세로 돌아가기
