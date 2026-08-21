@@ -25,6 +25,7 @@ function respondWithDetail(
     http.get('/api/v1/stores/:storeId/menus', () =>
       successResponse({ items: menus }),
     ),
+    http.get('/api/v1/stores/:storeId/images', () => successResponse([])),
   )
 }
 
@@ -50,6 +51,27 @@ describe('매장 상세 화면', () => {
     expect(
       screen.getByText('서울 · 서울특별시 성동구 연무장길 14'),
     ).toBeInTheDocument()
+  })
+
+  it('등록된 공개 매장 이미지를 hero에 먼저 표시한다', async () => {
+    respondWithDetail(storeDetail())
+    server.use(
+      http.get('/api/v1/stores/:storeId/images', () =>
+        successResponse([
+          {
+            imageId: 'd2719d4a-6174-4f23-ae57-18b7e4eeab40',
+            url: '/api/v1/public-files/d2719d4a-6174-4f23-ae57-18b7e4eeab40',
+          },
+        ]),
+      ),
+    )
+
+    renderDetail()
+
+    expect(await screen.findByAltText('매장 대표 이미지')).toHaveAttribute(
+      'src',
+      '/api/v1/public-files/d2719d4a-6174-4f23-ae57-18b7e4eeab40',
+    )
   })
 
   it('태그 표시명을 서버 catalog에서 받아 쓴다', async () => {

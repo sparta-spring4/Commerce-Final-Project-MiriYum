@@ -20,6 +20,10 @@ export interface paths {
     /** 매장 공개 메뉴 조회 */
     get: operations["getStoreMenus"];
   };
+  "/api/v1/stores/{storeId}/images": {
+    /** 매장 공개 이미지 조회 */
+    get: operations["getStoreImages"];
+  };
   "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches": {
     /** 품절 메뉴 대안 검색 */
     post: operations["searchMenuAlternatives"];
@@ -1090,6 +1094,24 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["MenuListSuccessResponse"];
+        };
+      };
+      404: components["responses"]["StoreNotFound"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 매장 공개 이미지 조회 */
+  getStoreImages: {
+    parameters: {
+      path: {
+        storeId: components["parameters"]["StoreId"];
+      };
+    };
+    responses: {
+      /** @description 공개 매장 이미지 목록 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PublicImageListSuccessResponse"];
         };
       };
       404: components["responses"]["StoreNotFound"];

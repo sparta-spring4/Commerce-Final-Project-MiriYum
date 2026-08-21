@@ -29,6 +29,7 @@ class StoreSearchOpenApiContractTest {
                 "/api/v1/stores",
                 "/api/v1/stores/{storeId}",
                 "/api/v1/stores/{storeId}/menus",
+                "/api/v1/stores/{storeId}/images",
                 "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches");
         Map<String, Object> alternativePath = map(paths.get(
                 "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches"));
@@ -44,6 +45,8 @@ class StoreSearchOpenApiContractTest {
         assertThat(responseReference(paths, "/api/v1/stores/{storeId}", "429"))
                 .isEqualTo(TOO_MANY_REQUESTS_RESPONSE);
         assertThat(responseReference(paths, "/api/v1/stores/{storeId}/menus", "429"))
+                .isEqualTo(TOO_MANY_REQUESTS_RESPONSE);
+        assertThat(responseReference(paths, "/api/v1/stores/{storeId}/images", "429"))
                 .isEqualTo(TOO_MANY_REQUESTS_RESPONSE);
         assertThat(parameterNames(map(map(paths.get("/api/v1/stores")).get("get"))))
                 .contains("serviceDate", "startTime", "partySize", "includesInfants",

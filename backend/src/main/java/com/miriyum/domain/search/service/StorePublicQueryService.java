@@ -7,6 +7,7 @@ import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.menu.dto.contract.RepresentativeMenuSnapshot;
 import com.miriyum.domain.menu.service.RepresentativeMenuQueryService;
 import com.miriyum.domain.store.error.StoreErrorCode;
+import com.miriyum.domain.store.dto.image.PublicImageResponse;
 import com.miriyum.domain.schedule.dto.contract.PublicOperatingDay;
 import com.miriyum.domain.schedule.dto.contract.PublicReservationDay;
 import com.miriyum.domain.schedule.dto.contract.PublicScheduleTimeRange;
@@ -25,6 +26,7 @@ import com.miriyum.domain.search.repository.StorePublicReadRepository;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.storage.FileStorageOwner;
 import com.miriyum.global.storage.FileStoragePurpose;
+import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.service.FileStorageFacade;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +64,23 @@ public class StorePublicQueryService {
         List<PublicMenu> menus = publicReadRepository.findPublicMenus(storeId);
         requirePublicStore(storeId);
         return attachImageUrls(menus);
+    }
+
+    /** 공개 중인 매장에 연결된 확정 이미지만 고객 화면에 제공한다. */
+    @Transactional(readOnly = true)
+    public List<PublicImageResponse> getImages(long storeId) {
+        requirePublicStore(storeId);
+        FileStorageFacade fileStorageFacade = fileStorageFacadeProvider.getIfAvailable();
+        if (fileStorageFacade == null) {
+            return List.of();
+        }
+        return fileStorageFacade.findPublicMetadata(
+                        new FileStorageOwner("STORE", storeId),
+                        FileStoragePurpose.STORE_IMAGE,
+                        List.of(FileStorageStatus.CONFIRMED))
+                .stream()
+                .map(PublicImageResponse::from)
+                .toList();
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
