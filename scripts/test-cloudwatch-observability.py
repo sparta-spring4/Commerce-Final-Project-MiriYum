@@ -69,8 +69,9 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         cls.compose_config = cls.load_compose_config(ENV_EXAMPLE_PATH)
 
     @staticmethod
-    def load_compose_config(env_file):
-        environment = CloudWatchObservabilityConfigTest.compose_environment()
+    def load_compose_config(env_file, environment=None):
+        if environment is None:
+            environment = CloudWatchObservabilityConfigTest.compose_environment()
         result = subprocess.run(
             [
                 "docker",
@@ -88,6 +89,7 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             check=True,
             env=environment,
             text=True,
+            encoding="utf-8",
         )
         return json.loads(result.stdout)
 
@@ -247,6 +249,32 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             "MIRIYUM_PAYMENT_ENABLED: ${MIRIYUM_PAYMENT_ENABLED:-false}",
             self.compose,
         )
+
+    def test_staging_payment_enablement_forwards_all_backend_only_secrets(self):
+        environment = self.compose_environment()
+        expected_environment = {
+            "MIRIYUM_PAYMENT_ENABLED": "true",
+            "MIRIYUM_PORTONE_STORE_ID": "test-only-portone-store-id",
+            "MIRIYUM_PORTONE_API_SECRET": "test-only-portone-api-secret",
+            "MIRIYUM_PAYMENT_CURSOR_SECRET": "test-only-payment-cursor-secret",
+            "MIRIYUM_PORTONE_WEBHOOK_SECRET": "test-only-portone-webhook-secret",
+        }
+        environment.update(expected_environment)
+
+        backend_environment = self.load_compose_config(
+            ENV_EXAMPLE_PATH, environment
+        )["services"]["backend"]["environment"]
+
+        expected_source_mappings = {
+            "MIRIYUM_PAYMENT_ENABLED": "MIRIYUM_PAYMENT_ENABLED: ${MIRIYUM_PAYMENT_ENABLED:-false}",
+            "MIRIYUM_PORTONE_STORE_ID": "MIRIYUM_PORTONE_STORE_ID: ${MIRIYUM_PORTONE_STORE_ID:-}",
+            "MIRIYUM_PORTONE_API_SECRET": "MIRIYUM_PORTONE_API_SECRET: ${MIRIYUM_PORTONE_API_SECRET:-}",
+            "MIRIYUM_PAYMENT_CURSOR_SECRET": "MIRIYUM_PAYMENT_CURSOR_SECRET: ${MIRIYUM_PAYMENT_CURSOR_SECRET:-}",
+            "MIRIYUM_PORTONE_WEBHOOK_SECRET": "MIRIYUM_PORTONE_WEBHOOK_SECRET: ${MIRIYUM_PORTONE_WEBHOOK_SECRET:-}",
+        }
+        for name, value in expected_environment.items():
+            self.assertEqual(value, backend_environment[name])
+            self.assertIn(expected_source_mappings[name], self.compose)
 
     def test_pending_risk_event_count_is_observable_without_identifier_dimensions(self):
         self.assertIn(
