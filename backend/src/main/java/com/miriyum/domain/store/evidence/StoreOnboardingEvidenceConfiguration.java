@@ -3,6 +3,7 @@ package com.miriyum.domain.store.evidence;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.domain.store.onboarding.repository.StoreOnboardingApplicationRepository;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -11,6 +12,7 @@ import org.springframework.context.annotation.Configuration;
 public class StoreOnboardingEvidenceConfiguration {
 
     @Bean
+    @ConditionalOnMissingBean(StoreOnboardingApplicationOwnershipPort.class)
     StoreOnboardingApplicationOwnershipPort storeOnboardingApplicationOwnershipPort(
             StoreOnboardingApplicationRepository applications
     ) {
