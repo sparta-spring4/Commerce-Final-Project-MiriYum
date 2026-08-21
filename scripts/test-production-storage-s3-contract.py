@@ -27,23 +27,27 @@ class ProductionS3StorageContractTest(unittest.TestCase):
         self.assertIn("days_after_initiation = 7", terraform)
         self.assertNotIn("expiration {", terraform)
 
-    def test_task_definition_starts_with_s3_and_reconciliation_disabled(self):
+    def test_task_definition_enables_s3_and_reconciliation_with_bucket_parameter(self):
         task_definition = json.loads(TASK_DEFINITION.read_text(encoding="utf-8"))
         backend = next(item for item in task_definition["containerDefinitions"] if item["name"] == "backend")
         environment = {item["name"]: item["value"] for item in backend["environment"]}
         secret_names = {item["name"] for item in backend["secrets"]}
 
-        self.assertEqual("false", environment["MIRIYUM_STORAGE_S3_ENABLED"])
-        self.assertEqual("false", environment["MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"])
-        self.assertNotIn("MIRIYUM_STORAGE_S3_BUCKET", secret_names)
+        self.assertEqual("true", environment["MIRIYUM_STORAGE_S3_ENABLED"])
+        self.assertEqual("true", environment["MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"])
+        self.assertIn("MIRIYUM_STORAGE_S3_BUCKET", secret_names)
 
-    def test_cd_preserves_disabled_default_and_injects_bucket_only_when_enabled(self):
+    def test_cd_requires_explicit_s3_activation_and_preflight(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
 
-        self.assertIn('select(.name == "MIRIYUM_STORAGE_S3_ENABLED") | .value][0] // "false"', workflow)
-        self.assertIn('select(.name == "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED") | .value][0] // "false"', workflow)
+        self.assertIn('MIRIYUM_STORAGE_S3_ENABLED: ${{ vars.MIRIYUM_STORAGE_S3_ENABLED }}', workflow)
+        self.assertIn('MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED: ${{ vars.MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED }}', workflow)
+        self.assertIn('storage_s3_enabled="$MIRIYUM_STORAGE_S3_ENABLED"', workflow)
+        self.assertIn('storage_s3_reconciliation_enabled="$MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"', workflow)
+        self.assertIn('aws ssm get-parameter', workflow)
+        self.assertIn('MIRIYUM_STORAGE_S3_ENABLED and MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED must match.', workflow)
         self.assertIn('if $storage_s3_enabled == "true" then', workflow)
-        self.assertNotIn('{name: "MIRIYUM_STORAGE_S3_ENABLED", value: "true"}', workflow)
+        self.assertIn('{name: "MIRIYUM_STORAGE_S3_ENABLED", value: $storage_s3_enabled}', workflow)
 
 
 if __name__ == "__main__":

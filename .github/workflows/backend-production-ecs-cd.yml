@@ -29,6 +29,8 @@ env:
   ECS_CONTAINER_NAME: backend
   RUNTIME_CONFIG_SECRET_NAME: miriyum/production/backend-runtime-config
   QR_STORAGE_GENERATION: ${{ vars.MIRIYUM_QR_STORAGE_GENERATION }}
+  MIRIYUM_STORAGE_S3_ENABLED: ${{ vars.MIRIYUM_STORAGE_S3_ENABLED }}
+  MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED: ${{ vars.MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED }}
   NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA: 515531e122ebbce13d8eead4a3ff15a94c25e0b3
 
 jobs:
@@ -211,6 +213,18 @@ jobs:
             exit 1
           fi
 
+          for value in "$MIRIYUM_STORAGE_S3_ENABLED" "$MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"; do
+            if [ "$value" != "true" ] && [ "$value" != "false" ]; then
+              echo "::error::MIRIYUM_STORAGE_S3_ENABLED and MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED must be true or false."
+              exit 1
+            fi
+          done
+
+          if [ "$MIRIYUM_STORAGE_S3_ENABLED" != "$MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED" ]; then
+            echo "::error::MIRIYUM_STORAGE_S3_ENABLED and MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED must match."
+            exit 1
+          fi
+
       - name: Configure AWS credentials through OIDC
         uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5.1.0
         with:
@@ -227,6 +241,39 @@ jobs:
 
           if [ "$image_tag_mutability" != "IMMUTABLE" ]; then
             echo "::error::Production deployment requires an IMMUTABLE ECR repository."
+            exit 1
+          fi
+
+      - name: Verify S3 activation prerequisites
+        if: env.MIRIYUM_STORAGE_S3_ENABLED == 'true'
+        run: |
+          account_id=$(aws sts get-caller-identity --query Account --output text)
+          expected_parameter_arn="arn:aws:ssm:${AWS_REGION}:${account_id}:parameter/miriyum/production/storage-s3-bucket"
+          parameter_arn=$(aws ssm get-parameter \
+            --name /miriyum/production/storage-s3-bucket \
+            --query 'Parameter.ARN' \
+            --output text)
+          if [ "$parameter_arn" != "$expected_parameter_arn" ]; then
+            echo "::error::Production S3 bucket Parameter is missing or does not match the expected ARN."
+            exit 1
+          fi
+
+          current_task_definition=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --query 'services[0].taskDefinition' \
+            --output text)
+          task_role_arn=$(aws ecs describe-task-definition \
+            --task-definition "$current_task_definition" \
+            --query 'taskDefinition.taskRoleArn' \
+            --output text)
+          execution_role_arn=$(aws ecs describe-task-definition \
+            --task-definition "$current_task_definition" \
+            --query 'taskDefinition.executionRoleArn' \
+            --output text)
+          if [ "$task_role_arn" != "arn:aws:iam::${account_id}:role/miriyum-prod-ecs-task-role" ] \
+            || [ "$execution_role_arn" != "arn:aws:iam::${account_id}:role/miriyum-prod-ecs-task-execution-role" ]; then
+            echo "::error::Production ECS task/execution role does not match the approved S3 policy target."
             exit 1
           fi
 
@@ -371,23 +418,8 @@ jobs:
             exit 1
           fi
 
-          storage_s3_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
-            [.containerDefinitions[] | select(.name == $container) | .environment[]?
-              | select(.name == "MIRIYUM_STORAGE_S3_ENABLED") | .value][0] // "false"
-          ' current-task-definition.json)
-          if [ "$storage_s3_enabled" != "true" ] && [ "$storage_s3_enabled" != "false" ]; then
-            echo "::error::Current task definition has an invalid MIRIYUM_STORAGE_S3_ENABLED value."
-            exit 1
-          fi
-
-          storage_s3_reconciliation_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
-            [.containerDefinitions[] | select(.name == $container) | .environment[]?
-              | select(.name == "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED") | .value][0] // "false"
-          ' current-task-definition.json)
-          if [ "$storage_s3_reconciliation_enabled" != "true" ] && [ "$storage_s3_reconciliation_enabled" != "false" ]; then
-            echo "::error::Current task definition has an invalid MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED value."
-            exit 1
-          fi
+          storage_s3_enabled="$MIRIYUM_STORAGE_S3_ENABLED"
+          storage_s3_reconciliation_enabled="$MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"
 
           runtime_config_secret_arn=""
           if [ "$runtime_config_enabled" = "true" ]; then
