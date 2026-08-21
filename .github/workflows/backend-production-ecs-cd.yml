@@ -272,14 +272,9 @@ jobs:
             exit 1
           fi
 
-          storage_s3_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
-            [.containerDefinitions[] | select(.name == $container) | .environment[]?
-              | select(.name == "MIRIYUM_STORAGE_S3_ENABLED") | .value][0] // "false"
-          ' current-task-definition.json)
-          if [ "$storage_s3_enabled" != "true" ] && [ "$storage_s3_enabled" != "false" ]; then
-            echo "::error::Current task definition has an invalid MIRIYUM_STORAGE_S3_ENABLED value."
-            exit 1
-          fi
+          # 공개 매장·메뉴 이미지는 운영 전용 S3 버킷에 저장한다. 이전 revision의
+          # 값을 계승하면 한 번 비활성화된 저장소가 이후 배포에서도 계속 꺼진다.
+          storage_s3_enabled="true"
 
           storage_s3_reconciliation_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
             [.containerDefinitions[] | select(.name == $container) | .environment[]?
