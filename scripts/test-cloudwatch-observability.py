@@ -697,6 +697,19 @@ main
             self.deploy_script,
         )
 
+    def test_manual_redeployment_keeps_full_stack_reconciliation_after_backend_recreation(self):
+        main_body = self.deploy_script[self.deploy_script.index("\nmain() {") :]
+        backend_recreation = main_body.index(
+            'up -d --force-recreate --remove-orphans backend'
+        )
+        self.assertIn('up -d --remove-orphans', main_body)
+        full_stack_reconciliation = main_body.index(
+            'up -d --remove-orphans',
+            backend_recreation + 1,
+        )
+
+        self.assertLess(backend_recreation, full_stack_reconciliation)
+
     def test_deployment_backfills_db_occurrence_count_to_family_bound_counter(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)

@@ -611,6 +611,10 @@ main() {
   # backend so replacement verification still proves a new container took over.
   compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --force-recreate --remove-orphans backend
 
+  # Preserve the normal full-stack reconciliation so newly pulled frontend
+  # images and nginx configuration are applied in the same deployment.
+  compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --remove-orphans
+
   if ! verify_nginx; then
     recover_nginx_http
     publish_deployment_health 0
