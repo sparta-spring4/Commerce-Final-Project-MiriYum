@@ -33,14 +33,14 @@ export function runSseRecovery({
   let triggeredAt = null
   let recoveredAt = null
   let result = null
-  announce()
-  wait(armDelaySeconds)
   try {
     result = open({
       mode: 'recovery',
       timeoutSeconds: maxRecoverySeconds,
       minimumValidEvents: 2,
       onFirstValidEvent: () => {
+        announce()
+        wait(armDelaySeconds)
         triggeredAt = clock()
         mutation = mutate()
       },

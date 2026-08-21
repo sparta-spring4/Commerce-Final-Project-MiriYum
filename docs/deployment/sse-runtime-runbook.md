@@ -212,9 +212,9 @@ probe도 계속 성공해야 한다. burst 입력 복원 전에 다음 profile�
 
 ## Valkey 중단과 backend 교체
 
-장애 전 synthetic 계정의 세션과 승인된 public owner mutation을 준비한다. 해당 mutation이 없거나 owner 승인이 없으면 이 단계를 `BLOCKED`로 기록하고 임의 DB seed나 test-only endpoint를 만들지 않는다. `recovery` 프로필은 매장 운영자 scope 한 개만 사용하며, FIFO 선두 합성 팀을 `WAITING → CALLED`로 변경한 뒤 HTTP 상세에서 MySQL 상태를 확인하고 반드시 `CANCELLED`로 정리한다.
+장애 전 synthetic 계정의 세션과 승인된 public owner mutation을 준비한다. 해당 mutation이 없거나 owner 승인이 없으면 이 단계를 `BLOCKED`로 기록하고 임의 DB seed나 test-only endpoint를 만들지 않는다. `recovery` 프로필은 매장 운영자 scope 한 개만 사용하며, FIFO 선두 합성 팀을 `WAITING → CALLED`로 변경한 뒤 HTTP 상세에서 MySQL 상태를 확인하고 반드시 `CANCELLED`로 정리한다. SSE payload에는 변경 자원 식별자가 없으므로 recovery store는 실행 구간에 다른 Waiting writer가 없는 전용 합성 store여야 한다. fixture owner와 operator가 이 독점 조건을 확인하지 못하면 다른 변경의 frame을 correction 결과로 오인할 수 있으므로 실행하지 않는다.
 
-먼저 세 endpoint smoke를 통과한 동일 SHA·fixture를 사용한다. 아래 실행은 로그인과 refresh session cleanup을 먼저 끝낸 뒤 `SSE_RECOVERY_READY`를 출력하고 15초 동안 대기한다. 운영자는 이 문구를 확인한 뒤 Valkey를 중단해야 하며, 중단 명령과 완료 시각은 별도 staging 실행 증거로 남긴다. Valkey 중단 증거가 없으면 빠른 두 번째 신호를 MySQL correction 결과로 해석하지 않는다.
+먼저 세 endpoint smoke를 통과한 동일 SHA·fixture를 사용한다. 아래 실행은 로그인과 refresh session cleanup을 끝내고 SSE 연결의 초기 `waiting.changed` frame까지 확인한 뒤 `SSE_RECOVERY_READY`를 출력하고 15초 동안 대기한다. 운영자는 이 문구를 확인한 뒤 Valkey를 중단하고, 하네스는 대기가 끝나면 기존 SSE 연결을 유지한 채 승인된 mutation을 실행한다. 중단 명령·완료 시각과 전용 store의 다른 writer 부재 승인은 별도 staging 실행 증거로 남긴다. 이 증거가 없으면 두 번째 신호를 해당 mutation의 MySQL correction 결과로 해석하지 않는다.
 
 ```powershell
 $recoveryRunId = 'staging-sse-recovery-YYYYMMDD-NN'
@@ -242,6 +242,7 @@ docker compose --env-file deploy/local/.env `
   -e SSE_RECOVERY_ARM_DELAY_SECONDS=15 `
   -e SSE_RECOVERY_MAX_SECONDS=6 `
   -e SSE_RECOVERY_TRIGGER_APPROVED=true `
+  -e SSE_RECOVERY_EXCLUSIVE_STORE_APPROVED=true `
   -e SSE_RECOVERY_TRIGGER_IDEMPOTENCY_KEY=$triggerKey `
   -e SSE_RECOVERY_CLEANUP_IDEMPOTENCY_KEY=$cleanupKey `
   /scripts/sse/main.js

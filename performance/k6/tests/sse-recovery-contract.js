@@ -53,8 +53,8 @@ export default function () {
   }))
 
   check(null, {
-    'recovery arms before opening and measures the second changed frame': () =>
-      order.join(',') === 'ready,delay:15,open,trigger,verify,cleanup'
+    'recovery opens the stream before arming and measures the second changed frame': () =>
+      order.join(',') === 'open,ready,delay:15,trigger,verify,cleanup'
       && result.recoveryMilliseconds === 2100
       && JSON.stringify(metrics) === JSON.stringify([
         ['duration', 2100], ['http', 1], ['cleanup', 1],

@@ -98,6 +98,7 @@ export default function () {
             SSE_RECOVERY_ARM_DELAY_SECONDS: '15',
             SSE_RECOVERY_MAX_SECONDS: '6',
             SSE_RECOVERY_TRIGGER_APPROVED: 'true',
+            SSE_RECOVERY_EXCLUSIVE_STORE_APPROVED: 'true',
             SSE_RECOVERY_TRIGGER_IDEMPOTENCY_KEY: '123e4567-e89b-12d3-a456-426614174000',
             SSE_RECOVERY_CLEANUP_IDEMPOTENCY_KEY: '223e4567-e89b-12d3-a456-426614174000',
           } : {}),
@@ -114,6 +115,7 @@ export default function () {
         SSE_RECOVERY_ARM_DELAY_SECONDS: '15',
         SSE_RECOVERY_MAX_SECONDS: '6',
         SSE_RECOVERY_TRIGGER_APPROVED: 'true',
+        SSE_RECOVERY_EXCLUSIVE_STORE_APPROVED: 'true',
         SSE_RECOVERY_TRIGGER_IDEMPOTENCY_KEY: '123e4567-e89b-12d3-a456-426614174000',
         SSE_RECOVERY_CLEANUP_IDEMPOTENCY_KEY: '223e4567-e89b-12d3-a456-426614174000',
       }))
@@ -121,6 +123,20 @@ export default function () {
         && config.recoveryArmDelaySeconds === 15
         && config.recoveryMaxSeconds === 6
         && config.recoveryTriggerIdempotencyKey !== config.recoveryCleanupIdempotencyKey
+    },
+    'recovery rejects a store scope with another possible Waiting writer': () => {
+      const message = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'recovery',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_CONNECTIONS: '1',
+        SSE_ENDPOINT_KINDS: 'waiting-store-operator',
+        SSE_RECOVERY_ARM_DELAY_SECONDS: '15',
+        SSE_RECOVERY_MAX_SECONDS: '6',
+        SSE_RECOVERY_TRIGGER_APPROVED: 'true',
+        SSE_RECOVERY_TRIGGER_IDEMPOTENCY_KEY: '123e4567-e89b-12d3-a456-426614174000',
+        SSE_RECOVERY_CLEANUP_IDEMPOTENCY_KEY: '223e4567-e89b-12d3-a456-426614174000',
+      })))
+      return message === 'recovery requires SSE_RECOVERY_EXCLUSIVE_STORE_APPROVED=true'
     },
     'capacity profile requires a single-account overflow shape': () => {
       const wrongKinds = errorMessage(() => loadSseConfig(validEnv({

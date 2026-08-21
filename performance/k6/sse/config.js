@@ -167,6 +167,9 @@ export function loadSseConfig(env) {
     if (env.SSE_RECOVERY_TRIGGER_APPROVED !== 'true') {
       throw new Error('recovery requires SSE_RECOVERY_TRIGGER_APPROVED=true')
     }
+    if (env.SSE_RECOVERY_EXCLUSIVE_STORE_APPROVED !== 'true') {
+      throw new Error('recovery requires SSE_RECOVERY_EXCLUSIVE_STORE_APPROVED=true')
+    }
     recoveryArmDelaySeconds = parsePositiveInt(
       'SSE_RECOVERY_ARM_DELAY_SECONDS', env.SSE_RECOVERY_ARM_DELAY_SECONDS, 60,
     )
