@@ -124,7 +124,8 @@ public class NotificationTaskRepository {
                         SELECT task.notification_id, task.source_domain, task.purpose,
                                task.recipient_relation_version,
                                task.resource_type, task.resource_id, task.resource_version,
-                               task.title, task.occurred_at, task.created_at, task.delivered_at
+                               task.title, task.occurred_at, task.created_at,
+                               task.delivered_at, task.read_at
                           FROM notification_tasks task
                           JOIN notification_channel_attempts attempt
                             ON attempt.notification_id = task.notification_id
@@ -151,7 +152,8 @@ public class NotificationTaskRepository {
                         resultSet.getString("title"),
                         utcInstant(resultSet.getObject("occurred_at", LocalDateTime.class)),
                         resultSet.getTimestamp("created_at").toInstant(),
-                        utcInstant(resultSet.getObject("delivered_at", LocalDateTime.class))
+                        utcInstant(resultSet.getObject("delivered_at", LocalDateTime.class)),
+                        utcInstant(resultSet.getObject("read_at", LocalDateTime.class))
                 ),
                 recipientAccountId,
                 occurredAt,
@@ -544,7 +546,8 @@ public class NotificationTaskRepository {
             String title,
             Instant occurredAt,
             Instant createdAt,
-            Instant deliveredAt
+            Instant deliveredAt,
+            Instant readAt
     ) {
     }
 }

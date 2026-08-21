@@ -102,6 +102,7 @@ public class NotificationHistoryService {
                 utc(task.occurredAt()),
                 utc(task.createdAt()),
                 utc(task.deliveredAt()),
+                nullableUtc(task.readAt()),
                 readAction(consumerAccountId, task)
         );
     }
@@ -145,5 +146,9 @@ public class NotificationHistoryService {
             throw new IllegalStateException("delivered notification history timestamp is missing");
         }
         return OffsetDateTime.ofInstant(value, ZoneOffset.UTC);
+    }
+
+    private static OffsetDateTime nullableUtc(Instant value) {
+        return value == null ? null : OffsetDateTime.ofInstant(value, ZoneOffset.UTC);
     }
 }

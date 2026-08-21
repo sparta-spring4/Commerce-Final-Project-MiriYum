@@ -21,6 +21,7 @@ import com.miriyum.domain.notification.port.ReservationNotificationSource;
 import com.miriyum.domain.notification.port.WaitingNotificationSource;
 import com.miriyum.domain.notification.entity.NotificationTaskStatus;
 import com.miriyum.domain.notification.repository.NotificationChannelAttemptRepository;
+import com.miriyum.domain.notification.repository.NotificationReadRepository;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository.DeliveryCompletion;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository.DueTask;
@@ -46,6 +47,7 @@ class NotificationDeliveryServiceTest {
     void deliveredInAppTaskRequestsAccountWakeUpAfterAllDatabaseWritesSucceed() {
         NotificationTaskRepository tasks = mock(NotificationTaskRepository.class);
         NotificationChannelAttemptRepository attempts = mock(NotificationChannelAttemptRepository.class);
+        NotificationReadRepository reads = mock(NotificationReadRepository.class);
         NotificationTaskTransitionAuditRepository audits =
                 mock(NotificationTaskTransitionAuditRepository.class);
         NotificationDatabaseClock databaseClock = mock(NotificationDatabaseClock.class);
@@ -77,7 +79,7 @@ class NotificationDeliveryServiceTest {
         given(tasks.completeDelivery(leased, "픽업 예약이 확정되었습니다.", null))
                 .willReturn(Optional.of(new DeliveryCompletion(NotificationTaskStatus.DELIVERED, null)));
         NotificationDeliveryService service = new NotificationDeliveryService(
-                tasks, attempts, audits, databaseClock, sources, titles, transactions, wakeUps);
+                tasks, attempts, reads, audits, databaseClock, sources, titles, transactions, wakeUps);
 
         int delivered = service.deliverDueBatch(new RuntimePolicy(
                 "v1", "worker", 1, Duration.ofSeconds(30), 3,
