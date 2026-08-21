@@ -86,6 +86,8 @@ Before registering the task definition, replace these placeholders through the a
 
 The execution role needs `secretsmanager:GetSecretValue` for the application secret ARN. Add the separate runtime config secret ARN only after the runtime config flag is explicitly enabled. The task role receives only the runtime permissions the application needs; it must not receive broad Secrets Manager access.
 
+Before deploying the #467 image, complete [#543](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/543): add the dedicated waiting-history cursor key to the production application secret and register a live backend task revision with exactly one matching `MIRIYUM_WAITING_HISTORY_CURSOR_SECRET` secret mapping. Production CD reads only the current task definition metadata and rejects a missing, duplicate, or mismatched JSON key selector before ECR login and image rollout. It does not fetch or log the secret value and does not add the mapping automatically.
+
 ## Central runtime config
 
 Store optional runtime settings in one JSON Secrets Manager secret named
