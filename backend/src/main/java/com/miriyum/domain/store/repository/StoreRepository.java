@@ -18,6 +18,8 @@ public interface StoreRepository extends JpaRepository<Store, Long> {
 
     boolean existsByIdAndStoreOperatorAccountId(long storeId, long operatorAccountId);
 
+    boolean existsByBusinessRegistrationNumber(String businessRegistrationNumber);
+
     @Query("""
             select store.storeOperatorAccountId
             from Store store

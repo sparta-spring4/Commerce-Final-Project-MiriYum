@@ -127,6 +127,38 @@ public class StoreOnboardingApplication {
         return currentVersion;
     }
 
+    public void markReviewReady(long expectedVersion, Instant now) {
+        requireCurrentVersion(expectedVersion);
+        requireStatus(ApplicationStatus.AUTO_CHECKING);
+        status = ApplicationStatus.REVIEW_READY;
+        updatedAt = requireTime(now);
+    }
+
+    public void rejectAutomatically(long expectedVersion, Instant now) {
+        requireCurrentVersion(expectedVersion);
+        requireStatus(ApplicationStatus.AUTO_CHECKING);
+        status = ApplicationStatus.REJECTED;
+        updatedAt = requireTime(now);
+    }
+
+    public void completeApproval(
+            long expectedVersion,
+            long storeId,
+            boolean automatic,
+            Instant now
+    ) {
+        requireCurrentVersion(expectedVersion);
+        ApplicationStatus expected = automatic
+                ? ApplicationStatus.AUTO_CHECKING : ApplicationStatus.UNDER_REVIEW;
+        requireStatus(expected);
+        if (storeId <= 0 || resultingStoreId != null) {
+            throw new IllegalStateException("application already has a resulting store");
+        }
+        resultingStoreId = storeId;
+        status = automatic ? ApplicationStatus.AUTO_APPROVED : ApplicationStatus.APPROVED;
+        updatedAt = requireTime(now);
+    }
+
     private void requireCurrentVersion(long expectedVersion) {
         if (expectedVersion != currentVersion) {
             throw new IllegalStateException("stale application version");

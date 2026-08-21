@@ -14,6 +14,7 @@ import java.time.Instant;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import com.miriyum.domain.store.onboarding.service.BusinessRegistrationVerificationPort.Outcome;
 
 @Entity
 @Table(name = "store_onboarding_automatic_check_jobs")
@@ -83,5 +84,54 @@ public class StoreOnboardingAutomaticCheckJob {
         job.createdAt = now;
         job.updatedAt = now;
         return job;
+    }
+
+    public long claim(String owner, Instant now, Instant expiresAt) {
+        boolean pendingDue = status == AutomaticCheckStatus.PENDING
+                && !nextAttemptAt.isAfter(now);
+        boolean expired = status == AutomaticCheckStatus.PROCESSING
+                && leaseExpiresAt != null && !leaseExpiresAt.isAfter(now);
+        if ((!pendingDue && !expired) || owner == null || owner.isBlank()
+                || expiresAt == null || !expiresAt.isAfter(now)) {
+            throw new IllegalStateException("automatic check job is not claimable");
+        }
+        status = AutomaticCheckStatus.PROCESSING;
+        leaseOwner = owner;
+        leaseToken = Math.addExact(leaseToken, 1L);
+        leaseExpiresAt = expiresAt;
+        updatedAt = now;
+        return leaseToken;
+    }
+
+    public AutomaticCheckStatus record(
+            String owner,
+            long token,
+            Outcome outcome,
+            String code,
+            Instant now,
+            Instant retryAt
+    ) {
+        if (status != AutomaticCheckStatus.PROCESSING
+                || !java.util.Objects.equals(leaseOwner, owner) || leaseToken != token) {
+            throw new IllegalStateException("stale automatic check claim");
+        }
+        resultCode = code;
+        updatedAt = now;
+        if (outcome == Outcome.PASSED) {
+            status = AutomaticCheckStatus.PASSED;
+        } else if (outcome == Outcome.REJECTED) {
+            status = AutomaticCheckStatus.REJECTED;
+        } else {
+            attemptCount = Math.addExact(attemptCount, 1);
+            if (attemptCount >= 5) {
+                status = AutomaticCheckStatus.EXHAUSTED;
+            } else {
+                status = AutomaticCheckStatus.PENDING;
+                nextAttemptAt = java.util.Objects.requireNonNull(retryAt, "retry time is required");
+            }
+        }
+        leaseOwner = null;
+        leaseExpiresAt = null;
+        return status;
     }
 }
