@@ -1,4 +1,4 @@
-package com.miriyum.domain.platformoperator.onboarding.controller;
+package com.miriyum.domain.platformoperator.controller.onboarding;
 
 import com.miriyum.domain.platformoperator.onboarding.dto.OnboardingReviewRequests.AssignmentRequest;
 import com.miriyum.domain.platformoperator.onboarding.dto.OnboardingReviewRequests.DecisionRequest;

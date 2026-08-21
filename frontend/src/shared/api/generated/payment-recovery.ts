@@ -6,6 +6,7 @@
 
 export interface paths {
   "/api/v1/platform-operators/payment-recovery-cases": {
+    /** 자동 대사 소진 결제 복구 사건 목록 조회 */
     get: operations["listPaymentRecoveryCases"];
   };
   "/api/v1/platform-operators/payment-recovery-cases/pending-additional-approvals": {
@@ -13,21 +14,27 @@ export interface paths {
     get: operations["listPendingPaymentRecoveryApprovals"];
   };
   "/api/v1/platform-operators/payment-recovery-cases/{caseId}": {
+    /** 결제 복구 사건 상세 조회 */
     get: operations["getPaymentRecoveryCase"];
   };
   "/api/v1/platform-operators/payment-recovery-cases/{caseId}/assignments": {
+    /** 결제 복구 사건 최초 자기 배정 */
     post: operations["assignPaymentRecoveryCase"];
   };
   "/api/v1/platform-operators/payment-recovery-cases/{caseId}/requeries": {
+    /** 외부 결제 결과 재조회 요청 */
     post: operations["requestPaymentRecoveryRequery"];
   };
   "/api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals": {
+    /** 결제 복구 제안 생성 */
     post: operations["createPaymentRecoveryProposal"];
   };
   "/api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals/{proposalVersion}/approvals": {
+    /** 결제 복구 제안 추가 승인 */
     post: operations["approvePaymentRecoveryProposal"];
   };
   "/api/v1/platform-operators/payment-recovery-cases/{caseId}/failed-unresolved-closures": {
+    /** 해결 불가 결제 복구 사건 종결 */
     post: operations["closePaymentRecoveryCaseUnresolved"];
   };
 }
@@ -455,6 +462,7 @@ export interface external {
 
 export interface operations {
 
+  /** 자동 대사 소진 결제 복구 사건 목록 조회 */
   listPaymentRecoveryCases: {
     parameters: {
       query?: {
@@ -483,6 +491,7 @@ export interface operations {
       403: components["responses"]["Forbidden"];
     };
   };
+  /** 결제 복구 사건 상세 조회 */
   getPaymentRecoveryCase: {
     parameters: {
       path: {
@@ -496,6 +505,7 @@ export interface operations {
       404: components["responses"]["NotFound"];
     };
   };
+  /** 결제 복구 사건 최초 자기 배정 */
   assignPaymentRecoveryCase: {
     parameters: {
       header: {
@@ -521,6 +531,7 @@ export interface operations {
       409: components["responses"]["Conflict"];
     };
   };
+  /** 외부 결제 결과 재조회 요청 */
   requestPaymentRecoveryRequery: {
     parameters: {
       header: {
@@ -547,6 +558,7 @@ export interface operations {
       503: components["responses"]["Unavailable"];
     };
   };
+  /** 결제 복구 제안 생성 */
   createPaymentRecoveryProposal: {
     parameters: {
       header: {
@@ -573,6 +585,7 @@ export interface operations {
       503: components["responses"]["Unavailable"];
     };
   };
+  /** 결제 복구 제안 추가 승인 */
   approvePaymentRecoveryProposal: {
     parameters: {
       header: {
@@ -599,6 +612,7 @@ export interface operations {
       409: components["responses"]["Conflict"];
     };
   };
+  /** 해결 불가 결제 복구 사건 종결 */
   closePaymentRecoveryCaseUnresolved: {
     parameters: {
       header: {

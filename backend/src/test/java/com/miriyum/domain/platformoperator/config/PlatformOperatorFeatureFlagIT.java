@@ -12,7 +12,7 @@ import com.miriyum.domain.platformoperator.controller.auth.PlatformOperatorAuthC
 import com.miriyum.domain.platformoperator.controller.account.PlatformOperatorCapabilitiesController;
 import com.miriyum.domain.platformoperator.controller.membersupport.PlatformOperatorMemberSupportController;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorCapabilitiesService;
-import com.miriyum.domain.platformoperator.onboarding.controller.PlatformOperatorOnboardingReviewController;
+import com.miriyum.domain.platformoperator.controller.onboarding.PlatformOperatorOnboardingReviewController;
 import java.util.Arrays;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
