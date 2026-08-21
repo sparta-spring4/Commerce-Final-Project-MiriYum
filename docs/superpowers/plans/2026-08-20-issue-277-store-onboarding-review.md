@@ -790,7 +790,7 @@ git diff --name-only origin/dev...HEAD
 
 Expected: V68 remains free or is renumbered consistently in migration, spec, plan, Issue #277, and tests. Every changed path appears in a Task `Files` list or is the approved design/plan document.
 
-- [ ] **Step 4: Run final focused verification and patch checks**
+- [x] **Step 4: Run final focused verification and patch checks**
 
 ```powershell
 cd backend
@@ -803,7 +803,7 @@ git diff --check origin/dev...HEAD
 
 Expected: all focused tests and lint pass. Report actual S3/IAM/staging and full regression as pending on #223/GitHub CI rather than running the full local suite.
 
-- [ ] **Step 5: Commit the final verification slice after explicit authorization**
+- [x] **Step 5: Commit the final verification slice after explicit authorization**
 
 Stage the exact Task 8 paths and commit:
 
