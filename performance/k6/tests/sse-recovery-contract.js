@@ -20,7 +20,9 @@ export default function () {
     now: () => now,
     openStream: (behavior) => {
       order.push('open')
-      if (behavior.timeoutSeconds !== 6) throw new Error('recovery timeout is not bounded')
+      if (behavior.timeoutSeconds !== 21) {
+        throw new Error('recovery transport timeout does not cover arm and measurement windows')
+      }
       behavior.onFirstValidEvent()
       now = 3100
       behavior.onRecoveryValidEvent()

@@ -36,7 +36,7 @@ export function runSseRecovery({
   try {
     result = open({
       mode: 'recovery',
-      timeoutSeconds: maxRecoverySeconds,
+      timeoutSeconds: armDelaySeconds + maxRecoverySeconds,
       minimumValidEvents: 2,
       onFirstValidEvent: () => {
         announce()
