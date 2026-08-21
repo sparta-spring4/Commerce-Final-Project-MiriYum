@@ -11,6 +11,7 @@ public record NotificationHistoryItemResponse(
         OffsetDateTime occurredAt,
         OffsetDateTime createdAt,
         OffsetDateTime deliveredAt,
+        OffsetDateTime readAt,
         NotificationActionResponse action
 ) {
 }

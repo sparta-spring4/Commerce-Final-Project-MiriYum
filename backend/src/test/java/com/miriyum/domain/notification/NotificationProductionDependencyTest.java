@@ -67,7 +67,7 @@ class NotificationProductionDependencyTest {
         assertThat(componentNames(NotificationHistoryItemResponse.class))
                 .containsExactly(
                         "notificationId", "purpose", "title", "resource",
-                        "occurredAt", "createdAt", "deliveredAt", "action");
+                        "occurredAt", "createdAt", "deliveredAt", "readAt", "action");
         assertThat(componentNames(NotificationResourceResponse.class))
                 .containsExactly("type", "id");
         assertThat(componentNames(NotificationActionResponse.class))

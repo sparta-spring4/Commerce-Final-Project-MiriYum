@@ -71,6 +71,7 @@ class ApiUrlConventionTest {
                 route(RequestMethod.POST, "/api/v1/platform-operators/auth/sessions"),
                 route(RequestMethod.PUT, "/api/v1/platform-operators/accounts/{operatorId}/authority"),
                 route(RequestMethod.PUT, "/api/v1/platform-operators/accounts/{operatorId}/suspension"),
+                route(RequestMethod.GET, "/api/v1/consumers/me/notifications/unread-count"),
                 route(RequestMethod.POST, "/api/v1/payments/webhooks/portone"));
 
         assertThat(ApiUrlConvention.violations(valid)).isEmpty();
