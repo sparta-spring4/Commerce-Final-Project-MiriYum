@@ -152,6 +152,14 @@ describe('일행 합류 화면 - 진행과 성공', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('합류 성공 뒤 현재 웨이팅 화면으로 갈 링크를 준다', () => {
+    renderPage({ progress: 'succeeded' })
+
+    expect(
+      screen.getByRole('link', { name: '현재 웨이팅 보기' }),
+    ).toHaveAttribute('href', '/waiting/current')
+  })
+
   /* 계약은 새 팀을 만들지 않고 기존 팀에 membership만 더한다. */
   it('성공 안내가 새 웨이팅을 만들었다고 말하지 않는다', () => {
     const { unmount } = renderPage({ progress: 'succeeded' })

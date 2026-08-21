@@ -18,9 +18,11 @@ import {
   ReservationCreatePage,
   ReservationDetailPage,
   ReservationCheckInQrPage,
+  ReservationRequestPaymentPage,
   MyReservationsPage,
 } from '../../domains/reservation/consumer'
 import {
+  CurrentWaitingRoute,
   WaitingInvitationAcceptRoute,
   WaitingRegistrationRoute,
   WaitingHistoryPage,
@@ -71,16 +73,21 @@ export const consumerRoutes = (
       <Route path={CONSUMER_PATHS.reservationDetail} element={<ReservationDetailPage />} />
       <Route path={CONSUMER_PATHS.reservationCheckIn} element={<ReservationCheckInQrPage />} />
       <Route path={CONSUMER_PATHS.reservationComplete} element={<ReservationCompletePage />} />
+      <Route
+        path={CONSUMER_PATHS.reservationRequestPayment}
+        element={<ReservationRequestPaymentPage />}
+      />
       <Route path={CONSUMER_PATHS.pickupCreate} element={<PickupCreatePage />} />
       <Route path={CONSUMER_PATHS.pickupDetail} element={<PickupDetailPage />} />
       <Route path={CONSUMER_PATHS.pickupComplete} element={<PickupCompletePage />} />
       <Route
-        path={CONSUMER_PATHS.waitingInvitationAccept}
-        element={<WaitingInvitationAcceptRoute />}
-      />
-      <Route
         path={CONSUMER_PATHS.waitingRegister}
         element={<WaitingRegistrationRoute />}
+      />
+      <Route path={CONSUMER_PATHS.waitingCurrent} element={<CurrentWaitingRoute />} />
+      <Route
+        path={CONSUMER_PATHS.waitingInvitationAccept}
+        element={<WaitingInvitationAcceptRoute />}
       />
     </Route>
   </Route>

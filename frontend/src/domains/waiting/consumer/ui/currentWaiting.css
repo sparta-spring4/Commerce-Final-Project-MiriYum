@@ -1,0 +1,180 @@
+/* 소비자 현재 웨이팅 상세 배치. 토큰은 shared/ui/theme.css가 소유한다. */
+
+.waiting-current {
+  padding-block-end: var(--space-8);
+}
+
+.waiting-current__header {
+  padding-block-end: var(--space-2);
+}
+
+.waiting-current__back {
+  margin-block-end: var(--space-1);
+}
+
+/* 등록·예약·픽업 화면의 돌아가기 줄과 같은 형태를 쓴다. */
+.waiting-current__back a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+.waiting-current__back a:hover {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.waiting-current__status {
+  margin-block: var(--space-1);
+}
+
+.waiting-current__queue h2 {
+  margin-block-end: var(--space-2);
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+}
+
+/*
+ * 순번·앞 팀·인원.
+ *
+ * 좁은 화면에서는 한 줄에 셋을 나란히 두고, 넓어지면 같은 배치를 유지하며
+ * 숫자만 키운다. 재정의를 기본 규칙 바로 뒤에 붙여 순서 싸움을 만들지 않는다.
+ */
+.waiting-current__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding-block: var(--space-2);
+  border-block: 1px solid var(--color-outline-variant);
+}
+
+.waiting-current__metrics dt {
+  margin-block-end: 0.25rem;
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-label-md);
+  line-height: var(--line-height-label-md);
+}
+
+.waiting-current__metric-value {
+  margin: 0;
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+  word-break: keep-all;
+}
+
+@media (min-width: 48rem) {
+  .waiting-current__metric-value {
+    font-size: var(--font-size-headline-lg);
+    line-height: var(--line-height-headline-lg);
+  }
+}
+
+.waiting-current__closed {
+  margin-block: 0 var(--space-2);
+  padding-block: var(--space-2);
+  border-block: 1px solid var(--color-outline-variant);
+  color: var(--color-on-surface-variant);
+}
+
+/* 등록·호출·도착 시각. 값이 있는 줄만 렌더되므로 빈 칸이 남지 않는다. */
+.waiting-current__facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+  margin-block: var(--space-2);
+}
+
+.waiting-current__facts > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  justify-content: space-between;
+  font-size: var(--font-size-body-md);
+  line-height: var(--line-height-body-md);
+}
+
+.waiting-current__facts dt {
+  color: var(--color-on-surface-variant);
+}
+
+.waiting-current__facts dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: end;
+}
+
+@media (min-width: 48rem) {
+  .waiting-current__facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--space-3);
+  }
+}
+
+.waiting-current__refresh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  justify-content: space-between;
+  padding-block-start: var(--space-2);
+  border-block-start: 1px solid var(--color-outline-variant);
+}
+
+.waiting-current__refresh-text {
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-label-md);
+  line-height: var(--line-height-label-md);
+}
+
+.waiting-current__refresh-text p {
+  margin: 0;
+}
+
+.waiting-current__store-link {
+  margin-block: var(--space-2) 0;
+}
+
+.waiting-current__store-link a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 600;
+}
+
+/*
+ * 취소 영역.
+ *
+ * 카드로 감싸지 않는다. 되돌릴 수 없는 조작을 대기 현황·일행 카드와 같은
+ * 무게로 두면 실수로 누르기 쉽다. 마지막에 따로 세운다.
+ */
+.waiting-current__cancel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  margin-block-start: var(--space-3);
+  padding-inline: var(--space-3);
+  padding-block: var(--space-3);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-lg);
+}
+
+.waiting-current__cancel-title {
+  margin: 0;
+  font-size: var(--font-size-body-lg);
+  line-height: var(--line-height-body-lg);
+  font-weight: 700;
+}
+
+.waiting-current__cancel-text {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-body-md);
+  line-height: var(--line-height-body-md);
+}

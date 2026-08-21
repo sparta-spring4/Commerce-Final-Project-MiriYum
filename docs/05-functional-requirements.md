@@ -14,13 +14,13 @@
 정책 결정 상태 집계와 단계별 미결정 세부 집계도 분리한다.
 
 - 정책 ID 상태는 `확정` 195개, `팀원 상의 필요` 0개, `TODO` 22개로 합계 217개다.
-- `AUTH-007`의 Access JWT 1시간·Refresh JWT 14일, 브라우저 전달·저장·CSRF 경계, 1차 MVP 동시 로그인 무제한, 정상 비밀번호·이메일 변경 시 기존 로그인 유지와 Access JWT 만료 전 기존 중앙 재검증 경계 유지가 확정됐다. `1차 MVP` 인증 세부에 남은 `팀원 상의 필요` 항목은 없다.
+- `AUTH-007`의 Access JWT 15분·Refresh JWT 14일, 브라우저 전달·저장·CSRF 경계, 1차 MVP 동시 로그인 무제한, 정상 비밀번호·이메일 변경 시 기존 로그인 유지와 Access JWT 만료 전 기존 중앙 재검증 경계 유지가 확정됐다. `1차 MVP` 인증 세부에 남은 `팀원 상의 필요` 항목은 없다.
 - `TASTE-003`, `TASTE-008`, `TASTE-012`, `SUB-001`, `SUB-002`, `SUB-003`, `SUB-007`, `ADS-001`은 뒤 단계 `TODO`이므로 앞 단계 미결정 집계에 포함하지 않는다.
 
 | 요구사항 그룹 | 정책 ID | 정책 결정 상태 | 적용 단계 | 소유 도메인 | 기능 명세 | 단계 경계 |
 |---|---|---|---|---|---|---|
 | 도메인 경계 기준 | DOMAIN-000 | 확정 | 전 단계 공통 | 모든 도메인 | [정책 원본](service-policies/00-policy-template.md) | 각 단계 기능이 정책 소유권과 공통 검토 항목을 따른다. |
-| 회원·인증·계정 | AUTH-001, AUTH-002, AUTH-003, AUTH-004, AUTH-005, AUTH-006, AUTH-007, AUTH-008, AUTH-009, AUTH-010, AUTH-011, AUTH-012 | 확정·검토 혼재 | `1차 MVP`, `고도화` | auth | [정책 원본](service-policies/01-member-auth.md) · [인증·계정·마이페이지 기능 명세](specs/auth-account/spec.md) · [회원지원 기능 명세](specs/member-support/spec.md) | 1차는 계정별 무저장 Access/Refresh JWT, Access 1시간·Refresh 14일, 승인된 브라우저 전달·저장·CSRF 경계, 기본 프로필과 내 예약 내역을 제공한다. 마이페이지는 계정 프로필을 소유하고 결제·웨이팅·알림의 공개 조회를 조합할 뿐 각 거래 DTO·상태를 복제하지 않는다. 고도화는 Valkey 회전·폐기·재사용 탐지, 일반 사용자 카카오 로그인과 이메일 접근 불가 복구·계정 제재를 제공한다. |
+| 회원·인증·계정 | AUTH-001, AUTH-002, AUTH-003, AUTH-004, AUTH-005, AUTH-006, AUTH-007, AUTH-008, AUTH-009, AUTH-010, AUTH-011, AUTH-012 | 확정·검토 혼재 | `1차 MVP`, `고도화` | auth | [정책 원본](service-policies/01-member-auth.md) · [인증·계정·마이페이지 기능 명세](specs/auth-account/spec.md) · [회원지원 기능 명세](specs/member-support/spec.md) | 1차는 계정별 무저장 Access/Refresh JWT, Access 15분·Refresh 14일, 승인된 브라우저 전달·저장·CSRF 경계, 기본 프로필과 내 예약 내역을 제공한다. 마이페이지는 계정 프로필을 소유하고 결제·웨이팅·알림의 공개 조회를 조합할 뿐 각 거래 DTO·상태를 복제하지 않는다. 고도화는 Valkey 회전·폐기·재사용 탐지, 일반 사용자 카카오 로그인과 이메일 접근 불가 복구·계정 제재를 제공한다. |
 | 매장 입점·매장 운영자 권한 | STORE-001, STORE-002, STORE-003, STORE-004, STORE-005, STORE-006, STORE-007, STORE-009, STORE-010, STORE-011, STORE-012, STORE-013, STORE-014 | 확정·TODO 혼재 | `1차 MVP`, 일부 `고도화` | store | [정책 원본](service-policies/02-store-onboarding.md) · [비공개 사업자등록증 증빙 계약](specs/store-onboarding/spec.md) | 1차는 사업자등록번호 형식과 중앙 활성 중복을 확인한 뒤 즉시 입점을 확정한다. 모든 등록 업종은 거래별 기능을 동일하게 선택할 수 있다. 국세청 공식 진위확인·파일·S3·플랫폼 운영자 심사는 고도화 경로다. |
 | 매장 운영·영업시간·메뉴 | OPER-001, OPER-002, OPER-003, OPER-004, OPER-005, OPER-006, OPER-007, OPER-008, OPER-009, OPER-010 | 확정 | `1차 MVP`, 일부 `고도화` | store | [정책 원본](service-policies/03-store-operation.md) | 1차는 텍스트 기반 매장·영업시간·메뉴와 세 거래별 운영 모드를 제공한다. 등록 업종과 검색 카테고리·태그는 픽업 가능 여부를 만들지 않으며, 매장·메뉴 이미지 업로드·S3·플랫폼 운영자 콘텐츠 검수는 고도화에서 활성화한다. |
 | 예약 | RES-001, RES-002, RES-003, RES-004, RES-005, RES-006, RES-007, RES-008, RES-009, RES-010, RES-011, RES-012, RES-013, RES-014, RES-015 | 확정 | `1차 MVP`, 일부 `고도화` | reservation | [정책 원본](service-policies/04-reservation.md) | 1차는 결제 없는 즉시 확정 예약, 사용자·운영자 취소와 운영자 직접 방문 완료다. 직접 방문 완료는 QR·체크인 시각·노쇼 판정 없이 독립 실행한다. 예약금·환불과 QR·노쇼 연결은 고도화에서만 진입한다. |

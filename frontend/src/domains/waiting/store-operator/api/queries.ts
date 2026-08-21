@@ -205,12 +205,7 @@ export function useUpdateWaitingSettings(storeId: string) {
         body: input.body,
         idempotencyKey: input.idempotencyKey,
       })
-      /*
-       * client의 성공 타입은 200 본문만 좁혀 준다(`paths.ts`의 SuccessStatus).
-       * 이 operation은 202로 종결 작업도 반환하므로 여기서만 합집합으로 넓힌다.
-       * 넓히는 자리를 한 곳으로 묶어 두어야 호출부가 두 모양을 반드시 가르게 된다.
-       */
-      return response.data as WaitingSetting | WaitingClosureJob
+      return response.data
     },
     onSuccess: () => {
       invalidateWaitingSettings(queryClient, storeId)

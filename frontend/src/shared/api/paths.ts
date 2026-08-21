@@ -129,12 +129,11 @@ export type MultipartOf<Op> = [MultipartRequestBody<Op>] extends [never]
  * client가 기본으로 좁혀 주는 성공 status다. 전부 application/json 본문을 가지며
  * 204를 선언한 operation은 없다.
  *
- * 202를 선언한 operation이 몇 개 있다(예약 요청 계열과 웨이팅 설정 교체). 여기에
- * 202를 더하면 그 operation들의 성공 본문이 합집합이 되어 기존 호출부가 한꺼번에
- * 깨진다. 지금 202 본문을 실제로 다뤄야 하는 곳은 웨이팅 설정 교체 하나뿐이므로,
- * 공유 타입을 넓히는 대신 그 호출 지점에서 합집합으로 넓히고 응답 모양으로 가른다.
+ * 202는 요청을 성공적으로 접수했지만 아직 종결되지 않은 상태다. 200·201과 함께
+ * 성공 본문에 포함하되, 여러 성공 모양을 선언한 호출부가 반드시 합집합을 좁혀
+ * 완료와 진행 중을 구분하게 한다.
  */
-type SuccessStatus = 200 | 201
+type SuccessStatus = 200 | 201 | 202
 
 /**
  * 성공 응답 타입. 생성 타입이 이미 {code, message, data} 봉투를 담고 있으므로

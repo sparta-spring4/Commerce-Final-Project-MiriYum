@@ -6,10 +6,8 @@ import {
   useConsumerAccount,
 } from '../api/queries'
 import { type ConsumerPayment, useConsumerPayments } from '../../../../payment/consumer/api/queries'
-import {
-  type ConsumerWaitingSnapshot,
-  useCurrentConsumerWaiting,
-} from '../../../../waiting/consumer/api/queries'
+import { useCurrentConsumerWaiting } from '../../../../waiting/consumer/api/queries'
+import { WAITING_STATUS_LABEL } from '../../../../waiting/consumer/model/currentWaitingView'
 import { ProfileSection } from './ProfileSection'
 
 /**
@@ -106,7 +104,7 @@ export function MyPage() {
                 <dl className="mypage__waiting-summary">
                   <div>
                     <dt>상태</dt>
-                    <dd>{waitingStatusLabel(currentWaiting.data.status)}</dd>
+                    <dd>{WAITING_STATUS_LABEL[currentWaiting.data.status]}</dd>
                   </div>
                   <div>
                     <dt>내 순번</dt>
@@ -121,6 +119,14 @@ export function MyPage() {
                     <dd>{currentWaiting.data.partySize}명</dd>
                   </div>
                 </dl>
+              )}
+              {currentWaiting.isSuccess && currentWaiting.data !== null && (
+                <p className="mypage__waiting-link">
+                  <Link to={CONSUMER_PATHS.waitingCurrent}>
+                    현재 웨이팅 자세히 보기
+                    <Icon name="arrowRight" className="mi-icon--sm" />
+                  </Link>
+                </p>
               )}
             </div>
           </section>
@@ -202,18 +208,4 @@ function paymentStatusLabel(status: ConsumerPayment['status']): string {
     REFUNDED: '환불 완료',
     RECONCILIATION_REQUIRED: '결제 상태 확인 필요',
   }[status]
-}
-
-function waitingStatusLabel(status: ConsumerWaitingSnapshot['status']): string {
-  return {
-    WAITING: '대기 중',
-    CALLED: '입장 호출',
-    ARRIVED: '도착 확인',
-    CHECKED_IN: '입장 완료',
-    CANCELLED: '취소됨',
-    NO_SHOW: '미도착 종료',
-    CLOSED_BY_STORE: '매장 종료',
-    RESERVATION_CONVERTING: '예약 전환 중',
-    RESERVATION_CONVERTED: '예약 전환 완료',
-  }[status] ?? '상태 확인 중'
 }

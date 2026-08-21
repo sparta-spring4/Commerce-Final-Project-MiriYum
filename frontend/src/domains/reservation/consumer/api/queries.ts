@@ -4,13 +4,21 @@ import { publicApiClient } from '../../../../shared/api/publicApiClient'
 import { useConsumerAuth } from '../../../account/consumer/auth'
 import { consumerReservationHistoryKeys } from './historyQueries'
 import { storeSearchKeys } from '../../../store/public/api/queries'
-import type { ReservationCreateRequest, ReservationDetail } from '../model/draft'
+import {
+  isReservationRequest,
+  type ReservationCreateRequest,
+  type ReservationCreateResult,
+  type ReservationDetail,
+  type ReservationRequest,
+} from '../model/draft'
 
 export const reservationKeys = {
   // 뿌리는 shared가 소유한다. 세션 종료 정리가 같은 값을 보고 지운다.
   all: CONSUMER_PROTECTED_QUERY_ROOTS.reservations,
   detail: (reservationId: string) =>
     [...reservationKeys.all, reservationId] as const,
+  request: (reservationRequestId: string) =>
+    [...reservationKeys.all, 'requests', reservationRequestId] as const,
   menuHoldAvailability: (
     storeId: string,
     serviceDate: string,
@@ -78,6 +86,44 @@ export function useReservation(reservationId: string) {
   })
 }
 
+const RESERVATION_REQUEST_POLL_MS = 2_000
+const POLLING_REQUEST_STATUSES: ReadonlySet<ReservationRequest['status']> =
+  new Set([
+    'FINALIZING_RESOURCES',
+    'COMPENSATION_REQUIRED',
+    'COMPENSATING',
+    'RECOVERY_REQUIRED',
+  ])
+
+export function useReservationRequest(reservationRequestId: string) {
+  const { apiClient } = useConsumerAuth()
+
+  return useQuery({
+    queryKey: reservationKeys.request(reservationRequestId),
+    enabled: reservationRequestId.length > 0,
+    queryFn: async ({ signal }): Promise<ReservationRequest> => {
+      const response = await apiClient(
+        '/api/v1/consumers/me/reservation-requests/{reservationRequestId}',
+        {
+          method: 'get',
+          pathParams: { reservationRequestId },
+          signal,
+        },
+      )
+      return response.data
+    },
+    refetchInterval: (query) => {
+      if (query.state.error !== null) {
+        return false
+      }
+      const request = query.state.data
+      return request !== undefined && POLLING_REQUEST_STATUSES.has(request.status)
+        ? RESERVATION_REQUEST_POLL_MS
+        : false
+    },
+  })
+}
+
 /**
  * 예약과 선택 메뉴 홀드를 한 번의 쓰기로 만든다.
  *
@@ -92,7 +138,7 @@ export function useCreateReservation() {
     mutationFn: async (variables: {
       body: ReservationCreateRequest
       idempotencyKey: string
-    }): Promise<ReservationDetail> => {
+    }): Promise<ReservationCreateResult> => {
       const response = await apiClient('/api/v1/consumers/me/reservations', {
         method: 'post',
         body: variables.body,
@@ -100,8 +146,66 @@ export function useCreateReservation() {
       })
       return response.data
     },
-    onSuccess: (reservation) => {
-      void invalidateAfterReservationChange(queryClient, reservation)
+    onSuccess: (result) => {
+      if (isReservationRequest(result)) {
+        void invalidateAfterReservationRequestChange(queryClient, result)
+      } else {
+        void invalidateAfterReservationChange(queryClient, result)
+      }
+    },
+  })
+}
+
+export function useFinalizeReservationRequest(reservationRequestId: string) {
+  const { apiClient } = useConsumerAuth()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (input: {
+      idempotencyKey: string
+    }): Promise<ReservationCreateResult> => {
+      const response = await apiClient(
+        '/api/v1/consumers/me/reservation-requests/{reservationRequestId}/finalizations',
+        {
+          method: 'post',
+          pathParams: { reservationRequestId },
+          body: {},
+          idempotencyKey: input.idempotencyKey,
+        },
+      )
+      return response.data
+    },
+    onSuccess: (result) => {
+      if (isReservationRequest(result)) {
+        void invalidateAfterReservationRequestChange(queryClient, result)
+      } else {
+        void invalidateAfterReservationChange(queryClient, result)
+      }
+    },
+  })
+}
+
+export function useAbandonReservationRequest(reservationRequestId: string) {
+  const { apiClient } = useConsumerAuth()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (input: {
+      idempotencyKey: string
+    }): Promise<ReservationRequest> => {
+      const response = await apiClient(
+        '/api/v1/consumers/me/reservation-requests/{reservationRequestId}/abandonments',
+        {
+          method: 'post',
+          pathParams: { reservationRequestId },
+          body: {},
+          idempotencyKey: input.idempotencyKey,
+        },
+      )
+      return response.data
+    },
+    onSuccess: (request) => {
+      void invalidateAfterReservationRequestChange(queryClient, request)
     },
   })
 }
@@ -162,6 +266,26 @@ function invalidateAfterReservationChange(
       queryKey: consumerReservationHistoryKeys.all,
     }),
     // 메뉴 홀드 잔여 수량이 바뀐다.
+    queryClient.invalidateQueries({
+      queryKey: [...reservationKeys.all, 'menu-hold-availability'],
+    }),
+  ])
+}
+
+function invalidateAfterReservationRequestChange(
+  queryClient: ReturnType<typeof useQueryClient>,
+  request: ReservationRequest,
+): Promise<unknown> {
+  queryClient.setQueryData(
+    reservationKeys.request(request.reservationRequestId),
+    request,
+  )
+
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: storeSearchKeys.all }),
+    queryClient.invalidateQueries({
+      queryKey: consumerReservationHistoryKeys.all,
+    }),
     queryClient.invalidateQueries({
       queryKey: [...reservationKeys.all, 'menu-hold-availability'],
     }),

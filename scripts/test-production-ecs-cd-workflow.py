@@ -77,6 +77,28 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertNotIn('| .value][0] // "true"', self.workflow)
         self.assertNotIn('{name: "MIRIYUM_STORE_SEARCH_LLM_ENABLED", value: "true"}', self.workflow)
 
+    def test_cd_replaces_the_live_llm_timeout_with_the_approved_production_value(self):
+        self.assertIn(
+            '.name != "MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS"', self.workflow
+        )
+        self.assertIn(
+            '{name: "MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS", value: "5000"}',
+            self.workflow,
+        )
+
+    def test_cd_validates_and_replaces_the_live_qr_storage_generation(self):
+        self.assertIn(
+            'QR_STORAGE_GENERATION: ${{ vars.MIRIYUM_QR_STORAGE_GENERATION }}',
+            self.workflow,
+        )
+        self.assertIn('"$QR_STORAGE_GENERATION" =~ ^[A-Za-z0-9._-]{1,64}$', self.workflow)
+        self.assertIn('--arg qr_storage_generation "$QR_STORAGE_GENERATION"', self.workflow)
+        self.assertIn('.name != "MIRIYUM_QR_STORAGE_GENERATION"', self.workflow)
+        self.assertIn(
+            '{name: "MIRIYUM_QR_STORAGE_GENERATION", value: $qr_storage_generation}',
+            self.workflow,
+        )
+
     def test_openai_secret_is_added_only_when_llm_is_enabled(self):
         self.assertIn('if $llm_enabled == "true" then', self.workflow)
         self.assertIn('{name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}', self.workflow)
@@ -90,6 +112,21 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("aws secretsmanager describe-secret", self.workflow)
         self.assertIn("SPRING_APPLICATION_JSON", self.workflow)
         self.assertIn("runtime_config_secret_arn", self.workflow)
+
+    def test_ecs_stability_wait_polls_for_the_approved_rolling_deployment_budget(self):
+        stability_step = self.workflow.split(
+            "- name: Wait for ECS service stability", 1
+        )[1].split("- name:", 1)[0]
+
+        self.assertIn("for attempt in $(seq 1 80)", stability_step)
+        self.assertIn("aws ecs describe-services", stability_step)
+        self.assertIn("sleep 15", stability_step)
+        self.assertIn("rolloutState", stability_step)
+        self.assertIn('select(.rolloutState == "FAILED")', stability_step)
+        self.assertIn('"$primary_rollout_state" = "COMPLETED"', stability_step)
+        self.assertIn('"$primary_task_definition" = "$TASK_DEFINITION_ARN"', stability_step)
+        self.assertIn("did not stabilize within the 20-minute deployment budget", stability_step)
+        self.assertNotIn("aws ecs wait services-stable", stability_step)
 
     def test_backend_ci_runs_the_workflow_contract_test(self):
         self.assertIn("Verify production ECS CD workflow contract", self.backend_ci)
