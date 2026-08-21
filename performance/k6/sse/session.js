@@ -151,7 +151,7 @@ function validateBehavior(behavior) {
   if (behavior === null || typeof behavior !== 'object' || Array.isArray(behavior)) {
     throw new Error('SSE stream behavior is required')
   }
-  if (!['smoke', 'reconnect', 'steady', 'slow-client'].includes(behavior.mode)) {
+  if (!['smoke', 'reconnect', 'steady', 'slow-client', 'recovery'].includes(behavior.mode)) {
     throw new Error('SSE stream behavior mode is invalid')
   }
   if (behavior.mode === 'slow-client'
@@ -167,6 +167,10 @@ function validateBehavior(behavior) {
   if (behavior.onFirstValidEvent !== undefined
     && typeof behavior.onFirstValidEvent !== 'function') {
     throw new Error('onFirstValidEvent must be a function')
+  }
+  if (behavior.onRecoveryValidEvent !== undefined
+    && typeof behavior.onRecoveryValidEvent !== 'function') {
+    throw new Error('onRecoveryValidEvent must be a function')
   }
   if (behavior.minimumValidEvents !== undefined
     && (!Number.isInteger(behavior.minimumValidEvents)
@@ -289,6 +293,13 @@ export function openChangedStream({
             if (typeof selectedBehavior.onFirstValidEvent === 'function') {
               selectedBehavior.onFirstValidEvent()
             }
+          }
+          if (selectedBehavior.mode === 'recovery'
+            && validEvents === (selectedBehavior.minimumValidEvents ?? 2)) {
+            if (typeof selectedBehavior.onRecoveryValidEvent === 'function') {
+              selectedBehavior.onRecoveryValidEvent()
+            }
+            closeClient()
           }
           if (selectedBehavior.mode === 'slow-client' && !receivePaused) {
             receivePaused = true
