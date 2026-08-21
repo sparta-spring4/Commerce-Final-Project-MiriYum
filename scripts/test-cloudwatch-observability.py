@@ -239,6 +239,15 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
 
         self.assertEqual("true", backend_environment["MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED"])
 
+    def test_staging_passes_payment_enablement_with_a_safe_default(self):
+        backend_environment = self.compose_config["services"]["backend"]["environment"]
+
+        self.assertEqual("false", backend_environment["MIRIYUM_PAYMENT_ENABLED"])
+        self.assertIn(
+            "MIRIYUM_PAYMENT_ENABLED: ${MIRIYUM_PAYMENT_ENABLED:-false}",
+            self.compose,
+        )
+
     def test_pending_risk_event_count_is_observable_without_identifier_dimensions(self):
         self.assertIn(
             "miriyum-staging-refresh-risk-event-pending-count", self.resource_script
