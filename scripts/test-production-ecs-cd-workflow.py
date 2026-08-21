@@ -153,6 +153,16 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
 
         self.assertIn("aws ecs list-tasks", capture_step)
         self.assertIn("--desired-status RUNNING", capture_step)
+        self.assertIn("--desired-status STOPPED", capture_step)
+        self.assertIn("aws ecs describe-tasks", capture_step)
+        self.assertIn("notification-read-stopped-task-arns.json", capture_step)
+        self.assertIn("notification-read-stopped-tasks.json", capture_step)
+        self.assertIn("select-previous-ecs-tasks", capture_step)
+        self.assertIn("aws ecs describe-services", capture_step)
+        self.assertIn("consecutive_stable_snapshots", capture_step)
+        self.assertIn("cmp -s", capture_step)
+        self.assertIn("sleep 5", capture_step)
+        self.assertIn("umask 077", capture_step)
         self.assertIn("notification-read-previous-task-arns.json", capture_step)
         self.assertIn("aws ecs list-tasks", evidence_step)
         self.assertIn("--desired-status RUNNING", evidence_step)
@@ -163,6 +173,12 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("aws elbv2 describe-target-health", evidence_step)
         self.assertIn("verify-production-ecs", evidence_step)
         self.assertIn("--expected-task-definition", evidence_step)
+
+        cleanup_step = self.workflow.split(
+            "- name: Cleanup previous ECS task identity evidence", 1
+        )[1]
+        self.assertIn("if: always()", cleanup_step)
+        self.assertIn("notification-read-previous-task-arns.json", cleanup_step)
 
     def test_revision_gate_runs_from_the_trusted_workflow_revision(self):
         self.assertGreaterEqual(self.workflow.count("github.workflow_sha"), 2)

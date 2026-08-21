@@ -48,6 +48,61 @@ def verify_compatible_revision(repository, minimum_sha, candidate_sha):
         )
 
 
+def select_previous_task_arns(running_task_arns, stopped_task_arns, stopped_tasks):
+    for label, task_arns, allow_empty in (
+        ("running", running_task_arns, False),
+        ("stopped", stopped_task_arns, True),
+    ):
+        if (
+            not isinstance(task_arns, list)
+            or (not allow_empty and not task_arns)
+            or any(not isinstance(task_arn, str) or not task_arn for task_arn in task_arns)
+            or len(set(task_arns)) != len(task_arns)
+        ):
+            raise DeploymentGateError(f"{label} ECS task identity evidence is invalid")
+
+    if not isinstance(stopped_tasks, dict):
+        raise DeploymentGateError("stopped ECS task lifecycle evidence is invalid")
+    if stopped_tasks.get("failures"):
+        raise DeploymentGateError("stopped ECS task evidence contains lookup failures")
+
+    described_stopped_tasks = stopped_tasks.get("tasks", [])
+    if not isinstance(described_stopped_tasks, list):
+        raise DeploymentGateError("stopped ECS task lifecycle evidence is invalid")
+    described_stopped_task_arns = {
+        task.get("taskArn")
+        for task in described_stopped_tasks
+        if isinstance(task, dict) and task.get("taskArn")
+    }
+    if (
+        described_stopped_task_arns != set(stopped_task_arns)
+        or len(described_stopped_tasks) != len(stopped_task_arns)
+        or any(
+            not isinstance(task, dict)
+            or task.get("desiredStatus") != "STOPPED"
+            or not isinstance(task.get("lastStatus"), str)
+            or not task.get("lastStatus")
+            for task in described_stopped_tasks
+        )
+    ):
+        raise DeploymentGateError("stopped ECS task lifecycle evidence is incomplete")
+
+    selected_task_arns = list(running_task_arns)
+    selected_task_arn_set = set(selected_task_arns)
+    stopped_tasks_by_arn = {
+        task["taskArn"]: task for task in described_stopped_tasks
+    }
+    for task_arn in stopped_task_arns:
+        if (
+            stopped_tasks_by_arn[task_arn]["lastStatus"] != "STOPPED"
+            and task_arn not in selected_task_arn_set
+        ):
+            selected_task_arns.append(task_arn)
+            selected_task_arn_set.add(task_arn)
+
+    return sorted(selected_task_arns)
+
+
 def verify_production_ecs_evidence(
     service,
     tasks,
@@ -101,6 +156,25 @@ def verify_production_ecs_evidence(
     ):
         raise DeploymentGateError("current ECS task evidence does not match desired count")
 
+    current_task_target_ids = set()
+    for task in current_tasks:
+        private_ipv4_addresses = [
+            detail.get("value")
+            for attachment in task.get("attachments", [])
+            if attachment.get("type") == "ElasticNetworkInterface"
+            and attachment.get("status") == "ATTACHED"
+            for detail in attachment.get("details", [])
+            if detail.get("name") == "privateIPv4Address" and detail.get("value")
+        ]
+        if len(private_ipv4_addresses) != 1:
+            raise DeploymentGateError(
+                "current ECS task target identity evidence is incomplete"
+            )
+        current_task_target_ids.add(private_ipv4_addresses[0])
+
+    if len(current_task_target_ids) != desired_count:
+        raise DeploymentGateError("current ECS task target identities are not unique")
+
     if (
         not isinstance(previous_task_arns, list)
         or not previous_task_arns
@@ -144,10 +218,16 @@ def verify_production_ecs_evidence(
             raise DeploymentGateError("ECS target group health evidence is missing")
 
         descriptions = target_health.get("TargetHealthDescriptions", [])
+        healthy_target_ids = {
+            description.get("Target", {}).get("Id")
+            for description in descriptions
+            if description.get("TargetHealth", {}).get("State") == "healthy"
+            and description.get("Target", {}).get("Id")
+        }
         if len(descriptions) != desired_count or any(
             description.get("TargetHealth", {}).get("State") != "healthy"
             for description in descriptions
-        ):
+        ) or healthy_target_ids != current_task_target_ids:
             raise DeploymentGateError(
                 "ECS target replacement has not completed deregistration"
             )
@@ -166,6 +246,9 @@ def run_cli(arguments):
     production_parser = subparsers.add_parser("verify-production-ecs")
     production_parser.add_argument("--evidence-json", required=True)
     production_parser.add_argument("--expected-task-definition", required=True)
+    selection_parser = subparsers.add_parser("select-previous-ecs-tasks")
+    selection_parser.add_argument("--evidence-json", required=True)
+    selection_parser.add_argument("--output-json", required=True)
     options = parser.parse_args(arguments)
 
     try:
@@ -175,7 +258,7 @@ def run_cli(arguments):
                 options.minimum_sha,
                 options.candidate_sha,
             )
-        else:
+        elif options.command == "verify-production-ecs":
             evidence = json.loads(
                 Path(options.evidence_json).read_text(encoding="utf-8")
             )
@@ -189,6 +272,21 @@ def run_cli(arguments):
                 evidence.get("targetHealthByArn", {}),
                 options.expected_task_definition,
             )
+        else:
+            evidence = json.loads(
+                Path(options.evidence_json).read_text(encoding="utf-8")
+            )
+            if not isinstance(evidence, dict):
+                raise DeploymentGateError("deployment evidence shape is invalid")
+            selected_task_arns = select_previous_task_arns(
+                evidence.get("runningTaskArns", []),
+                evidence.get("stoppedTaskArns", []),
+                evidence.get("stoppedTasks", {}),
+            )
+            Path(options.output_json).write_text(
+                json.dumps(selected_task_arns),
+                encoding="utf-8",
+            )
     except (DeploymentGateError, OSError, json.JSONDecodeError) as error:
         print(f"Notification read deployment gate failed: {error}", file=sys.stderr)
         return 1
@@ -198,8 +296,10 @@ def run_cli(arguments):
             "Notification read minimum compatible writer revision verified: "
             f"{options.candidate_sha}"
         )
-    else:
+    elif options.command == "verify-production-ecs":
         print("Notification read production ECS replacement evidence verified.")
+    else:
+        print("Notification read previous ECS task identities selected.")
     return 0
 
 
@@ -302,6 +402,131 @@ class RevisionFloorTest(unittest.TestCase):
         )
 
 
+class PreviousEcsTaskSelectionTest(unittest.TestCase):
+    def setUp(self):
+        self.running_task_arns = [
+            "arn:aws:ecs:task/current-1",
+            "arn:aws:ecs:task/current-2",
+        ]
+        self.transitioning_task_arn = "arn:aws:ecs:task/transitioning"
+        self.stopped_task_arn = "arn:aws:ecs:task/stopped"
+        self.stopped_task_arns = [
+            self.transitioning_task_arn,
+            self.stopped_task_arn,
+        ]
+
+    def _stopped_tasks(self, transitioning_status="STOPPING"):
+        return {
+            "tasks": [
+                {
+                    "taskArn": self.transitioning_task_arn,
+                    "desiredStatus": "STOPPED",
+                    "lastStatus": transitioning_status,
+                },
+                {
+                    "taskArn": self.stopped_task_arn,
+                    "desiredStatus": "STOPPED",
+                    "lastStatus": "STOPPED",
+                },
+            ],
+            "failures": [],
+        }
+
+    def test_stopped_desired_nonterminal_tasks_are_captured(self):
+        for last_status in ("RUNNING", "DEACTIVATING", "STOPPING"):
+            with self.subTest(last_status=last_status):
+                selected = select_previous_task_arns(
+                    self.running_task_arns,
+                    self.stopped_task_arns,
+                    self._stopped_tasks(last_status),
+                )
+
+                self.assertEqual(
+                    [*self.running_task_arns, self.transitioning_task_arn],
+                    selected,
+                )
+
+    def test_fully_stopped_history_is_not_captured(self):
+        stopped_tasks = self._stopped_tasks("STOPPED")
+
+        selected = select_previous_task_arns(
+            self.running_task_arns,
+            self.stopped_task_arns,
+            stopped_tasks,
+        )
+
+        self.assertEqual(self.running_task_arns, selected)
+
+    def test_selection_is_canonical_for_snapshot_comparison(self):
+        selected = select_previous_task_arns(
+            list(reversed(self.running_task_arns)),
+            self.stopped_task_arns,
+            self._stopped_tasks(),
+        )
+
+        self.assertEqual(
+            sorted([*self.running_task_arns, self.transitioning_task_arn]),
+            selected,
+        )
+
+    def test_missing_stopped_task_description_is_rejected(self):
+        stopped_tasks = self._stopped_tasks()
+        stopped_tasks["tasks"].pop()
+
+        with self.assertRaises(DeploymentGateError):
+            select_previous_task_arns(
+                self.running_task_arns,
+                self.stopped_task_arns,
+                stopped_tasks,
+            )
+
+    def test_stopped_task_lookup_failure_is_rejected(self):
+        stopped_tasks = self._stopped_tasks()
+        stopped_tasks["failures"].append({"arn": self.stopped_task_arn})
+
+        with self.assertRaises(DeploymentGateError):
+            select_previous_task_arns(
+                self.running_task_arns,
+                self.stopped_task_arns,
+                stopped_tasks,
+            )
+
+    def test_cli_writes_selected_task_identities(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            evidence_file = Path(temp_directory) / "evidence.json"
+            output_file = Path(temp_directory) / "selected.json"
+            evidence_file.write_text(
+                json.dumps(
+                    {
+                        "runningTaskArns": self.running_task_arns,
+                        "stoppedTaskArns": self.stopped_task_arns,
+                        "stoppedTasks": self._stopped_tasks(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "select-previous-ecs-tasks",
+                    "--evidence-json",
+                    str(evidence_file),
+                    "--output-json",
+                    str(output_file),
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(
+                [*self.running_task_arns, self.transitioning_task_arn],
+                json.loads(output_file.read_text(encoding="utf-8")),
+            )
+
+
 class ProductionEcsEvidenceTest(unittest.TestCase):
     def setUp(self):
         self.expected_task_definition = (
@@ -335,12 +560,48 @@ class ProductionEcsEvidenceTest(unittest.TestCase):
                     "taskDefinitionArn": self.expected_task_definition,
                     "lastStatus": "RUNNING",
                     "desiredStatus": "RUNNING",
+                    "attachments": [
+                        {
+                            "id": "eni-attachment-current-1",
+                            "type": "ElasticNetworkInterface",
+                            "status": "ATTACHED",
+                            "details": [
+                                {"name": "subnetId", "value": "subnet-test"},
+                                {
+                                    "name": "networkInterfaceId",
+                                    "value": "eni-current-1",
+                                },
+                                {
+                                    "name": "privateIPv4Address",
+                                    "value": "10.0.1.10",
+                                },
+                            ],
+                        }
+                    ],
                 },
                 {
                     "taskArn": "arn:aws:ecs:task/current-2",
                     "taskDefinitionArn": self.expected_task_definition,
                     "lastStatus": "RUNNING",
                     "desiredStatus": "RUNNING",
+                    "attachments": [
+                        {
+                            "id": "eni-attachment-current-2",
+                            "type": "ElasticNetworkInterface",
+                            "status": "ATTACHED",
+                            "details": [
+                                {"name": "subnetId", "value": "subnet-test"},
+                                {
+                                    "name": "networkInterfaceId",
+                                    "value": "eni-current-2",
+                                },
+                                {
+                                    "name": "privateIPv4Address",
+                                    "value": "10.0.1.11",
+                                },
+                            ],
+                        }
+                    ],
                 },
             ],
             "failures": [],
@@ -481,7 +742,7 @@ class ProductionEcsEvidenceTest(unittest.TestCase):
                 self.expected_task_definition,
             )
 
-    def test_incomplete_healthy_target_set_is_rejected(self):
+    def test_new_task_missing_from_target_group_is_rejected(self):
         target_health = copy.deepcopy(self.target_health)
         target_health[self.target_group_arn]["TargetHealthDescriptions"].pop()
 
@@ -492,6 +753,57 @@ class ProductionEcsEvidenceTest(unittest.TestCase):
                 self.previous_task_arns,
                 self.previous_tasks,
                 target_health,
+                self.expected_task_definition,
+            )
+
+    def test_stale_manual_target_mixed_with_current_task_is_rejected(self):
+        target_health = copy.deepcopy(self.target_health)
+        target_health[self.target_group_arn]["TargetHealthDescriptions"][1][
+            "Target"
+        ]["Id"] = "10.0.9.99"
+
+        with self.assertRaises(DeploymentGateError):
+            verify_production_ecs_evidence(
+                self.service,
+                self.tasks,
+                self.previous_task_arns,
+                self.previous_tasks,
+                target_health,
+                self.expected_task_definition,
+            )
+
+    def test_equal_target_count_with_different_identities_is_rejected(self):
+        target_health = copy.deepcopy(self.target_health)
+        target_health[self.target_group_arn]["TargetHealthDescriptions"][0][
+            "Target"
+        ]["Id"] = "10.0.9.98"
+        target_health[self.target_group_arn]["TargetHealthDescriptions"][1][
+            "Target"
+        ]["Id"] = "10.0.9.99"
+
+        with self.assertRaises(DeploymentGateError):
+            verify_production_ecs_evidence(
+                self.service,
+                self.tasks,
+                self.previous_task_arns,
+                self.previous_tasks,
+                target_health,
+                self.expected_task_definition,
+            )
+
+    def test_current_task_without_private_ip_evidence_is_rejected(self):
+        tasks = copy.deepcopy(self.tasks)
+        tasks["tasks"][0]["attachments"][0]["details"] = [
+            {"name": "networkInterfaceId", "value": "eni-current-1"}
+        ]
+
+        with self.assertRaises(DeploymentGateError):
+            verify_production_ecs_evidence(
+                self.service,
+                tasks,
+                self.previous_task_arns,
+                self.previous_tasks,
+                self.target_health,
                 self.expected_task_definition,
             )
 
@@ -714,6 +1026,10 @@ printf '%s\\n' "$OLD_BACKEND_CONTAINER_ID|$OLD_BACKEND_IMAGE|$OLD_BACKEND_IP"
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1].startswith("verify-"):
+    if len(sys.argv) > 1 and sys.argv[1] in {
+        "select-previous-ecs-tasks",
+        "verify-ancestor",
+        "verify-production-ecs",
+    }:
         raise SystemExit(run_cli(sys.argv[1:]))
     unittest.main()
