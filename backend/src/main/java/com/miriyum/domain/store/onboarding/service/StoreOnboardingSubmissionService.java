@@ -4,8 +4,6 @@ import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.evidence.BusinessRegistrationEvidenceUploadService;
 import com.miriyum.domain.store.evidence.ValidatedBusinessRegistrationEvidence;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAccountService;
-import com.miriyum.domain.store.service.StoreCatalogPolicy;
-import com.miriyum.domain.store.service.StoreGeocodingService;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -29,8 +27,7 @@ public class StoreOnboardingSubmissionService {
     private final StoreOnboardingRequestFingerprint fingerprints;
     private final StoreOnboardingTransactionExecutor transactions;
     private final BusinessRegistrationEvidenceUploadService evidenceUploads;
-    private final StoreCatalogPolicy catalogPolicy;
-    private final StoreGeocodingService geocodingService;
+    private final StoreOnboardingExternalOperations externalOperations;
     private final IdempotencyExecutor idempotency;
 
     @Transactional
@@ -42,14 +39,12 @@ public class StoreOnboardingSubmissionService {
     ) {
         operatorAccountService.requireActiveAccount(operatorId);
         ValidatedBusinessRegistrationEvidence validated = evidenceUploads.validate(evidence);
-        catalogPolicy.validate(request.storeCategoryCode(), request.tagCodes());
-        var geocoding = geocodingService.verify(request.region(), request.address());
         String fingerprint = fingerprints.create(request, validated.sha256());
         IdempotencyCommand command = new IdempotencyCommand(
                 PRINCIPAL_NAMESPACE, operatorId, SUBMIT_COMMAND,
                 idempotencyKey.value(), fingerprint);
         return idempotency.execute(command, () -> submitOnce(
-                operatorId, idempotencyKey, request, validated, geocoding, fingerprint));
+                operatorId, idempotencyKey, request, validated, fingerprint));
     }
 
     private BusinessResult<tools.jackson.databind.JsonNode> submitOnce(
@@ -57,14 +52,14 @@ public class StoreOnboardingSubmissionService {
             IdempotencyKey idempotencyKey,
             StoreCreateRequest request,
             ValidatedBusinessRegistrationEvidence validated,
-            com.miriyum.domain.store.model.VerifiedStoreGeocoding geocoding,
             String fingerprint
     ) {
+        var geocoding = externalOperations.validateCatalogAndGeocode(request);
         var reserved = transactions.reserve(operatorId, idempotencyKey.value(), fingerprint);
         if (reserved.replayed()) return business(transactions.replayOutcome(
                 reserved.applicationId(), reserved.applicationVersion()));
         transactions.beginEvidenceUpload(reserved);
-        var pending = evidenceUploads.storePending(
+        var pending = externalOperations.storePending(
                 reserved.applicationId(), reserved.applicationVersion(), validated);
         return business(transactions.attachAndSubmit(
                 operatorId, reserved, pending, fingerprint, request, null, geocoding));
@@ -80,8 +75,6 @@ public class StoreOnboardingSubmissionService {
     ) {
         operatorAccountService.requireActiveAccount(operatorId);
         ValidatedBusinessRegistrationEvidence validated = evidenceUploads.validate(evidence);
-        catalogPolicy.validate(request.storeCategoryCode(), request.tagCodes());
-        var geocoding = geocodingService.verify(request.region(), request.address());
         String fingerprint = fingerprints.create(request, validated.sha256());
         String commandFingerprint = RequestFingerprint.of(
                 "applicationId=" + applicationId + "&payload=" + fingerprint);
@@ -90,7 +83,7 @@ public class StoreOnboardingSubmissionService {
                 idempotencyKey.value(), commandFingerprint);
         return idempotency.execute(command, () -> supplementOnce(
                 operatorId, applicationId, idempotencyKey, request,
-                validated, geocoding, fingerprint));
+                validated, fingerprint));
     }
 
     private BusinessResult<tools.jackson.databind.JsonNode> supplementOnce(
@@ -99,14 +92,14 @@ public class StoreOnboardingSubmissionService {
             IdempotencyKey idempotencyKey,
             StoreCreateRequest request,
             ValidatedBusinessRegistrationEvidence validated,
-            com.miriyum.domain.store.model.VerifiedStoreGeocoding geocoding,
             String fingerprint
     ) {
+        var geocoding = externalOperations.validateCatalogAndGeocode(request);
         var reserved = transactions.reserveSupplement(
                 operatorId, applicationId, idempotencyKey.value(), fingerprint);
         if (reserved.replayed()) return business(transactions.replayOutcome(
                 applicationId, reserved.applicationVersion()));
-        var pending = evidenceUploads.storePending(
+        var pending = externalOperations.storePending(
                 applicationId, reserved.applicationVersion(), validated);
         return business(transactions.attachAndSubmit(
                 operatorId, reserved, pending, fingerprint, request,

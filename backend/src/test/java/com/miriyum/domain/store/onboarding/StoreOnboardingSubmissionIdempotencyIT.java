@@ -27,6 +27,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -37,6 +38,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -135,6 +137,50 @@ class StoreOnboardingSubmissionIdempotencyIT {
         assertThat(replayed).containsExactlyInAnyOrder(false, true);
         verify(transactions, times(1)).reserveSupplement(
                 11L, 41L, KEY.value(), "f".repeat(64));
+        verify(uploads, times(1)).storePending(
+                anyLong(), anyLong(), any(ValidatedBusinessRegistrationEvidence.class));
+    }
+
+    @Test
+    void firstSubmissionInvokesGeocodingAndStorageOutsideTransaction() {
+        AtomicBoolean geocodingOutsideTransaction = new AtomicBoolean();
+        AtomicBoolean storageOutsideTransaction = new AtomicBoolean();
+        given(geocoding.verify(any(), any())).willAnswer(invocation -> {
+            geocodingOutsideTransaction.set(
+                    !TransactionSynchronizationManager.isActualTransactionActive());
+            return org.mockito.Mockito.mock(VerifiedStoreGeocoding.class);
+        });
+        given(transactions.reserve(11L, KEY.value(), "f".repeat(64)))
+                .willReturn(new ReservedApplication(41L, 1L, false, false));
+        given(uploads.storePending(anyLong(), anyLong(), any(ValidatedBusinessRegistrationEvidence.class)))
+                .willAnswer(invocation -> {
+                    storageOutsideTransaction.set(
+                            !TransactionSynchronizationManager.isActualTransactionActive());
+                    return new PendingEvidence(
+                            UUID.fromString("550e8400-e29b-41d4-a716-446655440099"),
+                            "a".repeat(64), "application/pdf", 3L);
+                });
+
+        service.submit(11L, KEY, request, evidence);
+
+        assertThat(geocodingOutsideTransaction).isTrue();
+        assertThat(storageOutsideTransaction).isTrue();
+    }
+
+    @Test
+    void storedReplaySurvivesGeocodingProviderOutage() {
+        given(transactions.reserve(11L, KEY.value(), "f".repeat(64)))
+                .willReturn(new ReservedApplication(41L, 1L, false, false));
+
+        IdempotentOutcome first = service.submit(11L, KEY, request, evidence);
+        given(geocoding.verify(any(), any())).willThrow(new IllegalStateException("provider down"));
+
+        IdempotentOutcome replay = service.submit(11L, KEY, request, evidence);
+
+        assertThat(first.replayed()).isFalse();
+        assertThat(replay.replayed()).isTrue();
+        assertThat(replay.data()).isEqualTo(first.data());
+        verify(geocoding, times(1)).verify(any(), any());
         verify(uploads, times(1)).storePending(
                 anyLong(), anyLong(), any(ValidatedBusinessRegistrationEvidence.class));
     }

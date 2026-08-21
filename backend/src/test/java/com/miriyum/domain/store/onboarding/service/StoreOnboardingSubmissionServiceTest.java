@@ -6,6 +6,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
@@ -13,8 +15,6 @@ import com.miriyum.domain.store.evidence.BusinessRegistrationEvidenceUploadServi
 import com.miriyum.domain.store.evidence.ValidatedBusinessRegistrationEvidence;
 import com.miriyum.domain.store.onboarding.dto.StoreOnboardingContracts.ReservedApplication;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAccountService;
-import com.miriyum.domain.store.service.StoreCatalogPolicy;
-import com.miriyum.domain.store.service.StoreGeocodingService;
 import com.miriyum.domain.store.model.VerifiedStoreGeocoding;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
@@ -38,8 +38,7 @@ class StoreOnboardingSubmissionServiceTest {
     @Mock StoreOnboardingTransactionExecutor transactions;
     @Mock BusinessRegistrationEvidenceUploadService uploads;
     @Mock StoreCreateRequest request;
-    @Mock StoreCatalogPolicy catalogPolicy;
-    @Mock StoreGeocodingService geocodingService;
+    @Mock StoreOnboardingExternalOperations externalOperations;
     @Mock IdempotencyExecutor idempotency;
 
     private StoreOnboardingSubmissionService service;
@@ -50,14 +49,13 @@ class StoreOnboardingSubmissionServiceTest {
     @BeforeEach
     void setUp() {
         service = new StoreOnboardingSubmissionService(
-                accounts, fingerprints, transactions, uploads, catalogPolicy, geocodingService,
-                idempotency);
+                accounts, fingerprints, transactions, uploads, externalOperations, idempotency);
         given(uploads.validate(evidence)).willReturn(new ValidatedBusinessRegistrationEvidence(
                 "application/pdf", new byte[] {1}, "a".repeat(64)));
         given(fingerprints.create(request, "a".repeat(64))).willReturn("f".repeat(64));
-        given(geocodingService.verify(any(), any())).willReturn(org.mockito.Mockito.mock(
+        given(externalOperations.validateCatalogAndGeocode(request)).willReturn(org.mockito.Mockito.mock(
                 VerifiedStoreGeocoding.class));
-        given(idempotency.execute(any(), any())).willAnswer(invocation -> {
+        lenient().when(idempotency.execute(any(), any())).thenAnswer(invocation -> {
             Supplier<BusinessResult<tools.jackson.databind.JsonNode>> work = invocation.getArgument(1);
             BusinessResult<tools.jackson.databind.JsonNode> result = work.get();
             return new IdempotentOutcome(
@@ -105,6 +103,32 @@ class StoreOnboardingSubmissionServiceTest {
 
         then(uploads).should(never()).storePending(anyLong(), anyLong(),
                 any(ValidatedBusinessRegistrationEvidence.class));
+    }
+
+    @Test
+    void storedReplaySkipsMutableCatalogAndExternalGeocoding() {
+        IdempotentOutcome replay = new IdempotentOutcome(
+                true, 202, "SUCCESS", "STORE_ONBOARDING_APPLICATION", "41", null);
+        doReturn(replay).when(idempotency).execute(any(), any());
+        lenient().when(externalOperations.validateCatalogAndGeocode(request))
+                .thenThrow(new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE));
+
+        assertThat(service.submit(11L, key, request, evidence)).isSameAs(replay);
+
+        then(externalOperations).should(never()).validateCatalogAndGeocode(any());
+    }
+
+    @Test
+    void storedSupplementReplaySkipsMutableCatalogAndExternalGeocoding() {
+        IdempotentOutcome replay = new IdempotentOutcome(
+                true, 202, "SUCCESS", "STORE_ONBOARDING_APPLICATION", "41", null);
+        doReturn(replay).when(idempotency).execute(any(), any());
+        lenient().when(externalOperations.validateCatalogAndGeocode(request))
+                .thenThrow(new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE));
+
+        assertThat(service.supplement(11L, 41L, key, request, evidence)).isSameAs(replay);
+
+        then(externalOperations).should(never()).validateCatalogAndGeocode(any());
     }
 
 }
