@@ -46,6 +46,8 @@ const PROOF_PATH =
   '/api/v1/consumers/me/stores/{storeId}/waiting-location-proofs' as const
 const CREATE_PATH =
   '/api/v1/consumers/me/stores/{storeId}/waiting-teams' as const
+const CANCEL_PATH =
+  '/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations' as const
 
 async function fetchCurrentConsumerWaiting(
   apiClient: ApiClient,
@@ -83,6 +85,24 @@ export function useConsumerWaitingAvailability(storeId: string) {
       return response.data
     },
   })
+}
+
+/**
+ * 본인 활성 웨이팅을 취소한다.
+ *
+ * 팀을 만든 계정만 성공한다. 초대로 합류한 일행이 호출하면 서버가
+ * `WAITING_003`으로 거절하므로, 화면은 대표자에게만 이 명령을 노출한다.
+ */
+export function cancelConsumerWaitingTeam(
+  apiClient: ApiClient,
+  input: IdempotentCommand & { waitingTeamId: string; expectedVersion: number },
+): Promise<ConsumerWaitingSnapshot> {
+  return apiClient(CANCEL_PATH, {
+    method: 'post',
+    pathParams: { waitingTeamId: input.waitingTeamId },
+    body: { expectedVersion: input.expectedVersion },
+    idempotencyKey: input.idempotencyKey,
+  }).then((response) => response.data)
 }
 
 export function issueWaitingPartyInvitation(

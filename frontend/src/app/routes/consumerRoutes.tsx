@@ -20,6 +20,7 @@ import {
   MyReservationsPage,
 } from '../../domains/reservation/consumer'
 import {
+  CurrentWaitingRoute,
   WaitingInvitationAcceptRoute,
   WaitingRegistrationRoute,
 } from '../../domains/waiting/consumer'
@@ -74,12 +75,13 @@ export const consumerRoutes = (
       <Route path={CONSUMER_PATHS.pickupDetail} element={<PickupDetailPage />} />
       <Route path={CONSUMER_PATHS.pickupComplete} element={<PickupCompletePage />} />
       <Route
-        path={CONSUMER_PATHS.waitingInvitationAccept}
-        element={<WaitingInvitationAcceptRoute />}
-      />
-      <Route
         path={CONSUMER_PATHS.waitingRegister}
         element={<WaitingRegistrationRoute />}
+      />
+      <Route path={CONSUMER_PATHS.waitingCurrent} element={<CurrentWaitingRoute />} />
+      <Route
+        path={CONSUMER_PATHS.waitingInvitationAccept}
+        element={<WaitingInvitationAcceptRoute />}
       />
     </Route>
   </Route>
