@@ -94,6 +94,37 @@ const SLOW_SUMMARY_INPUT = {
   },
 }
 
+const RECOVERY_METADATA = {
+  ...METADATA,
+  profile: 'recovery',
+  runId: 'safe-recovery-run',
+  endpointKinds: ['waiting-store-operator'],
+  limits: {
+    connections: 1,
+    connectionsPerAccount: 1,
+    holdDurationSeconds: 30,
+    slowClientDelaySeconds: 1,
+    recoveryArmDelaySeconds: 15,
+    recoveryMaxSeconds: 6,
+  },
+}
+
+const RECOVERY_SUMMARY_INPUT = {
+  metrics: {
+    'sse_recovery_duration{phase:measured,profile:recovery,endpoint_kind:waiting-store-operator}': {
+      type: 'trend',
+      values: { avg: 2100, min: 2100, med: 2100, max: 2100, 'p(50)': 2100, 'p(95)': 2100, 'p(99)': 2100 },
+      thresholds: { 'max<=6000': { ok: true } },
+    },
+    'sse_recovery_http_verified{phase:measured,profile:recovery,traffic:owned-http}': {
+      type: 'counter', values: { count: 1, rate: 1 }, thresholds: { 'count==1': { ok: true } },
+    },
+    'sse_recovery_cleanup_successful{phase:cleanup,profile:recovery,traffic:cleanup}': {
+      type: 'counter', values: { count: 1, rate: 1 }, thresholds: { 'count==1': { ok: true } },
+    },
+  },
+}
+
 function message(action) {
   try {
     action()
@@ -121,6 +152,8 @@ export default function () {
   const slowError = message(() => {
     slowParsed = JSON.parse(renderSafeSseSummary(SLOW_SUMMARY_INPUT, SLOW_METADATA).json)
   })
+  const recoveryRendered = renderSafeSseSummary(RECOVERY_SUMMARY_INPUT, RECOVERY_METADATA)
+  const recoveryParsed = JSON.parse(recoveryRendered.json)
 
   check(null, {
     'summary keeps only approved run evidence': () =>
@@ -150,6 +183,15 @@ export default function () {
       && slowParsed.limits.companionMinLifetimeSeconds === 85
       && slowParsed.metrics['waiting-store-operator'].slowCleanupDuration.max === 52000
       && slowParsed.metrics['waiting-store-operator'].companionLifetime.min === 90000,
+    'recovery summary preserves only bounded aggregate evidence': () =>
+      recoveryParsed.limits.recoveryArmDelaySeconds === 15
+      && recoveryParsed.limits.recoveryMaxSeconds === 6
+      && recoveryParsed.metrics['waiting-store-operator'].recoveryDuration.max === 2100
+      && recoveryParsed.runMetrics.recoveryHttpVerified.count === 1
+      && recoveryParsed.runMetrics.recoveryCleanupSuccessful.count === 1
+      && recoveryRendered.stdout.includes('recovery max ms: 2100')
+      && recoveryRendered.stdout.includes('HTTP verified: 1')
+      && recoveryRendered.stdout.includes('cleanup successful: 1'),
     'summary omits unknown metadata metrics and identifier sentinels': () =>
       !combined.includes('forbidden-token')
       && !combined.includes('forbidden-cursor')
