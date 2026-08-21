@@ -11,8 +11,6 @@ import type { ReactNode } from 'react'
 import { createApiClient, type ApiClient } from '../../../shared/api/client'
 import { isApiError } from '../../../shared/api/apiError'
 import { isRefreshableAuthError } from '../../../shared/auth/authErrors'
-import { readCookie } from '../../../shared/auth/readCookie'
-import { STORE_OPERATOR_CSRF_COOKIE } from './csrfCookie'
 import {
   prepareStoreOperatorCsrfToken,
   refreshStoreOperatorToken,
@@ -254,10 +252,10 @@ export function StoreOperatorAuthProvider({
     const generation = clearSession()
     const completed = await runServerSessionCommand(async () => {
       try {
-        // 서버가 쿠키를 내려주므로 값을 읽기 전에 준비를 먼저 요청한다.
-        await prepareStoreOperatorCsrfToken()
-        const csrfToken = readCookie(STORE_OPERATOR_CSRF_COOKIE)
-        if (csrfToken !== null) {
+        // CSRF 쿠키는 인증 API path로 격리돼 로그인 페이지의 document.cookie에서
+        // 읽을 수 없다. 서버가 같은 값으로 응답한 토큰을 헤더에 사용한다.
+        const csrfToken = await prepareStoreOperatorCsrfToken()
+        if (csrfToken.length > 0) {
           await signOutStoreOperator(csrfToken)
           return true
         }

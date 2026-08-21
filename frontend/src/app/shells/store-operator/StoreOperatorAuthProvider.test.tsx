@@ -353,9 +353,8 @@ describe('매장 운영자 인증 shell', () => {
     expect(refreshCalls).toBe(1)
   })
 
-  it('로그아웃은 운영자 namespace 경로만 호출한다', async () => {
+  it('로그아웃은 CSRF 응답 토큰으로 운영자 namespace 경로만 호출한다', async () => {
     const called: string[] = []
-    document.cookie = 'MIRIYUM_STORE_OPERATOR_XSRF_TOKEN=operator-csrf'
 
     server.use(
       authenticatedOperator(),
