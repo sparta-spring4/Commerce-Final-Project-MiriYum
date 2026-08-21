@@ -30,6 +30,8 @@ class WaitingOpenApiContractTest {
             "/api/v1/consumers/me/stores/{storeId}/waiting-location-proofs";
     private static final String CONSUMER_CURRENT_PATH =
             "/api/v1/consumers/me/waiting-teams/current";
+    private static final String CONSUMER_HISTORY_PATH =
+            "/api/v1/consumers/me/waiting-teams";
     private static final String CONSUMER_CANCEL_PATH =
             "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations";
     private static final String CONSUMER_EVENTS_PATH =
@@ -75,6 +77,35 @@ class WaitingOpenApiContractTest {
     }
 
     @Test
+    void consumerHistoryContractHasNoConsumerIdAndOnlyPublicFields() throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> operation = map(map(paths.get(CONSUMER_HISTORY_PATH)).get("get"));
+
+        assertThat(list(operation.get("security")))
+                .containsExactly(Map.of("bearerAuth", List.of()));
+        assertThat(list(operation.get("parameters")))
+                .extracting(parameter -> map(parameter).get("name"))
+                .containsExactly("scope", "cursor", "size")
+                .doesNotContain("consumerId", "consumerAccountId");
+        assertThat(map(operation.get("responses")).keySet())
+                .containsExactlyInAnyOrder("200", "400", "401", "403", "429", "503");
+
+        Map<String, Object> components = map(document.get("components"));
+        Map<String, Object> schemas = map(components.get("schemas"));
+        Map<String, Object> item = map(schemas.get("WaitingConsumerHistoryItem"));
+        assertThat(map(item.get("properties"))).containsOnlyKeys(
+                "waitingTeamId", "storeId", "status",
+                "registeredAt", "calledAt", "terminatedAt");
+        assertThat(item.toString()).doesNotContain(
+                "consumerAccountId", "location", "audit", "ledger", "version", "membership");
+
+        Map<String, Object> responses = map(components.get("responses"));
+        assertThat(responseExampleCodes(map(responses.get("WaitingHistoryCursorBadRequest"))))
+                .containsExactly("COMMON_001", "WAITING_019");
+    }
+
+    @Test
     void storeOperatorWaitingSettingsKeepTheApprovedContract() throws IOException {
         Map<String, Object> document = load(CONTRACT);
 
@@ -93,6 +124,7 @@ class WaitingOpenApiContractTest {
                         CONSUMER_AVAILABILITY_PATH,
                         CONSUMER_LOCATION_PROOF_PATH,
                         CONSUMER_CREATE_PATH,
+                        CONSUMER_HISTORY_PATH,
                         CONSUMER_CURRENT_PATH,
                         CONSUMER_CANCEL_PATH,
                         "/api/v1/consumers/me/waiting-invitation-acceptances",

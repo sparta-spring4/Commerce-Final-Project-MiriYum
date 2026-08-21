@@ -171,14 +171,18 @@ if (
     throw "PortOne Channel Key must not be passed to a Compose service."
 }
 
-$cursorSecretName = "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET"
-$cursorSecret = "test-only-notification-history-cursor-secret"
+$cursorSecrets = [ordered]@{
+    MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET = "test-only-notification-history-cursor-secret"
+    MIRIYUM_WAITING_HISTORY_CURSOR_SECRET = "test-only-waiting-history-cursor-secret"
+}
 $portOneStoreId = 'test-only-portone-store-id'
 $portOneApiSecret = 'test-only-portone-api-secret'
 $testEnvironment = @{
-    $cursorSecretName = $cursorSecret
     MIRIYUM_PORTONE_STORE_ID = $portOneStoreId
     MIRIYUM_PORTONE_API_SECRET = $portOneApiSecret
+}
+foreach ($entry in $cursorSecrets.GetEnumerator()) {
+    $testEnvironment[$entry.Key] = $entry.Value
 }
 $previousEnvironment = @{}
 
@@ -195,10 +199,11 @@ try {
     }
 
     $compose = ($composeJson -join "`n") | ConvertFrom-Json
-    $renderedCursorSecret = $compose.services.backend.environment.$cursorSecretName
-
-    if ($renderedCursorSecret -ne $cursorSecret) {
-        throw "Production backend does not receive $cursorSecretName."
+    foreach ($entry in $cursorSecrets.GetEnumerator()) {
+        $renderedCursorSecret = $compose.services.backend.environment.($entry.Key)
+        if ($renderedCursorSecret -ne $entry.Value) {
+            throw "Production backend does not receive $($entry.Key)."
+        }
     }
 
     if ($compose.services.backend.environment.MIRIYUM_PORTONE_STORE_ID -ne $portOneStoreId) {
@@ -213,6 +218,11 @@ try {
         }
 
         $serviceEnvironment = $serviceProperty.Value.environment
+        foreach ($name in $cursorSecrets.Keys) {
+            if ($null -ne $serviceEnvironment -and $null -ne $serviceEnvironment.PSObject.Properties[$name]) {
+                throw "Compose service $($serviceProperty.Name) must not receive $name."
+            }
+        }
         foreach ($name in $allPortOneNames) {
             if ($null -ne $serviceEnvironment -and $null -ne $serviceEnvironment.PSObject.Properties[$name]) {
                 throw "Compose service $($serviceProperty.Name) must not receive $name."
