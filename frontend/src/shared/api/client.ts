@@ -8,6 +8,7 @@ import type {
   AdminReauthenticationOf,
   ApiPath,
   CsrfOf,
+  CorrelationIdOf,
   IdempotencyOf,
   IfMatchOf,
   MethodOf,
@@ -60,6 +61,7 @@ export type RequestOptions<P extends ApiPath, M extends MethodOf<P>> = {
   RequestBodyOf<OperationOf<P, M>> &
   MultipartOf<OperationOf<P, M>> &
   IdempotencyOf<OperationOf<P, M>> &
+  CorrelationIdOf<OperationOf<P, M>> &
   CsrfOf<OperationOf<P, M>> &
   IfMatchOf<OperationOf<P, M>> &
   AdminReauthenticationOf<P, OperationOf<P, M>> &
@@ -100,6 +102,7 @@ const ADMIN_REAUTHENTICATION_HEADER = 'X-Admin-Reauthentication'
 const ADMIN_CASE_ID_HEADER = 'X-Admin-Case-Id'
 const ADMIN_CASE_VERSION_HEADER = 'X-Admin-Case-Version'
 const ADMIN_REASON_CODE_HEADER = 'X-Admin-Reason-Code'
+const CORRELATION_ID_HEADER = 'X-Correlation-Id'
 
 /**
  * 2xx 본문을 JSON으로 읽지 못했을 때 쓰는 표식이다.
@@ -144,6 +147,7 @@ export function createApiClient(
       allowNoContent?: boolean
       multipart?: FormData
       idempotencyKey?: string
+      correlationId?: string
       csrfToken?: string
       ifMatch?: number
       adminReauthentication?: string
@@ -164,6 +168,9 @@ export function createApiClient(
     }
     if (options.idempotencyKey) {
       headers[IDEMPOTENCY_KEY_HEADER] = options.idempotencyKey
+    }
+    if (options.correlationId) {
+      headers[CORRELATION_ID_HEADER] = options.correlationId
     }
     if (options.csrfToken) {
       headers[CSRF_TOKEN_HEADER] = options.csrfToken
@@ -254,6 +261,7 @@ export function createApiClient(
       allowNoContent,
       multipart,
       idempotencyKey,
+      correlationId,
       csrfToken,
       ifMatch,
       adminReauthentication,
@@ -267,6 +275,7 @@ export function createApiClient(
       body?: unknown
       allowNoContent?: boolean
       idempotencyKey?: string
+      correlationId?: string
       csrfToken?: string
       ifMatch?: number
       adminReauthentication?: string
@@ -292,6 +301,7 @@ export function createApiClient(
       allowNoContent,
       multipart,
       idempotencyKey,
+      correlationId,
       csrfToken,
       signal,
     }

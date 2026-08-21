@@ -220,8 +220,7 @@ describe('예약 처리', () => {
   })
 
   it('노쇼는 서버가 확정하는 상태라 처리 명령을 열지 않는다', async () => {
-    // 계약상 NO_SHOW는 startAt + 5분에 서버가 원자 확정한다. 운영자가 누르는
-    // 상태가 아니므로 버튼을 만들면 눌러도 거절되는 행동을 약속하게 된다.
+    // 상세 화면은 이미 확정된 NO_SHOW 결과에 처리 명령을 다시 열지 않는다.
     server.use(
       authenticatedOperator(),
       http.get(DETAIL_PATH, () => successResponse(detail({ status: 'NO_SHOW' }))),

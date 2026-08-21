@@ -11,16 +11,19 @@ import {
   selectSseTargets,
   validateSseFixture,
 } from './contracts.js'
-import { loadSseConfig } from './config.js'
+import { loadSseConfig, requiredSmokeEndpointKinds } from './config.js'
 import {
   assignSlowClientRoles,
   buildSseScenarioOptions,
   buildSseThresholds,
+  cleanupWaitingChange,
   captureOwnedHttpBaseline,
   requireSlowCleanupResult,
   runOwnedHttpProbe,
   triggerWaitingChange,
+  verifyWaitingChange,
 } from './probe.js'
+import { runSseRecovery } from './recovery.js'
 import { openChangedStream, prepareSseSession } from './session.js'
 import {
   createFixtureFingerprint,
@@ -42,7 +45,7 @@ const prerequisiteSmokeProof = config.profile === 'smoke'
     harnessCommitSha: config.harnessCommitSha,
     targetFingerprint,
     fixtureSha256,
-    endpointKinds: config.endpointKinds,
+    endpointKinds: requiredSmokeEndpointKinds(config.profile, config.endpointKinds),
   })
 
 const availableTargets = buildSseTargets(
@@ -81,6 +84,9 @@ const ownedHttpErrors = new Counter('owned_http_errors')
 const slowClientTriggers = new Counter('slow_client_triggers')
 const slowClientCleanupMilliseconds = new Trend('sse_slow_cleanup_duration', true)
 const companionLifetimeMilliseconds = new Trend('sse_companion_lifetime', true)
+const recoveryMilliseconds = new Trend('sse_recovery_duration', true)
+const recoveryHttpVerified = new Counter('sse_recovery_http_verified')
+const recoveryCleanupSuccessful = new Counter('sse_recovery_cleanup_successful')
 
 function thresholds() {
   const expectedCapacityRejections = config.profile === 'capacity'
@@ -318,6 +324,60 @@ export function sseSteady(data) {
   safelyExecute(() => openSession(session, { mode: 'steady' }), session.target)
 }
 
+export function sseRecovery(data) {
+  const session = selectedSession(data)
+  safelyExecute(() => {
+    recoveryAttempts.add(1, tagsFor(session.target))
+    runSseRecovery({
+      armDelaySeconds: config.recoveryArmDelaySeconds,
+      maxRecoverySeconds: config.recoveryMaxSeconds,
+      delay: sleep,
+      ready: () => console.log(
+        `SSE_RECOVERY_READY stop Valkey within ${config.recoveryArmDelaySeconds}s`,
+      ),
+      openStream: (behavior) => openSession(session, behavior),
+      trigger: () => {
+        let mutation = null
+        triggerWaitingChange({
+          client: http,
+          baseUrl: config.baseUrl,
+          session,
+          idempotencyKey: config.recoveryTriggerIdempotencyKey,
+          tags: tagsFor(session.target, 'trigger'),
+          onMutation: (value) => { mutation = value },
+        })
+        if (mutation === null) throw new Error('recovery mutation evidence is missing')
+        return mutation
+      },
+      verify: (mutation) => verifyWaitingChange({
+        client: http,
+        baseUrl: config.baseUrl,
+        session,
+        mutation,
+        tags: tagsFor(session.target, 'owned-http'),
+      }),
+      cleanup: (mutation) => cleanupWaitingChange({
+        client: http,
+        baseUrl: config.baseUrl,
+        session,
+        mutation,
+        idempotencyKey: config.recoveryCleanupIdempotencyKey,
+        tags: tagsFor(session.target, 'cleanup', 'cleanup'),
+      }),
+      metrics: {
+        duration: (value) => recoveryMilliseconds.add(value, tagsFor(session.target)),
+        httpVerified: (value) => recoveryHttpVerified.add(
+          value, tagsFor(session.target, 'owned-http'),
+        ),
+        cleanupSuccessful: (value) => recoveryCleanupSuccessful.add(
+          value, tagsFor(session.target, 'cleanup', 'cleanup'),
+        ),
+      },
+    })
+    recoverySuccessful.add(1, tagsFor(session.target))
+  }, session.target)
+}
+
 export function sseSlowClient(data) {
   const session = selectedSession(data, 'slow')
   safelyExecute(() => {
@@ -412,6 +472,8 @@ export function handleSummary(data) {
       httpProbeRate: config.httpProbeRate,
       httpMaxP95Ratio: config.httpMaxP95Ratio,
       slowClientConnections: config.slowClientConnections,
+      recoveryArmDelaySeconds: config.recoveryArmDelaySeconds,
+      recoveryMaxSeconds: config.recoveryMaxSeconds,
     },
   })
   return {

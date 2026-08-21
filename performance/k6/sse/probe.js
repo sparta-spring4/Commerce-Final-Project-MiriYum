@@ -14,7 +14,7 @@ function requirePositiveInteger(name, value, maximum) {
 }
 
 function requireProfile(value) {
-  if (!['smoke', 'reconnect', 'steady', 'slow-client', 'capacity'].includes(value)) {
+  if (!['smoke', 'reconnect', 'steady', 'slow-client', 'capacity', 'recovery'].includes(value)) {
     throw new Error('SSE profile is invalid')
   }
   return value
@@ -50,6 +50,10 @@ export function buildSseScenarioOptions(config) {
   )
   if (profile === 'smoke') {
     return Object.freeze({ sse: streamScenario('sseSmoke', connections, holdDurationSeconds) })
+  }
+  if (profile === 'recovery') {
+    if (connections !== 1) throw new Error('recovery requires one SSE connection')
+    return Object.freeze({ sse: streamScenario('sseRecovery', 1, holdDurationSeconds) })
   }
 
   const probeRate = requirePositiveInteger('owned HTTP probe rate', config?.httpProbeRate, 100)
@@ -91,6 +95,16 @@ export function buildSseScenarioOptions(config) {
 export function buildSseThresholds(config) {
   const profile = requireProfile(config?.profile)
   if (profile === 'smoke') return Object.freeze({})
+  if (profile === 'recovery') {
+    const maxSeconds = requirePositiveInteger(
+      'recovery maximum seconds', config?.recoveryMaxSeconds, 60,
+    )
+    return Object.freeze({
+      'sse_recovery_duration{phase:measured,profile:recovery,endpoint_kind:waiting-store-operator}': [`max<=${maxSeconds * 1000}`],
+      'sse_recovery_http_verified{phase:measured,profile:recovery,traffic:owned-http}': ['count==1'],
+      'sse_recovery_cleanup_successful{phase:cleanup,profile:recovery,traffic:cleanup}': ['count==1'],
+    })
+  }
   const maxP95Ratio = requirePositiveInteger(
     'owned HTTP p95 ratio', config?.httpMaxP95Ratio, 10,
   )
@@ -195,6 +209,17 @@ function parseSuccess(response, errorMessage) {
     throw new Error(errorMessage)
   }
   return parsed.data
+}
+
+function requireRecoveryMutation(mutation) {
+  if (mutation === null || typeof mutation !== 'object'
+    || typeof mutation.waitingTeamId !== 'string'
+    || !/^[1-9][0-9]*$/.test(mutation.waitingTeamId)
+    || !Number.isInteger(mutation.version)
+    || mutation.version < 1) {
+    throw new Error('recovery mutation evidence is invalid')
+  }
+  return mutation
 }
 
 function durationMilliseconds(response, errorMessage) {
@@ -310,6 +335,7 @@ export function triggerWaitingChange({
   idempotencyKey,
   metrics = {},
   tags,
+  onMutation,
 }) {
   const selected = requireSession(session)
   if (selected.target.kind !== 'waiting-store-operator'
@@ -348,7 +374,63 @@ export function triggerWaitingChange({
       redirects: 0,
     },
   )
-  parseSuccess(response, 'slow-client trigger request failed')
+  const changed = parseSuccess(response, 'slow-client trigger request failed')
+  if (changed?.waitingTeamId !== item.waitingTeamId
+    || changed?.status !== 'CALLED'
+    || !Number.isInteger(changed?.version)
+    || changed.version <= item.version) {
+    throw new Error('slow-client trigger request failed')
+  }
+  if (onMutation !== undefined) {
+    if (typeof onMutation !== 'function') throw new Error('recovery mutation callback is invalid')
+    onMutation(Object.freeze({ waitingTeamId: item.waitingTeamId, version: changed.version }))
+  }
   emit(metrics, 'trigger', 1, selectedTags)
+  return true
+}
+
+export function verifyWaitingChange({ client, baseUrl, session, mutation, tags }) {
+  const selected = requireSession(session)
+  const evidence = requireRecoveryMutation(mutation)
+  const selectedTags = safeTags(tags)
+  const normalizedBaseUrl = requireText('baseUrl', baseUrl).replace(/\/+$/, '')
+  const detail = parseSuccess(get(
+    client,
+    `${normalizedBaseUrl}/api/v1/store-operators/stores/${selected.target.storeId}/waiting-teams/${evidence.waitingTeamId}`,
+    selected.accessToken,
+    selectedTags,
+  ), 'recovery HTTP verification failed')
+  if (detail?.waitingTeamId !== evidence.waitingTeamId
+    || detail?.status !== 'CALLED'
+    || detail?.version !== evidence.version) {
+    throw new Error('recovery HTTP verification failed')
+  }
+  return true
+}
+
+export function cleanupWaitingChange({
+  client, baseUrl, session, mutation, idempotencyKey, tags,
+}) {
+  const selected = requireSession(session)
+  const evidence = requireRecoveryMutation(mutation)
+  const key = requireText('recovery cleanup idempotency key', idempotencyKey)
+  const selectedTags = safeTags(tags)
+  const normalizedBaseUrl = requireText('baseUrl', baseUrl).replace(/\/+$/, '')
+  const response = client.post(
+    `${normalizedBaseUrl}/api/v1/store-operators/stores/${selected.target.storeId}/waiting-teams/${evidence.waitingTeamId}/cancellations`,
+    JSON.stringify({ expectedVersion: evidence.version }),
+    {
+      headers: { ...headers(selected.accessToken, true), 'Idempotency-Key': key },
+      tags: selectedTags,
+      redirects: 0,
+    },
+  )
+  const cleaned = parseSuccess(response, 'recovery cleanup failed')
+  if (cleaned?.waitingTeamId !== evidence.waitingTeamId
+    || cleaned?.status !== 'CANCELLED'
+    || !Number.isInteger(cleaned?.version)
+    || cleaned.version <= evidence.version) {
+    throw new Error('recovery cleanup failed')
+  }
   return true
 }

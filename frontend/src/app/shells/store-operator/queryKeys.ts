@@ -17,6 +17,8 @@ export const storeOperatorKeys = {
     [...storeOperatorKeys.store(storeId), 'menus'] as const,
   menu: (storeId: string, menuId: string) =>
     [...storeOperatorKeys.menus(storeId), menuId] as const,
+  representativeMenus: (storeId: string) =>
+    [...storeOperatorKeys.store(storeId), 'representative-menus'] as const,
   reservations: (storeId: string) =>
     [...storeOperatorKeys.store(storeId), 'reservations'] as const,
   reservationPages: (storeId: string) =>
@@ -25,6 +27,20 @@ export const storeOperatorKeys = {
     [...storeOperatorKeys.reservationPages(storeId), query] as const,
   reservation: (storeId: string, reservationId: string) =>
     [...storeOperatorKeys.reservations(storeId), reservationId] as const,
+  pickups: (storeId: string) =>
+    [...storeOperatorKeys.store(storeId), 'pickup-reservations'] as const,
+  pickupPages: (storeId: string) =>
+    [...storeOperatorKeys.pickups(storeId), 'page'] as const,
+  pickupPage: (storeId: string, query: object) =>
+    [...storeOperatorKeys.pickupPages(storeId), query] as const,
+  pickup: (storeId: string, pickupReservationId: string) =>
+    [...storeOperatorKeys.pickups(storeId), pickupReservationId] as const,
+  inventoryBuckets: (storeId: string) =>
+    [...storeOperatorKeys.store(storeId), 'menu-inventory-buckets'] as const,
+  inventoryPage: (storeId: string, query: object) =>
+    [...storeOperatorKeys.inventoryBuckets(storeId), 'page', query] as const,
+  dashboardStatistics: (storeId: string) =>
+    [...storeOperatorKeys.store(storeId), 'dashboard-statistics'] as const,
   waitingSettings: (storeId: string) =>
     [...storeOperatorKeys.store(storeId), 'waiting-settings'] as const,
   waitingDisableImpact: (storeId: string) =>
