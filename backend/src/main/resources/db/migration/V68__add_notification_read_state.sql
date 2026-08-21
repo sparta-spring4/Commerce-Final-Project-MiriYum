@@ -8,6 +8,11 @@ ALTER TABLE notification_tasks
         read_at,
         delivered_at,
         notification_id
+    ),
+    ADD INDEX idx_notification_public_watermark (
+        recipient_account_id,
+        status,
+        notification_id DESC
     );
 
 UPDATE notification_tasks task

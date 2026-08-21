@@ -171,45 +171,116 @@ class NotificationTaskWorkerIntegrationTest {
     }
 
     @Test
-    void existingChangeStateCanBeLockedWithoutReadingNotificationHistory() throws Exception {
-        record("change-version-existing-fast-path-1");
+    void outOfOrderNewDeliveryAdvancesPastLegacyWatermark() {
+        record("out-of-order-new-worker-older-1");
+        long olderNotificationId = jdbcTemplate.queryForObject("""
+                SELECT notification_id
+                  FROM notification_tasks
+                 WHERE source_event_id = 'out-of-order-new-worker-older-1'
+                """, Long.class);
+        record("out-of-order-legacy-newer-1");
+        long legacyWatermark = jdbcTemplate.queryForObject("""
+                SELECT notification_id
+                  FROM notification_tasks
+                 WHERE source_event_id = 'out-of-order-legacy-newer-1'
+                """, Long.class);
+        jdbcTemplate.update("""
+                INSERT INTO notification_consumer_change_states (
+                    consumer_account_id, change_version
+                ) VALUES (11, ?)
+                """, olderNotificationId);
+        transactions.executeWithoutResult(ignored -> {
+            jdbcTemplate.update("""
+                    UPDATE notification_tasks
+                       SET status = 'DELIVERED', title = '구 worker 전달',
+                           delivered_at = UTC_TIMESTAMP(6)
+                     WHERE notification_id = ?
+                    """, legacyWatermark);
+            jdbcTemplate.update("""
+                    UPDATE notification_channel_attempts
+                       SET status = 'DELIVERED'
+                     WHERE notification_id = ?
+                       AND channel = 'IN_APP'
+                    """, legacyWatermark);
+        });
+
         assertThat(worker.deliverDueBatch()).isOne();
-        long expectedVersion = jdbcTemplate.queryForObject("""
+
+        assertThat(jdbcTemplate.queryForObject("""
                 SELECT change_version
                   FROM notification_consumer_change_states
                  WHERE consumer_account_id = 11
-                """, Long.class);
-        CountDownLatch notificationLocked = new CountDownLatch(1);
-        CountDownLatch releaseNotification = new CountDownLatch(1);
+                """, Long.class)).isGreaterThan(legacyWatermark);
+    }
+
+    @Test
+    void existingChangeStateReconcilesAConcurrentLegacyDelivery() throws Exception {
+        record("change-version-existing-before-legacy-1");
+        assertThat(worker.deliverDueBatch()).isOne();
+        CountDownLatch legacyDeliveryReady = new CountDownLatch(1);
+        CountDownLatch commitLegacyDelivery = new CountDownLatch(1);
+        AtomicReference<Long> legacyNotificationId = new AtomicReference<>();
 
         try (var executor = Executors.newFixedThreadPool(2)) {
-            var notificationLock = executor.submit(() -> transactions.executeWithoutResult(ignored -> {
-                jdbcTemplate.queryForObject("""
+            var legacyDelivery = executor.submit(() -> transactions.executeWithoutResult(ignored -> {
+                OffsetDateTime occurredAt = OffsetDateTime.parse("2026-08-12T01:02:03Z");
+                recorder.record(new NotificationSourceEventV1(
+                        "legacy-delivery-after-existing-state-1",
+                        NotificationSourceDomain.PICKUP,
+                        NotificationPurpose.PICKUP_RESERVATION_CONFIRMED,
+                        "11",
+                        7L,
+                        NotificationResourceType.PICKUP_RESERVATION,
+                        "21",
+                        3L,
+                        "CONFIRMED",
+                        occurredAt,
+                        occurredAt,
+                        null,
+                        null,
+                        "correlation-legacy-delivery-after-existing-state-1"
+                ));
+                long notificationId = jdbcTemplate.queryForObject("""
                         SELECT notification_id
                           FROM notification_tasks
-                         WHERE recipient_account_id = 11
-                         FOR UPDATE
+                         WHERE source_event_id = 'legacy-delivery-after-existing-state-1'
                         """, Long.class);
-                notificationLocked.countDown();
+                legacyNotificationId.set(notificationId);
+                jdbcTemplate.update("""
+                        UPDATE notification_tasks
+                           SET status = 'DELIVERED', title = '구 worker 전달',
+                               delivered_at = UTC_TIMESTAMP(6)
+                         WHERE notification_id = ?
+                        """, notificationId);
+                jdbcTemplate.update("""
+                        UPDATE notification_channel_attempts
+                           SET status = 'DELIVERED'
+                         WHERE notification_id = ?
+                           AND channel = 'IN_APP'
+                        """, notificationId);
+                legacyDeliveryReady.countDown();
                 try {
-                    if (!releaseNotification.await(10, TimeUnit.SECONDS)) {
-                        throw new IllegalStateException("notification row lock was not released");
+                    if (!commitLegacyDelivery.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("legacy delivery commit was not released");
                     }
                 } catch (InterruptedException exception) {
                     Thread.currentThread().interrupt();
-                    throw new IllegalStateException("notification row lock wait was interrupted", exception);
+                    throw new IllegalStateException("legacy delivery commit wait was interrupted", exception);
                 }
             }));
-            assertThat(notificationLocked.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(legacyDeliveryReady.await(5, TimeUnit.SECONDS)).isTrue();
 
-            var changeStateLock = executor.submit(() -> transactions.execute(ignored ->
+            var changeState = executor.submit(() -> transactions.execute(ignored ->
                     readRepository.lockOrCreateChangeState(11L)));
 
-            assertThat(changeStateLock.get(2, TimeUnit.SECONDS)).isEqualTo(expectedVersion);
-            releaseNotification.countDown();
-            notificationLock.get(10, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> changeState.get(1, TimeUnit.SECONDS))
+                    .isInstanceOf(TimeoutException.class);
+            commitLegacyDelivery.countDown();
+            legacyDelivery.get(10, TimeUnit.SECONDS);
+            assertThat(changeState.get(10, TimeUnit.SECONDS))
+                    .isEqualTo(legacyNotificationId.get());
         } finally {
-            releaseNotification.countDown();
+            commitLegacyDelivery.countDown();
         }
     }
 

@@ -29,9 +29,9 @@ public class NotificationReadRepository {
     }
 
     /**
-     * 공개 전달 변경 전에 계정별 version 행을 생성하고 잠근다.
+     * 공개 변경 전에 계정별 version 행을 생성·잠그고 legacy 공개 최대값까지 보정한다.
      *
-     * <p>행이 아직 없으면 현재 공개 이력의 최대 notification ID를 초기값으로 사용한다.</p>
+     * <p>rolling 구간의 구 worker 전달도 이후 변경보다 작은 watermark로 남지 않는다.</p>
      */
     public long lockOrCreateChangeState(long consumerAccountId) {
         // 먼저 계정별 상태 행을 확보해 모든 경로에서 계정 행 -> 알림 이력 순서로 잠근다.
@@ -48,11 +48,8 @@ public class NotificationReadRepository {
                 consumerAccountId
         );
         long lockedVersion = lockChangeState(consumerAccountId);
-        if (lockedVersion > 0L) {
-            return lockedVersion;
-        }
 
-        // 상태가 0인 호환 경로에서만 current read로 커밋된 구 worker 전달을 포함한다.
+        // rolling 호환 경로에서 current read로 커밋된 구 worker 전달을 항상 포함한다.
         List<Long> legacyPublicNotifications = jdbcTemplate.query(
                 """
                 SELECT task.notification_id
@@ -72,21 +69,22 @@ public class NotificationReadRepository {
                 (resultSet, rowNumber) -> resultSet.getLong("notification_id"),
                 consumerAccountId
         );
-        long initializedVersion = legacyPublicNotifications.isEmpty()
+        long legacyPublicMax = legacyPublicNotifications.isEmpty()
                 ? 0L
                 : legacyPublicNotifications.getFirst();
-        if (initializedVersion != lockedVersion) {
+        long reconciledVersion = Math.max(lockedVersion, legacyPublicMax);
+        if (reconciledVersion != lockedVersion) {
             jdbcTemplate.update(
                     """
                     UPDATE notification_consumer_change_states
                        SET change_version = ?
                      WHERE consumer_account_id = ?
                     """,
-                    initializedVersion,
+                    reconciledVersion,
                     consumerAccountId
             );
         }
-        return initializedVersion;
+        return reconciledVersion;
     }
 
     private long lockChangeState(long consumerAccountId) {

@@ -6,6 +6,8 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Tag;
@@ -22,7 +24,8 @@ class NotificationReadMigrationTest {
     private static final DockerImageName MYSQL_IMAGE = DockerImageName.parse("mysql:8.0.40");
 
     @Test
-    void upgradesV67ByBackfillingOnlyPublicDeliveredNotifications() throws Exception {
+    void upgradesV67ByBackfillingPublicDeliveredNotificationsAndAddingReadIndexes()
+            throws Exception {
         try (MySQLContainer mysql = new MySQLContainer(MYSQL_IMAGE)
                 .withCommand("--log-bin-trust-function-creators=1")) {
             mysql.start();
@@ -49,6 +52,15 @@ class NotificationReadMigrationTest {
                 assertThat(indexColumnCount(
                         connection, "notification_tasks", "idx_notification_unread"))
                         .isGreaterThanOrEqualTo(4);
+                assertThat(indexColumns(
+                        connection,
+                        "notification_tasks",
+                        "idx_notification_public_watermark"
+                )).containsExactly(
+                        "recipient_account_id",
+                        "status",
+                        "notification_id"
+                );
             }
         }
     }
@@ -154,6 +166,31 @@ class NotificationReadMigrationTest {
             try (ResultSet resultSet = statement.executeQuery()) {
                 resultSet.next();
                 return resultSet.getInt(1);
+            }
+        }
+    }
+
+    private static List<String> indexColumns(
+            Connection connection,
+            String table,
+            String index
+    ) throws Exception {
+        try (var statement = connection.prepareStatement("""
+                SELECT column_name
+                  FROM information_schema.statistics
+                 WHERE table_schema = DATABASE()
+                   AND table_name = ?
+                   AND index_name = ?
+                 ORDER BY seq_in_index
+                """)) {
+            statement.setString(1, table);
+            statement.setString(2, index);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                List<String> columns = new ArrayList<>();
+                while (resultSet.next()) {
+                    columns.add(resultSet.getString(1));
+                }
+                return columns;
             }
         }
     }
