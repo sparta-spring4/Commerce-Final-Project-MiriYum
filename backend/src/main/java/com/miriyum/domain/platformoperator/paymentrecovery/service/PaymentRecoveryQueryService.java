@@ -9,7 +9,9 @@ import com.miriyum.domain.platformoperator.paymentrecovery.dto.PaymentRecoveryRe
 import com.miriyum.domain.platformoperator.paymentrecovery.dto.PaymentRecoveryResponses.CaseSummary;
 import com.miriyum.domain.platformoperator.paymentrecovery.dto.PaymentRecoveryResponses.ExecutionData;
 import com.miriyum.domain.platformoperator.paymentrecovery.dto.PaymentRecoveryResponses.ProposalData;
+import com.miriyum.domain.platformoperator.paymentrecovery.dto.PaymentRecoveryResponses.PendingApprovalPage;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.CaseStatus;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import com.miriyum.domain.platformoperator.paymentrecovery.exception.PaymentRecoveryErrorCode;
 import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRecoveryApprovalRepository;
 import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRecoveryCaseRepository;
@@ -54,17 +56,52 @@ public class PaymentRecoveryQueryService {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "updatedAt"));
         Page<com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryCase> result =
                 status == null ? cases.findAll(pageable) : cases.findByStatus(status, pageable);
-        return new CasePage(result.map(value -> CaseSummary.from(value, null)).getContent(),
+        return new CasePage(result.map(value -> CaseSummary.from(value,
+                        assignments.findActiveOperator(AdminCaseType.PAYMENT_RECOVERY,
+                                value.getPublicId(), value.getCaseVersion()).orElse(null),
+                        principal.accountId()))
+                        .getContent(),
                 result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages());
     }
 
     @Transactional
     public CaseDetail detail(PlatformOperatorPrincipal principal, String caseId) {
-        requirePermission(principal);
+        var authority = authorities.requireCurrentAuthority(
+                principal.accountId(), principal.authorityVersion());
         var recoveryCase = cases.findByPublicId(caseId)
                 .orElseThrow(() -> new ServiceException(PaymentRecoveryErrorCode.RECOVERY_CASE_NOT_FOUND));
-        assignments.verify(new AdminCaseAssignmentRequest(AdminCaseType.PAYMENT_RECOVERY,
-                caseId, recoveryCase.getCaseVersion(), principal.accountId()));
+        boolean canApproveAdditionalProposal =
+                isEligibleAdditionalApprover(principal, authority, recoveryCase);
+        if (!canApproveAdditionalProposal) {
+            if (!authority.permissions().contains(PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE)) {
+                throw new ServiceException(AdminAuthorizationErrorCode.AUTHORIZATION_DENIED);
+            }
+            assignments.verify(new AdminCaseAssignmentRequest(
+                    AdminCaseType.PAYMENT_RECOVERY, caseId,
+                    recoveryCase.getCaseVersion(), principal.accountId()));
+        }
+        return detail(recoveryCase, principal.accountId(), canApproveAdditionalProposal);
+    }
+
+    @Transactional(readOnly = true)
+    public PendingApprovalPage pendingAdditionalApprovals(
+            PlatformOperatorPrincipal principal, int page, int size) {
+        var authority = authorities.requireCurrentAuthority(
+                principal.accountId(), principal.authorityVersion());
+        requireAdditionalApprovalAuthority(authority);
+        PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "updatedAt"));
+        var result = cases.findPendingAdditionalApprovals(
+                CaseStatus.ADDITIONAL_APPROVAL_PENDING, principal.accountId(), pageable);
+        return new PendingApprovalPage(
+                result.map(value -> detail(value, principal.accountId(),
+                        isEligibleAdditionalApprover(principal, authority, value))).getContent(), result.getNumber(),
+                result.getSize(), result.getTotalElements(), result.getTotalPages());
+    }
+
+    private CaseDetail detail(
+            com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryCase recoveryCase,
+            long currentOperatorId, boolean canApproveAdditionalProposal) {
+        String caseId = recoveryCase.getPublicId();
         var proposalData = proposals.findByCasePublicIdOrderByProposalVersionAsc(caseId).stream()
                 .map(proposal -> ProposalData.from(proposal,
                         approvals.findByCasePublicIdAndProposalVersion(caseId, proposal.getProposalVersion())
@@ -72,8 +109,39 @@ public class PaymentRecoveryQueryService {
                 .toList();
         var executionData = executions.findByCasePublicIdOrderByCreatedAtAsc(caseId).stream()
                 .map(ExecutionData::from).toList();
-        return new CaseDetail(CaseSummary.from(recoveryCase, principal.accountId()),
-                proposalData, executionData);
+        Long assignedOperatorId = assignments.findActiveOperator(AdminCaseType.PAYMENT_RECOVERY,
+                caseId, recoveryCase.getCaseVersion()).orElse(null);
+        return new CaseDetail(CaseSummary.from(
+                        recoveryCase, assignedOperatorId, currentOperatorId),
+                proposalData, executionData, canApproveAdditionalProposal);
+    }
+
+    private boolean isEligibleAdditionalApprover(
+            PlatformOperatorPrincipal principal,
+            com.miriyum.domain.platformoperator.dto.authorization.OperatorAuthority authority,
+            com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryCase recoveryCase) {
+        if (!hasAdditionalApprovalAuthority(authority)
+                || recoveryCase.getStatus() != CaseStatus.ADDITIONAL_APPROVAL_PENDING) {
+            return false;
+        }
+        return proposals.findByCasePublicIdAndProposalVersion(
+                        recoveryCase.getPublicId(), recoveryCase.getCurrentProposalVersion())
+                .filter(proposal -> proposal.getRequesterPlatformOperatorAccountId() != principal.accountId())
+                .isPresent();
+    }
+
+    private static void requireAdditionalApprovalAuthority(
+            com.miriyum.domain.platformoperator.dto.authorization.OperatorAuthority authority) {
+        if (!hasAdditionalApprovalAuthority(authority)) {
+            throw new ServiceException(AdminAuthorizationErrorCode.AUTHORIZATION_DENIED);
+        }
+    }
+
+    private static boolean hasAdditionalApprovalAuthority(
+            com.miriyum.domain.platformoperator.dto.authorization.OperatorAuthority authority) {
+        return authority.roles().contains(PlatformOperatorRole.SUPER_ADMIN)
+                && authority.permissions().contains(
+                        PlatformOperatorPermission.PAYMENT_RECOVERY_HIGH_VALUE_APPROVE);
     }
 
     private void requirePermission(PlatformOperatorPrincipal principal) {

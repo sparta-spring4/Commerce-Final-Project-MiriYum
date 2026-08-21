@@ -20,6 +20,9 @@ export const ReservationErrorCode = {
   CAPACITY_CONFIGURATION_CONFLICT: 'RESERVATION_008',
   PARTY_SIZE_OUT_OF_RANGE: 'RESERVATION_009',
   TIME_POLICY_CONFLICT: 'RESERVATION_010',
+  CHECK_IN_QR_UNAVAILABLE: 'RESERVATION_011',
+  CHECK_IN_OUTSIDE_WINDOW: 'RESERVATION_012',
+  NO_SHOW_TOO_EARLY: 'RESERVATION_013',
 } as const
 
 /**
@@ -44,6 +47,12 @@ export function reservationOpsErrorMessage(error: unknown): string {
       return '설정한 최소·최대 인원 범위를 벗어납니다.'
     case ReservationErrorCode.TIME_POLICY_CONFLICT:
       return '현재 시간 정책 상태에서는 이 작업을 할 수 없습니다.'
+    case ReservationErrorCode.CHECK_IN_QR_UNAVAILABLE:
+      return '사용할 수 없는 체크인 QR입니다. 고객에게 최신 QR을 다시 보여 달라고 안내해 주세요.'
+    case ReservationErrorCode.CHECK_IN_OUTSIDE_WINDOW:
+      return '현재는 이 예약을 QR로 체크인할 수 있는 시간이 아닙니다.'
+    case ReservationErrorCode.NO_SHOW_TOO_EARLY:
+      return '예약 시작 5분 후부터 노쇼를 확정할 수 있습니다.'
     case ReservationErrorCode.POLICY_VERSION_CHANGED:
       return '조회 후 정책·수용량 버전이 바뀌었습니다. 최신 상태를 다시 확인해 주세요.'
     case ReservationErrorCode.INVALID_STATE:

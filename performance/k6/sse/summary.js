@@ -9,6 +9,7 @@ const ALLOWED_METRICS = Object.freeze({
   sse_connection_duration: ['connectionDuration', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
   sse_slow_cleanup_duration: ['slowCleanupDuration', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
   sse_companion_lifetime: ['companionLifetime', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
+  sse_recovery_duration: ['recoveryDuration', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
   sse_heartbeat_frames: ['heartbeatFrames', ['count', 'rate']],
   http_req_duration: ['httpRequestDuration', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
   http_reqs: ['httpRequests', ['count', 'rate']],
@@ -36,6 +37,8 @@ const ALLOWED_METRICS = Object.freeze({
 
 const RUN_METRICS = Object.freeze({
   dropped_iterations: ['droppedIterations', ['count', 'rate']],
+  sse_recovery_http_verified: ['recoveryHttpVerified', ['count', 'rate']],
+  sse_recovery_cleanup_successful: ['recoveryCleanupSuccessful', ['count', 'rate']],
 })
 
 const VALUE_NAMES = Object.freeze({
@@ -82,7 +85,7 @@ function copyMetricValues(values, allowedNames) {
 
 function safeMetadata(metadata) {
   const targetEnv = requireText('targetEnv', metadata.targetEnv, /^(local|staging)$/)
-  const profile = requireText('profile', metadata.profile, /^(smoke|reconnect|steady|slow-client|capacity)$/)
+  const profile = requireText('profile', metadata.profile, /^(smoke|reconnect|steady|slow-client|capacity|recovery)$/)
   const runId = requireText('runId', metadata.runId, /^[A-Za-z0-9._-]{1,100}$/)
   const shaPattern = /^[0-9a-f]{40}$/
   const digestPattern = /^[0-9a-f]{64}$/
@@ -101,6 +104,8 @@ function safeMetadata(metadata) {
   )
   let slowClientMaxCleanupSeconds = null
   let companionMinLifetimeSeconds = null
+  let recoveryArmDelaySeconds = null
+  let recoveryMaxSeconds = null
   if (profile === 'slow-client') {
     slowClientMaxCleanupSeconds = requirePositiveInt(
       'slowClientMaxCleanupSeconds', limits.slowClientMaxCleanupSeconds, 600,
@@ -114,6 +119,14 @@ function safeMetadata(metadata) {
       || companionMinLifetimeSeconds >= holdDurationSeconds) {
       throw new Error('slow-client timing windows are invalid')
     }
+  }
+  if (profile === 'recovery') {
+    recoveryArmDelaySeconds = requirePositiveInt(
+      'recoveryArmDelaySeconds', limits.recoveryArmDelaySeconds, 60,
+    )
+    recoveryMaxSeconds = requirePositiveInt(
+      'recoveryMaxSeconds', limits.recoveryMaxSeconds, 60,
+    )
   }
   return {
     schemaVersion: 'miriyum-k6-sse-summary-v1',
@@ -144,6 +157,8 @@ function safeMetadata(metadata) {
       slowClientDelaySeconds,
       slowClientMaxCleanupSeconds,
       companionMinLifetimeSeconds,
+      recoveryArmDelaySeconds,
+      recoveryMaxSeconds,
     },
   }
 }
@@ -167,7 +182,7 @@ function collectMetrics(data, metadata) {
   for (const [name, metric] of Object.entries(metrics)) {
     const parsed = parseMetricName(name)
     if (parsed === null
-      || parsed.tags.phase !== 'measured'
+      || !['measured', 'cleanup'].includes(parsed.tags.phase)
       || parsed.tags.profile !== metadata.profile
       || metric === null
       || typeof metric !== 'object') continue
@@ -208,6 +223,15 @@ function renderMarkdown(summary) {
   for (const endpointKind of summary.endpointKinds) {
     const metrics = summary.metrics[endpointKind] || {}
     lines.push(`| ${endpointKind} | ${metrics.firstEvent?.p95 ?? '-'} | ${metrics.connectionDuration?.p95 ?? '-'} | ${metrics.slowCleanupDuration?.max ?? '-'} | ${metrics.companionLifetime?.min ?? '-'} | ${metrics.successfulConnections?.count ?? 0} | ${metrics.rejectedConnections?.count ?? 0} | ${metrics.recoverySuccessful?.count ?? 0} | ${metrics.unexpected4xx?.count ?? 0} | ${metrics.server5xx?.count ?? 0} |`)
+  }
+  if (summary.profile === 'recovery') {
+    const recovery = summary.metrics['waiting-store-operator']?.recoveryDuration
+    lines.push(
+      '',
+      `- recovery max ms: ${recovery?.max ?? '-'}`,
+      `- HTTP verified: ${summary.runMetrics.recoveryHttpVerified?.count ?? 0}`,
+      `- cleanup successful: ${summary.runMetrics.recoveryCleanupSuccessful?.count ?? 0}`,
+    )
   }
   return `${lines.join('\n')}\n`
 }

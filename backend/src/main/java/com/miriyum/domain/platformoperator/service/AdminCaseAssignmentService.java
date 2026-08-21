@@ -10,6 +10,7 @@ import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.exception.CommonErrorCode;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Optional;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -39,6 +40,17 @@ public class AdminCaseAssignmentService implements AdminCaseAssignmentVerifier, 
         if (!valid) {
             throw new ServiceException(AdminAuthorizationErrorCode.AUTHORIZATION_DENIED);
         }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Long> findActiveOperator(
+            com.miriyum.domain.platformoperator.enums.AdminCaseType caseType,
+            String caseId,
+            long caseVersion) {
+        return assignments.findByCase(caseType, caseId, caseVersion)
+                .filter(assignment -> assignment.isActiveAt(clock.instant()))
+                .map(AdminCaseAssignment::getPlatformOperatorAccountId);
     }
 
     @Override

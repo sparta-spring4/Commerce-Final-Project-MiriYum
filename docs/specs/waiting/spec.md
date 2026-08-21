@@ -499,6 +499,7 @@ Runtime은 immutable 사건 high-watermark를 독립적으로 소비하며 이 p
 | `/api/v1/consumers/me/stores/{storeId}/waiting-availabilities` | `GET` | 중앙 시각 기준 접수 가능 여부와 등록에 사용할 `businessDate` 조회 |
 | `/api/v1/consumers/me/stores/{storeId}/waiting-teams` | `POST` | #409 위치 증명 연결 뒤 `businessDate`, `partySize`로 원격 웨이팅 등록 |
 | `/api/v1/consumers/me/waiting-teams/current` | `GET` | 인증 소비자의 단일 활성 웨이팅 조회 |
+| `/api/v1/consumers/me/waiting-teams` | `GET` | 인증 소비자가 대표자로 등록한 웨이팅을 scope와 opaque cursor로 조회 |
 | `/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations` | `POST` | 본인 웨이팅을 `expectedVersion`으로 취소 |
 
 등록과 취소는 표준 UUID `Idempotency-Key`가 필수다. 같은 키와 같은 요청 지문은 최초 HTTP

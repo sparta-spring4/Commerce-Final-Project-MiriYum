@@ -14,6 +14,7 @@ import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.pickup.config.PickupSecurityConfig;
 import com.miriyum.domain.pickup.dto.response.PickupReservationItemResponse;
+import com.miriyum.domain.pickup.dto.response.PickupReservationPageResponse;
 import com.miriyum.domain.pickup.dto.response.PickupReservationResponse;
 import com.miriyum.domain.pickup.entity.PickupStatus;
 import com.miriyum.domain.pickup.service.PickupCommandResult;
@@ -25,6 +26,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.util.List;
+import com.miriyum.global.response.PageMetadata;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -141,6 +143,24 @@ class PickupReservationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.pickupReservationId").value("77"));
         then(service).should().getConsumerPickup(11L, 77L);
+    }
+
+    @Test
+    void returnsAuthenticatedConsumersPickupHistory() throws Exception {
+        given(jwtTokenProvider.parseAccessToken("consumer-token"))
+                .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
+        given(service.listConsumerPickups(11L, 0, 20)).willReturn(
+                new PickupReservationPageResponse(
+                        List.of(response()), new PageMetadata(0, 20, 1, 1, false)));
+
+        mockMvc.perform(get(URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .queryParam("page", "0")
+                        .queryParam("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].pickupReservationId").value("77"))
+                .andExpect(jsonPath("$.data.page.totalElements").value(1));
+        then(service).should().listConsumerPickups(11L, 0, 20);
     }
 
     @Test

@@ -15,6 +15,21 @@ export const pickupKeys = {
     [...pickupKeys.all, 'availability', storeId, pickupDate] as const,
   detail: (pickupReservationId: string) =>
     [...pickupKeys.all, pickupReservationId] as const,
+  history: (page: number) => [...pickupKeys.all, 'history', page] as const,
+}
+
+export function useMyPickups(page: number) {
+  const { apiClient } = useConsumerAuth()
+  return useQuery({
+    queryKey: pickupKeys.history(page),
+    queryFn: async ({ signal }) => {
+      const response = await apiClient(
+        '/api/v1/consumers/me/pickup-reservations',
+        { method: 'get', query: { page, size: 20 }, signal },
+      )
+      return response.data
+    },
+  })
 }
 
 /** 픽업 가용성. 공개 조회다. */
@@ -122,6 +137,7 @@ function invalidateAfterPickupChange(
   )
 
   return Promise.all([
+    queryClient.invalidateQueries({ queryKey: [...pickupKeys.all, 'history'] }),
     queryClient.invalidateQueries({
       queryKey: [...pickupKeys.all, 'availability'],
     }),
