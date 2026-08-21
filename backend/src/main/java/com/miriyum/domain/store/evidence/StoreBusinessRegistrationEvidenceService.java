@@ -21,6 +21,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,7 +42,7 @@ public class StoreBusinessRegistrationEvidenceService {
     private final BusinessRegistrationEvidenceRepository evidenceRepository;
     private final FileMetadataRepository fileMetadataRepository;
     private final StoreOnboardingApplicationOwnershipPort ownershipPort;
-    private final FileStoragePort fileStoragePort;
+    private final ObjectProvider<FileStoragePort> fileStoragePortProvider;
     private final Clock clock;
 
     /** 같은 신청 version의 현재 증빙을 교체하고 구버전은 즉시 접근 불가 상태로 전환한다. */
@@ -101,7 +102,7 @@ public class StoreBusinessRegistrationEvidenceService {
                 .filter(current -> isExpectedPrivateMetadata(
                         current, onboardingApplicationId, applicationVersion))
                 .orElseThrow(StoreBusinessRegistrationEvidenceService::integrityFailure);
-        FileStorageObject stored = fileStoragePort.read(metadata.getObjectKey());
+        FileStorageObject stored = requireFileStoragePort().read(metadata.getObjectKey());
         byte[] bytes = stored.bytes();
         if (!metadata.getObjectKey().equals(stored.objectKey())
                 || !metadata.getContentType().equals(stored.contentType())
@@ -144,6 +145,14 @@ public class StoreBusinessRegistrationEvidenceService {
     private static String requireEvidenceId(UUID evidenceId) {
         if (evidenceId == null) throw integrityFailure();
         return evidenceId.toString();
+    }
+
+    private FileStoragePort requireFileStoragePort() {
+        FileStoragePort port = fileStoragePortProvider.getIfAvailable();
+        if (port == null) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
+        return port;
     }
 
     private static ServiceException integrityFailure() {

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.lenient;
 
 import com.miriyum.domain.store.evidence.dto.BusinessRegistrationEvidenceCommand;
 import com.miriyum.domain.store.evidence.entity.BusinessRegistrationEvidence;
@@ -30,6 +31,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataIntegrityViolationException;
 
 @ExtendWith(MockitoExtension.class)
@@ -49,15 +51,19 @@ class StoreBusinessRegistrationEvidenceServiceTest {
     @Mock
     private FileStoragePort fileStoragePort;
 
+    @Mock
+    private ObjectProvider<FileStoragePort> fileStoragePortProvider;
+
     private StoreBusinessRegistrationEvidenceService service;
 
     @BeforeEach
     void setUp() {
+        lenient().when(fileStoragePortProvider.getIfAvailable()).thenReturn(fileStoragePort);
         service = new StoreBusinessRegistrationEvidenceService(
                 evidenceRepository,
                 fileMetadataRepository,
                 ownershipPort,
-                fileStoragePort,
+                fileStoragePortProvider,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 

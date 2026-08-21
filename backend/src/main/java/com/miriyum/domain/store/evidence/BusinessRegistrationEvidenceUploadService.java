@@ -7,11 +7,14 @@ import com.miriyum.global.storage.FileStorageRequest;
 import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.FileStorageVisibility;
 import com.miriyum.global.storage.service.FileStorageFacade;
+import com.miriyum.global.exception.CommonErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -23,7 +26,7 @@ public class BusinessRegistrationEvidenceUploadService {
     private static final String RETENTION_POLICY = "STORE_ONBOARDING_PRIVATE";
 
     private final BusinessRegistrationEvidenceUploadValidator validator;
-    private final FileStorageFacade fileStorageFacade;
+    private final ObjectProvider<FileStorageFacade> fileStorageFacadeProvider;
     private final Clock clock;
 
     public PendingEvidence storePending(
@@ -66,7 +69,7 @@ public class BusinessRegistrationEvidenceUploadService {
                 RETENTION_POLICY,
                 clock.instant(),
                 null);
-        FileStorageMetadata stored = fileStorageFacade.storePending(
+        FileStorageMetadata stored = requireFileStorageFacade().storePending(
                 metadata,
                 new FileStorageRequest(
                         objectKey,
@@ -75,6 +78,14 @@ public class BusinessRegistrationEvidenceUploadService {
                         new ByteArrayInputStream(bytes)));
         return new PendingEvidence(
                 stored.fileId(), stored.checksum(), stored.contentType(), stored.sizeBytes());
+    }
+
+    private FileStorageFacade requireFileStorageFacade() {
+        FileStorageFacade facade = fileStorageFacadeProvider.getIfAvailable();
+        if (facade == null) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
+        return facade;
     }
 
     private static UUID stableFileId(long applicationId, long version, String sha256) {

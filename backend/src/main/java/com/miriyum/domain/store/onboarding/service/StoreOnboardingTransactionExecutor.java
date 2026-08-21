@@ -21,6 +21,7 @@ import com.miriyum.global.storage.service.FileStorageFacade;
 import com.miriyum.domain.store.model.VerifiedStoreGeocoding;
 import java.time.Clock;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,7 +38,7 @@ public class StoreOnboardingTransactionExecutor {
     private final StoreOnboardingApplicationRepository applicationRepository;
     private final StoreOnboardingApplicationVersionRepository versionRepository;
     private final StoreOnboardingAutomaticCheckJobRepository jobRepository;
-    private final FileStorageFacade fileStorageFacade;
+    private final ObjectProvider<FileStorageFacade> fileStorageFacadeProvider;
     private final StoreBusinessRegistrationEvidenceService evidenceService;
     private final StoreOnboardingProperties properties;
     private final ObjectMapper objectMapper;
@@ -109,7 +110,7 @@ public class StoreOnboardingTransactionExecutor {
             VerifiedStoreGeocoding geocoding
     ) {
         StoreOnboardingApplication application = loadForUpdate(reserved.applicationId());
-        fileStorageFacade.confirmWithinCurrentTransaction(pending.fileId());
+        requireFileStorageFacade().confirmWithinCurrentTransaction(pending.fileId());
         var evidence = evidenceService.replaceCurrentEvidence(
                 new BusinessRegistrationEvidenceCommand(
                         reserved.applicationId(), reserved.applicationVersion(), operatorId, pending.fileId()));
@@ -165,5 +166,13 @@ public class StoreOnboardingTransactionExecutor {
             case REJECTED -> "NONE";
             default -> "WAIT";
         };
+    }
+
+    private FileStorageFacade requireFileStorageFacade() {
+        FileStorageFacade facade = fileStorageFacadeProvider.getIfAvailable();
+        if (facade == null) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
+        return facade;
     }
 }
