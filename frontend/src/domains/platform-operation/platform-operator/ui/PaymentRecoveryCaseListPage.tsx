@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { PLATFORM_OPERATOR_PATHS } from '../../../../app/routes/paths/platformOperatorPaths'
 import { usePlatformOperatorAuth } from '../../../../app/shells/platform-operator/PlatformOperatorAuthProvider'
-import { createIdempotencyKey } from '../../../../shared/api/idempotencyKey'
+import { useIdempotentAttempt } from '../../../../shared/api/useIdempotentAttempt'
 import { Badge } from '../../../../shared/ui/Badge'
 import { Button } from '../../../../shared/ui/Button'
 import { Alert } from '../../../../shared/ui/Feedback'
@@ -28,6 +28,9 @@ export function PaymentRecoveryCaseListPage({ approvalsOnly = false }: { approva
   const regularCases = usePaymentRecoveryCases(undefined, page, !approvalsOnly)
   const pendingApprovals = usePendingPaymentRecoveryApprovals(page, approvalsOnly)
   const cases = approvalsOnly ? pendingApprovals : regularCases
+  const assignmentAttempt = useIdempotentAttempt(assignment === null
+    ? 'payment-recovery-assignment:none'
+    : `payment-recovery-assignment:${assignment.caseId}:${assignment.caseVersion}`)
 
   return (
     <main className="po-page">
@@ -69,18 +72,38 @@ export function PaymentRecoveryCaseListPage({ approvalsOnly = false }: { approva
           description="결제 복구 사건을 담당하려면 본인 확인이 필요합니다."
           onCancel={() => setAssignment(null)}
           onApproved={async (approval) => {
+            const currentAssignment = assignment
+            const idempotencyKey = assignmentAttempt.begin()
+            if (idempotencyKey === null) {
+              setAssignError('앞선 배정 결과를 확인할 수 없습니다. 최신 사건 상태를 확인해 주세요.')
+              setAssignment(null)
+              await regularCases.refetch()
+              return
+            }
             setAssigning(true)
             try {
               await assignPaymentRecoveryCase(apiClient, {
-                caseId: assignment.caseId,
-                caseVersion: assignment.caseVersion,
+                caseId: currentAssignment.caseId,
+                caseVersion: currentAssignment.caseVersion,
                 approval,
-                idempotencyKey: createIdempotencyKey(),
-                correlationId: createIdempotencyKey(),
+                idempotencyKey,
+                correlationId: idempotencyKey,
               })
-              navigate(PLATFORM_OPERATOR_PATHS.paymentRecoveryDetail.replace(':caseId', assignment.caseId))
+              assignmentAttempt.settle(null)
+              navigate(PLATFORM_OPERATOR_PATHS.paymentRecoveryDetail.replace(':caseId', currentAssignment.caseId))
             } catch (error) {
-              setAssignError(error instanceof Error ? error.message : '담당 배정에 실패했습니다.')
+              assignmentAttempt.settle(error)
+              const refreshed = await regularCases.refetch()
+              const latest = refreshed.data?.content.find((item) => item.caseId === currentAssignment.caseId)
+              if (latest?.assignedToCurrentOperator) {
+                assignmentAttempt.settle(null)
+                navigate(PLATFORM_OPERATOR_PATHS.paymentRecoveryDetail.replace(':caseId', currentAssignment.caseId))
+              } else {
+                if (latest !== undefined && (latest.caseVersion !== currentAssignment.caseVersion || latest.assignedOperatorId !== null)) {
+                  assignmentAttempt.settle(null)
+                }
+                setAssignError(error instanceof Error ? error.message : '담당 배정에 실패했습니다.')
+              }
             } finally {
               setAssigning(false)
               setAssignment(null)

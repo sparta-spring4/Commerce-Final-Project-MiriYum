@@ -89,7 +89,7 @@ export function PaymentRecoveryCaseDetailPage() {
       </dl>
     </div></section>
 
-    {item.allowedActions.includes('RETRY_REFUND') && (
+    {item.assignedToCurrentOperator && item.allowedActions.includes('RETRY_REFUND') && (
       <section className="po-recovery-command">
         <h2>환불 복구</h2>
         <p>현재 결제·환불 버전을 기준으로 환불 재시도를 제안합니다. 금액은 서버가 결제 원장으로 검증합니다.</p>
@@ -97,7 +97,7 @@ export function PaymentRecoveryCaseDetailPage() {
       </section>
     )}
 
-    {item.allowedActions.includes('REQUERY_PROVIDER_RESULT') && (
+    {item.assignedToCurrentOperator && item.allowedActions.includes('REQUERY_PROVIDER_RESULT') && (
       <section className="po-recovery-command">
         <h2>결제사 결과 재조회</h2>
         <p>결제사 명령을 다시 보내지 않고 서버가 기존 처리 결과만 안전하게 조회합니다.</p>

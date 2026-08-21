@@ -130,4 +130,36 @@ describe('결제 복구 사건 상세', () => {
     expect(await screen.findByText('RETRY_REFUND · ADDITIONAL_SUPER_ADMIN')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '추가 승인' })).not.toBeInTheDocument()
   })
+
+  it('별도 승인자에게는 추가 승인만 노출하고 담당자 복구 명령은 노출하지 않는다', async () => {
+    server.use(
+      http.post('/api/v1/platform-operators/auth/token-refreshes', () => successResponse({
+        accessToken: 'approver-token', initialPasswordChangeRequired: false,
+        sessionIdleExpiresAt: '2026-08-20T11:00:00Z', sessionAbsoluteExpiresAt: '2026-08-20T18:00:00Z',
+      })),
+      http.get('/api/v1/platform-operators/payment-recovery-cases/:caseId', () => successResponse({
+        caseId: 'case-1', status: 'ADDITIONAL_APPROVAL_PENDING', caseVersion: 4,
+        kind: 'REFUND_FAILED', resultStatus: 'FAILED', originalAmountMinor: 300000,
+        cumulativeRefundedAmountMinor: 0, remainingRefundableAmountMinor: 300000,
+        currency: 'KRW', maskedProviderReference: null,
+        allowedActions: ['RETRY_REFUND', 'REQUERY_PROVIDER_RESULT'],
+        handoffVersion: 2, paymentVersion: 4, recoveryVersion: 1, assignedOperatorId: 7,
+        assignedToCurrentOperator: false, canApproveAdditionalProposal: true,
+        createdAt: '2026-08-20T09:00:00Z', updatedAt: '2026-08-20T09:30:00Z',
+        proposals: [{
+          proposalVersion: 1, action: 'RETRY_REFUND', requestedAmountMinor: 250000,
+          cumulativeLineageAmountMinor: 250000, originalAmountMinor: 300000, currency: 'KRW',
+          approvalTier: 'ADDITIONAL_SUPER_ADMIN', requesterOperatorId: 7,
+          approverOperatorId: null, createdAt: '2026-08-20T09:20:00Z',
+        }],
+        executions: [],
+      })),
+    )
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={queryClient}><PlatformOperatorAuthProvider><MemoryRouter initialEntries={['/admin/payment-recovery-cases/case-1']}><Routes><Route path="/admin/payment-recovery-cases/:caseId" element={<PaymentRecoveryCaseDetailPage />} /></Routes></MemoryRouter></PlatformOperatorAuthProvider></QueryClientProvider>)
+
+    expect(await screen.findByRole('button', { name: '추가 승인' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '환불 재시도 제안' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '결제사 결과 재조회' })).not.toBeInTheDocument()
+  })
 })

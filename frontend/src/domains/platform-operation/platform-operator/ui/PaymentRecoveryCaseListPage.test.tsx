@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
-import { http } from 'msw'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { PlatformOperatorAuthProvider } from '../../../../app/shells/platform-operator/PlatformOperatorAuthProvider'
@@ -73,6 +73,57 @@ describe('결제 복구 사건 목록', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '나에게 배정' }))
     expect(screen.getByRole('dialog', { name: '재인증이 필요합니다' })).toBeInTheDocument()
+  })
+
+  it('응답 유실 뒤 사건을 다시 조회하고 같은 멱등 키로 배정을 재시도한다', async () => {
+    const idempotencyKeys: string[] = []
+    let listReads = 0
+    let assignmentAttempts = 0
+    server.use(
+      http.post('/api/v1/platform-operators/auth/refresh', () => successResponse({
+        accessToken: 'operator-token', initialPasswordChangeRequired: false,
+        sessionIdleExpiresAt: '2026-08-20T11:00:00Z', sessionAbsoluteExpiresAt: '2026-08-20T18:00:00Z',
+      })),
+      http.get('/api/v1/platform-operators/payment-recovery-cases', () => {
+        listReads += 1
+        return successResponse({
+          content: [{
+            caseId: 'e6a91572-0632-4fa6-9a93-819add8df110', status: 'INVESTIGATING', caseVersion: 3,
+            kind: 'REFUND_RESULT_UNKNOWN', resultStatus: 'UNKNOWN', originalAmountMinor: 50000,
+            cumulativeRefundedAmountMinor: 10000, remainingRefundableAmountMinor: 40000,
+            currency: 'KRW', maskedProviderReference: null, allowedActions: ['REQUERY_PROVIDER_RESULT'],
+            handoffVersion: 2, paymentVersion: 4, recoveryVersion: 1, assignedOperatorId: null,
+            assignedToCurrentOperator: false,
+            createdAt: '2026-08-20T09:00:00Z', updatedAt: '2026-08-20T09:30:00Z',
+          }], page: 0, size: 20, totalElements: 1, totalPages: 1,
+        })
+      }),
+      http.post('/api/v1/platform-operators/reauthentication-approvals', () => successResponse({
+        approval: `approval-${assignmentAttempts + 1}`, expiresAt: '2026-08-20T10:05:00Z',
+      })),
+      http.post('/api/v1/platform-operators/payment-recovery-cases/:caseId/assignments', ({ request }) => {
+        idempotencyKeys.push(request.headers.get('Idempotency-Key') ?? '')
+        assignmentAttempts += 1
+        return assignmentAttempts === 1 ? HttpResponse.error() : successResponse({ caseVersion: 4 })
+      }),
+    )
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PlatformOperatorAuthProvider><MemoryRouter><PaymentRecoveryCaseListPage /></MemoryRouter></PlatformOperatorAuthProvider>
+      </QueryClientProvider>,
+    )
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      fireEvent.click(await screen.findByRole('button', { name: '나에게 배정' }))
+      fireEvent.change(screen.getByLabelText('현재 비밀번호'), { target: { value: 'Miriyum1!' } })
+      fireEvent.click(screen.getByRole('button', { name: '확인' }))
+      await waitFor(() => expect(idempotencyKeys).toHaveLength(attempt + 1))
+      if (attempt === 0) await waitFor(() => expect(listReads).toBeGreaterThan(1))
+    }
+
+    expect(idempotencyKeys[0]).toBeTruthy()
+    expect(idempotencyKeys[1]).toBe(idempotencyKeys[0])
   })
 
   it('다른 운영자에게 배정된 사건은 상세 링크 대신 처리 중으로 표시한다', async () => {
