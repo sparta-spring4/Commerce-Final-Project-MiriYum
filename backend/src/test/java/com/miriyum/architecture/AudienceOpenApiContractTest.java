@@ -94,6 +94,7 @@ class AudienceOpenApiContractTest {
                             REPRESENTATIVE_MENUS_PATH,
                             STORE_DASHBOARD_ANALYTICS_PATH,
                             STORE_RESERVATION_PAYMENT_STATUS_PATH,
+                            "/api/v1/stores/{storeId}/images",
                             "/api/v1/store-operators/stores/{storeId}/images",
                             "/api/v1/store-operators/stores/{storeId}/images/{imageId}",
                             "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images",
