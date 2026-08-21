@@ -26,11 +26,18 @@ Create one JSON secret named `miriyum/production/application` after team approva
   "MIRIYUM_JWT_SECRET": "...",
   "MIRIYUM_STORE_GEOCODING_REST_API_KEY": "...",
   "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET": "...",
+  "MIRIYUM_WAITING_HISTORY_CURSOR_SECRET": "...",
   "MIRIYUM_VALKEY_PASSWORD": "..."
 }
 ```
 
 Do not commit values, the final secret ARN, database endpoints, ALB domain names, or task role ARNs.
+
+Generate `MIRIYUM_WAITING_HISTORY_CURSOR_SECRET` as a dedicated random value of at least 32
+characters. Keep it stable across ordinary deployments and backend instances. Rotating it is
+allowed, but every cursor issued with the previous value becomes invalid and clients must restart
+pagination without a cursor. Do not reuse the JWT, notification-history cursor, or other signing
+secrets.
 
 ## Store geocoding key migration
 

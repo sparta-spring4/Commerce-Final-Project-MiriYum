@@ -56,7 +56,7 @@ authoritative PortOne API Secret remains in staging AWS Secrets Manager.
 ## EC2 runtime setup
 
 1. Copy `deploy/.env.example` to `/opt/miriyum/.env` without committing the copied file.
-2. Replace every `replace-with-...` value with a unique staging value, including `MIRIYUM_VALKEY_PASSWORD`, `MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET`, and `MIRIYUM_QR_STORAGE_GENERATION`. The QR storage generation must match `^[A-Za-z0-9._-]{1,64}$` on every backend instance. Set `MIRIYUM_STORE_GEOCODING_REST_API_KEY` to the Kakao Local REST API key used for store address verification; do not reuse the Kakao OAuth key.
+2. Replace every `replace-with-...` value with a unique staging value, including `MIRIYUM_VALKEY_PASSWORD`, `MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET`, `MIRIYUM_WAITING_HISTORY_CURSOR_SECRET`, and `MIRIYUM_QR_STORAGE_GENERATION`. The waiting-history cursor secret must be a dedicated random value of at least 32 characters and remain the same across ordinary backend replacements; rotating it invalidates cursors issued with the previous value. The QR storage generation must match `^[A-Za-z0-9._-]{1,64}$` on every backend instance. Set `MIRIYUM_STORE_GEOCODING_REST_API_KEY` to the Kakao Local REST API key used for store address verification; do not reuse the Kakao OAuth key.
 3. Run `chmod 600 /opt/miriyum/.env`.
 4. Confirm the instance role has `AmazonEC2ContainerRegistryReadOnly` and Systems Manager access.
 5. Confirm the security group allows TCP `80` only as required for the API. Do not expose MySQL `3306`, backend `8080`, or Valkey `6379`.
