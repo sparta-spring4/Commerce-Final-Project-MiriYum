@@ -89,7 +89,7 @@ export function PaymentRecoveryCaseDetailPage() {
       </dl>
     </div></section>
 
-    {item.assignedToCurrentOperator && item.allowedActions.includes('RETRY_REFUND') && (
+    {canProposeRefund(item) && (
       <section className="po-recovery-command">
         <h2>환불 복구</h2>
         <p>현재 결제·환불 버전을 기준으로 환불 재시도를 제안합니다. 금액은 서버가 결제 원장으로 검증합니다.</p>
@@ -97,7 +97,7 @@ export function PaymentRecoveryCaseDetailPage() {
       </section>
     )}
 
-    {item.assignedToCurrentOperator && item.allowedActions.includes('REQUERY_PROVIDER_RESULT') && (
+    {canRequeryProviderResult(item) && (
       <section className="po-recovery-command">
         <h2>결제사 결과 재조회</h2>
         <p>결제사 명령을 다시 보내지 않고 서버가 기존 처리 결과만 안전하게 조회합니다.</p>
@@ -151,6 +151,18 @@ function needsAdditionalApproval(
   proposal: PaymentRecoveryCaseDetail['proposals'][number],
 ) {
   return item.canApproveAdditionalProposal && item.status === 'ADDITIONAL_APPROVAL_PENDING' && proposal.approvalTier === 'ADDITIONAL_SUPER_ADMIN' && proposal.approverOperatorId == null
+}
+
+function canProposeRefund(item: PaymentRecoveryCaseDetail) {
+  return item.assignedToCurrentOperator
+    && (item.status === 'INVESTIGATING' || item.status === 'FAILED')
+    && item.allowedActions.includes('RETRY_REFUND')
+}
+
+function canRequeryProviderResult(item: PaymentRecoveryCaseDetail) {
+  return item.assignedToCurrentOperator
+    && item.status === 'INVESTIGATING'
+    && item.allowedActions.includes('REQUERY_PROVIDER_RESULT')
 }
 
 function money(amount: number, currency: string) {

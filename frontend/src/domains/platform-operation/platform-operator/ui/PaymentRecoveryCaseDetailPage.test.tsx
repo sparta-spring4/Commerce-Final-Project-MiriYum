@@ -162,4 +162,33 @@ describe('결제 복구 사건 상세', () => {
     expect(screen.queryByRole('button', { name: '환불 재시도 제안' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '결제사 결과 재조회' })).not.toBeInTheDocument()
   })
+
+  it.each(['ADDITIONAL_APPROVAL_PENDING', 'EXECUTING'] as const)(
+    '%s 상태에서는 담당자에게도 새 복구 명령을 노출하지 않는다',
+    async (status) => {
+      server.use(
+        http.post('/api/v1/platform-operators/auth/token-refreshes', () => successResponse({
+          accessToken: 'operator-token', initialPasswordChangeRequired: false,
+          sessionIdleExpiresAt: '2026-08-20T11:00:00Z', sessionAbsoluteExpiresAt: '2026-08-20T18:00:00Z',
+        })),
+        http.get('/api/v1/platform-operators/payment-recovery-cases/:caseId', () => successResponse({
+          caseId: 'case-1', status, caseVersion: 4,
+          kind: 'REFUND_FAILED', resultStatus: 'FAILED', originalAmountMinor: 300000,
+          cumulativeRefundedAmountMinor: 0, remainingRefundableAmountMinor: 300000,
+          currency: 'KRW', maskedProviderReference: null,
+          allowedActions: ['RETRY_REFUND', 'REQUERY_PROVIDER_RESULT'],
+          handoffVersion: 2, paymentVersion: 4, recoveryVersion: 1, assignedOperatorId: 7,
+          assignedToCurrentOperator: true, canApproveAdditionalProposal: false,
+          createdAt: '2026-08-20T09:00:00Z', updatedAt: '2026-08-20T09:30:00Z',
+          proposals: [], executions: [],
+        })),
+      )
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      render(<QueryClientProvider client={queryClient}><PlatformOperatorAuthProvider><MemoryRouter initialEntries={['/admin/payment-recovery-cases/case-1']}><Routes><Route path="/admin/payment-recovery-cases/:caseId" element={<PaymentRecoveryCaseDetailPage />} /></Routes></MemoryRouter></PlatformOperatorAuthProvider></QueryClientProvider>)
+
+      expect(await screen.findByText(status)).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '환불 재시도 제안' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '결제사 결과 재조회' })).not.toBeInTheDocument()
+    },
+  )
 })
