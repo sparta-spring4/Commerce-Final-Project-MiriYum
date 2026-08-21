@@ -186,10 +186,10 @@ The staging Compose file fixes `MIRIYUM_RUNTIME_ENVIRONMENT=staging`; operators 
 Use the exception only during the approved #357 window:
 
 1. Confirm the approved full deployment SHA, execution time, load caps, synthetic fixture, and the runner's current public IPv4 address. Do not put the IP in an Issue, PR, chat transcript, shell command, or retained artifact.
-2. Open `/opt/miriyum/.env` with an interactive privileged editor and set exactly one `MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP` value. Keep file mode `600`; do not print or copy the file into Actions or SSM output.
-3. Manually dispatch `Backend CD (Staging)` from `dev` with the same approved full SHA. Record only the deployment run URL, image digest, SSM command ID, and loopback health result.
+2. The Deploy owner registers exactly one public IPv4 in the `staging` GitHub Environment Secret `MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP`. Do not put it in an Issue, workflow input, repository variable, Actions log, or SSM output. Update the secret only when the approved runner network changes.
+3. The approved k6 operator manually dispatches `Backend CD (Staging)` from `dev` with the same approved full SHA and `rate_limit_exception=enable`. The workflow rejects an empty, private, multicast, CIDR, or malformed secret and writes no source IP to output.
 4. Run the approved smoke before the baseline. Confirm the IP-free `event=staging_rate_limit_bypass_applied` warning appears once for the backend process without copying surrounding request data. Store only execution time, success/429/5xx counts, p50/p95/p99, scenario inputs, and the deployed full SHA. Never retain the source IP, tokens, cookies, authorization headers, or raw HTTP output.
-5. Immediately after the run, clear the value with the interactive editor and manually redeploy the same approved SHA. Do this after success, failure, or an interrupted k6 run.
+5. Immediately after the run, manually dispatch the same SHA with `rate_limit_exception=disable`. Do this after success, failure, or an interrupted k6 run.
 6. Confirm the backend container has an empty source-IP value without printing environment contents, then issue the normal login limit plus one request from the runner and confirm the final request returns `429`. Record only the recovery deployment and the `429` result.
 
 If injection, deployment, smoke, cleanup, or recovery verification fails, stop #357. Do not continue a baseline while the exception state is unknown, and do not broaden the IP or rate-limit scope as a workaround.
