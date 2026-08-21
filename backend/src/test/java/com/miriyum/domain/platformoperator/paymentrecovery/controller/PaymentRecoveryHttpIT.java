@@ -24,10 +24,13 @@ import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorRoleGrant;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryCase;
+import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryProposal;
+import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.ApprovalTier;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.RecoveryAction;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.RecoveryKind;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.ResultStatus;
 import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRecoveryCaseRepository;
+import com.miriyum.domain.platformoperator.paymentrecovery.repository.PaymentRecoveryProposalRepository;
 import com.miriyum.domain.platformoperator.repository.AdminCaseAssignmentRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorRoleGrantRepository;
@@ -69,6 +72,7 @@ import org.testcontainers.mysql.MySQLContainer;
         "miriyum.platform-operator.reauthentication-fingerprint-secret=test-only-reauthentication-fingerprint-secret",
         "miriyum.platform-operator.temporary-password.validity=PT10M",
         "miriyum.platform-operator.temporary-password.max-failures=3",
+        "miriyum.rate-limit.login.max-requests=100",
         "miriyum.store.schedule.activation-enabled=false",
         "miriyum.reservation.hold-expiration.enabled=false",
         "miriyum.menu.schedule.enabled=false"
@@ -94,10 +98,64 @@ class PaymentRecoveryHttpIT {
     @Autowired PlatformOperatorAccountRepository accounts;
     @Autowired PlatformOperatorRoleGrantRepository roles;
     @Autowired PaymentRecoveryCaseRepository cases;
+    @Autowired PaymentRecoveryProposalRepository proposals;
     @Autowired AdminCaseAssignmentRepository assignments;
     @Autowired JwtTokenProvider jwt;
     @Autowired JdbcTemplate jdbc;
     @MockitoBean PaymentService payments;
+
+    @Test
+    void differentSuperAdminCanListAndOpenPendingAdditionalApproval() throws Exception {
+        PlatformOperatorAccount requester = createOperator("payment-recovery-requester@example.com");
+        PlatformOperatorAccount approver = accounts.saveAndFlush(PlatformOperatorAccount.createTemporary(
+                "payment-recovery-approver@example.com", encoder.encode("Password1!"),
+                "payment-recovery-approver", Instant.now().plusSeconds(600)));
+        roles.saveAndFlush(PlatformOperatorRoleGrant.create(
+                approver.getId(), PlatformOperatorRole.SUPER_ADMIN, Instant.now()));
+        roles.saveAndFlush(PlatformOperatorRoleGrant.create(
+                approver.getId(), PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR, Instant.now()));
+        PlatformOperatorAccount regularOperator = createOperator(
+                "payment-recovery-regular@example.com");
+
+        Instant now = Instant.now();
+        PaymentRecoveryCase recoveryCase = pendingAdditionalApprovalCase(
+                "991284", requester.getId(), requester.getId(), now);
+        PaymentRecoveryCase regularOperatorCase = pendingAdditionalApprovalCase(
+                "991285", approver.getId(), regularOperator.getId(), now.plusSeconds(2));
+        PaymentRecoveryCase approverRequesterCase = pendingAdditionalApprovalCase(
+                "991286", approver.getId(), approver.getId(), now.plusSeconds(4));
+
+        String requesterToken = loginAndActivate("payment-recovery-requester@example.com");
+        mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases/{caseId}",
+                        recoveryCase.getPublicId()).header("Authorization", "Bearer " + requesterToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.canApproveAdditionalProposal").value(false));
+
+        String regularToken = loginAndActivate("payment-recovery-regular@example.com");
+        mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases/{caseId}",
+                        regularOperatorCase.getPublicId()).header("Authorization", "Bearer " + regularToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.canApproveAdditionalProposal").value(false));
+
+        String token = loginAndActivate("payment-recovery-approver@example.com");
+        mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases/{caseId}",
+                        approverRequesterCase.getPublicId()).header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.canApproveAdditionalProposal").value(false));
+        assertThat(publicSummary(token, recoveryCase.getPublicId())
+                .get("assignedToCurrentOperator")).isEqualTo(false);
+        mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases/pending-additional-approvals")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].caseId").value(recoveryCase.getPublicId()))
+                .andExpect(jsonPath("$.data.content[0].canApproveAdditionalProposal").value(true))
+                .andExpect(jsonPath("$.data.content[0].proposals[0].proposalVersion").value(1));
+        mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases/{caseId}",
+                        recoveryCase.getPublicId()).header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.caseVersion").value(3))
+                .andExpect(jsonPath("$.data.canApproveAdditionalProposal").value(true));
+    }
 
     @Test
     void authenticatedSelfAssignmentIsReauthenticatedIdempotentAndMasked() throws Exception {
@@ -166,6 +224,11 @@ class PaymentRecoveryHttpIT {
                 """, Long.class, recoveryCase.getPublicId())).isEqualTo(operator.getId());
         assertThat(jdbc.queryForObject("select case_version from payment_recovery_cases where case_public_id = ?",
                 Long.class, recoveryCase.getPublicId())).isEqualTo(2L);
+        mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].assignedOperatorId").value(operator.getId()))
+                .andExpect(jsonPath("$.data.content[0].assignedToCurrentOperator").value(true));
         Long auditId = jdbc.queryForObject("""
                 select platform_operator_audit_event_id from platform_operator_audit_events
                 where action = 'PAYMENT_RECOVERY_CASE_ASSIGNED' and case_id = ?
@@ -315,6 +378,31 @@ class PaymentRecoveryHttpIT {
         roles.saveAndFlush(PlatformOperatorRoleGrant.create(
                 operator.getId(), PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR, Instant.now()));
         return operator;
+    }
+
+    private PaymentRecoveryCase pendingAdditionalApprovalCase(
+            String paymentId, long requesterId, long assignedOperatorId, Instant now) {
+        PaymentRecoveryCase recoveryCase = PaymentRecoveryCase.open(
+                paymentId, RecoveryKind.REFUND_FAILED, ResultStatus.FAILED,
+                400_000L, 100_000L, 300_000L, "KRW",
+                Set.of(RecoveryAction.RETRY_REFUND), "port********approval",
+                3L, 4L, 5L, now);
+        recoveryCase.beginInvestigation(1L, now);
+        recoveryCase = cases.saveAndFlush(recoveryCase);
+        proposals.saveAndFlush(PaymentRecoveryProposal.propose(
+                recoveryCase.getPublicId(), 1L, 2L, RecoveryAction.RETRY_REFUND,
+                250_000L, 250_000L, 400_000L, "KRW", 3L, 4L, 5L,
+                "a".repeat(64), requesterId, 1L,
+                Set.of(PlatformOperatorRole.PAYMENT_RECOVERY_OPERATOR),
+                Set.of(com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE),
+                UUID.randomUUID().toString(), now));
+        recoveryCase.recordProposal(2L, 1L, ApprovalTier.ADDITIONAL_SUPER_ADMIN, now.plusSeconds(1));
+        recoveryCase = cases.saveAndFlush(recoveryCase);
+        assignments.saveAndFlush(AdminCaseAssignment.assign(
+                com.miriyum.domain.platformoperator.enums.AdminCaseType.PAYMENT_RECOVERY,
+                recoveryCase.getPublicId(), recoveryCase.getCaseVersion(), assignedOperatorId,
+                now.plusSeconds(600), now));
+        return recoveryCase;
     }
 
     private String loginAndActivate(String email) throws Exception {

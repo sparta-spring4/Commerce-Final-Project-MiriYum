@@ -1,9 +1,12 @@
 import type { paths as AdminStorePaths } from './generated/admin-store'
+import type { paths as AdminMonitoringPaths } from './generated/admin-monitoring'
+import type { paths as AnalyticsPaths } from './generated/analytics'
 import type { paths as AuthAccountPaths } from './generated/auth-account'
 import type { paths as MemberSupportPaths } from './generated/member-support'
 import type { paths as MenuHoldPickupPaths } from './generated/menu-hold-pickup'
 import type { paths as NotificationPaths } from './generated/notification'
 import type { paths as PaymentPaths } from './generated/payment'
+import type { paths as PaymentRecoveryPaths } from './generated/payment-recovery'
 import type { paths as PlatformOperatorAuthPaths } from './generated/platform-operator-auth'
 import type { paths as PlatformOperatorAuthorizationPaths } from './generated/platform-operator-authorization'
 import type { paths as PlatformOperatorCapabilitiesPaths } from './generated/platform-operator-capabilities'
@@ -37,6 +40,9 @@ type PathDocs = [
   MemberSupportPaths,
   PlatformOperatorManagementAuditPaths,
   AdminStorePaths,
+  AdminMonitoringPaths,
+  AnalyticsPaths,
+  PaymentRecoveryPaths,
   WaitingPaths,
 ]
 
@@ -149,6 +155,13 @@ export type IdempotencyOf<Op> = Op extends {
 }
   ? { idempotencyKey: string }
   : { idempotencyKey?: never }
+
+/** operation이 X-Correlation-Id를 요구하면 호출에서도 필수로 만든다. */
+export type CorrelationIdOf<Op> = Op extends {
+  parameters: { header: { 'X-Correlation-Id': unknown } }
+}
+  ? { correlationId: string }
+  : { correlationId?: never }
 
 /**
  * operation이 X-CSRF-TOKEN 헤더를 요구하면 호출에서도 필수로 만든다.

@@ -11,11 +11,13 @@ import {
   PickupCompletePage,
   PickupCreatePage,
   PickupDetailPage,
+  MyPickupsPage,
 } from '../../domains/pickup/consumer'
 import {
   ReservationCompletePage,
   ReservationCreatePage,
   ReservationDetailPage,
+  ReservationCheckInQrPage,
   ReservationRequestPaymentPage,
   MyReservationsPage,
 } from '../../domains/reservation/consumer'
@@ -23,6 +25,7 @@ import {
   CurrentWaitingRoute,
   WaitingInvitationAcceptRoute,
   WaitingRegistrationRoute,
+  WaitingHistoryPage,
 } from '../../domains/waiting/consumer'
 import { ConsumerShell } from '../shells/consumer/ConsumerShell'
 import { RequireConsumerAuth } from '../shells/consumer/RequireConsumerAuth'
@@ -60,12 +63,15 @@ export const consumerRoutes = (
     <Route element={<RequireConsumerAuth />}>
       <Route path={CONSUMER_PATHS.myPage} element={<MyPage />} />
       <Route path={CONSUMER_PATHS.myReservations} element={<MyReservationsPage />} />
+      <Route path={CONSUMER_PATHS.myPickups} element={<MyPickupsPage />} />
+      <Route path={CONSUMER_PATHS.waitingHistory} element={<WaitingHistoryPage />} />
       <Route
         path={CONSUMER_PATHS.notificationHistory}
         element={<ConsumerNotificationHistoryRoute />}
       />
       <Route path={CONSUMER_PATHS.reservationCreate} element={<ReservationCreatePage />} />
       <Route path={CONSUMER_PATHS.reservationDetail} element={<ReservationDetailPage />} />
+      <Route path={CONSUMER_PATHS.reservationCheckIn} element={<ReservationCheckInQrPage />} />
       <Route path={CONSUMER_PATHS.reservationComplete} element={<ReservationCompletePage />} />
       <Route
         path={CONSUMER_PATHS.reservationRequestPayment}

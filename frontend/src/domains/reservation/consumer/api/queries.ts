@@ -236,6 +236,19 @@ export function useCancelReservation(reservationId: string) {
   })
 }
 
+export function useIssueReservationCheckInQr(reservationId: string) {
+  const { apiClient } = useConsumerAuth()
+  return useMutation({
+    mutationFn: async () => {
+      const response = await apiClient(
+        '/api/v1/consumers/me/reservations/{reservationId}/check-in-qr-grants',
+        { method: 'post', pathParams: { reservationId } },
+      )
+      return response.data
+    },
+  })
+}
+
 function invalidateAfterReservationChange(
   queryClient: ReturnType<typeof useQueryClient>,
   reservation: ReservationDetail,

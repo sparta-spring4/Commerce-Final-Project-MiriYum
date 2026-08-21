@@ -7,6 +7,8 @@ import type {
   ReservationCapacitiesData,
   ReservationDetail,
   ReservationPageData,
+  ReservationCheckInRequest,
+  ReservationNoShowReason,
   ReservationSort,
   ReservationStatus,
   ReservationTimePolicyDraftRequest,
@@ -157,6 +159,56 @@ export function useFulfillStoreReservation(
           method: 'post',
           pathParams: { storeId, reservationId },
           body: {},
+          idempotencyKey: variables.idempotencyKey,
+        },
+      )
+      return response.data
+    },
+    onSuccess: (reservation) =>
+      refreshAfterReservationChange(queryClient, storeId, reservation),
+  })
+}
+
+export function useCheckInReservationByQr(storeId: string) {
+  const { apiClient } = useStoreOperatorAuth()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (variables: {
+      body: ReservationCheckInRequest
+      idempotencyKey: string
+    }): Promise<ReservationDetail> => {
+      const response = await apiClient(
+        '/api/v1/store-operators/stores/{storeId}/reservation-check-ins',
+        {
+          method: 'post',
+          pathParams: { storeId },
+          body: variables.body,
+          idempotencyKey: variables.idempotencyKey,
+        },
+      )
+      return response.data
+    },
+    onSuccess: (reservation) =>
+      refreshAfterReservationChange(queryClient, storeId, reservation),
+  })
+}
+
+export function useMarkReservationNoShow(storeId: string, reservationId: string) {
+  const { apiClient } = useStoreOperatorAuth()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (variables: {
+      reason: ReservationNoShowReason
+      idempotencyKey: string
+    }): Promise<ReservationDetail> => {
+      const response = await apiClient(
+        '/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/no-shows',
+        {
+          method: 'post',
+          pathParams: { storeId, reservationId },
+          body: { reason: variables.reason },
           idempotencyKey: variables.idempotencyKey,
         },
       )

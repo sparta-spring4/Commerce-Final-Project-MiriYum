@@ -18,6 +18,21 @@ public interface PaymentRecoveryCaseRepository extends JpaRepository<PaymentReco
 
     Page<PaymentRecoveryCase> findByStatus(CaseStatus status, Pageable pageable);
 
+    @Query("""
+            select recovery from PaymentRecoveryCase recovery
+             where recovery.status = :status
+               and exists (
+                    select proposal.id from PaymentRecoveryProposal proposal
+                     where proposal.casePublicId = recovery.publicId
+                       and proposal.proposalVersion = recovery.currentProposalVersion
+                       and proposal.requesterPlatformOperatorAccountId <> :operatorId
+               )
+            """)
+    Page<PaymentRecoveryCase> findPendingAdditionalApprovals(
+            @Param("status") CaseStatus status,
+            @Param("operatorId") long operatorId,
+            Pageable pageable);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select recovery from PaymentRecoveryCase recovery where recovery.publicId = :publicId")
     Optional<PaymentRecoveryCase> findByPublicIdForUpdate(@Param("publicId") String publicId);

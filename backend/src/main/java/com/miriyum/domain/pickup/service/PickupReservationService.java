@@ -16,6 +16,7 @@ import com.miriyum.domain.pickup.dto.request.PickupCancellationRequest;
 import com.miriyum.domain.pickup.dto.request.PickupReservationCreateRequest;
 import com.miriyum.domain.pickup.dto.response.PickupReservationItemResponse;
 import com.miriyum.domain.pickup.dto.response.PickupReservationResponse;
+import com.miriyum.domain.pickup.dto.response.PickupReservationPageResponse;
 import com.miriyum.domain.pickup.entity.PickupItemSnapshot;
 import com.miriyum.domain.pickup.entity.PickupReservation;
 import com.miriyum.domain.pickup.entity.PickupReservationItem;
@@ -46,6 +47,11 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -142,6 +148,49 @@ public class PickupReservationService {
                         pickupReservationId, consumerAccountId)
                 .orElseThrow(() -> new ServiceException(PickupErrorCode.PICKUP_NOT_FOUND));
         return toResponse(pickup);
+    }
+
+    @Transactional(readOnly = true)
+    public PickupReservationPageResponse listConsumerPickups(
+            long consumerAccountId,
+            int page,
+            int size
+    ) {
+        if (consumerAccountId <= 0) {
+            throw new IllegalArgumentException("consumerAccountId must be positive");
+        }
+        if (page < 0 || size < 1 || size > 100) {
+            throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
+        }
+        consumerAccountService.requireActiveAccount(consumerAccountId);
+
+        Pageable pageable = PageRequest.of(page, size, Sort.by(
+                Sort.Order.desc("pickupDate"), Sort.Order.desc("pickupTime"),
+                Sort.Order.desc("id")));
+        Page<PickupReservation> summaries = repository.findAllByConsumerAccountId(
+                consumerAccountId, pageable);
+        List<Long> ids = summaries.getContent().stream()
+                .map(PickupReservation::getId)
+                .toList();
+        if (ids.isEmpty()) {
+            return PickupReservationPageResponse.from(new PageImpl<>(
+                    List.of(), pageable, summaries.getTotalElements()));
+        }
+
+        Map<Long, PickupReservation> fetched = repository.findAllWithItemsByIdIn(ids)
+                .stream()
+                .collect(Collectors.toMap(PickupReservation::getId, Function.identity()));
+        List<PickupReservationResponse> responses = ids.stream()
+                .map(id -> {
+                    PickupReservation pickup = fetched.get(id);
+                    if (pickup == null) {
+                        throw new IllegalStateException("paged pickup was not fetched");
+                    }
+                    return toResponse(pickup);
+                })
+                .toList();
+        return PickupReservationPageResponse.from(new PageImpl<>(
+                responses, pageable, summaries.getTotalElements()));
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)

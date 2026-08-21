@@ -26,10 +26,13 @@ describe('사용자별 route 계약', () => {
       kakaoSignUp: '/auth/kakao/sign-up',
       myPage: '/mypage',
       myReservations: '/mypage/reservations',
+      myPickups: '/mypage/pickups',
+      waitingHistory: '/mypage/waiting-history',
       notificationHistory: '/mypage/notifications',
       reservationCreate: '/stores/:storeId/reserve',
       reservationDetail: '/reservations/:reservationId',
       reservationComplete: '/reservations/:reservationId/complete',
+      reservationCheckIn: '/reservations/:reservationId/check-in',
       reservationRequestPayment:
         '/reservation-requests/:reservationRequestId/payment',
       pickupCreate: '/stores/:storeId/pickup',
@@ -62,6 +65,18 @@ describe('사용자별 route 계약', () => {
       reservations: '/store-operator/stores/:storeId/reservations',
       reservation:
         '/store-operator/stores/:storeId/reservations/:reservationId',
+      reservationVisits:
+        '/store-operator/stores/:storeId/reservation-visits',
+      pickupReservations:
+        '/store-operator/stores/:storeId/pickup-reservations',
+      pickupReservation:
+        '/store-operator/stores/:storeId/pickup-reservations/:pickupReservationId',
+      menuInventory:
+        '/store-operator/stores/:storeId/menu-inventory',
+      representativeMenus:
+        '/store-operator/stores/:storeId/representative-menus',
+      dashboardStatistics:
+        '/store-operator/stores/:storeId/dashboard-statistics',
       waitingSettings: '/store-operator/stores/:storeId/waiting-settings',
       waitingTeams: '/store-operator/stores/:storeId/waiting-teams',
       waitingTeam:
@@ -86,6 +101,9 @@ describe('사용자별 route 계약', () => {
       memberSanctionApproval: '/admin/member-sanctions/approvals',
       audit: '/admin/audit',
       auditDetail: '/admin/audit/:eventKey',
+      paymentRecoveryCases: '/admin/payment-recovery-cases',
+      paymentRecoveryApprovals: '/admin/payment-recovery-approvals',
+      paymentRecoveryDetail: '/admin/payment-recovery-cases/:caseId',
     })
   })
 })
@@ -124,6 +142,23 @@ describe('사용자별 navigation 계약', () => {
         path: '/store-operator/stores/store%2F7/reservation-time-policy',
       },
       { label: '예약 목록', path: '/store-operator/stores/store%2F7/reservations' },
+      { label: '체크인·노쇼', path: '/store-operator/stores/store%2F7/reservation-visits' },
+      {
+        label: '픽업 목록',
+        path: '/store-operator/stores/store%2F7/pickup-reservations',
+      },
+      {
+        label: '메뉴 재고',
+        path: '/store-operator/stores/store%2F7/menu-inventory',
+      },
+      {
+        label: '추천 메뉴',
+        path: '/store-operator/stores/store%2F7/representative-menus',
+      },
+      {
+        label: '운영 통계',
+        path: '/store-operator/stores/store%2F7/dashboard-statistics',
+      },
       {
         label: '웨이팅 설정',
         path: '/store-operator/stores/store%2F7/waiting-settings',
@@ -137,6 +172,16 @@ describe('사용자별 navigation 계약', () => {
 
   test('플랫폼 운영자 메뉴와 권한을 그대로 유지한다', () => {
     expect(PLATFORM_OPERATOR_NAVIGATION).toEqual([
+      {
+        label: '결제 복구',
+        path: '/admin/payment-recovery-cases',
+        permissions: ['PAYMENT_RECOVERY_EXECUTE'],
+      },
+      {
+        label: '결제 복구 승인',
+        path: '/admin/payment-recovery-approvals',
+        permissions: ['PAYMENT_RECOVERY_HIGH_VALUE_APPROVE'],
+      },
       {
         label: '회원 관리',
         path: '/admin/members',

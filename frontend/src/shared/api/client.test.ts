@@ -350,6 +350,35 @@ describe('멱등 키', () => {
   })
 })
 
+describe('상관관계 ID', () => {
+  test('계약이 요구하는 운영자 명령에서 헤더로 보낸다', async () => {
+    let sent: string | null = null
+    server.use(
+      http.post(
+        '/api/v1/platform-operators/payment-recovery-cases/:caseId/assignments',
+        ({ request }) => {
+          sent = request.headers.get('X-Correlation-Id')
+          return successResponse({})
+        },
+      ),
+    )
+
+    await client()(
+      '/api/v1/platform-operators/payment-recovery-cases/{caseId}/assignments',
+      {
+        method: 'post',
+        pathParams: { caseId: 'case-1' },
+        body: { expectedCaseVersion: 1 },
+        idempotencyKey: 'key-1',
+        adminReauthentication: 'approval-1',
+        correlationId: 'correlation-1',
+      },
+    )
+
+    expect(sent).toBe('correlation-1')
+  })
+})
+
 describe('경로 변수와 query', () => {
   test('경로 변수를 치환해 호출한다', async () => {
     let seen = ''
