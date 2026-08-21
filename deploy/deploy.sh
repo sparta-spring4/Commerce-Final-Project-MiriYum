@@ -607,7 +607,9 @@ main() {
     return 1
   fi
 
-  compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --remove-orphans
+  # A manual CD may intentionally reuse the same immutable image SHA. Recreate
+  # backend so replacement verification still proves a new container took over.
+  compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --force-recreate --remove-orphans backend
 
   if ! verify_nginx; then
     recover_nginx_http

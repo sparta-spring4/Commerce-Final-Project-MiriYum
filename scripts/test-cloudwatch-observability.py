@@ -680,7 +680,9 @@ main
         occurrence_counter_backfill = main_body.index(
             'backfill_risk_event_occurrence_counters'
         )
-        backend_start = main_body.index('up -d --remove-orphans')
+        backend_start = main_body.index(
+            'up -d --force-recreate --remove-orphans backend'
+        )
 
         self.assertLess(backend_stop, valkey_start)
         self.assertLess(valkey_start, pending_index_backfill)
@@ -688,6 +690,12 @@ main
         self.assertLess(mysql_wait, pending_index_backfill)
         self.assertLess(pending_index_backfill, occurrence_counter_backfill)
         self.assertLess(occurrence_counter_backfill, backend_start)
+
+    def test_same_image_redeployment_forces_backend_container_recreation(self):
+        self.assertIn(
+            'up -d --force-recreate --remove-orphans backend',
+            self.deploy_script,
+        )
 
     def test_deployment_backfills_db_occurrence_count_to_family_bound_counter(self):
         with tempfile.TemporaryDirectory() as directory:
