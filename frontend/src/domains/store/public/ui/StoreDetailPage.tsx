@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { hasErrorCode } from '../../../../shared/api/apiError'
 import { Badge } from '../../../../shared/ui/Badge'
@@ -52,6 +52,7 @@ export function StoreDetailPage() {
   const storeCategories = useCatalog('store-categories')
   const storeTags = useCatalog('store-tags')
   const menuCategories = useCatalog('menu-categories')
+  const [failedPrimaryImageUrl, setFailedPrimaryImageUrl] = useState<string | null>(null)
 
   const backToSearch = `/stores?${writeFilters(filters).toString()}`
 
@@ -93,6 +94,8 @@ export function StoreDetailPage() {
   const art = categoryArt(store.storeCategoryCode)
   const tint = categoryTint(store.storeCategoryCode)
   const primaryImageUrl = images.data?.[0]?.url
+  const canDisplayPrimaryImage = primaryImageUrl !== undefined
+    && primaryImageUrl !== failedPrimaryImageUrl
 
   return (
     <div className="store-detail">
@@ -101,7 +104,7 @@ export function StoreDetailPage() {
         className="store-detail__hero"
         style={{ '--tile-from': tint.from, '--tile-to': tint.to } as CSSProperties}
       >
-        {primaryImageUrl !== undefined ? (
+        {canDisplayPrimaryImage ? (
           <img
             className="store-detail__hero-art"
             src={primaryImageUrl}
@@ -109,6 +112,7 @@ export function StoreDetailPage() {
             width={320}
             height={320}
             decoding="async"
+            onError={() => setFailedPrimaryImageUrl(primaryImageUrl)}
           />
         ) : art !== null && (
           <img
