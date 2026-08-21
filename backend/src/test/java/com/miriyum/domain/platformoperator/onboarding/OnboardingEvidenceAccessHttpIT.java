@@ -6,7 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.miriyum.domain.platformoperator.controller.onboarding.PlatformOperatorOnboardingReviewController;
+import com.miriyum.domain.platformoperator.controller.management.onboarding.PlatformOperatorOnboardingReviewController;
 import com.miriyum.domain.platformoperator.onboarding.service.OnboardingEvidenceAccessService;
 import com.miriyum.domain.platformoperator.onboarding.service.OnboardingReviewCommandService;
 import com.miriyum.domain.platformoperator.onboarding.service.OnboardingReviewQueryService;

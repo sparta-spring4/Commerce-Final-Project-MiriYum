@@ -2,7 +2,7 @@ package com.miriyum.domain.platformoperator.onboarding;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.miriyum.domain.platformoperator.controller.onboarding.PlatformOperatorOnboardingReviewController;
+import com.miriyum.domain.platformoperator.controller.management.onboarding.PlatformOperatorOnboardingReviewController;
 import com.miriyum.domain.platformoperator.onboarding.service.OnboardingReviewCommandService;
 import com.miriyum.domain.platformoperator.onboarding.service.OnboardingReviewQueryService;
 import com.miriyum.domain.platformoperator.onboarding.service.OnboardingEvidenceAccessService;

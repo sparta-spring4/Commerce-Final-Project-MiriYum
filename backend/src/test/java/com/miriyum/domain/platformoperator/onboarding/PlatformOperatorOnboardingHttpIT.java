@@ -2,7 +2,7 @@ package com.miriyum.domain.platformoperator.onboarding;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.miriyum.domain.platformoperator.controller.onboarding.PlatformOperatorOnboardingReviewController;
+import com.miriyum.domain.platformoperator.controller.management.onboarding.PlatformOperatorOnboardingReviewController;
 import java.util.Arrays;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
