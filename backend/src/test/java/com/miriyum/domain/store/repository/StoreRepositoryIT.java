@@ -92,6 +92,12 @@ class StoreRepositoryIT {
     @MockitoBean
     private StoreGeocodingPort geocodingPort;
 
+    @MockitoBean
+    private com.miriyum.global.storage.service.FileStorageFacade fileStorageFacade;
+
+    @MockitoBean
+    private com.miriyum.global.storage.FileStoragePort fileStoragePort;
+
     @Autowired
     private StoreService storeService;
 
@@ -154,6 +160,11 @@ class StoreRepositoryIT {
                 storeRepository.saveAndFlush(store(secondOperator, "1234567890", Set.of())))
                 .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("uk_stores_active_business_number");
+        entityManager.clear();
+        assertThat(storeRepository.findAll())
+                .singleElement()
+                .extracting(Store::getBusinessRegistrationNumber)
+                .isEqualTo("1234567890");
     }
 
     @Test

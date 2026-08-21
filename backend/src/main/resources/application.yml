@@ -157,6 +157,14 @@ miriyum:
       initial-delay-ms: ${MIRIYUM_WAITING_COMPENSATION_INITIAL_DELAY_MS:5000}
       reconciliation-delay-ms: ${MIRIYUM_WAITING_COMPENSATION_RECONCILIATION_DELAY_MS:60000}
   store:
+    onboarding:
+      manual-review-enabled: ${MIRIYUM_STORE_ONBOARDING_MANUAL_REVIEW_ENABLED:false}
+      dev-stub-enabled: ${MIRIYUM_STORE_ONBOARDING_DEV_STUB_ENABLED:true}
+      automatic-check-delay-ms: ${MIRIYUM_STORE_ONBOARDING_AUTOMATIC_CHECK_DELAY_MS:5000}
+      automatic-check-initial-delay-ms: ${MIRIYUM_STORE_ONBOARDING_AUTOMATIC_CHECK_INITIAL_DELAY_MS:30000}
+      automatic-check-batch-size: ${MIRIYUM_STORE_ONBOARDING_AUTOMATIC_CHECK_BATCH_SIZE:25}
+      automatic-check-lease-seconds: ${MIRIYUM_STORE_ONBOARDING_AUTOMATIC_CHECK_LEASE_SECONDS:30}
+      case-assignment-days: ${MIRIYUM_STORE_ONBOARDING_CASE_ASSIGNMENT_DAYS:3650}
     schedule:
       activation-enabled: ${MIRIYUM_STORE_SCHEDULE_ACTIVATION_ENABLED:true}
       activation-delay-ms: ${MIRIYUM_STORE_SCHEDULE_ACTIVATION_DELAY_MS:1000}

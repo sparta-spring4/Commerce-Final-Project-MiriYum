@@ -61,6 +61,8 @@ com.miriyum
 
 API·유스케이스 소유 Service가 교차 도메인 transaction을 조정한다. 다른 도메인은 소유자의 공개 Service 메서드와 DTO만 사용하며 Entity·Repository·내부 구현에 직접 접근하지 않는다.
 
+매장 입점 심사는 Store 도메인이 신청·version·자동검사·심사사건·최종 매장 생성의 정본을 소유한다. Platform Operator는 `StoreOnboardingReviewWorkflow`와 `StoreOnboardingContracts`만 사용하며 Store onboarding Entity·Repository를 직접 참조하지 않는다. 사업자등록증 원문은 URL·object key·file ID 없이 bytes로만 전달하고, 현재 사건 배정·`ONBOARDING_EVIDENCE_READ`·사건/version/증빙에 결속된 5분 일회 재인증을 소비한 뒤 별도 읽기로 수행한다.
+
 2차 MVP의 통합 검색·추천 projection은 다음 네 읽기 전용 QueryDSL reader에 한해 Store·Menu의 생성 `Q*` 메타모델을 직접 읽을 수 있다.
 
 - `recommendation/repository/RecommendationSignalRepository.java`
