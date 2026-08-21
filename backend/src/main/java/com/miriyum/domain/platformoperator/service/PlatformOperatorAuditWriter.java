@@ -3,6 +3,7 @@ package com.miriyum.domain.platformoperator.service;
 import com.miriyum.domain.platformoperator.dto.authorization.AdminAuditContext;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAuditEvent;
 import com.miriyum.domain.platformoperator.enums.AdminCaseType;
+import com.miriyum.domain.platformoperator.enums.AdminTargetType;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAccountStatus;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuditAction;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuditOutcome;
@@ -84,6 +85,56 @@ public class PlatformOperatorAuditWriter {
                 event.context().caseType(), event.context().caseId(), event.context().caseVersion(),
                 event.idempotencyKey(), event.beforeSnapshot(), event.afterSnapshot(),
                 event.context().correlationId(), clock.instant()));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public PlatformOperatorAuditEvent appendOnboarding(OnboardingEvent event) {
+        AdminAuditContext context = event.context();
+        return repository.append(PlatformOperatorAuditEvent.create(
+                context.operatorId(), context.authorityVersion(), context.roles(), context.permissions(),
+                event.action(), event.outcome(), PlatformOperatorAuditReason.ONBOARDING_REVIEW,
+                context.targetType().name(), context.targetId(), context.caseType(), context.caseId(),
+                context.caseVersion(), event.idempotencyKey(), null, null,
+                Set.of(), Set.of(), Set.of(), Set.of(), context.correlationId(), clock.instant()));
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public PlatformOperatorAuditEvent appendOnboardingReadAttempt(OnboardingReadAttempt event) {
+        return repository.append(PlatformOperatorAuditEvent.create(
+                event.actorId(), event.authorityVersion(), event.roles(), event.permissions(),
+                PlatformOperatorAuditAction.ONBOARDING_EVIDENCE_READ, event.outcome(),
+                PlatformOperatorAuditReason.ONBOARDING_REVIEW,
+                AdminTargetType.ONBOARDING_APPLICATION.name(), event.caseId(),
+                AdminCaseType.ONBOARDING_REVIEW, event.caseId(), event.caseVersion(),
+                null, null, null, Set.of(), Set.of(), Set.of(), Set.of(),
+                event.correlationId(), clock.instant()));
+    }
+
+    public record OnboardingReadAttempt(
+            long actorId, long authorityVersion,
+            Set<PlatformOperatorRole> roles, Set<PlatformOperatorPermission> permissions,
+            PlatformOperatorAuditOutcome outcome, String caseId, long caseVersion,
+            String correlationId) {
+        public OnboardingReadAttempt {
+            roles = Set.copyOf(roles);
+            permissions = Set.copyOf(permissions);
+            Objects.requireNonNull(outcome);
+            Objects.requireNonNull(caseId);
+            Objects.requireNonNull(correlationId);
+        }
+    }
+
+    public record OnboardingEvent(
+            AdminAuditContext context,
+            PlatformOperatorAuditAction action,
+            PlatformOperatorAuditOutcome outcome,
+            String idempotencyKey
+    ) {
+        public OnboardingEvent {
+            Objects.requireNonNull(context);
+            Objects.requireNonNull(action);
+            Objects.requireNonNull(outcome);
+        }
     }
 
     public record StoreEvent(long operatorId, long authorityVersion, Set<PlatformOperatorRole> roles,

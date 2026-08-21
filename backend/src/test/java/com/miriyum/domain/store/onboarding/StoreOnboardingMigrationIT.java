@@ -31,7 +31,7 @@ class StoreOnboardingMigrationIT {
 
             assertThat(flyway.info().applied())
                     .extracting(MigrationInfo::getScript)
-                    .contains("V68__create_store_onboarding_review_workflow.sql");
+                    .contains("V69__create_store_onboarding_review_workflow.sql");
 
             try (Connection connection = mysql.createConnection("")) {
                 assertThat(tables(connection)).contains(

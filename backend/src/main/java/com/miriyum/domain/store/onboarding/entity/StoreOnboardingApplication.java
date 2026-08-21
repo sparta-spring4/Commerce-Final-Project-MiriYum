@@ -134,6 +134,22 @@ public class StoreOnboardingApplication {
         updatedAt = requireTime(now);
     }
 
+    public void beginReview(long expectedVersion, Instant now) {
+        requireCurrentVersion(expectedVersion);
+        if (status != ApplicationStatus.REVIEW_READY && status != ApplicationStatus.UNDER_REVIEW) {
+            throw new IllegalStateException("application is not review ready");
+        }
+        status = ApplicationStatus.UNDER_REVIEW;
+        updatedAt = requireTime(now);
+    }
+
+    public void rejectManually(long expectedVersion, Instant now) {
+        requireCurrentVersion(expectedVersion);
+        requireStatus(ApplicationStatus.UNDER_REVIEW);
+        status = ApplicationStatus.REJECTED;
+        updatedAt = requireTime(now);
+    }
+
     public void rejectAutomatically(long expectedVersion, Instant now) {
         requireCurrentVersion(expectedVersion);
         requireStatus(ApplicationStatus.AUTO_CHECKING);

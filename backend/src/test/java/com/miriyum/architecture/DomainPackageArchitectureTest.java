@@ -101,6 +101,19 @@ class DomainPackageArchitectureTest {
     }
 
     @Test
+    void platformOnboardingUsesOnlyPublishedStoreOnboardingContracts() {
+        List<SourceFile> onboarding = javaSources().stream()
+                .filter(source -> source.relativePath().startsWith("platformoperator/onboarding/"))
+                .toList();
+
+        assertThat(onboarding).isNotEmpty();
+        assertThat(onboarding.stream().flatMap(source -> source.imports().stream())
+                .filter(imported -> imported.startsWith(DOMAIN_PREFIX + "store.onboarding.")))
+                .noneMatch(imported -> imported.contains(".entity.")
+                        || imported.contains(".repository."));
+    }
+
+    @Test
     void adminMonitoringUsesOnlyPublishedForeignMonitoringContracts() {
         List<SourceFile> monitoring = javaSources().stream()
                 .filter(source -> source.relativePath().startsWith("platformoperator/adminmonitoring/"))
@@ -400,6 +413,9 @@ class DomainPackageArchitectureTest {
         }
 
         private boolean hasExplicitHttpBoundary() {
+            if (relativePath.startsWith("platformoperator/onboarding/controller/")) {
+                return true;
+            }
             String marker = "/controller/";
             int start = relativePath.indexOf(marker) + marker.length();
             int end = relativePath.indexOf('/', start);

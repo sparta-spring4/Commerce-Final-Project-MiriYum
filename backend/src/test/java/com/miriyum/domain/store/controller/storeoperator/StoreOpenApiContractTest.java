@@ -53,6 +53,15 @@ class StoreOpenApiContractTest {
         Map<String, Object> multipart = map(map(post.get("requestBody")).get("content"));
 
         assertThat(multipart).containsKey("multipart/form-data");
+        Map<String, Object> multipartBody = map(multipart.get("multipart/form-data"));
+        Map<String, Object> schema = map(multipartBody.get("schema"));
+        assertThat(list(schema.get("required")))
+                .containsExactly("application", "businessRegistrationEvidence");
+        assertThat(map(map(schema.get("properties")).get("businessRegistrationEvidence")))
+                .containsEntry("type", "string")
+                .containsEntry("format", "binary");
+        assertThat(map(map(multipartBody.get("encoding")).get("application")))
+                .containsEntry("contentType", "application/json");
         assertThat(map(post.get("responses"))).containsKey("202");
     }
 

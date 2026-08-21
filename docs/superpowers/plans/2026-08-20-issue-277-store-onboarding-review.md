@@ -149,7 +149,7 @@ Add these contract bullets to the Issue body without closing it:
 - exact allowlist: 이 구현 계획의 각 Task `Files` 합집합으로 제한한다.
 ```
 
-- [ ] **Step 6: Commit the contract slice after explicit commit authorization**
+- [x] **Step 6: Commit the contract slice after explicit commit authorization**
 
 ```powershell
 git add -- docs/service-policies/02-store-onboarding.md docs/service-policies/15-admin-operation.md docs/service-policies/17-privacy-security.md docs/05-functional-requirements.md docs/specs/store-onboarding/spec.md docs/specs/store-onboarding/openapi.yaml docs/specs/platform-operator-onboarding-review/openapi.yaml docs/specs/store-operator-openapi.yaml docs/specs/platform-operator-openapi.yaml docs/specs/payment-recovery/openapi.yaml docs/specs/README.md redocly.yaml backend/src/test/java/com/miriyum/domain/store/controller/storeoperator/StoreOpenApiContractTest.java backend/src/test/java/com/miriyum/domain/platformoperator/onboarding/PlatformOperatorOnboardingOpenApiContractTest.java backend/src/test/java/com/miriyum/architecture/AudienceOpenApiContractTest.java
@@ -179,7 +179,7 @@ git commit -m "docs: define store onboarding review contract"
 - Consumes: V67 evidence ledger identifiers and existing `stores.store_id`.
 - Produces: `StoreOnboardingApplication.reserve(...)`, `attachVersion(...)`, `beginReview(...)`, `requestChanges(...)`, `approve(...)`, `reject(...)`; fenced job claims; one active case and one terminal decision constraints.
 
-- [ ] **Step 1: Write failing aggregate tests**
+- [x] **Step 1: Write failing aggregate tests**
 
 ```java
 @Test
@@ -207,7 +207,7 @@ void firstTerminalDecisionWins() {
 }
 ```
 
-- [ ] **Step 2: Run entity tests and verify RED**
+- [x] **Step 2: Run entity tests and verify RED**
 
 ```powershell
 cd backend
@@ -216,7 +216,7 @@ cd backend
 
 Expected: compilation FAIL because the onboarding entities do not exist.
 
-- [ ] **Step 3: Implement minimal aggregates and repositories**
+- [x] **Step 3: Implement minimal aggregates and repositories**
 
 Define nested enums exactly:
 
@@ -251,7 +251,7 @@ CONSTRAINT uk_store_onboarding_result_store UNIQUE (resulting_store_id)
 
 Review and decision rows use opaque UUID strings. Job rows include `lease_owner`, monotonically increasing `lease_token`, `lease_expires_at`, `attempt_count`, `next_attempt_at`, and `row_version`.
 
-- [ ] **Step 4: Add and run focused migration tests**
+- [x] **Step 4: Add and run focused migration tests**
 
 The integration test inserts two active cases for the same application/version and expects the second insert to fail, then inserts one `active_marker=NULL` historical row and expects success.
 
@@ -262,7 +262,7 @@ cd backend
 
 Expected: PASS against actual MySQL Testcontainers.
 
-- [ ] **Step 5: Commit the persistence slice after explicit authorization**
+- [x] **Step 5: Commit the persistence slice after explicit authorization**
 
 ```powershell
 git add -- backend/src/main/resources/db/migration/V68__create_store_onboarding_review_workflow.sql backend/src/main/java/com/miriyum/domain/store/onboarding/entity/StoreOnboardingEnums.java backend/src/main/java/com/miriyum/domain/store/onboarding/entity/StoreOnboardingApplication.java backend/src/main/java/com/miriyum/domain/store/onboarding/entity/StoreOnboardingApplicationVersion.java backend/src/main/java/com/miriyum/domain/store/onboarding/entity/StoreOnboardingAutomaticCheckJob.java backend/src/main/java/com/miriyum/domain/store/onboarding/entity/StoreOnboardingReviewCase.java backend/src/main/java/com/miriyum/domain/store/onboarding/entity/StoreOnboardingDecision.java backend/src/main/java/com/miriyum/domain/store/onboarding/repository/StoreOnboardingApplicationRepository.java backend/src/main/java/com/miriyum/domain/store/onboarding/repository/StoreOnboardingApplicationVersionRepository.java backend/src/main/java/com/miriyum/domain/store/onboarding/repository/StoreOnboardingAutomaticCheckJobRepository.java backend/src/main/java/com/miriyum/domain/store/onboarding/repository/StoreOnboardingReviewCaseRepository.java backend/src/main/java/com/miriyum/domain/store/onboarding/repository/StoreOnboardingDecisionRepository.java backend/src/test/java/com/miriyum/domain/store/onboarding/entity/StoreOnboardingApplicationTest.java backend/src/test/java/com/miriyum/domain/store/onboarding/entity/StoreOnboardingReviewCaseTest.java backend/src/test/java/com/miriyum/domain/store/onboarding/StoreOnboardingMigrationIT.java
@@ -287,7 +287,7 @@ git commit -m "feat: add store onboarding workflow ledger"
 - Consumes: `FileStorageFacade.storePending`, `confirmWithinCurrentTransaction`, `FileStoragePort.read`, and #344 evidence ledger.
 - Produces: `ValidatedBusinessRegistrationEvidence validate(MultipartFile)`; `PendingEvidence storePending(long applicationId, long version, MultipartFile)`; `BusinessRegistrationEvidenceContent readCurrentEvidence(long applicationId, long version, UUID evidenceId)`. `PendingEvidence` is `record PendingEvidence(UUID fileId, String sha256, String contentType, long sizeBytes)`.
 
-- [ ] **Step 1: Write failing validator tests**
+- [x] **Step 1: Write failing validator tests**
 
 ```java
 @ParameterizedTest
@@ -307,7 +307,7 @@ void rejectsEncryptedPdf() {
 
 Valid signatures are `%PDF-`, JPEG `FF D8 FF`, and PNG `89 50 4E 47 0D 0A 1A 0A`. Test exactly 10,485,760 bytes as accepted and 10,485,761 as rejected.
 
-- [ ] **Step 2: Run evidence tests and verify RED**
+- [x] **Step 2: Run evidence tests and verify RED**
 
 ```powershell
 cd backend
@@ -316,7 +316,7 @@ cd backend
 
 Expected: compilation FAIL because validator and upload service are absent.
 
-- [ ] **Step 3: Implement private pending upload and integrity-checked read**
+- [x] **Step 3: Implement private pending upload and integrity-checked read**
 
 Use stable owner and object identity:
 
@@ -334,7 +334,7 @@ FileStorageMetadata metadata = new FileStorageMetadata(
 
 `readCurrentEvidence` loads the current evidence internally, resolves its private confirmed metadata, calls `FileStoragePort.read`, and compares object key, MIME, byte length, and SHA-256 before returning only content type and copied bytes. No public DTO exposes `fileId` or object key.
 
-- [ ] **Step 4: Run evidence tests**
+- [x] **Step 4: Run evidence tests**
 
 ```powershell
 cd backend
@@ -343,7 +343,7 @@ cd backend
 
 Expected: PASS; assertions verify private visibility and response/log objects contain no URL or object key.
 
-- [ ] **Step 5: Commit the evidence slice after explicit authorization**
+- [x] **Step 5: Commit the evidence slice after explicit authorization**
 
 ```powershell
 git add -- backend/src/main/java/com/miriyum/domain/store/evidence/ValidatedBusinessRegistrationEvidence.java backend/src/main/java/com/miriyum/domain/store/evidence/BusinessRegistrationEvidenceUploadValidator.java backend/src/main/java/com/miriyum/domain/store/evidence/BusinessRegistrationEvidenceUploadService.java backend/src/main/java/com/miriyum/domain/store/evidence/dto/BusinessRegistrationEvidenceContent.java backend/src/main/java/com/miriyum/domain/store/evidence/StoreBusinessRegistrationEvidenceService.java backend/src/main/java/com/miriyum/domain/store/evidence/StoreOnboardingEvidenceConfiguration.java backend/src/main/java/com/miriyum/domain/store/error/StoreErrorCode.java backend/src/test/java/com/miriyum/domain/store/evidence/BusinessRegistrationEvidenceUploadValidatorTest.java backend/src/test/java/com/miriyum/domain/store/evidence/BusinessRegistrationEvidenceUploadServiceTest.java backend/src/test/java/com/miriyum/domain/store/evidence/StoreBusinessRegistrationEvidenceServiceTest.java
@@ -375,7 +375,7 @@ git commit -m "feat: add private onboarding evidence upload"
 - Consumes: Task 2 repositories, Task 3 upload service, existing catalog/geocoding validation, Store Operator account guard.
 - Produces: `IdempotentOutcome submit(long operatorId, IdempotencyKey key, StoreCreateRequest request, MultipartFile evidence)`; `IdempotentOutcome supplement(long operatorId, long applicationId, IdempotencyKey key, StoreCreateRequest request, MultipartFile evidence)`; `ApplicationData getOwn(long operatorId, long applicationId)`; concrete `StoreOnboardingApplicationOwnershipPort` bean.
 
-- [ ] **Step 1: Write failing multipart Controller and submission tests**
+- [x] **Step 1: Write failing multipart Controller and submission tests**
 
 ```java
 mockMvc.perform(multipart("/api/v1/store-operators/stores")
@@ -390,7 +390,7 @@ mockMvc.perform(multipart("/api/v1/store-operators/stores")
 
 Service tests assert the same key and fingerprint returns the same application, while the same key with a different certificate checksum throws `COMMON_007`.
 
-- [ ] **Step 2: Run submission tests and verify RED**
+- [x] **Step 2: Run submission tests and verify RED**
 
 ```powershell
 cd backend
@@ -399,7 +399,7 @@ cd backend
 
 Expected: FAIL because `StoreController` still accepts JSON and immediately returns a Store.
 
-- [ ] **Step 3: Implement reserve-upload-attach transactions**
+- [x] **Step 3: Implement reserve-upload-attach transactions**
 
 `StoreOnboardingSubmissionService` reads and validates the multipart bytes first, performs catalog/geocoding preflight without a Store/application lock, then executes:
 
@@ -453,7 +453,7 @@ miriyum:
       case-assignment-days: 3650
 ```
 
-- [ ] **Step 4: Run submission/query tests**
+- [x] **Step 4: Run submission/query tests**
 
 ```powershell
 cd backend
@@ -462,7 +462,7 @@ cd backend
 
 Expected: PASS; no test expects immediate Store creation from POST `/stores`.
 
-- [ ] **Step 5: Commit the submission slice after explicit authorization**
+- [x] **Step 5: Commit the submission slice after explicit authorization**
 
 Stage the exact Task 4 paths and commit:
 
@@ -489,7 +489,7 @@ git commit -m "feat: submit durable store onboarding applications"
 - Consumes: immutable application snapshot and Task 2 fenced job repository.
 - Produces: `VerificationResult verify(VerificationRequest)`; `Optional<Claim> claim(String owner)`; `void record(Claim, VerificationResult)`; `long finalizeApproved(long applicationId, long version, ApprovalMode mode)`.
 
-- [ ] **Step 1: Write failing worker and finalization tests**
+- [x] **Step 1: Write failing worker and finalization tests**
 
 ```java
 @Test
@@ -512,7 +512,7 @@ void passedCheckCreatesReviewCaseWhenReviewWasRequired() {
 
 Add tests for definitive rejection, retryable outage, five-attempt exhaustion, expired claim recovery, and stale fencing-token rejection.
 
-- [ ] **Step 2: Run automatic-check tests and verify RED**
+- [x] **Step 2: Run automatic-check tests and verify RED**
 
 ```powershell
 cd backend
@@ -521,7 +521,7 @@ cd backend
 
 Expected: compilation FAIL because the port, worker, and finalizer are absent.
 
-- [ ] **Step 3: Implement provider result and worker transitions**
+- [x] **Step 3: Implement provider result and worker transitions**
 
 Use exact public result types:
 
@@ -540,7 +540,7 @@ The mock returns `PASSED` only after the same format/nonblank rules used by the 
 
 `StoreOnboardingFinalizationService` locks application/version, verifies the passed automatic job and expected approval mode, checks `StoreRepository.existsByBusinessRegistrationNumber`, creates `Store.createVerified(...)`, saves/flushes it, and records `resultingStoreId` in the same transaction.
 
-- [ ] **Step 4: Run unit and focused MySQL concurrency tests**
+- [x] **Step 4: Run unit and focused MySQL concurrency tests**
 
 ```powershell
 cd backend
@@ -550,7 +550,7 @@ cd backend
 
 Expected: PASS; two workers or two finalizers converge to one Store and one terminal result.
 
-- [ ] **Step 5: Commit the automatic-check slice after explicit authorization**
+- [x] **Step 5: Commit the automatic-check slice after explicit authorization**
 
 Stage the exact Task 5 paths and commit:
 
@@ -583,7 +583,7 @@ git commit -m "feat: automate store onboarding verification"
 - Consumes: Store public `StoreOnboardingReviewWorkflow`, #276 guard/assignment, Platform Operator principal/audit.
 - Produces: list/detail, initial self-assignment, explicit reassignment, and one `decide` command for three actions.
 
-- [ ] **Step 1: Write failing authorization and concurrency tests**
+- [x] **Step 1: Write failing authorization and concurrency tests**
 
 ```java
 @Test
@@ -601,7 +601,7 @@ void concurrentApproveAndRejectHaveOneWinner() {
 }
 ```
 
-- [ ] **Step 2: Run review tests and verify RED**
+- [x] **Step 2: Run review tests and verify RED**
 
 ```powershell
 cd backend
@@ -610,7 +610,7 @@ cd backend
 
 Expected: compilation FAIL because review services/controllers do not exist.
 
-- [ ] **Step 3: Implement the review public boundary and guard calls**
+- [x] **Step 3: Implement the review public boundary and guard calls**
 
 Add `ONBOARDING_ASSIGNMENT` and `ONBOARDING_EVIDENCE_ACCESS` purposes. Add `HighRiskCommandGuard.authorizeInitialOnboardingAssignment(...)`, constrained to `ONBOARDING_REVIEW`, `ONBOARDING_ASSIGNMENT`, `ONBOARDING_APPLICATION`, and `ONBOARDING_REVIEW` permission while skipping only the not-yet-existing assignment check.
 
@@ -649,7 +649,7 @@ public interface StoreOnboardingReviewWorkflow {
 
 APPROVE calls the Task 5 finalizer. REQUEST_CHANGES closes the active assignment and old version. REJECT records the terminal state without creating a Store. Initial assignment uses a 3,650-day expiry and no renewal endpoint; reassignment is explicit and requires the current assignment.
 
-- [ ] **Step 4: Run unit and concurrency tests**
+- [x] **Step 4: Run unit and concurrency tests**
 
 ```powershell
 cd backend
@@ -659,7 +659,7 @@ cd backend
 
 Expected: PASS; concurrent decisions persist one immutable decision, one audit outcome, and at most one Store.
 
-- [ ] **Step 5: Commit the review slice after explicit authorization**
+- [x] **Step 5: Commit the review slice after explicit authorization**
 
 Stage the exact Task 6 paths and commit:
 
@@ -684,7 +684,7 @@ git commit -m "feat: review store onboarding applications"
 - Consumes: common reauthentication approval, current assignment, `ONBOARDING_EVIDENCE_READ`, and Store `readCurrentEvidence` boundary.
 - Produces: stable `GET .../{caseId}/evidence` response with content bytes and no S3 URL; REQUIRES_NEW access-attempt audit.
 
-- [ ] **Step 1: Write failing one-time and privacy tests**
+- [x] **Step 1: Write failing one-time and privacy tests**
 
 ```java
 mockMvc.perform(get(EVIDENCE_PATH, caseId)
@@ -703,7 +703,7 @@ mockMvc.perform(get(EVIDENCE_PATH, caseId)
 
 Assert response and audit serialization do not contain `objectKey`, `fileId`, `businessRegistrationNumber`, representative name, or approval value.
 
-- [ ] **Step 2: Run evidence-access tests and verify RED**
+- [x] **Step 2: Run evidence-access tests and verify RED**
 
 ```powershell
 cd backend
@@ -712,13 +712,13 @@ cd backend
 
 Expected: compilation FAIL because `OnboardingEvidenceAccessService` is absent.
 
-- [ ] **Step 3: Implement consume-then-read ordering**
+- [x] **Step 3: Implement consume-then-read ordering**
 
 `authorizeAccess` runs in a short transaction and consumes reauthentication through `HighRiskCommandGuard.authorize` with target ID `applicationId:applicationVersion:evidenceId`. It commits before storage read. The subsequent read cannot roll back approval consumption.
 
 On success or failure, call a dedicated `PlatformOperatorAuditWriter.appendOnboardingReadAttempt(...)` with `Propagation.REQUIRES_NEW` and `AdminCaseType.ONBOARDING_REVIEW`. Store only public IDs, versions, actor/authority snapshot, outcome, allowlisted reason, and correlation ID.
 
-- [ ] **Step 4: Run unit and focused HTTP integration tests**
+- [x] **Step 4: Run unit and focused HTTP integration tests**
 
 ```powershell
 cd backend
@@ -728,7 +728,7 @@ cd backend
 
 Expected: PASS for first read, reuse denial, stale-version denial, reassignment denial, and storage failure with consumed approval plus failure audit.
 
-- [ ] **Step 5: Commit the evidence-access slice after explicit authorization**
+- [x] **Step 5: Commit the evidence-access slice after explicit authorization**
 
 Stage the exact Task 7 paths and commit:
 
@@ -754,7 +754,7 @@ git commit -m "feat: secure onboarding evidence access"
 - Consumes: all prior tasks.
 - Produces: end-to-end proof for mandatory evidence/checks, switch snapshot, automatic/manual finalization, stale commands, privacy, feature-off admin 404, package boundaries, and exact local verification evidence.
 
-- [ ] **Step 1: Write missing end-to-end assertions**
+- [x] **Step 1: Write missing end-to-end assertions**
 
 Cover these scenarios as separate tests:
 
@@ -769,7 +769,7 @@ platform-operator.enabled=false -> review Controller and OpenAPI path absent
 consumer/store-operator credential -> Platform Operator review unauthorized
 ```
 
-- [ ] **Step 2: Run focused HTTP, feature, architecture, and repository tests**
+- [x] **Step 2: Run focused HTTP, feature, architecture, and repository tests**
 
 ```powershell
 cd backend
@@ -780,7 +780,7 @@ cd backend
 
 Expected: PASS with no forbidden package import or OpenAPI drift.
 
-- [ ] **Step 3: Recheck migration and exact allowlist**
+- [x] **Step 3: Recheck migration and exact allowlist**
 
 ```powershell
 git fetch origin dev:refs/remotes/origin/dev

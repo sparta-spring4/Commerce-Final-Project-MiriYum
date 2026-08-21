@@ -109,8 +109,12 @@ components:
       required:
         - name
         - description
+        - region
         - address
-        - contactNumber
+        - timeZoneId
+        - storeCategoryCode
+        - tagCodes
+        - modes
         - businessRegistrationNumber
         - businessType
         - legalBusinessName
@@ -118,14 +122,30 @@ components:
         - openingDate
         - primaryBusinessCategory
         - primaryBusinessItem
-        - pickupEnabled
-        - applicantDeclarationAgreed
+        - applicantSelfAttested
         - requiredTermsAgreed
       properties:
         name: {type: string, minLength: 1, maxLength: 100}
         description: {type: string, minLength: 1, maxLength: 2000}
-        address: {type: string, minLength: 1, maxLength: 255}
-        contactNumber: {type: string, minLength: 8, maxLength: 20}
+        region:
+          type: string
+          enum: [SEOUL, BUSAN, DAEGU, DAEJEON, GWANGJU]
+        address: {type: string, minLength: 1, maxLength: 300}
+        timeZoneId: {type: string, minLength: 1, maxLength: 64}
+        storeCategoryCode: {type: string, pattern: '^[A-Z][A-Z0-9_]{1,49}$'}
+        tagCodes:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: {type: string, pattern: '^[A-Z][A-Z0-9_]{1,49}$'}
+        modes:
+          type: object
+          additionalProperties: false
+          required: [reservationEnabled, menuHoldEnabled, pickupEnabled]
+          properties:
+            reservationEnabled: {type: boolean}
+            menuHoldEnabled: {type: boolean}
+            pickupEnabled: {type: boolean}
         businessRegistrationNumber:
           type: string
           pattern: '^[0-9]{10}$'
@@ -137,8 +157,7 @@ components:
         openingDate: {type: string, format: date}
         primaryBusinessCategory: {type: string, minLength: 1, maxLength: 100}
         primaryBusinessItem: {type: string, minLength: 1, maxLength: 100}
-        pickupEnabled: {type: boolean}
-        applicantDeclarationAgreed: {type: boolean, const: true}
+        applicantSelfAttested: {type: boolean, const: true}
         requiredTermsAgreed: {type: boolean, const: true}
     StoreOnboardingApplicationStatus:
       type: string
@@ -163,15 +182,14 @@ components:
         - nextAction
         - storeId
       properties:
-        applicationId: {type: integer, format: int64, minimum: 1}
+        applicationId: {type: string, pattern: '^[1-9][0-9]*$'}
         applicationVersion: {type: integer, format: int64, minimum: 1}
         status: {$ref: '#/components/schemas/StoreOnboardingApplicationStatus'}
         reviewRequired: {type: boolean}
         nextAction: {type: string, minLength: 1, maxLength: 100}
         storeId:
-          type: [integer, 'null']
-          format: int64
-          minimum: 1
+          type: [string, 'null']
+          pattern: '^[1-9][0-9]*$'
     StoreOnboardingApplicationEnvelope:
       type: object
       additionalProperties: false

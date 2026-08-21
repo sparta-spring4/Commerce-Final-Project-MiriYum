@@ -12,6 +12,7 @@ import com.miriyum.domain.platformoperator.controller.auth.PlatformOperatorAuthC
 import com.miriyum.domain.platformoperator.controller.account.PlatformOperatorCapabilitiesController;
 import com.miriyum.domain.platformoperator.controller.membersupport.PlatformOperatorMemberSupportController;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorCapabilitiesService;
+import com.miriyum.domain.platformoperator.onboarding.controller.PlatformOperatorOnboardingReviewController;
 import java.util.Arrays;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -47,6 +49,8 @@ class PlatformOperatorFeatureFlagIT {
 
     @Autowired MockMvc mvc;
     @Autowired ApplicationContext context;
+    @MockitoBean com.miriyum.global.storage.service.FileStorageFacade fileStorageFacade;
+    @MockitoBean com.miriyum.global.storage.FileStoragePort fileStoragePort;
 
     @Test
     void disabledFeatureExposesNeitherControllerNorOpenEndedNamespace() throws Exception {
@@ -59,6 +63,7 @@ class PlatformOperatorFeatureFlagIT {
         assertThat(context.getBeansOfType(PlatformOperatorCapabilitiesController.class)).isEmpty();
         assertThat(context.getBeansOfType(PlatformOperatorMemberSupportController.class)).isEmpty();
         assertThat(context.getBeansOfType(PlatformOperatorCapabilitiesService.class)).isEmpty();
+        assertThat(context.getBeansOfType(PlatformOperatorOnboardingReviewController.class)).isEmpty();
         mvc.perform(get("/api/v1/platform-operators/me"))
                 .andExpect(status().isNotFound());
         mvc.perform(post("/api/v1/platform-operators/auth/sessions")
@@ -66,6 +71,8 @@ class PlatformOperatorFeatureFlagIT {
                         .content("{\"email\":\"x@example.com\",\"password\":\"Password1!\"}"))
                 .andExpect(status().isNotFound());
         mvc.perform(get("/api/v1/platform-operators/future-business"))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/platform-operators/onboarding-review-cases"))
                 .andExpect(status().isNotFound());
         mvc.perform(get("/api/v1/platform-operators/member-sanctions/pending-additional-approvals"))
                 .andExpect(status().isNotFound());
