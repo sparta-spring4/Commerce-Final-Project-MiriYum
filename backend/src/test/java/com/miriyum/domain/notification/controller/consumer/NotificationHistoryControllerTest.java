@@ -5,6 +5,7 @@ import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -17,10 +18,12 @@ import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.notification.dto.response.NotificationHistoryItemResponse;
 import com.miriyum.domain.notification.dto.response.NotificationHistoryPageResponse;
 import com.miriyum.domain.notification.dto.response.NotificationResourceResponse;
+import com.miriyum.domain.notification.dto.response.NotificationUnreadCountResponse;
 import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import com.miriyum.domain.notification.dto.source.NotificationResourceType;
 import com.miriyum.domain.notification.exception.NotificationErrorCode;
 import com.miriyum.domain.notification.service.NotificationHistoryService;
+import com.miriyum.domain.notification.service.NotificationReadService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.security.SecurityConfig;
@@ -46,6 +49,7 @@ class NotificationHistoryControllerTest {
 
     @Autowired MockMvc mockMvc;
     @MockitoBean NotificationHistoryService historyService;
+    @MockitoBean NotificationReadService readService;
     @MockitoBean ConsumerAccountService consumerAccountService;
     @MockitoBean JwtTokenProvider jwtTokenProvider;
     @MockitoBean RateLimiter rateLimiter;
@@ -160,5 +164,38 @@ class NotificationHistoryControllerTest {
                 .andExpect(jsonPath("$.code").value("AUTH_011"));
 
         verifyNoInteractions(historyService);
+    }
+
+    @Test
+    void activeConsumerCanReadTheCurrentUnreadCount() throws Exception {
+        given(readService.getUnreadCount(CONSUMER_ID))
+                .willReturn(new NotificationUnreadCountResponse(4L));
+
+        mockMvc.perform(get("/api/v1/consumers/me/notifications/unread-count")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.unreadCount").value(4));
+    }
+
+    @Test
+    void activeConsumerCanMarkOneNotificationRead() throws Exception {
+        given(readService.readOne(CONSUMER_ID, 31L))
+                .willReturn(new NotificationUnreadCountResponse(2L));
+
+        mockMvc.perform(post("/api/v1/consumers/me/notifications/31/reads")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.unreadCount").value(2));
+    }
+
+    @Test
+    void activeConsumerCanMarkAllNotificationsRead() throws Exception {
+        given(readService.readAll(CONSUMER_ID))
+                .willReturn(new NotificationUnreadCountResponse(0L));
+
+        mockMvc.perform(post("/api/v1/consumers/me/notifications/reads")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.unreadCount").value(0));
     }
 }
