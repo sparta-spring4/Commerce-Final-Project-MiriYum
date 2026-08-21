@@ -9,4 +9,8 @@ public interface StoreOnboardingApplicationVersionRepository
 
     Optional<StoreOnboardingApplicationVersion> findByStoreOnboardingApplicationIdAndApplicationVersion(
             long storeOnboardingApplicationId, long applicationVersion);
+
+    Optional<StoreOnboardingApplicationVersion>
+            findByStoreOnboardingApplicationIdAndSupplementIdempotencyKey(
+                    long storeOnboardingApplicationId, String supplementIdempotencyKey);
 }

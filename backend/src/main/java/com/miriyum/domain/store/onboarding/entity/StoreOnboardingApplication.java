@@ -115,6 +115,7 @@ public class StoreOnboardingApplication {
             long expectedVersion,
             String idempotencyKey,
             String fingerprint,
+            boolean reviewRequired,
             Instant now
     ) {
         requireCurrentVersion(expectedVersion);
@@ -122,6 +123,7 @@ public class StoreOnboardingApplication {
         currentRequestIdempotencyKey = requireText(idempotencyKey, "idempotency key");
         currentRequestFingerprint = requireText(fingerprint, "submission fingerprint");
         currentVersion = Math.addExact(currentVersion, 1L);
+        this.reviewRequired = reviewRequired;
         status = ApplicationStatus.EVIDENCE_PENDING;
         updatedAt = requireTime(now);
         return currentVersion;

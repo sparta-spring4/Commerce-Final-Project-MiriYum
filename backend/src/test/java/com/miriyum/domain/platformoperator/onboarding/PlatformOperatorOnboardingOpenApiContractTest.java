@@ -2,6 +2,7 @@ package com.miriyum.domain.platformoperator.onboarding;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.miriyum.domain.store.onboarding.dto.StoreOnboardingContracts.ReviewCaseDetail;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -35,6 +36,26 @@ class PlatformOperatorOnboardingOpenApiContractTest {
 
         assertThat(decisionType.get("enum"))
                 .isEqualTo(java.util.List.of("APPROVE", "REJECT", "REQUEST_CHANGES"));
+    }
+
+    @Test
+    void runtimeDetailContainsTheSummaryFieldsRequiredByOpenApi() {
+        assertThat(java.util.Arrays.stream(ReviewCaseDetail.class.getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName))
+                .contains("maskedBusinessNumber", "receivedAt");
+    }
+
+    @Test
+    void detailIsOneClosedObjectInsteadOfConflictingAllOfBranches() throws IOException {
+        Map<String, Object> schemas = map(map(document().get("components")).get("schemas"));
+        Map<String, Object> detail = map(schemas.get("OnboardingReviewCaseDetail"));
+
+        assertThat(detail).doesNotContainKey("allOf");
+        assertThat(detail.get("additionalProperties")).isEqualTo(false);
+        assertThat((java.util.List<String>) detail.get("required")).containsExactlyInAnyOrder(
+                "caseId", "type", "status", "applicationId", "applicationVersion",
+                "caseVersion", "maskedBusinessNumber", "receivedAt",
+                "assignedOperatorId", "application");
     }
 
     private static Map<String, Object> paths() throws IOException {

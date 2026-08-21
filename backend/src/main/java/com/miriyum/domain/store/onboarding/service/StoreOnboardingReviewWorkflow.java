@@ -16,6 +16,7 @@ import com.miriyum.domain.store.onboarding.dto.StoreOnboardingContracts.ReviewTy
 import com.miriyum.domain.store.onboarding.entity.StoreOnboardingApplication;
 import com.miriyum.domain.store.onboarding.entity.StoreOnboardingDecision;
 import com.miriyum.domain.store.onboarding.entity.StoreOnboardingEnums.DecisionType;
+import com.miriyum.domain.store.onboarding.entity.StoreOnboardingEnums.ApplicationStatus;
 import com.miriyum.domain.store.onboarding.entity.StoreOnboardingEnums.ReviewCaseStatus;
 import com.miriyum.domain.store.onboarding.entity.StoreOnboardingEnums.ReviewCaseType;
 import com.miriyum.domain.store.onboarding.entity.StoreOnboardingReviewCase;
@@ -124,12 +125,13 @@ class DefaultStoreOnboardingReviewWorkflow implements StoreOnboardingReviewWorkf
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public EvidenceAccessDescriptor resolveEvidenceAccess(String caseId, long expectedCaseVersion) {
-        StoreOnboardingReviewCase reviewCase = load(caseId);
+        StoreOnboardingReviewCase reviewCase = loadForUpdate(caseId);
         if (reviewCase.getCaseVersion() != expectedCaseVersion) {
             throw new IllegalStateException("stale evidence access request");
         }
+        requireActiveEvidenceReview(reviewCase);
         UUID evidenceId = evidence.findCurrentEvidence(
                         reviewCase.getStoreOnboardingApplicationId(), reviewCase.getApplicationVersion())
                 .orElseThrow(() -> new IllegalStateException("onboarding evidence is missing"))
@@ -141,14 +143,15 @@ class DefaultStoreOnboardingReviewWorkflow implements StoreOnboardingReviewWorkf
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public BusinessRegistrationEvidenceContent readEvidence(EvidenceReadQuery query) {
-        StoreOnboardingReviewCase reviewCase = load(query.caseId());
+        StoreOnboardingReviewCase reviewCase = loadForUpdate(query.caseId());
         if (reviewCase.getCaseVersion() != query.expectedCaseVersion()
                 || reviewCase.getStoreOnboardingApplicationId() != query.applicationId()
                 || reviewCase.getApplicationVersion() != query.applicationVersion()) {
             throw new IllegalStateException("stale evidence read request");
         }
+        requireActiveEvidenceReview(reviewCase);
         return evidence.readCurrentEvidence(
                 query.applicationId(), query.applicationVersion(), query.evidenceId());
     }
@@ -167,11 +170,13 @@ class DefaultStoreOnboardingReviewWorkflow implements StoreOnboardingReviewWorkf
         StoreOnboardingApplication application = applications
                 .findById(reviewCase.getStoreOnboardingApplicationId())
                 .orElseThrow(() -> new IllegalStateException("onboarding application is missing"));
+        var version = version(reviewCase);
         return new ReviewCaseDetail(
                 reviewCase.getCasePublicId(), ReviewType.valueOf(reviewCase.getCaseType().name()),
                 ReviewStatus.valueOf(reviewCase.getStatus().name()),
                 reviewCase.getStoreOnboardingApplicationId(), reviewCase.getApplicationVersion(),
-                reviewCase.getCaseVersion(), reviewCase.getAssignedPlatformOperatorId(),
+                reviewCase.getCaseVersion(), mask(version.getBusinessRegistrationNumber()),
+                reviewCase.getCreatedAt(), reviewCase.getAssignedPlatformOperatorId(),
                 applicationData(application));
     }
 
@@ -191,6 +196,16 @@ class DefaultStoreOnboardingReviewWorkflow implements StoreOnboardingReviewWorkf
     private StoreOnboardingReviewCase loadForUpdate(String caseId) {
         return cases.findByCasePublicIdForUpdate(caseId)
                 .orElseThrow(() -> new IllegalStateException("onboarding review case is missing"));
+    }
+
+    private void requireActiveEvidenceReview(StoreOnboardingReviewCase reviewCase) {
+        StoreOnboardingApplication application = applicationForUpdate(reviewCase);
+        if (reviewCase.getStatus() != ReviewCaseStatus.UNDER_REVIEW
+                || reviewCase.getActiveMarker() == null
+                || application.getStatus() != ApplicationStatus.UNDER_REVIEW
+                || application.getCurrentVersion() != reviewCase.getApplicationVersion()) {
+            throw new IllegalStateException("evidence is available only during the active review");
+        }
     }
 
     private StoreOnboardingApplication applicationForUpdate(StoreOnboardingReviewCase reviewCase) {

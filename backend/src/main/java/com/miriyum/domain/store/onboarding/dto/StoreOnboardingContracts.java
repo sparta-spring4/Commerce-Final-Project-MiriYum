@@ -77,6 +77,7 @@ public final class StoreOnboardingContracts {
     public record ReviewCaseDetail(
             String caseId, ReviewType type, ReviewStatus status,
             long applicationId, long applicationVersion, long caseVersion,
+            String maskedBusinessNumber, Instant receivedAt,
             Long assignedOperatorId, ApplicationData application) {
     }
 }

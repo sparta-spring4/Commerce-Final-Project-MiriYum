@@ -9,17 +9,20 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import com.miriyum.domain.platformoperator.dto.authorization.AdminAuditContext;
+import com.miriyum.domain.platformoperator.dto.authorization.OperatorAuthority;
 import com.miriyum.domain.platformoperator.enums.AdminCaseType;
 import com.miriyum.domain.platformoperator.enums.AdminCommandPurpose;
 import com.miriyum.domain.platformoperator.enums.AdminTargetType;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
+import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode;
 import com.miriyum.domain.platformoperator.onboarding.dto.OnboardingReviewRequests.AssignmentRequest;
 import com.miriyum.domain.platformoperator.onboarding.dto.OnboardingReviewRequests.DecisionRequest;
 import com.miriyum.domain.platformoperator.onboarding.dto.OnboardingReviewRequests.ReassignmentRequest;
 import com.miriyum.domain.platformoperator.onboarding.service.OnboardingReviewCommandService;
 import com.miriyum.domain.platformoperator.service.AdminCaseAssignmentService;
 import com.miriyum.domain.platformoperator.service.HighRiskCommandGuard;
+import com.miriyum.domain.platformoperator.service.OperatorAuthorityService;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorAuditWriter;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.domain.store.onboarding.dto.StoreOnboardingContracts.ApplicationData;
@@ -71,6 +74,7 @@ class OnboardingReviewIdempotencyIT {
     @Autowired JdbcTemplate jdbc;
     @MockitoBean StoreOnboardingReviewWorkflow workflow;
     @MockitoBean HighRiskCommandGuard guard;
+    @MockitoBean OperatorAuthorityService authorities;
     @MockitoBean AdminCaseAssignmentService assignments;
     @MockitoBean PlatformOperatorAuditWriter audit;
 
@@ -85,18 +89,23 @@ class OnboardingReviewIdempotencyIT {
         request = new DecisionRequest(ReviewDecisionAction.APPROVE, 1L, 2L, "APPROVED");
         var detail = new ReviewCaseDetail(
                 CASE_ID, ReviewType.ONBOARDING, ReviewStatus.UNDER_REVIEW,
-                41L, 1L, 2L, 91L, null);
+                41L, 1L, 2L, "123-**-*****", java.time.Instant.parse("2026-08-21T00:00:00Z"),
+                91L, null);
         given(workflow.getReviewCase(CASE_ID)).willReturn(detail);
+        given(authorities.currentAuthority(principal.accountId()))
+                .willReturn(authority(1L, Set.of(PlatformOperatorPermission.ONBOARDING_REVIEW)));
         given(guard.authorize(any())).willReturn(context());
         given(guard.authorizeInitialOnboardingAssignment(any())).willReturn(context());
         given(workflow.assign(any(), anyLong(), anyLong(), any()))
                 .willReturn(new ReviewCaseDetail(
                         CASE_ID, ReviewType.ONBOARDING, ReviewStatus.UNDER_REVIEW,
-                        41L, 1L, 3L, 91L, null));
+                        41L, 1L, 3L, "123-**-*****",
+                        java.time.Instant.parse("2026-08-21T00:00:00Z"), 91L, null));
         given(workflow.reassign(any(), anyLong(), anyLong(), anyLong(), any()))
                 .willReturn(new ReviewCaseDetail(
                         CASE_ID, ReviewType.ONBOARDING, ReviewStatus.UNDER_REVIEW,
-                        41L, 1L, 3L, 92L, null));
+                        41L, 1L, 3L, "123-**-*****",
+                        java.time.Instant.parse("2026-08-21T00:00:00Z"), 92L, null));
         given(workflow.decide(any())).willReturn(new ApplicationData(
                 "41", 1L, ApplicationStatus.APPROVED, true, "WAIT", "7"));
     }
@@ -113,6 +122,7 @@ class OnboardingReviewIdempotencyIT {
         assertThat(first.replayed()).isFalse();
         assertThat(replay.replayed()).isTrue();
         assertThat(replay.data()).isEqualTo(first.data());
+        verifyAuthorityCheckedForBothRequests();
         verify(guard, times(1)).authorizeInitialOnboardingAssignment(any());
         verify(workflow, times(1)).assign(any(), anyLong(), anyLong(), any());
     }
@@ -129,6 +139,7 @@ class OnboardingReviewIdempotencyIT {
         assertThat(first.replayed()).isFalse();
         assertThat(replay.replayed()).isTrue();
         assertThat(replay.data()).isEqualTo(first.data());
+        verifyAuthorityCheckedForBothRequests();
         verify(guard, times(1)).authorize(any());
         verify(workflow, times(1)).reassign(any(), anyLong(), anyLong(), anyLong(), any());
     }
@@ -143,6 +154,7 @@ class OnboardingReviewIdempotencyIT {
         assertThat(first.replayed()).isFalse();
         assertThat(replay.replayed()).isTrue();
         assertThat(replay.data()).isEqualTo(first.data());
+        verifyAuthorityCheckedForBothRequests();
         verify(guard, times(1)).authorize(any());
         verify(workflow, times(1)).decide(any());
     }
@@ -158,6 +170,25 @@ class OnboardingReviewIdempotencyIT {
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
+        verifyAuthorityCheckedForBothRequests();
+        verify(guard, times(1)).authorize(any());
+        verify(workflow, times(1)).decide(any());
+    }
+
+    @Test
+    void replayIsForbiddenAfterCurrentOnboardingReviewPermissionIsRevoked() {
+        service.decide(command("ONBOARDING_DECIDE", "a".repeat(64)), principal, CASE_ID,
+                request, "first-approval", "correlation");
+        given(authorities.currentAuthority(principal.accountId()))
+                .willReturn(authority(2L, Set.of()));
+
+        assertThatThrownBy(() -> service.decide(
+                command("ONBOARDING_DECIDE", "a".repeat(64)), principal, CASE_ID,
+                request, "already-consumed-approval", "correlation"))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(AdminAuthorizationErrorCode.AUTHORIZATION_DENIED);
+        verifyAuthorityCheckedForBothRequests();
         verify(guard, times(1)).authorize(any());
         verify(workflow, times(1)).decide(any());
     }
@@ -165,6 +196,10 @@ class OnboardingReviewIdempotencyIT {
     private IdempotencyCommand command(String commandType, String fingerprint) {
         return new IdempotencyCommand(
                 "platform-operator", principal.accountId(), commandType, KEY, fingerprint);
+    }
+
+    private void verifyAuthorityCheckedForBothRequests() {
+        verify(authorities, times(2)).currentAuthority(principal.accountId());
     }
 
     private static AdminAuditContext context() {
@@ -175,5 +210,11 @@ class OnboardingReviewIdempotencyIT {
                 AdminCommandPurpose.ONBOARDING_DECISION,
                 AdminTargetType.ONBOARDING_APPLICATION, "41",
                 "approval-fingerprint", "correlation");
+    }
+
+    private static OperatorAuthority authority(
+            long authorityVersion, Set<PlatformOperatorPermission> permissions) {
+        return new OperatorAuthority(
+                91L, authorityVersion, Set.of(PlatformOperatorRole.ONBOARDING_REVIEWER), permissions);
     }
 }

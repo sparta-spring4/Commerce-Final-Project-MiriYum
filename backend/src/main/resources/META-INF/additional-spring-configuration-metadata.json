@@ -36,6 +36,11 @@
       "description": "개발 환경의 본인 확인 Stub 사용 여부입니다."
     },
     {
+      "name": "miriyum.store.onboarding.dev-stub-enabled",
+      "type": "java.lang.Boolean",
+      "description": "개발·테스트 환경에서만 사업자등록 자동검사 Stub을 활성화합니다."
+    },
+    {
       "name": "miriyum.storage.s3.enabled",
       "type": "java.lang.Boolean",
       "description": "S3 파일 저장 어댑터 활성화 여부입니다."

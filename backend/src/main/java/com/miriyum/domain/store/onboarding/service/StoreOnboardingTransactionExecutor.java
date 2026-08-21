@@ -94,8 +94,21 @@ public class StoreOnboardingTransactionExecutor {
                     applicationId, application.getCurrentVersion(),
                     application.isReviewRequired(), completed);
         }
+        var historical = versionRepository
+                .findByStoreOnboardingApplicationIdAndSupplementIdempotencyKey(
+                        applicationId, idempotencyKey);
+        if (historical.isPresent()) {
+            StoreOnboardingApplicationVersion version = historical.get();
+            if (!version.getRequestFingerprint().equals(fingerprint)) {
+                throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
+            }
+            return new ReservedApplication(
+                    applicationId, version.getApplicationVersion(),
+                    application.isReviewRequired(), true);
+        }
         long version = application.reserveSupplement(
-                application.getCurrentVersion(), idempotencyKey, fingerprint, clock.instant());
+                application.getCurrentVersion(), idempotencyKey, fingerprint,
+                properties.manualReviewEnabled(), clock.instant());
         return new ReservedApplication(applicationId, version, application.isReviewRequired(), false);
     }
 
@@ -126,9 +139,18 @@ public class StoreOnboardingTransactionExecutor {
     }
 
     @Transactional(readOnly = true)
-    public IdempotentOutcome replayOutcome(long applicationId) {
-        return outcome(applicationRepository.findById(applicationId)
-                .orElseThrow(() -> new ServiceException(CommonErrorCode.VALIDATION_FAILED)), true);
+    public IdempotentOutcome replayOutcome(long applicationId, long applicationVersion) {
+        StoreOnboardingApplicationVersion version = versionRepository
+                .findByStoreOnboardingApplicationIdAndApplicationVersion(
+                        applicationId, applicationVersion)
+                .orElseThrow(() -> new ServiceException(CommonErrorCode.VALIDATION_FAILED));
+        ApplicationData data = new ApplicationData(
+                Long.toString(applicationId), applicationVersion,
+                ApplicationStatus.AUTO_CHECKING, version.isReviewRequired(),
+                "WAIT", null);
+        return new IdempotentOutcome(
+                true, 202, "SUCCESS", RESOURCE_TYPE, Long.toString(applicationId),
+                objectMapper.valueToTree(data));
     }
 
     private ReservedApplication replay(StoreOnboardingApplication application, String fingerprint) {
@@ -136,10 +158,11 @@ public class StoreOnboardingTransactionExecutor {
             throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
         }
         return new ReservedApplication(
-                application.getId(), application.getCurrentVersion(),
+                application.getId(), 1L,
                 application.isReviewRequired(),
-                application.getStatus() != ApplicationStatus.RECEIVED
-                        && application.getStatus() != ApplicationStatus.EVIDENCE_PENDING);
+                application.getCurrentVersion() > 1L
+                        || (application.getStatus() != ApplicationStatus.RECEIVED
+                        && application.getStatus() != ApplicationStatus.EVIDENCE_PENDING));
     }
 
     private StoreOnboardingApplication loadForUpdate(long applicationId) {

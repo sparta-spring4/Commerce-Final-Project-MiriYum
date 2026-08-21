@@ -222,17 +222,23 @@ components:
         maskedBusinessNumber: {type: string, pattern: '^[0-9]{3}-\*\*-\*{5}$'}
         receivedAt: {type: string, format: date-time}
     OnboardingReviewCaseDetail:
-      allOf:
-        - $ref: '#/components/schemas/OnboardingReviewCaseSummary'
-        - type: object
-          additionalProperties: false
-          required: [assignedOperatorId, application]
-          properties:
-            assignedOperatorId:
-              type: [integer, 'null']
-              format: int64
-              minimum: 1
-            application: {$ref: '#/components/schemas/ApplicationData'}
+      type: object
+      additionalProperties: false
+      required: [caseId, type, status, applicationId, applicationVersion, caseVersion, maskedBusinessNumber, receivedAt, assignedOperatorId, application]
+      properties:
+        caseId: {type: string, format: uuid}
+        type: {$ref: '#/components/schemas/OnboardingReviewCaseType'}
+        status: {$ref: '#/components/schemas/OnboardingReviewCaseStatus'}
+        applicationId: {type: integer, format: int64, minimum: 1}
+        applicationVersion: {type: integer, format: int64, minimum: 1}
+        caseVersion: {type: integer, format: int64, minimum: 1}
+        maskedBusinessNumber: {type: string, pattern: '^[0-9]{3}-\*\*-\*{5}$'}
+        receivedAt: {type: string, format: date-time}
+        assignedOperatorId:
+          type: [integer, 'null']
+          format: int64
+          minimum: 1
+        application: {$ref: '#/components/schemas/ApplicationData'}
     OnboardingReviewCasePage:
       type: object
       additionalProperties: false

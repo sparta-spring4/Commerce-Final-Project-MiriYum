@@ -19,7 +19,7 @@ class StoreOnboardingApplicationTest {
         application.requestChanges(1L, NOW);
 
         long nextVersion = application.reserveSupplement(
-                1L, "supplement-key", "supplement-fingerprint", NOW);
+                1L, "supplement-key", "supplement-fingerprint", true, NOW);
 
         assertThat(nextVersion).isEqualTo(2L);
         assertThat(application.getCurrentVersion()).isEqualTo(2L);

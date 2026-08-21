@@ -1,5 +1,6 @@
 package com.miriyum.domain.platformoperator.onboarding.service;
 
+import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.platformoperator.dto.authorization.AdminCaseAssignmentCommand;
 import com.miriyum.domain.platformoperator.dto.authorization.AdminCaseAssignmentRequest;
 import com.miriyum.domain.platformoperator.dto.authorization.HighRiskCommandRequest;
@@ -9,11 +10,13 @@ import com.miriyum.domain.platformoperator.enums.AdminTargetType;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuditAction;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuditOutcome;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
+import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode;
 import com.miriyum.domain.platformoperator.onboarding.dto.OnboardingReviewRequests.AssignmentRequest;
 import com.miriyum.domain.platformoperator.onboarding.dto.OnboardingReviewRequests.DecisionRequest;
 import com.miriyum.domain.platformoperator.onboarding.dto.OnboardingReviewRequests.ReassignmentRequest;
 import com.miriyum.domain.platformoperator.service.AdminCaseAssignmentManager;
 import com.miriyum.domain.platformoperator.service.HighRiskCommandGuard;
+import com.miriyum.domain.platformoperator.service.OperatorAuthorityReader;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorAuditWriter;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorAuditWriter.OnboardingEvent;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
@@ -23,6 +26,7 @@ import com.miriyum.domain.store.onboarding.dto.StoreOnboardingContracts.ReviewCa
 import com.miriyum.domain.store.onboarding.dto.StoreOnboardingContracts.ReviewDecisionCommand;
 import com.miriyum.domain.store.onboarding.dto.StoreOnboardingContracts.ReviewActorContext;
 import com.miriyum.domain.store.onboarding.service.StoreOnboardingReviewWorkflow;
+import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
@@ -47,6 +51,7 @@ public class OnboardingReviewCommandService {
     private final AdminCaseAssignmentManager assignments;
     private final PlatformOperatorAuditWriter audit;
     private final StoreOnboardingProperties properties;
+    private final OperatorAuthorityReader authorities;
     private final IdempotencyExecutor idempotency;
     private final Clock clock;
 
@@ -55,6 +60,7 @@ public class OnboardingReviewCommandService {
             IdempotencyCommand command, PlatformOperatorPrincipal principal,
             String caseId, AssignmentRequest request,
             String approval, String correlationId) {
+        requireCurrentReviewer(principal);
         return idempotency.execute(command, () -> {
             ReviewCaseDetail before = workflow.getReviewCase(caseId);
             var context = guard.authorizeInitialOnboardingAssignment(highRisk(
@@ -79,6 +85,7 @@ public class OnboardingReviewCommandService {
             IdempotencyCommand command, PlatformOperatorPrincipal principal,
             String caseId, ReassignmentRequest request,
             String approval, String correlationId) {
+        requireCurrentReviewer(principal);
         return idempotency.execute(command, () -> {
             ReviewCaseDetail before = workflow.getReviewCase(caseId);
             var context = guard.authorize(highRisk(
@@ -106,6 +113,7 @@ public class OnboardingReviewCommandService {
             IdempotencyCommand command, PlatformOperatorPrincipal principal,
             String caseId, DecisionRequest request,
             String approval, String correlationId) {
+        requireCurrentReviewer(principal);
         return idempotency.execute(command, () -> {
             ReviewCaseDetail detail = workflow.getReviewCase(caseId);
             var context = guard.authorize(highRisk(
@@ -138,6 +146,16 @@ public class OnboardingReviewCommandService {
             String caseId, long caseVersion, long operatorId) {
         return new AdminCaseAssignmentRequest(
                 AdminCaseType.ONBOARDING_REVIEW, caseId, caseVersion, operatorId);
+    }
+
+    private void requireCurrentReviewer(PlatformOperatorPrincipal principal) {
+        var authority = authorities.currentAuthority(principal.accountId());
+        if (!authority.permissions().contains(PlatformOperatorPermission.ONBOARDING_REVIEW)) {
+            throw new ServiceException(AdminAuthorizationErrorCode.AUTHORIZATION_DENIED);
+        }
+        if (authority.authorityVersion() != principal.authorityVersion()) {
+            throw new ServiceException(AuthErrorCode.PLATFORM_OPERATOR_SESSION_INVALID);
+        }
     }
 
     private static <T> BusinessResult<T> success(

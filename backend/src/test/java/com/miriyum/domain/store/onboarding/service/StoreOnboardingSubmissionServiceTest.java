@@ -19,7 +19,10 @@ import com.miriyum.domain.store.model.VerifiedStoreGeocoding;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
+import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotentOutcome;
+import com.miriyum.global.idempotency.BusinessResult;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,6 +40,7 @@ class StoreOnboardingSubmissionServiceTest {
     @Mock StoreCreateRequest request;
     @Mock StoreCatalogPolicy catalogPolicy;
     @Mock StoreGeocodingService geocodingService;
+    @Mock IdempotencyExecutor idempotency;
 
     private StoreOnboardingSubmissionService service;
     private final IdempotencyKey key = IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000");
@@ -46,12 +50,20 @@ class StoreOnboardingSubmissionServiceTest {
     @BeforeEach
     void setUp() {
         service = new StoreOnboardingSubmissionService(
-                accounts, fingerprints, transactions, uploads, catalogPolicy, geocodingService);
+                accounts, fingerprints, transactions, uploads, catalogPolicy, geocodingService,
+                idempotency);
         given(uploads.validate(evidence)).willReturn(new ValidatedBusinessRegistrationEvidence(
                 "application/pdf", new byte[] {1}, "a".repeat(64)));
         given(fingerprints.create(request, "a".repeat(64))).willReturn("f".repeat(64));
         given(geocodingService.verify(any(), any())).willReturn(org.mockito.Mockito.mock(
                 VerifiedStoreGeocoding.class));
+        given(idempotency.execute(any(), any())).willAnswer(invocation -> {
+            Supplier<BusinessResult<tools.jackson.databind.JsonNode>> work = invocation.getArgument(1);
+            BusinessResult<tools.jackson.databind.JsonNode> result = work.get();
+            return new IdempotentOutcome(
+                    false, result.httpStatus(), result.responseCode(), result.resourceType(),
+                    result.resourceId(), result.data());
+        });
     }
 
     @Test
@@ -60,9 +72,9 @@ class StoreOnboardingSubmissionServiceTest {
         IdempotentOutcome replay = new IdempotentOutcome(
                 true, 202, "SUCCESS", "STORE_ONBOARDING_APPLICATION", "41", null);
         given(transactions.reserve(11L, key.value(), "f".repeat(64))).willReturn(reserved);
-        given(transactions.replayOutcome(41L)).willReturn(replay);
+        given(transactions.replayOutcome(41L, 1L)).willReturn(replay);
 
-        assertThat(service.submit(11L, key, request, evidence)).isSameAs(replay);
+        assertThat(service.submit(11L, key, request, evidence).data()).isEqualTo(replay.data());
 
         then(uploads).should(never()).storePending(anyLong(), anyLong(),
                 any(ValidatedBusinessRegistrationEvidence.class));
@@ -78,4 +90,21 @@ class StoreOnboardingSubmissionServiceTest {
                         error -> assertThat(error.getErrorCode()).isEqualTo(
                                 CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
     }
+
+    @Test
+    void supplementReplayUsesTheHistoricalApplicationVersion() {
+        ReservedApplication reserved = new ReservedApplication(41L, 2L, true, true);
+        IdempotentOutcome replay = new IdempotentOutcome(
+                true, 202, "SUCCESS", "STORE_ONBOARDING_APPLICATION", "41", null);
+        given(transactions.reserveSupplement(
+                11L, 41L, key.value(), "f".repeat(64))).willReturn(reserved);
+        given(transactions.replayOutcome(41L, 2L)).willReturn(replay);
+
+        assertThat(service.supplement(11L, 41L, key, request, evidence).data())
+                .isEqualTo(replay.data());
+
+        then(uploads).should(never()).storePending(anyLong(), anyLong(),
+                any(ValidatedBusinessRegistrationEvidence.class));
+    }
+
 }
