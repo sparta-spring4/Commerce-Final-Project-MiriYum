@@ -163,6 +163,11 @@ public enum ReservationErrorCode implements ErrorCode {
             HttpStatus.SERVICE_UNAVAILABLE,
             "WAITING_018",
             "웨이팅 모니터링 원장을 조회할 수 없습니다."
+    ),
+    WAITING_HISTORY_CURSOR_INVALID(
+            HttpStatus.BAD_REQUEST,
+            "WAITING_019",
+            "웨이팅 이력 cursor가 올바르지 않습니다."
     );
 
     private final HttpStatus httpStatus;

@@ -91,6 +91,13 @@ export interface paths {
      */
     post: operations["createConsumerWaitingTeam"];
   };
+  "/api/v1/consumers/me/waiting-teams": {
+    /**
+     * 본인 웨이팅 이력 조회
+     * @description 소비자 식별자를 입력받지 않고 Consumer Access Token principal의 본인 이력만 `(registeredAt DESC, waitingTeamId DESC)` 고정 정렬로 반환한다.
+     */
+    get: operations["getConsumerWaitingHistory"];
+  };
   "/api/v1/consumers/me/waiting-teams/current": {
     /** 본인 현재 활성 웨이팅 조회 */
     get: operations["getCurrentConsumerWaitingTeam"];
@@ -313,6 +320,21 @@ export interface components {
       version: number;
       memberships: components["schemas"]["WaitingPartyMember"][];
     };
+    WaitingConsumerHistoryItem: {
+      waitingTeamId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      storeId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      status: components["schemas"]["WaitingTeamStatus"];
+      registeredAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      /** Format: date-time */
+      calledAt: string | null;
+      /** Format: date-time */
+      terminatedAt: string | null;
+    };
+    WaitingConsumerHistoryPage: {
+      items: components["schemas"]["WaitingConsumerHistoryItem"][];
+      /** @description 다음 page가 없으면 null인 opaque cursor */
+      nextCursor: string | null;
+    };
     WaitingExpectedVersionRequest: {
       /** Format: int64 */
       expectedVersion: number;
@@ -448,6 +470,11 @@ export interface components {
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["WaitingConsumerSnapshot"];
     };
+    WaitingConsumerHistorySuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["WaitingConsumerHistoryPage"];
+    };
   };
   responses: {
     /** @description storeId, 조건부 위치 측정 본문 또는 JSON 형식이 올바르지 않음 */
@@ -458,6 +485,12 @@ export interface components {
     };
     /** @description Last-Event-ID 형식·무결성 또는 audience·계정·store 결속이 유효하지 않음 */
     WaitingEventCursorBadRequest: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description scope·size가 올바르지 않거나 cursor 형식·무결성·계정·scope 결속이 유효하지 않음 */
+    WaitingHistoryCursorBadRequest: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -1097,6 +1130,33 @@ export interface operations {
       404: components["responses"]["WaitingConsumerStoreNotFound"];
       409: components["responses"]["WaitingConsumerCreateConflict"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /**
+   * 본인 웨이팅 이력 조회
+   * @description 소비자 식별자를 입력받지 않고 Consumer Access Token principal의 본인 이력만 `(registeredAt DESC, waitingTeamId DESC)` 고정 정렬로 반환한다.
+   */
+  getConsumerWaitingHistory: {
+    parameters: {
+      query?: {
+        scope?: "ALL" | "CURRENT" | "TERMINAL";
+        /** @description 계약 version·인증 소비자·scope·정렬 경계에 결속된 opaque cursor */
+        cursor?: string;
+        size?: number;
+      };
+    };
+    responses: {
+      /** @description 빈 이력을 포함한 본인의 웨이팅 이력 page */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingConsumerHistorySuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingHistoryCursorBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 본인 현재 활성 웨이팅 조회 */
