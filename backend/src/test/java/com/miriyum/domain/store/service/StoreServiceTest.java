@@ -227,6 +227,23 @@ class StoreServiceTest {
     }
 
     @Test
+    void returnsManagedStoresInStableRepositoryOrder() {
+        Store first = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(first, "id", STORE_ID);
+        Store second = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(second, "id", 9L);
+        given(storeRepository.findAllByStoreOperatorAccountIdOrderByIdAsc(OPERATOR_ID))
+                .willReturn(List.of(first, second));
+
+        List<ManagedStoreResponse> stores = storeService.getManagedStores(OPERATOR_ID);
+
+        assertThat(stores)
+                .extracting(ManagedStoreResponse::storeId)
+                .containsExactly("7", "9");
+        then(operatorAccountService).should().getMe(OPERATOR_ID);
+    }
+
+    @Test
     void returnsServiceProfilesWithoutExposingStoreEntities() {
         Store accepting = storeOwnedBy(OPERATOR_ID);
         ReflectionTestUtils.setField(accepting, "id", STORE_ID);

@@ -9,9 +9,12 @@ export const CONSUMER_PATHS = {
   reservationCreate: '/stores/:storeId/reserve',
   reservationDetail: '/reservations/:reservationId',
   reservationComplete: '/reservations/:reservationId/complete',
+  reservationRequestPayment:
+    '/reservation-requests/:reservationRequestId/payment',
   pickupCreate: '/stores/:storeId/pickup',
   pickupDetail: '/pickup-reservations/:pickupReservationId',
   pickupComplete: '/pickup-reservations/:pickupReservationId/complete',
-  waitingInvitationAccept: '/waiting/invitations/accept',
   waitingRegister: '/stores/:storeId/waiting',
+  waitingCurrent: '/waiting/current',
+  waitingInvitationAccept: '/waiting/invitations/accept',
 } as const

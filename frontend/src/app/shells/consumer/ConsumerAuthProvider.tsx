@@ -30,6 +30,10 @@ import {
   createNotificationEventStreamClient,
   type NotificationEventStreamClient,
 } from '../../../domains/notification/consumer/notificationEventStream'
+import {
+  createWaitingEventStreamClient,
+  type WaitingEventStreamClient,
+} from '../../../domains/waiting/consumer/waitingEventStream'
 
 /**
  * 일반 사용자 shell의 인증 상태.
@@ -59,6 +63,8 @@ export interface ConsumerAuthContextValue {
   apiClient: ApiClient
   /** 본인 알림 변경 신호용 fetch streaming client. Token은 외부에 노출하지 않는다. */
   notificationEventStream: NotificationEventStreamClient
+  /** 본인 웨이팅 변경 신호용 fetch streaming client. */
+  waitingEventStream: WaitingEventStreamClient
   signIn: (credentials: LoginRequest) => Promise<void>
   completeKakaoSignIn: (accessToken: string) => Promise<void>
   signOut: () => Promise<SignOutOutcome>
@@ -263,6 +269,15 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
     [handleUnauthorized],
   )
 
+  const waitingEventStream = useMemo(
+    () =>
+      createWaitingEventStreamClient({
+        getAccessToken: () => accessTokenRef.current,
+        onUnauthorized: handleUnauthorized,
+      }),
+    [handleUnauthorized],
+  )
+
   // 새로고침 직후 같은 shell의 재발급으로 세션을 복구한다.
   useEffect(() => {
     void refreshOnce()
@@ -352,6 +367,7 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
       sessionKey,
       apiClient,
       notificationEventStream,
+      waitingEventStream,
       signIn,
       completeKakaoSignIn,
       signOut,
@@ -363,6 +379,7 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
       sessionKey,
       apiClient,
       notificationEventStream,
+      waitingEventStream,
       signIn,
       completeKakaoSignIn,
       signOut,

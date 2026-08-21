@@ -28,6 +28,7 @@ env:
   ECS_SERVICE: ${{ vars.AWS_ECS_SERVICE }}
   ECS_CONTAINER_NAME: backend
   RUNTIME_CONFIG_SECRET_NAME: miriyum/production/backend-runtime-config
+  QR_STORAGE_GENERATION: ${{ vars.MIRIYUM_QR_STORAGE_GENERATION }}
 
 jobs:
   verify-source:
@@ -152,6 +153,11 @@ jobs:
             fi
           done
 
+          if ! [[ "$QR_STORAGE_GENERATION" =~ ^[A-Za-z0-9._-]{1,64}$ ]]; then
+            echo "::error::MIRIYUM_QR_STORAGE_GENERATION must be a non-empty generation identifier."
+            exit 1
+          fi
+
       - name: Checkout successful CI revision
         if: github.event_name == 'workflow_run'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -266,6 +272,24 @@ jobs:
             exit 1
           fi
 
+          storage_s3_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .environment[]?
+              | select(.name == "MIRIYUM_STORAGE_S3_ENABLED") | .value][0] // "false"
+          ' current-task-definition.json)
+          if [ "$storage_s3_enabled" != "true" ] && [ "$storage_s3_enabled" != "false" ]; then
+            echo "::error::Current task definition has an invalid MIRIYUM_STORAGE_S3_ENABLED value."
+            exit 1
+          fi
+
+          storage_s3_reconciliation_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .environment[]?
+              | select(.name == "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED") | .value][0] // "false"
+          ' current-task-definition.json)
+          if [ "$storage_s3_reconciliation_enabled" != "true" ] && [ "$storage_s3_reconciliation_enabled" != "false" ]; then
+            echo "::error::Current task definition has an invalid MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED value."
+            exit 1
+          fi
+
           runtime_config_secret_arn=""
           if [ "$runtime_config_enabled" = "true" ]; then
             runtime_config_secret_arn=$(aws secretsmanager describe-secret \
@@ -280,31 +304,51 @@ jobs:
 
           account_id=$(aws sts get-caller-identity --query Account --output text)
           openai_parameter_arn="arn:aws:ssm:${AWS_REGION}:${account_id}:parameter/miriyum/shared/openai-api-key"
+          storage_s3_bucket_parameter_arn="arn:aws:ssm:${AWS_REGION}:${account_id}:parameter/miriyum/production/storage-s3-bucket"
 
           jq --arg image "$IMAGE_URI" --arg container "$ECS_CONTAINER_NAME" \
             --arg runtime_config_secret_arn "$runtime_config_secret_arn" \
             --arg openai_parameter_arn "$openai_parameter_arn" --arg llm_enabled "$llm_enabled" \
-            --arg runtime_config_enabled "$runtime_config_enabled" '
+            --arg qr_storage_generation "$QR_STORAGE_GENERATION" \
+            --arg runtime_config_enabled "$runtime_config_enabled" \
+            --arg storage_s3_enabled "$storage_s3_enabled" \
+            --arg storage_s3_reconciliation_enabled "$storage_s3_reconciliation_enabled" \
+            --arg storage_s3_bucket_parameter_arn "$storage_s3_bucket_parameter_arn" \
+            --arg aws_region "$AWS_REGION" '
             .containerDefinitions |= map(
               if .name == $container then
                 .image = $image
                 | .environment = ((.environment // [] | map(select(
                     .name != "MIRIYUM_STORE_SEARCH_LLM_ENABLED"
+                    and .name != "MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS"
+                    and .name != "MIRIYUM_QR_STORAGE_GENERATION"
                     and .name != "MIRIYUM_RUNTIME_CONFIG_ENABLED"
                     and .name != "MIRIYUM_STORE_SEARCH_LLM_MODEL"
                     and .name != "MIRIYUM_CLOUDWATCH_METRICS_ENABLED"
                     and .name != "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE"
+                    and .name != "MIRIYUM_STORAGE_S3_ENABLED"
+                    and .name != "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"
+                    and .name != "MIRIYUM_STORAGE_S3_REGION"
                   ))) + [
                     {name: "MIRIYUM_STORE_SEARCH_LLM_ENABLED", value: $llm_enabled},
+                    {name: "MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS", value: "5000"},
+                    {name: "MIRIYUM_QR_STORAGE_GENERATION", value: $qr_storage_generation},
                     {name: "MIRIYUM_RUNTIME_CONFIG_ENABLED", value: $runtime_config_enabled},
                     {name: "MIRIYUM_STORE_SEARCH_LLM_MODEL", value: "gpt-4o-mini"},
                     {name: "MIRIYUM_CLOUDWATCH_METRICS_ENABLED", value: "true"},
-                    {name: "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE", value: "MiriYum/Production"}
+                    {name: "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE", value: "MiriYum/Production"},
+                    {name: "MIRIYUM_STORAGE_S3_ENABLED", value: $storage_s3_enabled},
+                    {name: "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED", value: $storage_s3_reconciliation_enabled},
+                    {name: "MIRIYUM_STORAGE_S3_REGION", value: $aws_region}
                   ])
                 | .secrets = ((.secrets // [] | map(select(
-                    .name != "SPRING_APPLICATION_JSON" and .name != "OPENAI_API_KEY"
+                    .name != "SPRING_APPLICATION_JSON"
+                    and .name != "OPENAI_API_KEY"
+                    and .name != "MIRIYUM_STORAGE_S3_BUCKET"
                   ))) + (if $runtime_config_enabled == "true" then
                     [{name: "SPRING_APPLICATION_JSON", valueFrom: $runtime_config_secret_arn}]
+                  else [] end) + (if $storage_s3_enabled == "true" then
+                    [{name: "MIRIYUM_STORAGE_S3_BUCKET", valueFrom: $storage_s3_bucket_parameter_arn}]
                   else [] end) + (if $llm_enabled == "true" then
                     [{name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}]
                   else [] end))
@@ -354,19 +398,37 @@ jobs:
         env:
           TASK_DEFINITION_ARN: ${{ steps.task-definition.outputs.arn }}
         run: |
-          aws ecs wait services-stable \
-            --cluster "$ECS_CLUSTER" \
-            --services "$ECS_SERVICE"
+          # ALB connection draining can exceed the AWS CLI waiter's 10-minute default.
+          # Poll for at most 20 minutes instead of relying on the fixed 40-attempt waiter.
+          for attempt in $(seq 1 80); do
+            service=$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$ECS_SERVICE" \
+              --query 'services[0]' \
+              --output json)
 
-          primary_task_definition=$(aws ecs describe-services \
-            --cluster "$ECS_CLUSTER" \
-            --services "$ECS_SERVICE" \
-            --query 'services[0].deployments[?status==`PRIMARY`].taskDefinition | [0]' \
-            --output text)
+            primary_task_definition=$(jq -r '.deployments[] | select(.status == "PRIMARY") | .taskDefinition' <<< "$service")
+            primary_rollout_state=$(jq -r '.deployments[] | select(.status == "PRIMARY") | .rolloutState // "UNKNOWN"' <<< "$service")
+            running_count=$(jq -r '.runningCount' <<< "$service")
+            desired_count=$(jq -r '.desiredCount' <<< "$service")
+            pending_count=$(jq -r '.pendingCount' <<< "$service")
 
-          if [ "$primary_task_definition" != "$TASK_DEFINITION_ARN" ]; then
-            echo "::error::ECS did not retain the new task definition as PRIMARY. The deployment may have rolled back."
-            exit 1
-          fi
+            if jq -e '.deployments[] | select(.rolloutState == "FAILED")' <<< "$service" >/dev/null; then
+              echo "::error::ECS deployment entered FAILED rollout state."
+              exit 1
+            fi
 
-          echo "ECS deployment completed with $TASK_DEFINITION_ARN"
+            if [ "$primary_task_definition" = "$TASK_DEFINITION_ARN" ] \
+              && [ "$primary_rollout_state" = "COMPLETED" ] \
+              && [ "$running_count" = "$desired_count" ] \
+              && [ "$pending_count" = "0" ]; then
+              echo "ECS deployment completed with $TASK_DEFINITION_ARN"
+              exit 0
+            fi
+
+            echo "Waiting for ECS service stability ($attempt/80)..."
+            sleep 15
+          done
+
+          echo "::error::ECS service did not stabilize within the 20-minute deployment budget."
+          exit 1

@@ -30,6 +30,7 @@ import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -208,6 +209,34 @@ class StoreControllerTest {
                 .andExpect(jsonPath("$.data.storeId").isString())
                 .andExpect(jsonPath("$.data.storeId").value("7"))
                 .andExpect(jsonPath("$.data.geocoding.status").value("VERIFIED"));
+    }
+
+    @Test
+    void listReturnsCurrentOperatorsManagedStores() throws Exception {
+        authenticateStoreOperator(11L);
+        given(storeService.getManagedStores(11L))
+                .willReturn(List.of(managedStore(7L), managedStore(9L)));
+
+        mockMvc.perform(get("/api/v1/store-operators/stores")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].storeId").value("7"))
+                .andExpect(jsonPath("$.data[1].storeId").value("9"));
+    }
+
+    @Test
+    void listReturnsEmptyArrayWhenCurrentOperatorOwnsNoStores() throws Exception {
+        authenticateStoreOperator(11L);
+        given(storeService.getManagedStores(11L)).willReturn(List.of());
+
+        mockMvc.perform(get("/api/v1/store-operators/stores")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data").isEmpty());
     }
 
     @ParameterizedTest

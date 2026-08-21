@@ -40,7 +40,83 @@ pnpm run dev
 
 `frontend/vite.config.ts`가 `/api`를 `http://127.0.0.1:8080`으로 프록시한다. 브라우저에서 보면 dev server와 API가 같은 오리진이므로 `SameSite=Lax` 쿠키와 Origin 검증이 동작한다.
 
+Vite도 `deploy/local/.env`를 읽는다. 브라우저 번들에는
+`MIRIYUM_PORTONE_STORE_ID`와 `MIRIYUM_PORTONE_CHANNEL_KEY` 두 값만 주입한다.
+`MIRIYUM_PORTONE_API_SECRET`과 `MIRIYUM_PORTONE_WEBHOOK_SECRET`은 backend
+컨테이너에만 전달되며 frontend 코드에는 포함되지 않는다.
+
 dev server 포트를 바꾸면 `.env`의 `MIRIYUM_ALLOWED_ORIGIN`도 같은 값으로 바꾼다. 두 값이 다르면 재발급과 로그아웃이 `AUTH` Origin 오류로 거절된다.
+
+## PortOne V2 토스페이먼츠 예약금 로컬 테스트
+
+`deploy/local/.env`에서 다음 항목을 로컬 테스트 값으로 채운다. 값을 명령행 인자나
+로그에 직접 쓰지 않는다.
+
+```dotenv
+MIRIYUM_PAYMENT_ENABLED=true
+MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED=true
+MIRIYUM_PAYMENT_CURSOR_SECRET=<32자 이상의 로컬 전용 값>
+MIRIYUM_PORTONE_API_SECRET=<PortOne V2 API Secret>
+MIRIYUM_PORTONE_WEBHOOK_SECRET=
+MIRIYUM_PORTONE_STORE_ID=<PortOne Store ID>
+MIRIYUM_PORTONE_CHANNEL_KEY=<토스페이먼츠 V2 테스트 Channel Key>
+```
+
+첫 로컬 검증은 frontend의 결제 확인·최종화 호출을 사용하므로 공개 HTTPS tunnel과
+webhook 등록이 필요 없다. `MIRIYUM_PORTONE_WEBHOOK_SECRET`은 비워 둘 수 있다.
+결제창 성공 뒤 confirmation 중단·새로고침이 발생하면 결제 화면의
+`이미 결제했다면 상태 확인`으로 backend confirmation을 다시 호출한다. 이 호출 또는
+webhook이 PortOne 조회 결과를 Payment 원장에 반영한다.
+
+예약금 process worker는 PortOne을 직접 조회하지 않고 저장된 Payment 원장을 기준으로
+예약 최종화·만료·보상 상태를 수렴한다. 따라서 중단 뒤 Payment 원장에 반영된 결제를
+서버에서 계속 조정하거나 예약 취소 뒤 생성된 환불 처분 의무를 비동기로 처리하려면
+`MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED=true`가 필요하다. 기본값은 `false`이므로
+해당 복구·환불 검증을 하지 않는 로컬 환경에서는 작업기가 실행되지 않는다.
+
+예약금이 필요한 202 응답을 만들려면 테스트할 매장에 대표 메뉴가 `CONFIGURED`로
+설정돼 있어야 한다. 매장 ID를 확인한 뒤 Docker MySQL에서 그 매장의 예약금 정책만
+직접 활성화한다. 이 작업은 로컬 데이터에만 수행한다.
+
+```sql
+SELECT store_id, name FROM stores ORDER BY store_id;
+SELECT store_id, version, status
+FROM representative_menu_settings
+ORDER BY store_id;
+
+SET @store_id = <테스트할 숫자 store_id>;
+INSERT INTO store_reservation_deposit_policies (
+    store_id, enabled, rate_percent, policy_version, lock_version,
+    created_at, updated_at
+) VALUES (
+    @store_id, TRUE, 20, 1, 0, NOW(6), NOW(6)
+)
+ON DUPLICATE KEY UPDATE
+    enabled = TRUE,
+    rate_percent = 20,
+    policy_version = policy_version + 1,
+    lock_version = lock_version + 1,
+    updated_at = NOW(6);
+```
+
+설정을 바꾼 뒤 backend를 다시 만든다.
+
+```bash
+docker compose --env-file deploy/local/.env \
+  -f deploy/local/docker-compose.dev.yml up -d --build mysql valkey backend
+```
+
+다른 터미널에서 host Vite를 실행하고 `http://localhost:5173`에서 예약한다.
+
+```bash
+cd frontend
+pnpm install
+pnpm run dev
+```
+
+예약 생성이 202이면 `/reservation-requests/{id}/payment`로 이동한다. 토스 테스트
+카드 결제 후 backend가 Payment를 `PAID`로 확인하고 예약 요청을 최종화했을 때만
+기존 `/reservations/{id}/complete` 화면으로 이동한다.
 
 ## 중지와 초기화
 
