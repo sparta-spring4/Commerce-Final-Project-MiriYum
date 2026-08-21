@@ -26,6 +26,7 @@ describe('결제 복구 사건 목록', () => {
           cumulativeRefundedAmountMinor: 10000, remainingRefundableAmountMinor: 40000,
           currency: 'KRW', maskedProviderReference: 'imp_****110', allowedActions: ['REQUERY_PROVIDER_RESULT'],
           handoffVersion: 2, paymentVersion: 4, recoveryVersion: 1, assignedOperatorId: 7,
+          assignedToCurrentOperator: true,
           createdAt: '2026-08-20T09:00:00Z', updatedAt: '2026-08-20T09:30:00Z',
         }], page: 0, size: 20, totalElements: 1, totalPages: 1,
       })),
@@ -58,6 +59,7 @@ describe('결제 복구 사건 목록', () => {
           cumulativeRefundedAmountMinor: 10000, remainingRefundableAmountMinor: 40000,
           currency: 'KRW', maskedProviderReference: null, allowedActions: ['RETRY_REFUND'],
           handoffVersion: 2, paymentVersion: 4, recoveryVersion: 1, assignedOperatorId: null,
+          assignedToCurrentOperator: false,
           createdAt: '2026-08-20T09:00:00Z', updatedAt: '2026-08-20T09:30:00Z',
         }], page: 0, size: 20, totalElements: 1, totalPages: 1,
       })),
@@ -73,6 +75,40 @@ describe('결제 복구 사건 목록', () => {
     expect(screen.getByRole('dialog', { name: '재인증이 필요합니다' })).toBeInTheDocument()
   })
 
+  it('다른 운영자에게 배정된 사건은 상세 링크 대신 처리 중으로 표시한다', async () => {
+    server.use(
+      http.post('/api/v1/platform-operators/auth/refresh', () => successResponse({
+        accessToken: 'operator-token', initialPasswordChangeRequired: false,
+        sessionIdleExpiresAt: '2026-08-20T11:00:00Z', sessionAbsoluteExpiresAt: '2026-08-20T18:00:00Z',
+      })),
+      http.post('/api/v1/platform-operators/auth/token-refreshes', () => successResponse({
+        accessToken: 'operator-token', initialPasswordChangeRequired: false,
+        sessionIdleExpiresAt: '2026-08-20T11:00:00Z', sessionAbsoluteExpiresAt: '2026-08-20T18:00:00Z',
+      })),
+      http.get('/api/v1/platform-operators/payment-recovery-cases', () => successResponse({
+        content: [{
+          caseId: 'e6a91572-0632-4fa6-9a93-819add8df110', status: 'INVESTIGATING', caseVersion: 3,
+          kind: 'REFUND_RESULT_UNKNOWN', resultStatus: 'UNKNOWN', originalAmountMinor: 50000,
+          cumulativeRefundedAmountMinor: 10000, remainingRefundableAmountMinor: 40000,
+          currency: 'KRW', maskedProviderReference: null, allowedActions: ['REQUERY_PROVIDER_RESULT'],
+          handoffVersion: 2, paymentVersion: 4, recoveryVersion: 1, assignedOperatorId: 99,
+          assignedToCurrentOperator: false,
+          createdAt: '2026-08-20T09:00:00Z', updatedAt: '2026-08-20T09:30:00Z',
+        }], page: 0, size: 20, totalElements: 1, totalPages: 1,
+      })),
+    )
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PlatformOperatorAuthProvider><MemoryRouter><PaymentRecoveryCaseListPage /></MemoryRouter></PlatformOperatorAuthProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText('다른 운영자 처리 중')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '사건 상세' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '나에게 배정' })).not.toBeInTheDocument()
+  })
+
   it('별도 승인자에게 자기 제안을 제외한 승인 대기 사건의 상세 진입을 제공한다', async () => {
     server.use(
       http.post('/api/v1/platform-operators/auth/refresh', () => successResponse({
@@ -86,6 +122,7 @@ describe('결제 복구 사건 목록', () => {
           cumulativeRefundedAmountMinor: 0, remainingRefundableAmountMinor: 300000,
           currency: 'KRW', maskedProviderReference: null, allowedActions: ['RETRY_REFUND'],
           handoffVersion: 2, paymentVersion: 4, recoveryVersion: 1, assignedOperatorId: 7,
+          assignedToCurrentOperator: false,
           createdAt: '2026-08-20T09:00:00Z', updatedAt: '2026-08-20T09:30:00Z',
           proposals: [{ proposalVersion: 1, action: 'RETRY_REFUND', requestedAmountMinor: 250000,
             cumulativeLineageAmountMinor: 250000, originalAmountMinor: 300000, currency: 'KRW',

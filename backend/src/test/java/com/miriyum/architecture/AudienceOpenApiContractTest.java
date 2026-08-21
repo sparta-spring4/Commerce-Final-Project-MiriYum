@@ -47,9 +47,9 @@ class AudienceOpenApiContractTest {
             "/api/v1/consumers/me/stores/{storeId}/waiting-availabilities",
             "/api/v1/consumers/me/stores/{storeId}/waiting-location-proofs",
             "/api/v1/consumers/me/stores/{storeId}/waiting-teams",
+            "/api/v1/consumers/me/waiting-teams",
             "/api/v1/consumers/me/waiting-invitation-acceptances",
             "/api/v1/consumers/me/waiting-teams/current",
-            "/api/v1/consumers/me/waiting-team-histories",
             "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations",
             "/api/v1/consumers/me/waiting-teams/{teamId}/invitations",
             "/api/v1/consumers/me/waiting-teams/{teamId}/invitations/{invitationId}/revocations",
@@ -63,6 +63,12 @@ class AudienceOpenApiContractTest {
             "/api/v1/consumers/me/notifications";
     private static final String NOTIFICATION_EVENTS_PATH =
             "/api/v1/consumers/me/notification-events";
+    private static final String NOTIFICATION_UNREAD_COUNT_PATH =
+            "/api/v1/consumers/me/notifications/unread-count";
+    private static final String NOTIFICATION_READ_PATH =
+            "/api/v1/consumers/me/notifications/{notificationId}/reads";
+    private static final String ALL_NOTIFICATION_READS_PATH =
+            "/api/v1/consumers/me/notifications/reads";
     private static final String CONSUMER_WAITING_EVENTS_PATH =
             "/api/v1/consumers/me/waiting-events";
     private static final String OPERATOR_WAITING_EVENTS_PATH =
@@ -80,6 +86,9 @@ class AudienceOpenApiContractTest {
                             MENU_ALTERNATIVE_SEARCH_PATH,
                             NOTIFICATION_HISTORY_PATH,
                             NOTIFICATION_EVENTS_PATH,
+                            NOTIFICATION_UNREAD_COUNT_PATH,
+                            NOTIFICATION_READ_PATH,
+                            ALL_NOTIFICATION_READS_PATH,
                             CONSUMER_WAITING_EVENTS_PATH,
                             OPERATOR_WAITING_EVENTS_PATH,
                             REPRESENTATIVE_MENUS_PATH,

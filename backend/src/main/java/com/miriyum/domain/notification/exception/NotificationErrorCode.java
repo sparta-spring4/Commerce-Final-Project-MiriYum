@@ -14,6 +14,11 @@ public enum NotificationErrorCode implements ErrorCode {
             HttpStatus.CONFLICT,
             "NOTIFICATION_002",
             "동일한 알림 원 사건 식별자를 다른 내용으로 사용할 수 없습니다."
+    ),
+    NOTIFICATION_NOT_FOUND(
+            HttpStatus.NOT_FOUND,
+            "NOTIFICATION_003",
+            "알림을 찾을 수 없습니다."
     );
 
     private final HttpStatus httpStatus;

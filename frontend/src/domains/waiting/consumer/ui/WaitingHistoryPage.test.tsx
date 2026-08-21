@@ -10,18 +10,22 @@ import { server } from '../../../../test/msw/server'
 import { WaitingHistoryPage } from './WaitingHistoryPage'
 
 describe('지난 웨이팅 이력', () => {
-  it('종결 상태와 예약 전환 링크를 표시한다', async () => {
+  it('종결 scope의 cursor 계약으로 본인 웨이팅 이력을 표시한다', async () => {
     server.use(
       authenticatedConsumer(),
-      http.get('/api/v1/consumers/me/waiting-team-histories', () => successResponse({
+      http.get('/api/v1/consumers/me/waiting-teams', ({ request }) => {
+        const url = new URL(request.url)
+        expect(url.searchParams.get('scope')).toBe('TERMINAL')
+        expect(url.searchParams.get('size')).toBe('20')
+        return successResponse({
         items: [{
-          waitingTeamId: '300', storeId: '100', businessDate: '2026-08-17',
-          status: 'RESERVATION_CONVERTED', queueSequence: 9, partySize: 2,
-          createdAt: '2026-08-17T00:00:00Z', endedAt: '2026-08-17T00:20:00Z',
-          reservationId: '901',
+          waitingTeamId: '300', storeId: '100', status: 'RESERVATION_CONVERTED',
+          registeredAt: '2026-08-17T00:00:00Z', calledAt: '2026-08-17T00:10:00Z',
+          terminatedAt: '2026-08-17T00:20:00Z',
         }],
-        page: { number: 0, size: 20, totalElements: 1, totalPages: 1, hasNext: false },
-      })),
+        nextCursor: null,
+      })
+      }),
     )
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
@@ -32,9 +36,7 @@ describe('지난 웨이팅 이력', () => {
     )
 
     expect(await screen.findByText('예약 전환 완료')).toBeInTheDocument()
-    expect(screen.getByText('2명 · 접수 순번 9번')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '전환된 예약 보기' })).toHaveAttribute(
-      'href', '/reservations/901',
-    )
+    expect(screen.getByRole('heading', { name: '매장 #100' })).toBeInTheDocument()
+    expect(screen.getByText(/9:20/)).toHaveAttribute('dateTime', '2026-08-17T00:20:00Z')
   })
 })

@@ -24,14 +24,18 @@ public final class PaymentRecoveryResponses {
             long cumulativeRefundedAmountMinor, long remainingRefundableAmountMinor,
             String currency, String maskedProviderReference, Set<RecoveryAction> allowedActions,
             long handoffVersion, long paymentVersion, long recoveryVersion,
-            Long assignedOperatorId, Instant createdAt, Instant updatedAt) {
-        public static CaseSummary from(PaymentRecoveryCase value, Long assignedOperatorId) {
+            Long assignedOperatorId, boolean assignedToCurrentOperator,
+            Instant createdAt, Instant updatedAt) {
+        public static CaseSummary from(
+                PaymentRecoveryCase value, Long assignedOperatorId, Long currentOperatorId) {
             return new CaseSummary(value.getPublicId(), value.getStatus(), value.getCaseVersion(),
                     value.getRecoveryKind(), value.getResultStatus(), value.getOriginalAmountMinor(),
                     value.getCumulativeRefundedAmountMinor(), value.getRemainingRefundableAmountMinor(),
                     value.getCurrency(), value.getMaskedProviderReference(), Set.copyOf(value.getAllowedActions()),
                     value.getHandoffVersion(), value.getPaymentVersion(), value.getRecoveryVersion(),
-                    assignedOperatorId, value.getCreatedAt(), value.getUpdatedAt());
+                    assignedOperatorId,
+                    assignedOperatorId != null && assignedOperatorId.equals(currentOperatorId),
+                    value.getCreatedAt(), value.getUpdatedAt());
         }
     }
 

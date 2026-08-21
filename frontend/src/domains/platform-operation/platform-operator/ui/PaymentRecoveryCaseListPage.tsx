@@ -46,8 +46,10 @@ export function PaymentRecoveryCaseListPage({ approvalsOnly = false }: { approva
                 <div className="po-recovery-list__actions">
                   {!approvalsOnly && item.assignedOperatorId == null ? (
                     <Button type="button" variant="secondary" loading={assigning && assignment?.caseId === item.caseId} onClick={() => { setAssignError(null); setAssignment(item) }}>나에게 배정</Button>
-                  ) : (
+                  ) : approvalsOnly || item.assignedToCurrentOperator ? (
                     <Link className="mi-button mi-button--ghost" to={PLATFORM_OPERATOR_PATHS.paymentRecoveryDetail.replace(':caseId', item.caseId)}>사건 상세</Link>
+                  ) : (
+                    <span>다른 운영자 처리 중</span>
                   )}
                 </div>
               </div></li>

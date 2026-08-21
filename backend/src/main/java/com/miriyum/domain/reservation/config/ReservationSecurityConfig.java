@@ -54,8 +54,6 @@ public class ReservationSecurityConfig {
             CONSUMER_WAITING_ME_ROOT + "/**";
     private static final String CONSUMER_WAITING_INVITATION_ACCEPTANCE =
             "/api/v1/consumers/me/waiting-invitation-acceptances";
-    private static final String CONSUMER_WAITING_TEAM_HISTORIES =
-            "/api/v1/consumers/me/waiting-team-histories";
     private static final String STORE_RESERVATION_ROOT =
             "/api/v1/store-operators/stores/*/reservations";
     private static final String STORE_RESERVATION_FAMILY = STORE_RESERVATION_ROOT + "/**";
@@ -196,7 +194,6 @@ public class ReservationSecurityConfig {
                         CONSUMER_WAITING_LOCATION_PROOF,
                         CONSUMER_WAITING_ME_ROOT,
                         CONSUMER_WAITING_ME_FAMILY,
-                        CONSUMER_WAITING_TEAM_HISTORIES,
                         CONSUMER_WAITING_INVITATION_ACCEPTANCE)
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session ->
@@ -215,12 +212,9 @@ public class ReservationSecurityConfig {
                         .requestMatchers(HttpMethod.GET, CONSUMER_WAITING_AVAILABILITY).authenticated()
                         .requestMatchers(HttpMethod.POST, CONSUMER_WAITING_LOCATION_PROOF).authenticated()
                         .requestMatchers(HttpMethod.POST, CONSUMER_WAITING_STORE_ROOT).authenticated()
+                        .requestMatchers(HttpMethod.GET, CONSUMER_WAITING_ME_ROOT).authenticated()
                         .requestMatchers(HttpMethod.GET,
                                 CONSUMER_WAITING_ME_ROOT + "/current").authenticated()
-                        .requestMatchers(HttpMethod.GET,
-                                CONSUMER_WAITING_TEAM_HISTORIES).authenticated()
-                        .requestMatchers(HttpMethod.GET,
-                                CONSUMER_WAITING_ME_ROOT + "/history").authenticated()
                         .requestMatchers(HttpMethod.POST,
                                 CONSUMER_WAITING_ME_ROOT + "/*/cancellations").authenticated()
                         .requestMatchers(HttpMethod.POST,

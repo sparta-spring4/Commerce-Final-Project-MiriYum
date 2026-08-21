@@ -1,26 +1,29 @@
-import { Link, useSearchParams } from 'react-router'
+import { useSearchParams } from 'react-router'
 import { Badge, type BadgeTone } from '../../../../shared/ui/Badge'
+import { Button } from '../../../../shared/ui/Button'
 import { EmptyState, ErrorState, Loading } from '../../../../shared/ui/Feedback'
-import { Pagination } from '../../../../shared/ui/Pagination'
 import {
   useConsumerWaitingHistory,
   type ConsumerWaitingHistoryItem,
 } from '../api/queries'
 
 const LABEL: Record<ConsumerWaitingHistoryItem['status'], string> = {
+  WAITING: '대기 중', CALLED: '호출됨', ARRIVED: '도착 확인',
   CHECKED_IN: '입장 완료', CANCELLED: '취소됨', NO_SHOW: '미도착 종료',
-  CLOSED_BY_STORE: '매장 종료', RESERVATION_CONVERTED: '예약 전환 완료',
+  CLOSED_BY_STORE: '매장 종료', RESERVATION_CONVERTING: '예약 전환 중',
+  RESERVATION_CONVERTED: '예약 전환 완료',
 }
 const TONE: Record<ConsumerWaitingHistoryItem['status'], BadgeTone> = {
+  WAITING: 'neutral', CALLED: 'attention', ARRIVED: 'attention',
   CHECKED_IN: 'positive', CANCELLED: 'neutral', NO_SHOW: 'negative',
-  CLOSED_BY_STORE: 'attention', RESERVATION_CONVERTED: 'positive',
+  CLOSED_BY_STORE: 'attention', RESERVATION_CONVERTING: 'attention',
+  RESERVATION_CONVERTED: 'positive',
 }
 
 export function WaitingHistoryPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const parsed = Number.parseInt(searchParams.get('page') ?? '', 10)
-  const page = Number.isInteger(parsed) && parsed > 0 ? parsed : 0
-  const history = useConsumerWaitingHistory(page)
+  const cursor = searchParams.get('cursor') ?? undefined
+  const history = useConsumerWaitingHistory(cursor)
 
   return (
     <main className="mi-container waiting-history">
@@ -41,32 +44,29 @@ export function WaitingHistoryPage() {
                 <div className="mi-card__body">
                   <div className="waiting-history__head">
                     <Badge tone={TONE[item.status]}>{LABEL[item.status]}</Badge>
-                    <time dateTime={item.endedAt}>{item.businessDate}</time>
+                    {item.terminatedAt !== null && (
+                      <time dateTime={item.terminatedAt}>{formatTimestamp(item.terminatedAt)}</time>
+                    )}
                   </div>
                   <h2>매장 #{item.storeId}</h2>
-                  <p>{item.partySize}명 · 접수 순번 {item.queueSequence}번</p>
-                  {item.reservationId !== null && (
-                    <Link className="mi-button mi-button--ghost mi-button--block" to={`/reservations/${item.reservationId}`}>
-                      전환된 예약 보기
-                    </Link>
-                  )}
+                  <p>등록 {formatTimestamp(item.registeredAt)}</p>
                 </div>
               </li>
             ))}
           </ul>
-          <Pagination
-            number={history.data.page.number}
-            totalPages={history.data.page.totalPages}
-            totalElements={history.data.page.totalElements}
-            hasNext={history.data.page.hasNext}
-            onChange={(next) => {
-              const params = new URLSearchParams()
-              if (next > 0) params.set('page', String(next))
-              setSearchParams(params)
-            }}
-          />
+          {history.data.nextCursor !== null && (
+            <Button type="button" variant="secondary" onClick={() => {
+              setSearchParams({ cursor: history.data.nextCursor! })
+            }}>다음 이력</Button>
+          )}
         </>
       )}
     </main>
   )
+}
+
+function formatTimestamp(value: string) {
+  return new Intl.DateTimeFormat('ko-KR', {
+    dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Seoul',
+  }).format(new Date(value))
 }

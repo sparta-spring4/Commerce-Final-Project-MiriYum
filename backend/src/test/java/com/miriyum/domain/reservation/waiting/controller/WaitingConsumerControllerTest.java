@@ -16,12 +16,15 @@ import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.reservation.config.ReservationSecurityConfig;
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.controller.consumer.WaitingConsumerController;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryContracts.HistoryItem;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryContracts.HistoryPage;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryContracts.HistoryQuery;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryContracts.HistoryStatus;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryContracts.Scope;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
-import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryItem;
-import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryPage;
-import com.miriyum.global.response.PageMetadata;
 import com.miriyum.domain.reservation.waiting.dto.WaitingReceptionAvailability;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.dto.WaitingLocationProofContracts.Snapshot;
@@ -34,15 +37,17 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession
 import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession.ResultCategory;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerCommandFacade;
+import com.miriyum.domain.reservation.waiting.service.WaitingConsumerHistoryQueryService;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerQueryService;
 import com.miriyum.domain.reservation.waiting.service.WaitingLocationProofService;
 import com.miriyum.domain.reservation.waiting.service.WaitingPartyService;
 import com.miriyum.global.exception.GlobalExceptionHandler;
+import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.UUID;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -57,34 +62,96 @@ import org.springframework.test.web.servlet.MvcResult;
 @Import({ReservationSecurityConfig.class, GlobalExceptionHandler.class})
 class WaitingConsumerControllerTest {
 
-    @Test
-    void consumerCanReadTerminalWaitingHistory() throws Exception {
-        authenticateConsumer(200L);
-        given(queryService.getHistory(200L, 0, 20)).willReturn(
-                new WaitingConsumerHistoryPage(List.of(new WaitingConsumerHistoryItem(
-                        "300", "100", LocalDate.of(2026, 8, 17),
-                        WaitingTeamStatus.CHECKED_IN, 9, 2,
-                        Instant.parse("2026-08-17T00:00:00Z"),
-                        Instant.parse("2026-08-17T00:20:00Z"), null)),
-                        new PageMetadata(0, 20, 1, 1, false)));
-
-        mockMvc.perform(get("/api/v1/consumers/me/waiting-team-histories")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.items[0].waitingTeamId").value("300"))
-                .andExpect(jsonPath("$.data.items[0].consumerAccountId").doesNotExist());
-    }
-
     private static final String KEY = "550e8400-e29b-41d4-a716-446655440301";
     private static final UUID LOCATION_PROOF_ID =
             UUID.fromString("d276a024-71f5-4f98-9682-89f16df4fbd0");
 
     @Autowired MockMvc mockMvc;
     @MockitoBean WaitingConsumerQueryService queryService;
+    @MockitoBean WaitingConsumerHistoryQueryService historyQueryService;
     @MockitoBean WaitingConsumerCommandFacade commandFacade;
     @MockitoBean WaitingLocationProofService locationProofService;
     @MockitoBean WaitingPartyService partyService;
     @MockitoBean JwtTokenProvider jwtTokenProvider;
+
+    @Test
+    void consumerReadsOnlyOwnPublicWaitingHistory() throws Exception {
+        authenticateConsumer(200L);
+        given(historyQueryService.getHistory(
+                200L, new HistoryQuery(Scope.TERMINAL, "opaque-cursor", 10)))
+                .willReturn(new HistoryPage(List.of(new HistoryItem(
+                        "301",
+                        "100",
+                        HistoryStatus.CANCELLED,
+                        Instant.parse("2026-08-20T01:00:00Z"),
+                        Instant.parse("2026-08-20T01:10:00Z"),
+                        Instant.parse("2026-08-20T01:12:00Z"))), null));
+
+        mockMvc.perform(get("/api/v1/consumers/me/waiting-teams")
+                        .queryParam("scope", "TERMINAL")
+                        .queryParam("cursor", "opaque-cursor")
+                        .queryParam("size", "10")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].waitingTeamId").value("301"))
+                .andExpect(jsonPath("$.data.items[0].storeId").value("100"))
+                .andExpect(jsonPath("$.data.items[0].status").value("CANCELLED"))
+                .andExpect(jsonPath("$.data.items[0].registeredAt")
+                        .value("2026-08-20T01:00:00Z"))
+                .andExpect(jsonPath("$.data.items[0].calledAt")
+                        .value("2026-08-20T01:10:00Z"))
+                .andExpect(jsonPath("$.data.items[0].terminatedAt")
+                        .value("2026-08-20T01:12:00Z"))
+                .andExpect(jsonPath("$.data.items[0].consumerAccountId").doesNotExist())
+                .andExpect(jsonPath("$.data.items[0].locationProofSessionId").doesNotExist())
+                .andExpect(jsonPath("$.data.items[0].queueSequence").doesNotExist())
+                .andExpect(jsonPath("$.data.nextCursor").isEmpty());
+    }
+
+    @Test
+    void damagedHistoryCursorReturnsExplicitBadRequest() throws Exception {
+        authenticateConsumer(200L);
+        given(historyQueryService.getHistory(
+                200L, new HistoryQuery(Scope.ALL, "damaged", 20)))
+                .willThrow(new ServiceException(
+                        ReservationErrorCode.WAITING_HISTORY_CURSOR_INVALID));
+
+        mockMvc.perform(get("/api/v1/consumers/me/waiting-teams")
+                        .queryParam("cursor", "damaged")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("WAITING_019"));
+    }
+
+    @Test
+    void waitingHistoryRequiresConsumerAccessToken() throws Exception {
+        mockMvc.perform(get("/api/v1/consumers/me/waiting-teams"))
+                .andExpect(status().isUnauthorized());
+
+        given(jwtTokenProvider.parseAccessToken("store-token"))
+                .willReturn(new ParsedToken(TokenNamespace.STORE_OPERATOR, 33L));
+        mockMvc.perform(get("/api/v1/consumers/me/waiting-teams")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_004"));
+    }
+
+    @Test
+    void invalidHistoryScopeAndSizeReturnValidationBadRequest() throws Exception {
+        authenticateConsumer(200L);
+
+        mockMvc.perform(get("/api/v1/consumers/me/waiting-teams")
+                        .queryParam("scope", "OTHER")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        mockMvc.perform(get("/api/v1/consumers/me/waiting-teams")
+                        .queryParam("size", "51")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+    }
 
     @Test
     void consumerCanInspectRegisterReadCurrentAndCancelWithoutInternalFields() throws Exception {

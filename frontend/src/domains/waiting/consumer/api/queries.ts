@@ -31,8 +31,8 @@ interface VersionedTeamCommand extends IdempotentCommand {
 }
 export const consumerWaitingKeys = {
   current: [...CONSUMER_PROTECTED_QUERY_ROOTS.account, 'me', 'waiting-teams', 'current'] as const,
-  history: (page: number) =>
-    [...CONSUMER_PROTECTED_QUERY_ROOTS.account, 'me', 'waiting-teams', 'history', page] as const,
+  history: (cursor: string | undefined) =>
+    [...CONSUMER_PROTECTED_QUERY_ROOTS.account, 'me', 'waiting-teams', 'history', cursor ?? 'FIRST'] as const,
   availability: (storeId: string) =>
     [
       ...CONSUMER_PROTECTED_QUERY_ROOTS.account,
@@ -74,13 +74,13 @@ export function useCurrentConsumerWaiting() {
   })
 }
 
-export function useConsumerWaitingHistory(page: number) {
+export function useConsumerWaitingHistory(cursor: string | undefined) {
   const { apiClient } = useConsumerAuth()
   return useQuery({
-    queryKey: consumerWaitingKeys.history(page),
+    queryKey: consumerWaitingKeys.history(cursor),
     queryFn: async ({ signal }) => {
-      const response = await apiClient('/api/v1/consumers/me/waiting-team-histories', {
-        method: 'get', query: { page, size: 20 }, signal,
+      const response = await apiClient('/api/v1/consumers/me/waiting-teams', {
+        method: 'get', query: { scope: 'TERMINAL', cursor, size: 20 }, signal,
       })
       return response.data
     },

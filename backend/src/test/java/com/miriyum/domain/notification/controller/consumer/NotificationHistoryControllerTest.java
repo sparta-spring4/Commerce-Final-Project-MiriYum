@@ -68,6 +68,7 @@ class NotificationHistoryControllerTest {
                 occurredAt,
                 occurredAt.plusSeconds(1),
                 occurredAt.plusSeconds(2),
+                occurredAt.plusSeconds(3),
                 null
         );
         given(historyService.getHistory(CONSUMER_ID, null, 20))
@@ -79,6 +80,7 @@ class NotificationHistoryControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.items[0].notificationId").value("103"))
                 .andExpect(jsonPath("$.data.items[0].deliveredAt").isNotEmpty())
+                .andExpect(jsonPath("$.data.items[0].readAt").isNotEmpty())
                 .andExpect(jsonPath("$.data.items[0].action").isEmpty())
                 .andExpect(jsonPath("$.data.items[0].deliveryStatus").doesNotExist())
                 .andExpect(jsonPath("$.data.items[0].attemptCount").doesNotExist())

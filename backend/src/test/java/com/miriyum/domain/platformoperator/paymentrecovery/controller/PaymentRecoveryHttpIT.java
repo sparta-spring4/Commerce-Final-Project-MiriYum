@@ -132,8 +132,14 @@ class PaymentRecoveryHttpIT {
                 UUID.randomUUID().toString(), now));
         recoveryCase.recordProposal(2L, 1L, ApprovalTier.ADDITIONAL_SUPER_ADMIN, now.plusSeconds(1));
         cases.saveAndFlush(recoveryCase);
+        assignments.saveAndFlush(AdminCaseAssignment.assign(
+                com.miriyum.domain.platformoperator.enums.AdminCaseType.PAYMENT_RECOVERY,
+                recoveryCase.getPublicId(), recoveryCase.getCaseVersion(), requester.getId(),
+                now.plusSeconds(600), now));
 
         String token = loginAndActivate("payment-recovery-approver@example.com");
+        assertThat(publicSummary(token, recoveryCase.getPublicId())
+                .get("assignedToCurrentOperator")).isEqualTo(false);
         mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases/pending-additional-approvals")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
@@ -215,7 +221,8 @@ class PaymentRecoveryHttpIT {
         mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content[0].assignedOperatorId").value(operator.getId()));
+                .andExpect(jsonPath("$.data.content[0].assignedOperatorId").value(operator.getId()))
+                .andExpect(jsonPath("$.data.content[0].assignedToCurrentOperator").value(true));
         Long auditId = jdbc.queryForObject("""
                 select platform_operator_audit_event_id from platform_operator_audit_events
                 where action = 'PAYMENT_RECOVERY_CASE_ASSIGNED' and case_id = ?

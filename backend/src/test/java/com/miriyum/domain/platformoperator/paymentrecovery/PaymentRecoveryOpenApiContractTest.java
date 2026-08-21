@@ -74,9 +74,11 @@ class PaymentRecoveryOpenApiContractTest {
         Map<String, Object> summary = map(schemas.get("CaseSummary"));
 
         assertThat((List<String>) summary.get("required"))
-                .contains("caseVersion", "handoffVersion", "paymentVersion", "recoveryVersion");
+                .contains("caseVersion", "handoffVersion", "paymentVersion", "recoveryVersion",
+                        "assignedOperatorId", "assignedToCurrentOperator");
         assertThat(map(summary.get("properties")))
-                .containsKeys("caseVersion", "handoffVersion", "paymentVersion", "recoveryVersion");
+                .containsKeys("caseVersion", "handoffVersion", "paymentVersion", "recoveryVersion",
+                        "assignedOperatorId", "assignedToCurrentOperator");
     }
 
     @Test

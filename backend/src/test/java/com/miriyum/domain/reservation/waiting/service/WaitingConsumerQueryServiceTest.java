@@ -9,7 +9,6 @@ import static org.mockito.Mockito.when;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
-import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryPage;
 import com.miriyum.domain.reservation.waiting.dto.WaitingReceptionAvailability;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActiveMembership;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
@@ -26,37 +25,8 @@ import java.util.Optional;
 import java.util.List;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 
 class WaitingConsumerQueryServiceTest {
-
-    @Test
-    void historyReturnsOnlyTerminalOwnedTeamsAsPublicItems() {
-        ConsumerAccountService accounts = mock(ConsumerAccountService.class);
-        WaitingActiveMembershipRepository memberships = mock(WaitingActiveMembershipRepository.class);
-        WaitingTeamRepository teams = mock(WaitingTeamRepository.class);
-        WaitingReceptionGate receptionGate = mock(WaitingReceptionGate.class);
-        StoreAdministrationService stores = mock(StoreAdministrationService.class);
-        WaitingTeam team = waitingTeam(300L, 100L, 200L, 9L);
-        when(team.getStatus()).thenReturn(WaitingTeamStatus.CHECKED_IN);
-        when(team.getCheckedInAt()).thenReturn(Instant.parse("2026-08-17T00:20:00Z"));
-        when(teams.findAllByConsumerAccountIdAndStatusIn(eq(200L), any(), any()))
-                .thenReturn(new PageImpl<>(List.of(team), PageRequest.of(0, 20), 1));
-
-        WaitingConsumerHistoryPage result = new WaitingConsumerQueryService(
-                accounts, memberships, teams, receptionGate, stores,
-                Clock.fixed(Instant.parse("2026-08-17T00:00:00Z"), ZoneOffset.UTC))
-                .getHistory(200L, 0, 20);
-
-        assertThat(result.items()).hasSize(1);
-        assertThat(result.items().get(0).waitingTeamId()).isEqualTo("300");
-        assertThat(result.items().get(0).endedAt())
-                .isEqualTo(Instant.parse("2026-08-17T00:20:00Z"));
-        verify(accounts).requireActiveAccount(200L);
-    }
 
     @Test
     void availabilityUsesTheInjectedCentralClockAfterRevalidatingTheAccount() {

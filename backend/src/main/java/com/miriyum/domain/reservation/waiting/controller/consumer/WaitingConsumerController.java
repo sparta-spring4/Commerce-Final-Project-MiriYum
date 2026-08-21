@@ -3,19 +3,24 @@ package com.miriyum.domain.reservation.waiting.controller.consumer;
 import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerCreateRequest;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryContracts.HistoryPage;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryContracts.HistoryQuery;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryContracts.Scope;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
-import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryPage;
 import com.miriyum.domain.reservation.waiting.dto.WaitingReceptionAvailability;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.dto.WaitingLocationProofContracts;
 import com.miriyum.domain.reservation.waiting.dto.WaitingPartyContracts;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerCommandFacade;
+import com.miriyum.domain.reservation.waiting.service.WaitingConsumerHistoryQueryService;
 import com.miriyum.domain.reservation.waiting.service.WaitingConsumerQueryService;
 import com.miriyum.domain.reservation.waiting.service.WaitingLocationProofService;
 import com.miriyum.domain.reservation.waiting.service.WaitingPartyService;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -26,8 +31,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 /** 소비자 JWT 주체의 웨이팅 등록·현재 조회·취소 HTTP 경계다. */
 @RestController
@@ -36,9 +41,32 @@ import org.springframework.web.bind.annotation.RequestParam;
 public class WaitingConsumerController {
 
     private final WaitingConsumerQueryService queryService;
+    private final WaitingConsumerHistoryQueryService historyQueryService;
     private final WaitingConsumerCommandFacade commandFacade;
     private final WaitingLocationProofService locationProofService;
     private final WaitingPartyService partyService;
+
+    /**
+     * 다른 소비자 식별자를 입력받지 않고 JWT 주체 본인의 현재·종료 이력만 조회한다.
+     *
+     * @param principal Consumer Access Token에서 검증한 인증 주체
+     * @param scope 현재·종료 상태 묶음 필터
+     * @param cursor 서버가 발급한 opaque cursor
+     * @param size 요청 page 크기
+     * @return 공개 필드만 포함한 최신 등록순 이력 page
+     */
+    @GetMapping("/waiting-teams")
+    public ApiResponse<HistoryPage> getHistory(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @RequestParam(required = false) Scope scope,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) @Min(1) @Max(50) Integer size
+    ) {
+        return ApiResponse.success(
+                "웨이팅 이력을 조회했습니다.",
+                historyQueryService.getHistory(
+                        principal.accountId(), HistoryQuery.of(scope, cursor, size)));
+    }
 
     @GetMapping("/stores/{storeId}/waiting-availabilities")
     public ApiResponse<WaitingReceptionAvailability> getAvailability(
@@ -210,17 +238,6 @@ public class WaitingConsumerController {
         return ApiResponse.success(
                 "현재 웨이팅을 조회했습니다.",
                 queryService.getCurrent(principal.accountId()));
-    }
-
-    @GetMapping("/waiting-team-histories")
-    public ApiResponse<WaitingConsumerHistoryPage> getHistory(
-            @AuthenticationPrincipal AuthenticatedPrincipal principal,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size
-    ) {
-        return ApiResponse.success(
-                "지난 웨이팅을 조회했습니다.",
-                queryService.getHistory(principal.accountId(), page, size));
     }
 
     @PostMapping("/waiting-teams/{waitingTeamId}/cancellations")

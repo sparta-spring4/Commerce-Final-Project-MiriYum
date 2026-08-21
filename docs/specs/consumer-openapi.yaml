@@ -46,6 +46,12 @@ paths:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1kakao-links"
   /api/v1/consumers/me/notifications:
     $ref: "./notification/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notifications"
+  /api/v1/consumers/me/notifications/unread-count:
+    $ref: "./notification/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notifications~1unread-count"
+  /api/v1/consumers/me/notifications/{notificationId}/reads:
+    $ref: "./notification/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notifications~1{notificationId}~1reads"
+  /api/v1/consumers/me/notifications/reads:
+    $ref: "./notification/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notifications~1reads"
   /api/v1/consumers/me/notification-events:
     $ref: "./notification/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notification-events"
   /api/v1/consumers/me/stores/{storeId}/waiting-availabilities:
@@ -54,10 +60,10 @@ paths:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1stores~1{storeId}~1waiting-location-proofs"
   /api/v1/consumers/me/stores/{storeId}/waiting-teams:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1stores~1{storeId}~1waiting-teams"
+  /api/v1/consumers/me/waiting-teams:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams"
   /api/v1/consumers/me/waiting-teams/current:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1current"
-  /api/v1/consumers/me/waiting-team-histories:
-    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-team-histories"
   /api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1waiting-teams~1{waitingTeamId}~1cancellations"
   /api/v1/consumers/me/waiting-invitation-acceptances:

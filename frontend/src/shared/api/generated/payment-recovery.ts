@@ -107,7 +107,9 @@ export interface components {
       /** Format: int64 */
       recoveryVersion: number;
       /** Format: int64 */
-      assignedOperatorId?: number | null;
+      assignedOperatorId: number | null;
+      /** @description 현재 인증 운영자가 이 사건의 활성 중앙 배정 담당자인지 여부 */
+      assignedToCurrentOperator: boolean;
       /** Format: date-time */
       createdAt: string;
       /** Format: date-time */
@@ -167,7 +169,9 @@ export interface components {
       /** Format: int64 */
       recoveryVersion: number;
       /** Format: int64 */
-      assignedOperatorId?: number | null;
+      assignedOperatorId: number | null;
+      /** @description 현재 인증 운영자가 이 사건의 활성 중앙 배정 담당자인지 여부 */
+      assignedToCurrentOperator: boolean;
       /** Format: date-time */
       createdAt: string;
       /** Format: date-time */

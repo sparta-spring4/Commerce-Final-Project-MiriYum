@@ -91,13 +91,16 @@ export interface paths {
      */
     post: operations["createConsumerWaitingTeam"];
   };
+  "/api/v1/consumers/me/waiting-teams": {
+    /**
+     * 본인 웨이팅 이력 조회
+     * @description 소비자 식별자를 입력받지 않고 Consumer Access Token principal의 본인 이력만 `(registeredAt DESC, waitingTeamId DESC)` 고정 정렬로 반환한다.
+     */
+    get: operations["getConsumerWaitingHistory"];
+  };
   "/api/v1/consumers/me/waiting-teams/current": {
     /** 본인 현재 활성 웨이팅 조회 */
     get: operations["getCurrentConsumerWaitingTeam"];
-  };
-  "/api/v1/consumers/me/waiting-team-histories": {
-    /** 본인 지난 웨이팅 이력 조회 */
-    get: operations["getCurrentConsumerWaitingHistory"];
   };
   "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations": {
     /** 본인 활성 웨이팅 취소 */
@@ -320,19 +323,17 @@ export interface components {
     WaitingConsumerHistoryItem: {
       waitingTeamId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
       storeId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
-      businessDate: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalDate"];
-      /** @enum {string} */
-      status: "CHECKED_IN" | "CANCELLED" | "NO_SHOW" | "CLOSED_BY_STORE" | "RESERVATION_CONVERTED";
-      /** Format: int64 */
-      queueSequence: number;
-      partySize: number;
-      createdAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
-      endedAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
-      reservationId: string | null;
+      status: components["schemas"]["WaitingTeamStatus"];
+      registeredAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      /** Format: date-time */
+      calledAt: string | null;
+      /** Format: date-time */
+      terminatedAt: string | null;
     };
     WaitingConsumerHistoryPage: {
       items: components["schemas"]["WaitingConsumerHistoryItem"][];
-      page: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PageMetadata"];
+      /** @description 다음 page가 없으면 null인 opaque cursor */
+      nextCursor: string | null;
     };
     WaitingExpectedVersionRequest: {
       /** Format: int64 */
@@ -469,7 +470,7 @@ export interface components {
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["WaitingConsumerSnapshot"];
     };
-    WaitingConsumerHistoryPageSuccessResponse: {
+    WaitingConsumerHistorySuccessResponse: {
       code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["WaitingConsumerHistoryPage"];
@@ -484,6 +485,12 @@ export interface components {
     };
     /** @description Last-Event-ID 형식·무결성 또는 audience·계정·store 결속이 유효하지 않음 */
     WaitingEventCursorBadRequest: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description scope·size가 올바르지 않거나 cursor 형식·무결성·계정·scope 결속이 유효하지 않음 */
+    WaitingHistoryCursorBadRequest: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -1125,6 +1132,33 @@ export interface operations {
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
     };
   };
+  /**
+   * 본인 웨이팅 이력 조회
+   * @description 소비자 식별자를 입력받지 않고 Consumer Access Token principal의 본인 이력만 `(registeredAt DESC, waitingTeamId DESC)` 고정 정렬로 반환한다.
+   */
+  getConsumerWaitingHistory: {
+    parameters: {
+      query?: {
+        scope?: "ALL" | "CURRENT" | "TERMINAL";
+        /** @description 계약 version·인증 소비자·scope·정렬 경계에 결속된 opaque cursor */
+        cursor?: string;
+        size?: number;
+      };
+    };
+    responses: {
+      /** @description 빈 이력을 포함한 본인의 웨이팅 이력 page */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WaitingConsumerHistorySuccessResponse"];
+        };
+      };
+      400: components["responses"]["WaitingHistoryCursorBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["WaitingConsumerAccountForbidden"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
   /** 본인 현재 활성 웨이팅 조회 */
   getCurrentConsumerWaitingTeam: {
     responses: {
@@ -1137,27 +1171,6 @@ export interface operations {
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["WaitingConsumerAccountForbidden"];
       404: components["responses"]["WaitingConsumerTeamNotFound"];
-      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
-    };
-  };
-  /** 본인 지난 웨이팅 이력 조회 */
-  getCurrentConsumerWaitingHistory: {
-    parameters: {
-      query?: {
-        page?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Page"];
-        size?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Size"];
-      };
-    };
-    responses: {
-      /** @description 생성 시각 최신순의 본인 종결 웨이팅 페이지 */
-      200: {
-        content: {
-          "application/json": components["schemas"]["WaitingConsumerHistoryPageSuccessResponse"];
-        };
-      };
-      400: components["responses"]["WaitingLedgerBadRequest"];
-      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
-      403: components["responses"]["WaitingConsumerAccountForbidden"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
     };
   };

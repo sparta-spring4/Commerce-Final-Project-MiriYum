@@ -265,7 +265,7 @@ components:
     CaseSummary:
       type: object
       additionalProperties: false
-      required: [caseId, status, caseVersion, kind, resultStatus, originalAmountMinor, cumulativeRefundedAmountMinor, remainingRefundableAmountMinor, currency, allowedActions, handoffVersion, paymentVersion, recoveryVersion, createdAt, updatedAt]
+      required: [caseId, status, caseVersion, kind, resultStatus, originalAmountMinor, cumulativeRefundedAmountMinor, remainingRefundableAmountMinor, currency, allowedActions, handoffVersion, paymentVersion, recoveryVersion, assignedOperatorId, assignedToCurrentOperator, createdAt, updatedAt]
       properties:
         caseId: {type: string, format: uuid}
         status: {$ref: '#/components/schemas/CaseStatus'}
@@ -287,6 +287,9 @@ components:
         paymentVersion: {type: integer, format: int64, minimum: 0}
         recoveryVersion: {type: integer, format: int64, minimum: 0}
         assignedOperatorId: {type: [integer, 'null'], format: int64, minimum: 1}
+        assignedToCurrentOperator:
+          type: boolean
+          description: 현재 인증 운영자가 이 사건의 활성 중앙 배정 담당자인지 여부
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
     Proposal:
@@ -318,7 +321,7 @@ components:
     CaseDetail:
       type: object
       additionalProperties: false
-      required: [caseId, status, caseVersion, kind, resultStatus, originalAmountMinor, cumulativeRefundedAmountMinor, remainingRefundableAmountMinor, currency, allowedActions, handoffVersion, paymentVersion, recoveryVersion, createdAt, updatedAt, proposals, executions]
+      required: [caseId, status, caseVersion, kind, resultStatus, originalAmountMinor, cumulativeRefundedAmountMinor, remainingRefundableAmountMinor, currency, allowedActions, handoffVersion, paymentVersion, recoveryVersion, assignedOperatorId, assignedToCurrentOperator, createdAt, updatedAt, proposals, executions]
       properties:
         caseId: {type: string, format: uuid}
         status: {$ref: '#/components/schemas/CaseStatus'}
@@ -340,6 +343,9 @@ components:
         paymentVersion: {type: integer, format: int64, minimum: 0}
         recoveryVersion: {type: integer, format: int64, minimum: 0}
         assignedOperatorId: {type: [integer, 'null'], format: int64, minimum: 1}
+        assignedToCurrentOperator:
+          type: boolean
+          description: 현재 인증 운영자가 이 사건의 활성 중앙 배정 담당자인지 여부
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
         proposals:

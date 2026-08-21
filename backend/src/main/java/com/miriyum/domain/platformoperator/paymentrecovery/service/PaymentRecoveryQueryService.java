@@ -58,7 +58,8 @@ public class PaymentRecoveryQueryService {
                 status == null ? cases.findAll(pageable) : cases.findByStatus(status, pageable);
         return new CasePage(result.map(value -> CaseSummary.from(value,
                         assignments.findActiveOperator(AdminCaseType.PAYMENT_RECOVERY,
-                                value.getPublicId(), value.getCaseVersion()).orElse(null)))
+                                value.getPublicId(), value.getCaseVersion()).orElse(null),
+                        principal.accountId()))
                         .getContent(),
                 result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages());
     }
@@ -77,7 +78,7 @@ public class PaymentRecoveryQueryService {
                     AdminCaseType.PAYMENT_RECOVERY, caseId,
                     recoveryCase.getCaseVersion(), principal.accountId()));
         }
-        return detail(recoveryCase);
+        return detail(recoveryCase, principal.accountId());
     }
 
     @Transactional(readOnly = true)
@@ -89,12 +90,14 @@ public class PaymentRecoveryQueryService {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "updatedAt"));
         var result = cases.findPendingAdditionalApprovals(
                 CaseStatus.ADDITIONAL_APPROVAL_PENDING, principal.accountId(), pageable);
-        return new PendingApprovalPage(result.map(this::detail).getContent(), result.getNumber(),
+        return new PendingApprovalPage(
+                result.map(value -> detail(value, principal.accountId())).getContent(), result.getNumber(),
                 result.getSize(), result.getTotalElements(), result.getTotalPages());
     }
 
     private CaseDetail detail(
-            com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryCase recoveryCase) {
+            com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryCase recoveryCase,
+            long currentOperatorId) {
         String caseId = recoveryCase.getPublicId();
         var proposalData = proposals.findByCasePublicIdOrderByProposalVersionAsc(caseId).stream()
                 .map(proposal -> ProposalData.from(proposal,
@@ -105,7 +108,8 @@ public class PaymentRecoveryQueryService {
                 .map(ExecutionData::from).toList();
         Long assignedOperatorId = assignments.findActiveOperator(AdminCaseType.PAYMENT_RECOVERY,
                 caseId, recoveryCase.getCaseVersion()).orElse(null);
-        return new CaseDetail(CaseSummary.from(recoveryCase, assignedOperatorId),
+        return new CaseDetail(CaseSummary.from(
+                        recoveryCase, assignedOperatorId, currentOperatorId),
                 proposalData, executionData);
     }
 

@@ -11,6 +11,9 @@ import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerSnapshot;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryContracts.HistoryQuery;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryContracts.HistoryStatus;
+import com.miriyum.domain.reservation.waiting.dto.WaitingConsumerHistoryContracts.Scope;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.domain.reservation.waiting.entity.WaitingLocationProofSession;
@@ -78,6 +81,7 @@ import tools.jackson.databind.ObjectMapper;
             "miriyum.waiting.closure.initial-delay-ms=600000",
             "miriyum.waiting.compensation.initial-delay-ms=600000",
             "miriyum.payment.cursor-secret=test-history-cursor-secret-with-enough-entropy",
+            "miriyum.waiting.history.cursor-secret=test-waiting-history-secret-with-enough-entropy",
             "miriyum.payment.portone.api-secret=test-api-secret",
             "miriyum.payment.portone.webhook-secret=whsec_dGVzdC1zZWNyZXQ=",
             "miriyum.payment.portone.store-id=store-1"
@@ -100,6 +104,7 @@ class WaitingConsumerApiIT {
     @Autowired ConsumerAccountService consumerAccountService;
     @Autowired WaitingConsumerCommandFacade consumerCommandFacade;
     @Autowired WaitingConsumerQueryService consumerQueryService;
+    @Autowired WaitingConsumerHistoryQueryService consumerHistoryQueryService;
     @Autowired WaitingCommandFacade operatorCommandFacade;
     @Autowired WaitingLedgerService ledgerService;
     @Autowired Clock clock;
@@ -266,6 +271,48 @@ class WaitingConsumerApiIT {
                 .isInstanceOfSatisfying(ServiceException.class, failure ->
                         assertThat(failure.getErrorCode())
                                 .isEqualTo(StoreErrorCode.STORE_NOT_FOUND));
+    }
+
+    @Test
+    void historyIsOwnerScopedFilteredAndStableAcrossCursorBoundary() {
+        Fixture fixture = fixture();
+        long otherConsumerId = createConsumer();
+        Instant oldestAt = Instant.parse("2026-08-20T01:00:00Z");
+        Instant terminalAt = Instant.parse("2026-08-20T01:10:00Z");
+
+        WaitingTeam current = teams.saveAndFlush(WaitingTeam.create(
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2,
+                WaitingSource.REMOTE, 1L, oldestAt));
+        WaitingTeam terminal = WaitingTeam.create(
+                fixture.firstStoreId(), fixture.consumerId(), BUSINESS_DATE, 2,
+                WaitingSource.REMOTE, 2L, oldestAt.plusSeconds(1));
+        terminal.cancel(0L, terminalAt);
+        terminal = teams.saveAndFlush(terminal);
+        WaitingTeam other = teams.saveAndFlush(WaitingTeam.create(
+                fixture.firstStoreId(), otherConsumerId, BUSINESS_DATE, 2,
+                WaitingSource.REMOTE, 3L, oldestAt.plusSeconds(2)));
+
+        var first = consumerHistoryQueryService.getHistory(
+                fixture.consumerId(), new HistoryQuery(Scope.ALL, null, 1));
+        var second = consumerHistoryQueryService.getHistory(
+                fixture.consumerId(), new HistoryQuery(Scope.ALL, first.nextCursor(), 1));
+        var currentPage = consumerHistoryQueryService.getHistory(
+                fixture.consumerId(), new HistoryQuery(Scope.CURRENT, null, 20));
+        var terminalPage = consumerHistoryQueryService.getHistory(
+                fixture.consumerId(), new HistoryQuery(Scope.TERMINAL, null, 20));
+
+        assertThat(first.items()).extracting(item -> item.waitingTeamId())
+                .containsExactly(Long.toString(terminal.getId()));
+        assertThat(second.items()).extracting(item -> item.waitingTeamId())
+                .containsExactly(Long.toString(current.getId()))
+                .doesNotContain(Long.toString(other.getId()));
+        assertThat(second.nextCursor()).isNull();
+        assertThat(currentPage.items()).extracting(item -> item.status())
+                .containsExactly(HistoryStatus.WAITING);
+        assertThat(terminalPage.items()).singleElement().satisfies(item -> {
+            assertThat(item.status()).isEqualTo(HistoryStatus.CANCELLED);
+            assertThat(item.terminatedAt()).isEqualTo(terminalAt);
+        });
     }
 
     @Test

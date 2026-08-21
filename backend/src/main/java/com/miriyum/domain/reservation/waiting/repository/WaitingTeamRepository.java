@@ -10,7 +10,6 @@ import java.util.Optional;
 import java.util.List;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Page;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -19,13 +18,47 @@ import org.springframework.data.repository.query.Param;
 /** 웨이팅 팀 잠금, FIFO 선두와 활성 수·종결 대상 조회를 소유한다. */
 public interface WaitingTeamRepository extends JpaRepository<WaitingTeam, Long> {
 
-    Page<WaitingTeam> findAllByConsumerAccountIdAndStatusIn(
+    List<WaitingTeam> findAllByIdIn(List<Long> waitingTeamIds);
+
+    /** 소비자·상태 묶음과 최신순 복합 cursor에 한정된 이력 page를 조회한다. */
+    default List<WaitingTeam> findConsumerHistoryPage(
             long consumerAccountId,
             Collection<WaitingTeamStatus> statuses,
+            Instant beforeCreatedAt,
+            Long beforeWaitingTeamId,
+            int limit
+    ) {
+        if (consumerAccountId <= 0 || statuses == null || statuses.isEmpty()
+                || (beforeCreatedAt == null) != (beforeWaitingTeamId == null)
+                || limit < 1) {
+            throw new IllegalArgumentException("history scope, cursor and limit must be valid");
+        }
+        return findConsumerHistoryPage(
+                consumerAccountId,
+                statuses,
+                beforeCreatedAt,
+                beforeWaitingTeamId,
+                PageRequest.of(0, limit));
+    }
+
+    @Query("""
+            select team
+            from WaitingTeam team
+            where team.consumerAccountId = :consumerAccountId
+              and team.status in :statuses
+              and (:beforeCreatedAt is null
+                   or team.createdAt < :beforeCreatedAt
+                   or (team.createdAt = :beforeCreatedAt
+                       and team.id < :beforeWaitingTeamId))
+            order by team.createdAt desc, team.id desc
+            """)
+    List<WaitingTeam> findConsumerHistoryPage(
+            @Param("consumerAccountId") long consumerAccountId,
+            @Param("statuses") Collection<WaitingTeamStatus> statuses,
+            @Param("beforeCreatedAt") Instant beforeCreatedAt,
+            @Param("beforeWaitingTeamId") Long beforeWaitingTeamId,
             Pageable pageable
     );
-
-    List<WaitingTeam> findAllByIdIn(List<Long> waitingTeamIds);
 
     /** 매장·선택 상태·복합 cursor에 한정된 안정적인 FIFO 페이지를 조회한다. */
     default List<WaitingTeam> findKeysetPage(

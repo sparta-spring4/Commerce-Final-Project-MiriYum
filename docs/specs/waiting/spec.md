@@ -499,7 +499,7 @@ Runtime은 immutable 사건 high-watermark를 독립적으로 소비하며 이 p
 | `/api/v1/consumers/me/stores/{storeId}/waiting-availabilities` | `GET` | 중앙 시각 기준 접수 가능 여부와 등록에 사용할 `businessDate` 조회 |
 | `/api/v1/consumers/me/stores/{storeId}/waiting-teams` | `POST` | #409 위치 증명 연결 뒤 `businessDate`, `partySize`로 원격 웨이팅 등록 |
 | `/api/v1/consumers/me/waiting-teams/current` | `GET` | 인증 소비자의 단일 활성 웨이팅 조회 |
-| `/api/v1/consumers/me/waiting-team-histories` | `GET` | 인증 소비자가 대표자 또는 일행으로 참여했던 종결 웨이팅을 최신 종결 시각순으로 조회 |
+| `/api/v1/consumers/me/waiting-teams` | `GET` | 인증 소비자가 대표자로 등록한 웨이팅을 scope와 opaque cursor로 조회 |
 | `/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations` | `POST` | 본인 웨이팅을 `expectedVersion`으로 취소 |
 
 등록과 취소는 표준 UUID `Idempotency-Key`가 필수다. 같은 키와 같은 요청 지문은 최초 HTTP
@@ -531,10 +531,27 @@ call/cancel이 같은 version으로 경합하면 팀 row lock에서 먼저 확�
 다른 소비자의 팀은 존재 여부와 소유권을 구분하지 않고 `404 WAITING_003`으로 응답한다. 계정 ID,
 연락처, 운영 메모, 좌표, 원본 식별자, 멱등 키는 반환하지 않는다.
 
-이력 조회는 현재 계정이 대표자 또는 구성원으로 참여했던 종결 팀만 반환하며 활성 팀은 포함하지
-않는다. `cancelledAt`, `checkedInAt`, `arrivedAt`, `calledAt`, `createdAt` 순으로 확인한 종결 기준
-시각을 최신순 정렬하고 같은 시각에는 `waitingTeamId` 역순으로 안정화한다. 목록에는 다른 구성원의
-계정 식별자나 연락처를 포함하지 않는다.
+### 소비자 웨이팅 이력 공개 조회 (#467)
+
+`GET /api/v1/consumers/me/waiting-teams`는 소비자 ID를 path·query·body로 받지 않고 Consumer
+Access Token principal의 `consumer_account_id`와 일치하는 팀만 조회한다. 빈 이력은 정상
+`200`이며 `items=[]`, `nextCursor=null`이다. Waiting Repository는 Waiting 내부 query
+service만 사용하고 Controller와 후속 #155에는 공개 service와 DTO만 제공한다.
+
+`scope`는 `ALL`(기본), `CURRENT`, `TERMINAL`이다. CURRENT는 `WAITING`, `CALLED`,
+`ARRIVED`, `RESERVATION_CONVERTING`, TERMINAL은 `CHECKED_IN`, `CANCELLED`, `NO_SHOW`,
+`CLOSED_BY_STORE`, `RESERVATION_CONVERTED`를 포함한다. 기본 page 크기는 20, 최대는 50이며
+정렬은 `(createdAt DESC, waitingTeamId DESC)`로 고정한다. cursor는 계약 version, 인증 소비자,
+scope와 마지막 정렬 경계를 독립 secret으로 HMAC 결속한 최대 512자의 base64url opaque 값이다.
+형식·서명이 손상됐거나 다른 소비자·scope·계약 version에 결속된 cursor는
+`400 WAITING_019`로 거절한다. cursor secret이 없거나 32자 미만이면 endpoint는
+`503 COMMON_012`로 fail-closed한다.
+
+item은 `waitingTeamId`, `storeId`, `status`, `registeredAt`, `calledAt`, `terminatedAt`만
+공개한다. `terminatedAt`은 terminal 상태에 따라 `checkedInAt`, `cancelledAt`, `noShowAt`,
+`closedByStoreAt`, `reservationConvertedAt` 중 하나를 정규화하며 현재 상태에서는 null이다.
+위치 증명, 내부 account ID, queue·party·version·membership, 감사·원장·결제 내부 정보는
+노출하지 않는다.
 
 플랫폼 3km 정책은 유지하고 위치 판정·좌표 수집 구현은 #409가 소유한다. 위치 원문은 판정 호출
 스택에서만 사용하며 위치 판정 발급에는 전역 멱등 지문을 만들지 않는다. DB에는 계정·매장·목적,

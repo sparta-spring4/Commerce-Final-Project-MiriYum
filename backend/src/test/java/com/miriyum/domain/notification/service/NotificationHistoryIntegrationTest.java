@@ -132,6 +132,7 @@ class NotificationHistoryIntegrationTest {
             assertThat(task.occurredAt()).isEqualTo(Instant.parse("2026-08-17T03:00:00Z"));
             assertThat(task.createdAt()).isBetween(beforeRecord, afterRecord);
             assertThat(task.deliveredAt()).isEqualTo(Instant.parse("2026-08-17T03:00:01Z"));
+            assertThat(task.readAt()).isNull();
         });
 
         var boundary = new HistoryBoundary(
