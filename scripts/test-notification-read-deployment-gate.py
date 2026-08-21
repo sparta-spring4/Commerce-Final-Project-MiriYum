@@ -110,10 +110,22 @@ def verify_production_ecs_evidence(
     previous_tasks,
     target_health_by_arn,
     expected_task_definition,
+    final_stopped_task_arns=None,
+    final_stopped_tasks=None,
 ):
+    if final_stopped_task_arns is None:
+        final_stopped_task_arns = []
+    if final_stopped_tasks is None:
+        final_stopped_tasks = {"tasks": [], "failures": []}
     if not all(
         isinstance(value, dict)
-        for value in (service, tasks, previous_tasks, target_health_by_arn)
+        for value in (
+            service,
+            tasks,
+            previous_tasks,
+            final_stopped_tasks,
+            target_health_by_arn,
+        )
     ):
         raise DeploymentGateError("deployment evidence shape is invalid")
     if not expected_task_definition:
@@ -204,6 +216,44 @@ def verify_production_ecs_evidence(
     ):
         raise DeploymentGateError("a previous ECS task has not reached STOPPED")
 
+    if (
+        not isinstance(final_stopped_task_arns, list)
+        or any(
+            not isinstance(task_arn, str) or not task_arn
+            for task_arn in final_stopped_task_arns
+        )
+        or len(set(final_stopped_task_arns)) != len(final_stopped_task_arns)
+    ):
+        raise DeploymentGateError("final stopped ECS task identity evidence is invalid")
+    if final_stopped_tasks.get("failures"):
+        raise DeploymentGateError(
+            "final stopped ECS task evidence contains lookup failures"
+        )
+
+    described_final_stopped_tasks = final_stopped_tasks.get("tasks", [])
+    if not isinstance(described_final_stopped_tasks, list):
+        raise DeploymentGateError(
+            "final stopped ECS task lifecycle evidence is incomplete"
+        )
+    described_final_stopped_task_arns = {
+        task.get("taskArn")
+        for task in described_final_stopped_tasks
+        if isinstance(task, dict) and task.get("taskArn")
+    }
+    if (
+        described_final_stopped_task_arns != set(final_stopped_task_arns)
+        or len(described_final_stopped_tasks) != len(final_stopped_task_arns)
+    ):
+        raise DeploymentGateError(
+            "final stopped ECS task lifecycle evidence is incomplete"
+        )
+    if any(
+        task.get("desiredStatus") != "STOPPED"
+        or task.get("lastStatus") != "STOPPED"
+        for task in described_final_stopped_tasks
+    ):
+        raise DeploymentGateError("a nonterminal stopped ECS task remains")
+
     target_group_arns = {
         load_balancer.get("targetGroupArn")
         for load_balancer in service.get("loadBalancers", [])
@@ -264,6 +314,10 @@ def run_cli(arguments):
             )
             if not isinstance(evidence, dict):
                 raise DeploymentGateError("deployment evidence shape is invalid")
+            if not all(
+                key in evidence for key in ("stoppedTaskArns", "stoppedTasks")
+            ):
+                raise DeploymentGateError("final stopped ECS task evidence is missing")
             verify_production_ecs_evidence(
                 evidence.get("service", {}),
                 evidence.get("tasks", {}),
@@ -271,6 +325,8 @@ def run_cli(arguments):
                 evidence.get("previousTasks", {}),
                 evidence.get("targetHealthByArn", {}),
                 options.expected_task_definition,
+                evidence.get("stoppedTaskArns", []),
+                evidence.get("stoppedTasks", {}),
             )
         else:
             evidence = json.loads(
@@ -832,6 +888,8 @@ class ProductionEcsEvidenceTest(unittest.TestCase):
                 "tasks": self.tasks,
                 "previousTaskArns": self.previous_task_arns,
                 "previousTasks": self.previous_tasks,
+                "stoppedTaskArns": [],
+                "stoppedTasks": {"tasks": [], "failures": []},
                 "targetHealthByArn": self.target_health,
             }
         )
@@ -851,6 +909,8 @@ class ProductionEcsEvidenceTest(unittest.TestCase):
                 "tasks": self.tasks,
                 "previousTaskArns": self.previous_task_arns,
                 "previousTasks": self.previous_tasks,
+                "stoppedTaskArns": [],
+                "stoppedTasks": {"tasks": [], "failures": []},
                 "targetHealthByArn": target_health,
             }
         )
@@ -864,6 +924,48 @@ class ProductionEcsEvidenceTest(unittest.TestCase):
         self.assertEqual(1, result.returncode)
         self.assertNotIn("Traceback", result.stderr)
         self.assertIn("deployment evidence shape is invalid", result.stderr)
+
+    def test_cli_rejects_uncaptured_nonterminal_stopped_task(self):
+        stopped_task_arn = "arn:aws:ecs:task/replacement-after-snapshot"
+        result = self._run_cli(
+            {
+                "service": self.service,
+                "tasks": self.tasks,
+                "previousTaskArns": self.previous_task_arns,
+                "previousTasks": self.previous_tasks,
+                "stoppedTaskArns": [stopped_task_arn],
+                "stoppedTasks": {
+                    "tasks": [
+                        {
+                            "taskArn": stopped_task_arn,
+                            "desiredStatus": "STOPPED",
+                            "lastStatus": "STOPPING",
+                        }
+                    ],
+                    "failures": [],
+                },
+                "targetHealthByArn": self.target_health,
+            }
+        )
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn("nonterminal stopped ECS task", result.stderr)
+
+    def test_cli_rejects_incomplete_final_stopped_task_evidence(self):
+        result = self._run_cli(
+            {
+                "service": self.service,
+                "tasks": self.tasks,
+                "previousTaskArns": self.previous_task_arns,
+                "previousTasks": self.previous_tasks,
+                "stoppedTaskArns": ["arn:aws:ecs:task/missing"],
+                "stoppedTasks": {"tasks": [], "failures": []},
+                "targetHealthByArn": self.target_health,
+            }
+        )
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn("final stopped ECS task lifecycle evidence", result.stderr)
 
 
 class StagingComposeEvidenceTest(unittest.TestCase):
