@@ -21,7 +21,12 @@ public enum StoreErrorCode implements ErrorCode {
     PUBLIC_IMAGE_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "STORE_012", "매장 이미지는 최대 10장까지 등록할 수 있습니다."),
     PUBLIC_IMAGE_SIZE_EXCEEDED(HttpStatus.PAYLOAD_TOO_LARGE, "STORE_013", "이미지 파일 크기가 제한을 초과했습니다."),
     STORE_ENFORCEMENT_VERSION_CONFLICT(HttpStatus.CONFLICT, "STORE_014", "매장 제재 상태 버전이 변경되었습니다."),
-    STORE_FEATURE_RESTRICTED(HttpStatus.FORBIDDEN, "STORE_015", "제재로 제한된 매장 기능입니다.");
+    STORE_FEATURE_RESTRICTED(HttpStatus.FORBIDDEN, "STORE_015", "제재로 제한된 매장 기능입니다."),
+    ONBOARDING_EVIDENCE_INVALID(HttpStatus.BAD_REQUEST, "STORE_016", "사업자등록증 파일이 유효하지 않습니다."),
+    ONBOARDING_EVIDENCE_SIZE_EXCEEDED(
+            HttpStatus.PAYLOAD_TOO_LARGE, "STORE_017", "사업자등록증 파일 크기가 제한을 초과했습니다."),
+    ONBOARDING_EVIDENCE_INTEGRITY_FAILED(
+            HttpStatus.SERVICE_UNAVAILABLE, "STORE_018", "사업자등록증 파일 무결성을 확인할 수 없습니다.");
 
     private final HttpStatus httpStatus;
     private final String code;
