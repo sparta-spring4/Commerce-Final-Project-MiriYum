@@ -62,6 +62,7 @@ class PlatformOperatorOpenApiContractTest {
             "/api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions/{sanctionId}/releases");
     private static final Set<String> PAYMENT_RECOVERY_PATHS = Set.of(
             "/api/v1/platform-operators/payment-recovery-cases",
+            "/api/v1/platform-operators/payment-recovery-cases/pending-additional-approvals",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}/assignments",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}/requeries",
