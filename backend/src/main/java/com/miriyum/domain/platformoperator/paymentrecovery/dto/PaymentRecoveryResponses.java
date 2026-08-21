@@ -62,7 +62,8 @@ public final class PaymentRecoveryResponses {
     }
 
     public record CaseDetail(@JsonUnwrapped CaseSummary summary, List<ProposalData> proposals,
-                             List<ExecutionData> executions) {
+                             List<ExecutionData> executions,
+                             boolean canApproveAdditionalProposal) {
         public CaseDetail {
             proposals = List.copyOf(proposals);
             executions = List.copyOf(executions);

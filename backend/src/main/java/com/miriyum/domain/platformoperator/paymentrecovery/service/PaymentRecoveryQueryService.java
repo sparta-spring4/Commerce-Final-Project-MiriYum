@@ -70,7 +70,9 @@ public class PaymentRecoveryQueryService {
                 principal.accountId(), principal.authorityVersion());
         var recoveryCase = cases.findByPublicId(caseId)
                 .orElseThrow(() -> new ServiceException(PaymentRecoveryErrorCode.RECOVERY_CASE_NOT_FOUND));
-        if (!isEligibleAdditionalApprover(principal, authority, recoveryCase)) {
+        boolean canApproveAdditionalProposal =
+                isEligibleAdditionalApprover(principal, authority, recoveryCase);
+        if (!canApproveAdditionalProposal) {
             if (!authority.permissions().contains(PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE)) {
                 throw new ServiceException(AdminAuthorizationErrorCode.AUTHORIZATION_DENIED);
             }
@@ -78,7 +80,7 @@ public class PaymentRecoveryQueryService {
                     AdminCaseType.PAYMENT_RECOVERY, caseId,
                     recoveryCase.getCaseVersion(), principal.accountId()));
         }
-        return detail(recoveryCase, principal.accountId());
+        return detail(recoveryCase, principal.accountId(), canApproveAdditionalProposal);
     }
 
     @Transactional(readOnly = true)
@@ -91,13 +93,14 @@ public class PaymentRecoveryQueryService {
         var result = cases.findPendingAdditionalApprovals(
                 CaseStatus.ADDITIONAL_APPROVAL_PENDING, principal.accountId(), pageable);
         return new PendingApprovalPage(
-                result.map(value -> detail(value, principal.accountId())).getContent(), result.getNumber(),
+                result.map(value -> detail(value, principal.accountId(),
+                        isEligibleAdditionalApprover(principal, authority, value))).getContent(), result.getNumber(),
                 result.getSize(), result.getTotalElements(), result.getTotalPages());
     }
 
     private CaseDetail detail(
             com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryCase recoveryCase,
-            long currentOperatorId) {
+            long currentOperatorId, boolean canApproveAdditionalProposal) {
         String caseId = recoveryCase.getPublicId();
         var proposalData = proposals.findByCasePublicIdOrderByProposalVersionAsc(caseId).stream()
                 .map(proposal -> ProposalData.from(proposal,
@@ -110,7 +113,7 @@ public class PaymentRecoveryQueryService {
                 caseId, recoveryCase.getCaseVersion()).orElse(null);
         return new CaseDetail(CaseSummary.from(
                         recoveryCase, assignedOperatorId, currentOperatorId),
-                proposalData, executionData);
+                proposalData, executionData, canApproveAdditionalProposal);
     }
 
     private boolean isEligibleAdditionalApprover(

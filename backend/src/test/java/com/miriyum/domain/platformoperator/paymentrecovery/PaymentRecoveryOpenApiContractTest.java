@@ -82,6 +82,18 @@ class PaymentRecoveryOpenApiContractTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void caseDetailPublishesCurrentOperatorAdditionalApprovalEligibility() throws Exception {
+        Map<String, Object> schemas = map(map(document().get("components")).get("schemas"));
+        Map<String, Object> detail = map(schemas.get("CaseDetail"));
+
+        assertThat((List<String>) detail.get("required"))
+                .contains("canApproveAdditionalProposal");
+        assertThat(map(detail.get("properties")))
+                .containsKey("canApproveAdditionalProposal");
+    }
+
+    @Test
     void responseAndAuditShapedSchemasExcludeRawProviderAndSecretFields() throws Exception {
         Map<String, Object> schemas = map(map(document().get("components")).get("schemas"));
         String normalized = schemas.toString().toLowerCase(Locale.ROOT);

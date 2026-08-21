@@ -150,7 +150,7 @@ function needsAdditionalApproval(
   item: PaymentRecoveryCaseDetail,
   proposal: PaymentRecoveryCaseDetail['proposals'][number],
 ) {
-  return item.status === 'ADDITIONAL_APPROVAL_PENDING' && proposal.approvalTier === 'ADDITIONAL_SUPER_ADMIN' && proposal.approverOperatorId == null
+  return item.canApproveAdditionalProposal && item.status === 'ADDITIONAL_APPROVAL_PENDING' && proposal.approvalTier === 'ADDITIONAL_SUPER_ADMIN' && proposal.approverOperatorId == null
 }
 
 function money(amount: number, currency: string) {

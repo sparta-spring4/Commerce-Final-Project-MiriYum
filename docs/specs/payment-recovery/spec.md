@@ -157,6 +157,7 @@ The #281 API provides only:
 - list and detail recovery cases, including `caseVersion`, `handoffVersion`, `paymentVersion`, and `recoveryVersion` required by follow-up commands;
 - expose the current, unexpired central assignment operator ID and whether it belongs to the authenticated operator in list and detail summaries, so only that operator receives the ordinary detail entry while other assignments are shown as in progress;
 - list pending additional approvals only to a different `SUPER_ADMIN` with `PAYMENT_RECOVERY_HIGH_VALUE_APPROVE`, and allow that eligible approver to read the exact case/proposal versions without inheriting the requester's assignment;
+- expose `canApproveAdditionalProposal` on detail from the authenticated principal's role, permission, case state, and requester-separation check; clients render the additional-approval command only when it is true;
 - request an exact provider-result requery;
 - create a recovery proposal;
 - approve a proposal when the additional tier is required;

@@ -321,7 +321,7 @@ components:
     CaseDetail:
       type: object
       additionalProperties: false
-      required: [caseId, status, caseVersion, kind, resultStatus, originalAmountMinor, cumulativeRefundedAmountMinor, remainingRefundableAmountMinor, currency, allowedActions, handoffVersion, paymentVersion, recoveryVersion, assignedOperatorId, assignedToCurrentOperator, createdAt, updatedAt, proposals, executions]
+      required: [caseId, status, caseVersion, kind, resultStatus, originalAmountMinor, cumulativeRefundedAmountMinor, remainingRefundableAmountMinor, currency, allowedActions, handoffVersion, paymentVersion, recoveryVersion, assignedOperatorId, assignedToCurrentOperator, canApproveAdditionalProposal, createdAt, updatedAt, proposals, executions]
       properties:
         caseId: {type: string, format: uuid}
         status: {$ref: '#/components/schemas/CaseStatus'}
@@ -346,6 +346,9 @@ components:
         assignedToCurrentOperator:
           type: boolean
           description: 현재 인증 운영자가 이 사건의 활성 중앙 배정 담당자인지 여부
+        canApproveAdditionalProposal:
+          type: boolean
+          description: 현재 인증 운영자가 요청자 분리와 고액 추가 승인 권한을 모두 충족하는지 여부
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
         proposals:
