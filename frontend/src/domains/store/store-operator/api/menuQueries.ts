@@ -7,6 +7,8 @@ import type {
   MenuVisibility,
   MenuWriteRequest,
   PublicationMode,
+  RepresentativeMenuReplaceRequest,
+  RepresentativeMenuSetting,
 } from '../model/types'
 import { storeOperatorKeys } from '../../../../app/shells/store-operator/queryKeys'
 
@@ -60,6 +62,51 @@ export function useManagedMenu(storeId: string, menuId: string, enabled = true) 
       return response.data
     },
     enabled,
+  })
+}
+
+export function useRepresentativeMenus(storeId: string) {
+  const { apiClient } = useStoreOperatorAuth()
+
+  return useQuery({
+    queryKey: storeOperatorKeys.representativeMenus(storeId),
+    queryFn: async ({ signal }): Promise<RepresentativeMenuSetting> => {
+      const response = await apiClient(
+        '/api/v1/store-operators/stores/{storeId}/representative-menus',
+        { method: 'get', pathParams: { storeId }, signal },
+      )
+      return response.data
+    },
+  })
+}
+
+export function useReplaceRepresentativeMenus(storeId: string) {
+  const { apiClient } = useStoreOperatorAuth()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (variables: {
+      body: RepresentativeMenuReplaceRequest
+      idempotencyKey: string
+    }): Promise<RepresentativeMenuSetting> => {
+      const response = await apiClient(
+        '/api/v1/store-operators/stores/{storeId}/representative-menus',
+        {
+          method: 'put',
+          pathParams: { storeId },
+          body: variables.body,
+          idempotencyKey: variables.idempotencyKey,
+        },
+      )
+      return response.data
+    },
+    onSuccess: (setting) => {
+      queryClient.setQueryData(
+        storeOperatorKeys.representativeMenus(storeId),
+        setting,
+      )
+      void queryClient.invalidateQueries({ queryKey: ['store-search'] })
+    },
   })
 }
 

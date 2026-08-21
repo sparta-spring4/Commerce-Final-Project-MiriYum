@@ -105,7 +105,8 @@ public class PaymentRecoveryCommandService {
                     caseId, command.idempotencyKey(), before,
                     PaymentRecoveryAuditSnapshots.caseSnapshot(recoveryCase));
             return success(HttpStatus.OK, "PAYMENT_RECOVERY_CASE", caseId,
-                    CaseSummary.from(recoveryCase, principal.accountId()));
+                    CaseSummary.from(
+                            recoveryCase, principal.accountId(), principal.accountId()));
         });
     }
 
@@ -273,7 +274,8 @@ public class PaymentRecoveryCommandService {
                     caseId, command.idempotencyKey(), before,
                     PaymentRecoveryAuditSnapshots.caseSnapshot(recoveryCase));
             return success(HttpStatus.OK, "PAYMENT_RECOVERY_CASE", caseId,
-                    CaseSummary.from(recoveryCase, null));
+                    CaseSummary.from(
+                            recoveryCase, context.operatorId(), context.operatorId()));
         });
     }
 

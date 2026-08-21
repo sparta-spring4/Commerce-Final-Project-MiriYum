@@ -80,6 +80,8 @@ paths:
     $ref: "./admin-monitoring/openapi.yaml#/paths/~1api~1v1~1platform-operators~1monitoring-cases~1{caseType}~1{caseId}"
   /api/v1/platform-operators/payment-recovery-cases:
     $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases"
+  /api/v1/platform-operators/payment-recovery-cases/pending-additional-approvals:
+    $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1pending-additional-approvals"
   /api/v1/platform-operators/payment-recovery-cases/{caseId}:
     $ref: "./payment-recovery/openapi.yaml#/paths/~1api~1v1~1platform-operators~1payment-recovery-cases~1{caseId}"
   /api/v1/platform-operators/payment-recovery-cases/{caseId}/assignments:

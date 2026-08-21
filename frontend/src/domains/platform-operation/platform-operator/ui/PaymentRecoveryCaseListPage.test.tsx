@@ -1,0 +1,198 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
+import { MemoryRouter } from 'react-router'
+import { describe, expect, it } from 'vitest'
+import { PlatformOperatorAuthProvider } from '../../../../app/shells/platform-operator/PlatformOperatorAuthProvider'
+import { successResponse } from '../../../../test/msw/envelope'
+import { server } from '../../../../test/msw/server'
+import { PaymentRecoveryCaseListPage } from './PaymentRecoveryCaseListPage'
+
+describe('결제 복구 사건 목록', () => {
+  it('복구 종류와 남은 환불액을 상세 링크로 표시한다', async () => {
+    server.use(
+      http.post('/api/v1/platform-operators/auth/refresh', () => successResponse({
+        accessToken: 'operator-token', initialPasswordChangeRequired: false,
+        sessionIdleExpiresAt: '2026-08-20T11:00:00Z', sessionAbsoluteExpiresAt: '2026-08-20T18:00:00Z',
+      })),
+      http.post('/api/v1/platform-operators/auth/token-refreshes', () => successResponse({
+        accessToken: 'operator-token', initialPasswordChangeRequired: false,
+        sessionIdleExpiresAt: '2026-08-20T11:00:00Z', sessionAbsoluteExpiresAt: '2026-08-20T18:00:00Z',
+      })),
+      http.get('/api/v1/platform-operators/payment-recovery-cases', () => successResponse({
+        content: [{
+          caseId: 'e6a91572-0632-4fa6-9a93-819add8df110', status: 'INVESTIGATING', caseVersion: 3,
+          kind: 'REFUND_RESULT_UNKNOWN', resultStatus: 'UNKNOWN', originalAmountMinor: 50000,
+          cumulativeRefundedAmountMinor: 10000, remainingRefundableAmountMinor: 40000,
+          currency: 'KRW', maskedProviderReference: 'imp_****110', allowedActions: ['REQUERY_PROVIDER_RESULT'],
+          handoffVersion: 2, paymentVersion: 4, recoveryVersion: 1, assignedOperatorId: 7,
+          assignedToCurrentOperator: true,
+          createdAt: '2026-08-20T09:00:00Z', updatedAt: '2026-08-20T09:30:00Z',
+        }], page: 0, size: 20, totalElements: 1, totalPages: 1,
+      })),
+    )
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PlatformOperatorAuthProvider><MemoryRouter><PaymentRecoveryCaseListPage /></MemoryRouter></PlatformOperatorAuthProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText('환불 결과 불명')).toBeInTheDocument()
+    expect(screen.getByText('남은 환불 가능액 40,000 KRW')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '사건 상세' })).toHaveAttribute(
+      'href', '/admin/payment-recovery-cases/e6a91572-0632-4fa6-9a93-819add8df110',
+    )
+    expect(screen.queryByRole('button', { name: '나에게 배정' })).not.toBeInTheDocument()
+  })
+
+  it('담당 배정 전에 재인증을 요구한다', async () => {
+    server.use(
+      http.post('/api/v1/platform-operators/auth/refresh', () => successResponse({
+        accessToken: 'operator-token', initialPasswordChangeRequired: false,
+        sessionIdleExpiresAt: '2026-08-20T11:00:00Z', sessionAbsoluteExpiresAt: '2026-08-20T18:00:00Z',
+      })),
+      http.get('/api/v1/platform-operators/payment-recovery-cases', () => successResponse({
+        content: [{
+          caseId: 'e6a91572-0632-4fa6-9a93-819add8df110', status: 'INVESTIGATING', caseVersion: 3,
+          kind: 'REFUND_RESULT_UNKNOWN', resultStatus: 'UNKNOWN', originalAmountMinor: 50000,
+          cumulativeRefundedAmountMinor: 10000, remainingRefundableAmountMinor: 40000,
+          currency: 'KRW', maskedProviderReference: null, allowedActions: ['RETRY_REFUND'],
+          handoffVersion: 2, paymentVersion: 4, recoveryVersion: 1, assignedOperatorId: null,
+          assignedToCurrentOperator: false,
+          createdAt: '2026-08-20T09:00:00Z', updatedAt: '2026-08-20T09:30:00Z',
+        }], page: 0, size: 20, totalElements: 1, totalPages: 1,
+      })),
+    )
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PlatformOperatorAuthProvider><MemoryRouter><PaymentRecoveryCaseListPage /></MemoryRouter></PlatformOperatorAuthProvider>
+      </QueryClientProvider>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '나에게 배정' }))
+    expect(screen.getByRole('dialog', { name: '재인증이 필요합니다' })).toBeInTheDocument()
+  })
+
+  it('응답 유실 뒤 사건을 다시 조회하고 같은 멱등 키로 배정을 재시도한다', async () => {
+    const idempotencyKeys: string[] = []
+    let listReads = 0
+    let assignmentAttempts = 0
+    server.use(
+      http.post('/api/v1/platform-operators/auth/refresh', () => successResponse({
+        accessToken: 'operator-token', initialPasswordChangeRequired: false,
+        sessionIdleExpiresAt: '2026-08-20T11:00:00Z', sessionAbsoluteExpiresAt: '2026-08-20T18:00:00Z',
+      })),
+      http.get('/api/v1/platform-operators/payment-recovery-cases', () => {
+        listReads += 1
+        return successResponse({
+          content: [{
+            caseId: 'e6a91572-0632-4fa6-9a93-819add8df110', status: 'INVESTIGATING', caseVersion: 3,
+            kind: 'REFUND_RESULT_UNKNOWN', resultStatus: 'UNKNOWN', originalAmountMinor: 50000,
+            cumulativeRefundedAmountMinor: 10000, remainingRefundableAmountMinor: 40000,
+            currency: 'KRW', maskedProviderReference: null, allowedActions: ['REQUERY_PROVIDER_RESULT'],
+            handoffVersion: 2, paymentVersion: 4, recoveryVersion: 1, assignedOperatorId: null,
+            assignedToCurrentOperator: false,
+            createdAt: '2026-08-20T09:00:00Z', updatedAt: '2026-08-20T09:30:00Z',
+          }], page: 0, size: 20, totalElements: 1, totalPages: 1,
+        })
+      }),
+      http.post('/api/v1/platform-operators/reauthentication-approvals', () => successResponse({
+        approval: `approval-${assignmentAttempts + 1}`, expiresAt: '2026-08-20T10:05:00Z',
+      })),
+      http.post('/api/v1/platform-operators/payment-recovery-cases/:caseId/assignments', ({ request }) => {
+        idempotencyKeys.push(request.headers.get('Idempotency-Key') ?? '')
+        assignmentAttempts += 1
+        return assignmentAttempts === 1 ? HttpResponse.error() : successResponse({ caseVersion: 4 })
+      }),
+    )
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PlatformOperatorAuthProvider><MemoryRouter><PaymentRecoveryCaseListPage /></MemoryRouter></PlatformOperatorAuthProvider>
+      </QueryClientProvider>,
+    )
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      fireEvent.click(await screen.findByRole('button', { name: '나에게 배정' }))
+      fireEvent.change(screen.getByLabelText('현재 비밀번호'), { target: { value: 'Miriyum1!' } })
+      fireEvent.click(screen.getByRole('button', { name: '확인' }))
+      await waitFor(() => expect(idempotencyKeys).toHaveLength(attempt + 1))
+      if (attempt === 0) await waitFor(() => expect(listReads).toBeGreaterThan(1))
+    }
+
+    expect(idempotencyKeys[0]).toBeTruthy()
+    expect(idempotencyKeys[1]).toBe(idempotencyKeys[0])
+  })
+
+  it('다른 운영자에게 배정된 사건은 상세 링크 대신 처리 중으로 표시한다', async () => {
+    server.use(
+      http.post('/api/v1/platform-operators/auth/refresh', () => successResponse({
+        accessToken: 'operator-token', initialPasswordChangeRequired: false,
+        sessionIdleExpiresAt: '2026-08-20T11:00:00Z', sessionAbsoluteExpiresAt: '2026-08-20T18:00:00Z',
+      })),
+      http.post('/api/v1/platform-operators/auth/token-refreshes', () => successResponse({
+        accessToken: 'operator-token', initialPasswordChangeRequired: false,
+        sessionIdleExpiresAt: '2026-08-20T11:00:00Z', sessionAbsoluteExpiresAt: '2026-08-20T18:00:00Z',
+      })),
+      http.get('/api/v1/platform-operators/payment-recovery-cases', () => successResponse({
+        content: [{
+          caseId: 'e6a91572-0632-4fa6-9a93-819add8df110', status: 'INVESTIGATING', caseVersion: 3,
+          kind: 'REFUND_RESULT_UNKNOWN', resultStatus: 'UNKNOWN', originalAmountMinor: 50000,
+          cumulativeRefundedAmountMinor: 10000, remainingRefundableAmountMinor: 40000,
+          currency: 'KRW', maskedProviderReference: null, allowedActions: ['REQUERY_PROVIDER_RESULT'],
+          handoffVersion: 2, paymentVersion: 4, recoveryVersion: 1, assignedOperatorId: 99,
+          assignedToCurrentOperator: false,
+          createdAt: '2026-08-20T09:00:00Z', updatedAt: '2026-08-20T09:30:00Z',
+        }], page: 0, size: 20, totalElements: 1, totalPages: 1,
+      })),
+    )
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PlatformOperatorAuthProvider><MemoryRouter><PaymentRecoveryCaseListPage /></MemoryRouter></PlatformOperatorAuthProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText('다른 운영자 처리 중')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '사건 상세' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '나에게 배정' })).not.toBeInTheDocument()
+  })
+
+  it('별도 승인자에게 자기 제안을 제외한 승인 대기 사건의 상세 진입을 제공한다', async () => {
+    server.use(
+      http.post('/api/v1/platform-operators/auth/refresh', () => successResponse({
+        accessToken: 'approver-token', initialPasswordChangeRequired: false,
+        sessionIdleExpiresAt: '2026-08-20T11:00:00Z', sessionAbsoluteExpiresAt: '2026-08-20T18:00:00Z',
+      })),
+      http.get('/api/v1/platform-operators/payment-recovery-cases/pending-additional-approvals', () => successResponse({
+        content: [{
+          caseId: 'e6a91572-0632-4fa6-9a93-819add8df110', status: 'ADDITIONAL_APPROVAL_PENDING', caseVersion: 4,
+          kind: 'REFUND_FAILED', resultStatus: 'FAILED', originalAmountMinor: 300000,
+          cumulativeRefundedAmountMinor: 0, remainingRefundableAmountMinor: 300000,
+          currency: 'KRW', maskedProviderReference: null, allowedActions: ['RETRY_REFUND'],
+          handoffVersion: 2, paymentVersion: 4, recoveryVersion: 1, assignedOperatorId: 7,
+          assignedToCurrentOperator: false,
+          createdAt: '2026-08-20T09:00:00Z', updatedAt: '2026-08-20T09:30:00Z',
+          proposals: [{ proposalVersion: 1, action: 'RETRY_REFUND', requestedAmountMinor: 250000,
+            cumulativeLineageAmountMinor: 250000, originalAmountMinor: 300000, currency: 'KRW',
+            approvalTier: 'ADDITIONAL_SUPER_ADMIN', requesterOperatorId: 7, approverOperatorId: null,
+            createdAt: '2026-08-20T09:30:00Z' }], executions: [],
+        }], page: 0, size: 20, totalElements: 1, totalPages: 1,
+      })),
+    )
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PlatformOperatorAuthProvider><MemoryRouter><PaymentRecoveryCaseListPage approvalsOnly /></MemoryRouter></PlatformOperatorAuthProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText('환불 실패')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '사건 상세' })).toHaveAttribute(
+      'href', '/admin/payment-recovery-cases/e6a91572-0632-4fa6-9a93-819add8df110',
+    )
+    expect(screen.queryByRole('button', { name: '나에게 배정' })).not.toBeInTheDocument()
+  })
+})

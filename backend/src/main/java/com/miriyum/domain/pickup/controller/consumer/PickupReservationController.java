@@ -4,6 +4,7 @@ import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
 import com.miriyum.domain.pickup.dto.request.PickupReservationCreateRequest;
 import com.miriyum.domain.pickup.dto.request.PickupCancellationRequest;
 import com.miriyum.domain.pickup.dto.response.PickupReservationResponse;
+import com.miriyum.domain.pickup.dto.response.PickupReservationPageResponse;
 import com.miriyum.domain.pickup.service.PickupCommandResult;
 import com.miriyum.domain.pickup.service.PickupCommandFacade;
 import com.miriyum.domain.pickup.service.PickupReservationService;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -45,6 +47,16 @@ public class PickupReservationController {
                 principal.accountId(), IdempotencyKey.parse(rawKey), request);
         return ResponseEntity.status(result.httpStatus())
                 .body(ApiResponse.success("픽업 예약을 생성했습니다.", result.data()));
+    }
+
+    @GetMapping
+    public ApiResponse<PickupReservationPageResponse> list(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        return ApiResponse.success("조회했습니다.", service.listConsumerPickups(
+                principal.accountId(), page, size));
     }
 
     @GetMapping("/{pickupReservationId}")

@@ -14,6 +14,8 @@ export interface paths {
     get: operations["getPickupAvailability"];
   };
   "/api/v1/consumers/me/pickup-reservations": {
+    /** 본인 픽업 예약 목록 조회 */
+    get: operations["getCurrentConsumerPickupReservations"];
     /** 픽업 예약 생성 */
     post: operations["createPickupReservation"];
   };
@@ -496,6 +498,26 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       404: components["responses"]["StoreNotFound"];
       409: components["responses"]["PickupTransactionEligibilityConflict"];
+    };
+  };
+  /** 본인 픽업 예약 목록 조회 */
+  getCurrentConsumerPickupReservations: {
+    parameters: {
+      query?: {
+        page?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Page"];
+        size?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Size"];
+      };
+    };
+    responses: {
+      /** @description 픽업 예정일 최신순의 본인 픽업 예약 페이지 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PickupReservationPageSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
     };
   };
   /** 픽업 예약 생성 */
