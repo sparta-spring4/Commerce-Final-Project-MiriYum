@@ -21,7 +21,7 @@ function respondWithStores(...items: ReturnType<typeof storeSummary>[]) {
     ...catalogHandlers,
     http.get('/api/v1/stores', ({ request }) => {
       receivedSearch = new URL(request.url).searchParams
-      return successResponse(storePage(items))
+      return successResponse(searchResponse(request, items))
     }),
   )
 }
@@ -43,6 +43,40 @@ function pageOf(name: string, number: number) {
   }
 }
 
+function integratedSearch(
+  items: ReturnType<typeof storeSummary>[],
+  nextCursor: string | null = null,
+) {
+  return {
+    items: items.map((item) => ({ ...item, recommendationReason: null })),
+    normalizedCondition: {
+      regionCodes: [],
+      storeCategoryCodes: [],
+      menuCategoryCodes: [],
+      tagCodes: [],
+      minimumPrice: null,
+      maximumPrice: null,
+      partySize: null,
+      reservationDate: null,
+      reservationTime: null,
+      remainingKeyword: '파스타',
+    },
+    warnings: [],
+    ruleVersion: 'rule-v1',
+    vocabularyVersion: 'catalog-v1',
+    rankingRuleVersion: null,
+    nextCursor,
+  }
+}
+
+function searchResponse(
+  request: Request,
+  items: ReturnType<typeof storeSummary>[],
+) {
+  const search = new URL(request.url).searchParams
+  return search.has('searchInput') ? integratedSearch(items) : storePage(items)
+}
+
 function typeInto(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } })
 }
@@ -54,6 +88,51 @@ beforeEach(() => {
 })
 
 describe('매장 찾기 결과 화면', () => {
+  it('기본 검색을 searchInput cursor 흐름으로 조회한다', async () => {
+    let call = 0
+    const received: URLSearchParams[] = []
+    server.use(
+      ...catalogHandlers,
+      http.get('/api/v1/stores', ({ request }) => {
+        call += 1
+        received.push(new URL(request.url).searchParams)
+        return successResponse(
+          call === 1
+            ? integratedSearch(
+                [storeSummary({ name: '자연어 첫 결과' })],
+                'next-cursor',
+              )
+            : integratedSearch([storeSummary({ name: '자연어 다음 결과' })]),
+        )
+      }),
+    )
+
+    renderWithProviders(<StoreSearchPage />, {
+      route: '/stores?keyword=얼큰한%20국물',
+    })
+
+    expect(
+      await screen.findByRole('link', { name: '자연어 첫 결과' }),
+    ).toBeInTheDocument()
+    expect(received[0]?.get('searchInput')).toBe('얼큰한 국물')
+    expect(received[0]?.has('keyword')).toBe(false)
+    expect(screen.getByText('현재 1개의 매장')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '다음 결과' }))
+
+    expect(
+      await screen.findByRole('link', { name: '자연어 다음 결과' }),
+    ).toBeInTheDocument()
+    expect(received[1]?.get('cursor')).toBe('next-cursor')
+
+    typeInto('검색어', '담백한 메뉴')
+    fireEvent.click(screen.getByRole('button', { name: '이 조건으로 검색' }))
+
+    await waitFor(() => expect(received).toHaveLength(3))
+    expect(received[2]?.get('searchInput')).toBe('담백한 메뉴')
+    expect(received[2]?.has('cursor')).toBe(false)
+  })
+
   it('검색 결과를 목록으로 표시한다', async () => {
     respondWithStores(
       storeSummary({ name: '파스타 마스터즈' }),
@@ -120,9 +199,10 @@ describe('매장 찾기 결과 화면', () => {
 
     await screen.findByRole('link', { name: '파스타 마스터즈' })
 
-    expect(receivedSearch?.get('serviceDate')).toBe('2026-09-01')
-    expect(receivedSearch?.get('startTime')).toBe('19:00')
-    expect(receivedSearch?.get('partySize')).toBe('2')
+    expect(receivedSearch?.get('searchInput')).toBe('2026-09-01 19:00 2명')
+    expect(receivedSearch?.has('serviceDate')).toBe(false)
+    expect(receivedSearch?.has('startTime')).toBe(false)
+    expect(receivedSearch?.has('partySize')).toBe(false)
     expect(receivedSearch?.get('availableOnly')).toBe('true')
   })
 
@@ -188,8 +268,11 @@ describe('매장 찾기 결과 화면', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '이 조건으로 검색' }))
 
-    await waitFor(() => expect(receivedSearch?.get('keyword')).toBe('파스타'))
-    expect(receivedSearch?.get('region')).toBe('BUSAN')
+    await waitFor(() =>
+      expect(receivedSearch?.get('searchInput')).toBe('파스타 BUSAN'),
+    )
+    expect(receivedSearch?.has('keyword')).toBe(false)
+    expect(receivedSearch?.has('region')).toBe(false)
   })
 
   /*
@@ -203,14 +286,18 @@ describe('매장 찾기 결과 화면', () => {
 
     server.use(
       ...catalogHandlers,
-      http.get('/api/v1/stores', async () => {
+      http.get('/api/v1/stores', async ({ request }) => {
         call += 1
         if (call === 1) {
-          return successResponse(storePage([storeSummary({ name: '이전 매장' })]))
+          return successResponse(
+            searchResponse(request, [storeSummary({ name: '이전 매장' })]),
+          )
         }
         // 두 번째 조회를 붙잡아 전환 구간을 관찰한다.
         await second.promise
-        return successResponse(storePage([storeSummary({ name: '새 매장' })]))
+        return successResponse(
+          searchResponse(request, [storeSummary({ name: '새 매장' })]),
+        )
       }),
     )
 
@@ -323,7 +410,7 @@ describe('매장 찾기 결과 화면', () => {
     fireEvent.click(seoul)
     fireEvent.click(screen.getByRole('button', { name: '이 조건으로 검색' }))
 
-    await waitFor(() => expect(receivedSearch?.get('region')).toBeNull())
+    await waitFor(() => expect(receivedSearch?.has('searchInput')).toBe(false))
   })
 
   it('카테고리 표시명은 서버 catalog에서 받아 쓴다', async () => {
@@ -344,9 +431,9 @@ describe('매장 찾기 결과 화면', () => {
   })
 
   it('cursor 모드 응답이 오면 빈 결과로 넘기지 않고 계약 위반으로 다룬다', async () => {
-    // 2차 MVP 통합 검색 응답 모양. 1차 MVP는 searchInput을 보내지 않으므로
-    // 이 응답이 오면 안 된다. 조용히 "결과 없음"으로 보여 주면 사용자가
-    // 검색이 정상 동작했다고 오해한다.
+    // 조건 없는 기본 탐색은 searchInput을 보내지 않으므로 page 응답이어야 한다.
+    // cursor 응답을 조용히 "결과 없음"으로 보여 주면 사용자가 검색이 정상
+    // 동작했다고 오해한다.
     server.use(
       ...catalogHandlers,
       http.get('/api/v1/stores', () =>
@@ -363,6 +450,24 @@ describe('매장 찾기 결과 화면', () => {
     )
 
     renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+
+    expect(
+      await screen.findByText('서비스를 일시적으로 이용할 수 없습니다.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText('조건에 맞는 매장이 없습니다.'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('통합 검색에 page 응답이 오면 계약 위반으로 다룬다', async () => {
+    server.use(
+      ...catalogHandlers,
+      http.get('/api/v1/stores', () => successResponse(storePage([]))),
+    )
+
+    renderWithProviders(<StoreSearchPage />, {
+      route: '/stores?keyword=자연어%20검색',
+    })
 
     expect(
       await screen.findByText('서비스를 일시적으로 이용할 수 없습니다.'),
@@ -424,8 +529,8 @@ describe('매장 찾기 결과 화면', () => {
  * `map/KakaoMap.test.tsx`가 소유한다. 여기서는 화면이 지도를 어디에 놓고,
  * 무엇을 넘기고, 선택을 어떻게 주고받는지만 본다.
  *
- * page 모드 응답 항목(`StoreSummary`)의 nullable 좌표를 목록과 지도가 함께
- * 소비한다. 좌표가 null인 항목은 목록에 남고 지도 마커에서만 제외된다.
+ * page/cursor 응답 항목의 nullable 좌표를 목록과 지도가 함께 소비한다.
+ * 좌표가 null인 항목은 목록에 남고 지도 마커에서만 제외된다.
  */
 describe('매장 찾기 목록과 지도', () => {
   const 좌표없음 = '표시할 수 있는 매장 좌표가 없습니다.'
@@ -517,10 +622,10 @@ describe('매장 찾기 목록과 지도', () => {
     let call = 0
     server.use(
       ...catalogHandlers,
-      http.get('/api/v1/stores', () => {
+      http.get('/api/v1/stores', ({ request }) => {
         call += 1
         return successResponse(
-          storePage([
+          searchResponse(request, [
             call === 1
               ? storeSummary({
                   name: '좌표 있는 이전 매장',
@@ -619,10 +724,11 @@ describe('매장 찾기 목록과 지도', () => {
     let call = 0
     server.use(
       ...catalogHandlers,
-      http.get('/api/v1/stores', () => {
+      http.get('/api/v1/stores', ({ request }) => {
         call += 1
         return successResponse(
-          storePage(
+          searchResponse(
+            request,
             call === 2
               ? [
                   storeSummary({

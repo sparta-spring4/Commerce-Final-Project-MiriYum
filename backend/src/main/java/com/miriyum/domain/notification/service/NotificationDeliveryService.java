@@ -5,6 +5,7 @@ import com.miriyum.domain.notification.dto.source.NotificationSourceContextV1;
 import com.miriyum.domain.notification.dto.source.NotificationSourceReadResult;
 import com.miriyum.domain.notification.entity.NotificationTaskStatus;
 import com.miriyum.domain.notification.repository.NotificationChannelAttemptRepository;
+import com.miriyum.domain.notification.repository.NotificationReadRepository;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository.DeliveryCompletion;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository.DueTask;
@@ -38,6 +39,7 @@ public class NotificationDeliveryService {
 
     private final NotificationTaskRepository taskRepository;
     private final NotificationChannelAttemptRepository channelAttemptRepository;
+    private final NotificationReadRepository readRepository;
     private final NotificationTaskTransitionAuditRepository transitionAuditRepository;
     private final NotificationDatabaseClock databaseClock;
     private final NotificationSourceRegistry sourceRegistry;
@@ -48,6 +50,7 @@ public class NotificationDeliveryService {
     public NotificationDeliveryService(
             NotificationTaskRepository taskRepository,
             NotificationChannelAttemptRepository channelAttemptRepository,
+            NotificationReadRepository readRepository,
             NotificationTaskTransitionAuditRepository transitionAuditRepository,
             NotificationDatabaseClock databaseClock,
             NotificationSourceRegistry sourceRegistry,
@@ -57,6 +60,7 @@ public class NotificationDeliveryService {
     ) {
         this.taskRepository = taskRepository;
         this.channelAttemptRepository = channelAttemptRepository;
+        this.readRepository = readRepository;
         this.transitionAuditRepository = transitionAuditRepository;
         this.databaseClock = databaseClock;
         this.sourceRegistry = sourceRegistry;
@@ -241,6 +245,7 @@ public class NotificationDeliveryService {
             RuntimePolicy policy
     ) {
         Boolean updated = transactions.execute(status -> {
+            readRepository.lockOrCreateChangeState(task.recipientAccountId());
             Optional<DeliveryCompletion> completion =
                     taskRepository.completeDelivery(task, title, sourceExpiresAt);
             if (completion.isEmpty()) {
@@ -249,6 +254,8 @@ public class NotificationDeliveryService {
             DeliveryCompletion outcome = completion.orElseThrow();
             if (outcome.status() == NotificationTaskStatus.DELIVERED) {
                 channelAttemptRepository.markDelivered(task.notificationId());
+                readRepository.advanceForDelivery(
+                        task.recipientAccountId(), task.notificationId());
             } else if (outcome.status() == NotificationTaskStatus.CANCELLED) {
                 channelAttemptRepository.markCancelled(task.notificationId(), outcome.reason());
             } else {

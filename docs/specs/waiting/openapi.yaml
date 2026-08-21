@@ -486,6 +486,58 @@ paths:
           $ref: "#/components/responses/WaitingConsumerCreateConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/consumers/me/waiting-teams:
+    get:
+      tags: [Consumer Waiting]
+      summary: 본인 웨이팅 이력 조회
+      operationId: getConsumerWaitingHistory
+      description: >-
+        소비자 식별자를 입력받지 않고 Consumer Access Token principal의 본인 이력만
+        `(registeredAt DESC, waitingTeamId DESC)` 고정 정렬로 반환한다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ALL, CURRENT, TERMINAL]
+            default: ALL
+        - name: cursor
+          in: query
+          required: false
+          description: 계약 version·인증 소비자·scope·정렬 경계에 결속된 opaque cursor
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 512
+            pattern: "^[A-Za-z0-9_-]+$"
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        "200":
+          description: 빈 이력을 포함한 본인의 웨이팅 이력 page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingConsumerHistorySuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingHistoryCursorBadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WaitingConsumerAccountForbidden"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/consumers/me/waiting-teams/current:
     get:
       tags: [Consumer Waiting]
@@ -1249,6 +1301,43 @@ components:
         memberships:
           type: array
           items: { $ref: "#/components/schemas/WaitingPartyMember" }
+    WaitingConsumerHistoryItem:
+      type: object
+      additionalProperties: false
+      required:
+        - waitingTeamId
+        - storeId
+        - status
+        - registeredAt
+        - calledAt
+        - terminatedAt
+      properties:
+        waitingTeamId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        status:
+          $ref: "#/components/schemas/WaitingTeamStatus"
+        registeredAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        calledAt:
+          type: [string, "null"]
+          format: date-time
+        terminatedAt:
+          type: [string, "null"]
+          format: date-time
+    WaitingConsumerHistoryPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/WaitingConsumerHistoryItem"
+        nextCursor:
+          type: [string, "null"]
+          description: 다음 page가 없으면 null인 opaque cursor
     WaitingExpectedVersionRequest:
       type: object
       additionalProperties: false
@@ -1510,6 +1599,17 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
         data:
           $ref: "#/components/schemas/WaitingConsumerSnapshot"
+    WaitingConsumerHistorySuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/WaitingConsumerHistoryPage"
   responses:
     WaitingLocationProofBadRequest:
       description: storeId, 조건부 위치 측정 본문 또는 JSON 형식이 올바르지 않음
@@ -1535,6 +1635,21 @@ components:
           example:
             code: COMMON_001
             message: 입력값이 올바르지 않습니다.
+    WaitingHistoryCursorBadRequest:
+      description: scope·size가 올바르지 않거나 cursor 형식·무결성·계정·scope 결속이 유효하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            invalidQuery:
+              value:
+                code: COMMON_001
+                message: 입력값이 올바르지 않습니다.
+            invalidCursor:
+              value:
+                code: WAITING_019
+                message: 웨이팅 이력 cursor가 올바르지 않습니다.
     WaitingStoreIdBadRequest:
       description: storeId가 양의 정수 문자열 PublicId 형식이 아님
       content:
