@@ -166,7 +166,7 @@ staging smoke에는 `TARGET_ENV=staging`, HTTPS `BASE_URL`, `STAGING_APPROVED=tr
 
 ### 예외 제거와 기본 429 복구
 
-성공·실패·중단과 무관하게 [`docs/deployment/docker-ecr-ssm-cd.md`](../../docs/deployment/docker-ecr-ssm-cd.md)의 절차로 `MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP` 값을 비우고 같은 `COMMIT_SHA`를 다시 배포한다. backend container에서 값이 비었음을 환경 원문을 출력하지 않는 존재 여부 검사로 확인하고, 직전 로그인 창이 남아 있지 않은 새 600초 창에서만 아래 verifier를 실행한다. 자격증명 파일에는 `K6_RECOVERY_EMAIL`과 `K6_RECOVERY_PASSWORD`만 두며 저장소 밖에서 읽는다.
+성공·실패·중단과 무관하게 [`docs/deployment/docker-ecr-ssm-cd.md`](../../docs/deployment/docker-ecr-ssm-cd.md)의 절차로 `Backend CD (Staging)`을 같은 `COMMIT_SHA`와 `rate_limit_exception=disable`로 다시 실행한다. backend container에서 값이 비었음을 환경 원문을 출력하지 않는 존재 여부 검사로 확인하고, 직전 로그인 창이 남아 있지 않은 새 600초 창에서만 아래 verifier를 실행한다. 자격증명 파일에는 `K6_RECOVERY_EMAIL`과 `K6_RECOVERY_PASSWORD`만 두며 저장소 밖에서 읽는다.
 
 ```powershell
 $recoveryRunId = 'staging-rate-limit-recovery-YYYYMMDD-NN'

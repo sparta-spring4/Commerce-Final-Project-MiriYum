@@ -163,6 +163,20 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn("amazon-cloudwatch-agent-ctl -a fetch-config", self.workflow)
         self.assertIn("file:/opt/miriyum/monitoring/cloudwatch-agent.json", self.workflow)
 
+    def test_staging_cd_rate_limit_exception_is_explicit_and_fail_closed(self):
+        self.assertIn("rate_limit_exception:", self.workflow)
+        self.assertIn("default: preserve", self.workflow)
+        self.assertIn("- enable", self.workflow)
+        self.assertIn("- disable", self.workflow)
+        self.assertIn(
+            "secrets.MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP", self.workflow
+        )
+        self.assertIn("Invalid staging load-test source IP secret.", self.workflow)
+        self.assertIn("load_test_source_ip_base64", self.workflow)
+        self.assertIn("Staging load-test source IP enabled.", self.workflow)
+        self.assertIn("Staging load-test source IP disabled.", self.workflow)
+        self.assertNotIn('echo "$STAGING_LOAD_TEST_SOURCE_IP"', self.workflow)
+
     def test_compose_sends_each_service_log_to_a_dedicated_stream(self):
         expected_streams = ("frontend", "mysql", "backend", "nginx", "valkey")
         for stream in expected_streams:
