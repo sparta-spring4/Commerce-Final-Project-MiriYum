@@ -31,7 +31,7 @@ $requiredFragments = @(
     "Frontend CI did not complete successfully",
     "steps.ecr-image.outputs.exists != 'true'",
     "Manual deployment requires an existing immutable ECR image tag",
-    'ref: ${{ inputs.image_tag }}',
+    'ref: ${{ steps.image.outputs.tag }}',
     "retry-max-attempts: 2",
     "BACKEND_DEPLOYMENT_ENVIRONMENT: staging-backend",
     "deployments: write",
@@ -50,12 +50,23 @@ $requiredFragments = @(
     "deploy/nginx/templates/snippets/sse-location.conf",
     "nginx_sse_base64",
     "/opt/miriyum/nginx/templates/snippets/sse-location.conf"
+    "NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA: 515531e122ebbce13d8eead4a3ff15a94c25e0b3"
+    "Verify notification read minimum compatible writer revision"
+    "github.workflow_sha"
+    "Preserve trusted notification read deployment controls"
+    '$RUNNER_TEMP/notification-read-deployment-gate.py'
+    '$RUNNER_TEMP/notification-read-deploy.sh'
+    "fetch-depth: 0"
 )
 
 foreach ($fragment in $requiredFragments) {
     if (-not $workflow.Contains($fragment)) {
         throw "Missing CD retry safeguard: $fragment"
     }
+}
+
+if ($workflow.Contains('script_base64=$(base64 --wrap=0 deploy/deploy.sh)')) {
+    throw "Staging CD must upload the trusted deploy script, not the selected candidate copy."
 }
 
 $frontendBuildArgumentsMatch = [regex]::Match(

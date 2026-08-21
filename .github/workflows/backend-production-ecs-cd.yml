@@ -29,6 +29,7 @@ env:
   ECS_CONTAINER_NAME: backend
   RUNTIME_CONFIG_SECRET_NAME: miriyum/production/backend-runtime-config
   QR_STORAGE_GENERATION: ${{ vars.MIRIYUM_QR_STORAGE_GENERATION }}
+  NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA: 515531e122ebbce13d8eead4a3ff15a94c25e0b3
 
 jobs:
   verify-source:
@@ -99,6 +100,34 @@ jobs:
           echo "deployable=true" >> "$GITHUB_OUTPUT"
           echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
 
+      - name: Checkout trusted production control revision
+        if: steps.source.outputs.deployable == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+
+      - name: Preserve trusted notification read deployment control
+        if: steps.source.outputs.deployable == 'true'
+        run: |
+          cp scripts/test-notification-read-deployment-gate.py \
+            "$RUNNER_TEMP/notification-read-deployment-gate.py"
+
+      - name: Checkout selected production revision
+        if: steps.source.outputs.deployable == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.source.outputs.image_tag }}
+          fetch-depth: 0
+
+      - name: Verify notification read minimum compatible writer revision
+        if: steps.source.outputs.deployable == 'true'
+        env:
+          DEPLOY_SHA: ${{ steps.source.outputs.image_tag }}
+        run: |
+          python3 "$RUNNER_TEMP/notification-read-deployment-gate.py" verify-ancestor \
+            --minimum-sha "$NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA" \
+            --candidate-sha "$DEPLOY_SHA"
+
   deploy:
     name: build-and-deploy-backend-production-ecs
     needs: verify-source
@@ -115,6 +144,22 @@ jobs:
       vars.PRODUCTION_ECS_DEPLOYMENT_ENABLED == 'true'
 
     steps:
+      - name: Checkout trusted production control revision after approval
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+
+      - name: Preserve trusted notification read deployment control after approval
+        run: |
+          cp scripts/test-notification-read-deployment-gate.py \
+            "$RUNNER_TEMP/notification-read-deployment-gate.py"
+
+      - name: Checkout selected revision after production approval
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify-source.outputs.image_tag }}
+          fetch-depth: 0
+
       - name: Verify selected main revision after production approval
         env:
           DEPLOY_SHA: ${{ needs.verify-source.outputs.image_tag }}
@@ -142,6 +187,14 @@ jobs:
             exit 1
           fi
 
+      - name: Reverify notification read minimum compatible writer revision
+        env:
+          DEPLOY_SHA: ${{ needs.verify-source.outputs.image_tag }}
+        run: |
+          python3 "$RUNNER_TEMP/notification-read-deployment-gate.py" verify-ancestor \
+            --minimum-sha "$NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA" \
+            --candidate-sha "$DEPLOY_SHA"
+
       - name: Validate deployment configuration
         env:
           ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
@@ -157,12 +210,6 @@ jobs:
             echo "::error::MIRIYUM_QR_STORAGE_GENERATION must be a non-empty generation identifier."
             exit 1
           fi
-
-      - name: Checkout successful CI revision
-        if: github.event_name == 'workflow_run'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Configure AWS credentials through OIDC
         uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5.1.0
@@ -436,6 +483,156 @@ jobs:
 
           echo "arn=$task_definition_arn" >> "$GITHUB_OUTPUT"
 
+      - name: Capture previous ECS task identities
+        run: |
+          umask 077
+          capture_directory=$(mktemp -d)
+          previous_task_arns_file="$RUNNER_TEMP/notification-read-previous-task-arns.json"
+          trap 'rm -rf "$capture_directory"' EXIT
+
+          capture_previous_task_snapshot() {
+            local snapshot_directory="$1"
+            local service_file="$snapshot_directory/service.json"
+            local running_task_arns_file="$snapshot_directory/notification-read-running-task-arns.json"
+            local stopped_task_arns_file="$snapshot_directory/notification-read-stopped-task-arns.json"
+            local stopped_tasks_file="$snapshot_directory/notification-read-stopped-tasks.json"
+            local selected_task_arns_file="$snapshot_directory/selected-task-arns.json"
+            local desired_count
+            local -a stopped_task_arns
+            local -a batch_task_arns
+
+            mkdir -p "$snapshot_directory" || return 1
+            aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$ECS_SERVICE" \
+              --query 'services[0]' \
+              --output json > "$service_file" || return 1
+            if ! jq -e '
+              .taskDefinition as $service_task_definition
+              | (.desiredCount | type == "number")
+                and .desiredCount >= 1
+                and .runningCount == .desiredCount
+                and .pendingCount == 0
+                and ([
+                  .deployments[]?
+                  | select(
+                    .status == "PRIMARY"
+                    and .rolloutState == "COMPLETED"
+                    and .taskDefinition == $service_task_definition
+                  )
+                ] | length) == 1
+                and ([
+                  .deployments[]?
+                  | select(.rolloutState != "COMPLETED")
+                ] | length) == 0
+            ' "$service_file" >/dev/null; then
+              return 1
+            fi
+            desired_count=$(jq -r '.desiredCount' "$service_file") || return 1
+
+            aws ecs list-tasks \
+              --cluster "$ECS_CLUSTER" \
+              --service-name "$ECS_SERVICE" \
+              --desired-status RUNNING \
+              --query 'taskArns' \
+              --output json > "$running_task_arns_file" || return 1
+            if ! jq -e --argjson desired_count "$desired_count" \
+              'type == "array" and length == $desired_count' \
+              "$running_task_arns_file" >/dev/null; then
+              return 1
+            fi
+
+            aws ecs list-tasks \
+              --cluster "$ECS_CLUSTER" \
+              --service-name "$ECS_SERVICE" \
+              --desired-status STOPPED \
+              --query 'taskArns' \
+              --output json > "$stopped_task_arns_file" || return 1
+            jq -e 'type == "array"' "$stopped_task_arns_file" >/dev/null \
+              || return 1
+
+            printf '%s\n' '{"tasks":[],"failures":[]}' > "$stopped_tasks_file" \
+              || return 1
+            mapfile -t stopped_task_arns < <(jq -r '.[]' "$stopped_task_arns_file")
+            for ((offset = 0; offset < ${#stopped_task_arns[@]}; offset += 100)); do
+              batch_task_arns=("${stopped_task_arns[@]:offset:100}")
+              aws ecs describe-tasks \
+                --cluster "$ECS_CLUSTER" \
+                --tasks "${batch_task_arns[@]}" \
+                --output json > "$snapshot_directory/stopped-tasks-batch.json" \
+                || return 1
+              jq -s \
+                '{
+                  tasks: (.[0].tasks + .[1].tasks),
+                  failures: (.[0].failures + .[1].failures)
+                }' \
+                "$stopped_tasks_file" \
+                "$snapshot_directory/stopped-tasks-batch.json" \
+                > "$snapshot_directory/stopped-tasks-next.json" || return 1
+              mv \
+                "$snapshot_directory/stopped-tasks-next.json" \
+                "$stopped_tasks_file" || return 1
+            done
+
+            jq -n \
+              --slurpfile running_task_arns "$running_task_arns_file" \
+              --slurpfile stopped_task_arns "$stopped_task_arns_file" \
+              --slurpfile stopped_tasks "$stopped_tasks_file" \
+              '{
+                runningTaskArns: $running_task_arns[0],
+                stoppedTaskArns: $stopped_task_arns[0],
+                stoppedTasks: $stopped_tasks[0]
+              }' \
+              > "$snapshot_directory/selection-evidence.json" || return 1
+
+            python3 "$RUNNER_TEMP/notification-read-deployment-gate.py" \
+              select-previous-ecs-tasks \
+              --evidence-json "$snapshot_directory/selection-evidence.json" \
+              --output-json "$selected_task_arns_file" || return 1
+
+            jq -n \
+              --slurpfile service "$service_file" \
+              --slurpfile task_arns "$selected_task_arns_file" \
+              '{
+                serviceTaskDefinition: $service[0].taskDefinition,
+                desiredCount: $service[0].desiredCount,
+                taskArns: $task_arns[0]
+              }' \
+              > "$snapshot_directory/stable-state.json" || return 1
+          }
+
+          consecutive_stable_snapshots=0
+          previous_snapshot_state=""
+          for attempt in $(seq 1 12); do
+            snapshot_directory="$capture_directory/snapshot-$attempt"
+            if ! capture_previous_task_snapshot "$snapshot_directory"; then
+              echo "::error::Stable previous ECS task identity evidence is unavailable."
+              exit 1
+            fi
+
+            current_snapshot_state="$snapshot_directory/stable-state.json"
+            if [ -n "$previous_snapshot_state" ] \
+              && cmp -s "$previous_snapshot_state" "$current_snapshot_state"; then
+              consecutive_stable_snapshots=$((consecutive_stable_snapshots + 1))
+            else
+              consecutive_stable_snapshots=1
+            fi
+
+            if [ "$consecutive_stable_snapshots" -ge 2 ]; then
+              cp "$snapshot_directory/selected-task-arns.json" \
+                "$previous_task_arns_file"
+              break
+            fi
+
+            previous_snapshot_state="$current_snapshot_state"
+            sleep 5
+          done
+
+          if [ ! -s "$previous_task_arns_file" ]; then
+            echo "::error::Previous ECS task identities did not converge."
+            exit 1
+          fi
+
       - name: Update ECS service
         env:
           TASK_DEFINITION_ARN: ${{ steps.task-definition.outputs.arn }}
@@ -474,7 +671,7 @@ jobs:
               && [ "$primary_rollout_state" = "COMPLETED" ] \
               && [ "$running_count" = "$desired_count" ] \
               && [ "$pending_count" = "0" ]; then
-              echo "ECS deployment completed with $TASK_DEFINITION_ARN"
+              echo "ECS deployment completed with the selected task definition."
               exit 0
             fi
 
@@ -484,3 +681,131 @@ jobs:
 
           echo "::error::ECS service did not stabilize within the 20-minute deployment budget."
           exit 1
+
+      - name: Verify production ECS replacement evidence
+        env:
+          TASK_DEFINITION_ARN: ${{ steps.task-definition.outputs.arn }}
+        run: |
+          evidence_directory=$(mktemp -d)
+          previous_task_arns_file="$RUNNER_TEMP/notification-read-previous-task-arns.json"
+          trap 'rm -rf "$evidence_directory"; rm -f "$previous_task_arns_file"' EXIT
+
+          aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --query 'services[0]' \
+            --output json > "$evidence_directory/service.json"
+
+          running_task_arns=$(aws ecs list-tasks \
+            --cluster "$ECS_CLUSTER" \
+            --service-name "$ECS_SERVICE" \
+            --desired-status RUNNING \
+            --query 'taskArns' \
+            --output text)
+          read -r -a task_arns <<< "$running_task_arns"
+          if [ "${#task_arns[@]}" -lt 1 ]; then
+            echo "::error::Active ECS task evidence is missing."
+            exit 1
+          fi
+          aws ecs describe-tasks \
+            --cluster "$ECS_CLUSTER" \
+            --tasks "${task_arns[@]}" \
+            --output json > "$evidence_directory/tasks.json"
+
+          mapfile -t previous_task_arns < <(jq -r '.[]' "$previous_task_arns_file")
+          if [ "${#previous_task_arns[@]}" -lt 1 ]; then
+            echo "::error::Previous ECS task identity evidence is missing."
+            exit 1
+          fi
+          printf '%s\n' '{"tasks":[],"failures":[]}' \
+            > "$evidence_directory/previous-tasks.json"
+          for ((offset = 0; offset < ${#previous_task_arns[@]}; offset += 100)); do
+            batch_task_arns=("${previous_task_arns[@]:offset:100}")
+            aws ecs describe-tasks \
+              --cluster "$ECS_CLUSTER" \
+              --tasks "${batch_task_arns[@]}" \
+              --output json > "$evidence_directory/previous-tasks-batch.json"
+            jq -s \
+              '{
+                tasks: (.[0].tasks + .[1].tasks),
+                failures: (.[0].failures + .[1].failures)
+              }' \
+              "$evidence_directory/previous-tasks.json" \
+              "$evidence_directory/previous-tasks-batch.json" \
+              > "$evidence_directory/previous-tasks-next.json"
+            mv \
+              "$evidence_directory/previous-tasks-next.json" \
+              "$evidence_directory/previous-tasks.json"
+          done
+
+          aws ecs list-tasks \
+            --cluster "$ECS_CLUSTER" \
+            --service-name "$ECS_SERVICE" \
+            --desired-status STOPPED \
+            --query 'taskArns' \
+            --output json > "$evidence_directory/final-stopped-task-arns.json"
+          mapfile -t final_stopped_task_arns \
+            < <(jq -r '.[]' "$evidence_directory/final-stopped-task-arns.json")
+          printf '%s\n' '{"tasks":[],"failures":[]}' \
+            > "$evidence_directory/final-stopped-tasks.json"
+          for ((offset = 0; offset < ${#final_stopped_task_arns[@]}; offset += 100)); do
+            batch_task_arns=("${final_stopped_task_arns[@]:offset:100}")
+            aws ecs describe-tasks \
+              --cluster "$ECS_CLUSTER" \
+              --tasks "${batch_task_arns[@]}" \
+              --output json > "$evidence_directory/final-stopped-tasks-batch.json"
+            jq -s \
+              '{
+                tasks: (.[0].tasks + .[1].tasks),
+                failures: (.[0].failures + .[1].failures)
+              }' \
+              "$evidence_directory/final-stopped-tasks.json" \
+              "$evidence_directory/final-stopped-tasks-batch.json" \
+              > "$evidence_directory/final-stopped-tasks-next.json"
+            mv \
+              "$evidence_directory/final-stopped-tasks-next.json" \
+              "$evidence_directory/final-stopped-tasks.json"
+          done
+
+          jq -n \
+            --slurpfile service "$evidence_directory/service.json" \
+            --slurpfile tasks "$evidence_directory/tasks.json" \
+            --slurpfile previous_task_arns "$previous_task_arns_file" \
+            --slurpfile previous_tasks "$evidence_directory/previous-tasks.json" \
+            --slurpfile stopped_task_arns "$evidence_directory/final-stopped-task-arns.json" \
+            --slurpfile stopped_tasks "$evidence_directory/final-stopped-tasks.json" \
+            '{
+              service: $service[0],
+              tasks: $tasks[0],
+              previousTaskArns: $previous_task_arns[0],
+              previousTasks: $previous_tasks[0],
+              stoppedTaskArns: $stopped_task_arns[0],
+              stoppedTasks: $stopped_tasks[0],
+              targetHealthByArn: {}
+            }' \
+            > "$evidence_directory/evidence.json"
+
+          target_group_index=0
+          while IFS= read -r target_group_arn; do
+            [ -n "$target_group_arn" ] || continue
+            target_group_index=$((target_group_index + 1))
+            target_health_file="$evidence_directory/target-health-$target_group_index.json"
+            aws elbv2 describe-target-health \
+              --target-group-arn "$target_group_arn" \
+              --output json > "$target_health_file"
+            jq --arg arn "$target_group_arn" \
+              --slurpfile health "$target_health_file" \
+              '.targetHealthByArn[$arn] = $health[0]' \
+              "$evidence_directory/evidence.json" \
+              > "$evidence_directory/evidence.next.json"
+            mv "$evidence_directory/evidence.next.json" "$evidence_directory/evidence.json"
+          done < <(jq -r '.loadBalancers[]?.targetGroupArn // empty' "$evidence_directory/service.json")
+
+          python3 "$RUNNER_TEMP/notification-read-deployment-gate.py" verify-production-ecs \
+            --evidence-json "$evidence_directory/evidence.json" \
+            --expected-task-definition "$TASK_DEFINITION_ARN"
+
+      - name: Cleanup previous ECS task identity evidence
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/notification-read-previous-task-arns.json"

@@ -13,6 +13,8 @@ VALKEY_HEALTH_TIMEOUT_SECONDS="${VALKEY_HEALTH_TIMEOUT_SECONDS:-190}"
 RISK_EVENT_BACKFILL_MAX_SCAN_PAGES="${RISK_EVENT_BACKFILL_MAX_SCAN_PAGES:-10000}"
 CLOUDWATCH_NAMESPACE="${MIRIYUM_CLOUDWATCH_NAMESPACE:-MiriYum/Staging}"
 OPENAI_API_KEY_PARAMETER_NAME="${OPENAI_API_KEY_PARAMETER_NAME:-/miriyum/shared/openai-api-key}"
+BACKEND_DB_CONNECTION_DRAIN_TIMEOUT_SECONDS="${BACKEND_DB_CONNECTION_DRAIN_TIMEOUT_SECONDS:-30}"
+BACKEND_DATABASE_NETWORK_NAME="${BACKEND_DATABASE_NETWORK_NAME:-miriyum_app}"
 
 compose_command() (
   # Docker Compose gives the invoking shell precedence over --env-file values.
@@ -20,6 +22,140 @@ compose_command() (
   unset OPENAI_API_KEY MIRIYUM_STORE_SEARCH_LLM_ENABLED
   docker compose "$@"
 )
+
+read_backend_container_running_state() {
+  local container_id="$1"
+  local running_state matching_containers
+
+  if running_state="$(docker inspect --format '{{.State.Running}}' "${container_id}" 2>/dev/null)"; then
+    printf '%s' "${running_state}"
+    return 0
+  fi
+
+  if ! matching_containers="$(docker container ls --all --quiet --no-trunc --filter "id=${container_id}" 2>/dev/null)"; then
+    echo "Previous backend container state evidence is unavailable." >&2
+    return 1
+  fi
+  if [[ -n "${matching_containers}" ]]; then
+    echo "Previous backend container state evidence is unavailable." >&2
+    return 1
+  fi
+
+  printf '%s' 'removed'
+}
+
+capture_existing_backend() {
+  local compose=(compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local container_evidence container_image container_ip
+
+  OLD_BACKEND_CONTAINER_ID="$("${compose[@]}" ps -q backend)"
+  OLD_BACKEND_IMAGE=""
+  OLD_BACKEND_IP=""
+  if [[ -z "${OLD_BACKEND_CONTAINER_ID}" ]]; then
+    return 0
+  fi
+
+  if ! container_evidence="$(docker inspect --format "{{.Config.Image}}|{{with index .NetworkSettings.Networks \"${BACKEND_DATABASE_NETWORK_NAME}\"}}{{.IPAddress}}{{end}}" "${OLD_BACKEND_CONTAINER_ID}")"; then
+    echo "Could not inspect the existing backend container." >&2
+    return 1
+  fi
+  IFS='|' read -r container_image container_ip <<<"${container_evidence}"
+  if [[ ! "${container_image}" =~ :[0-9a-f]{40}$ ]]; then
+    echo "Existing backend immutable image evidence is missing or invalid." >&2
+    return 1
+  fi
+  if [[ ! "${container_ip}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+    echo "Existing backend network evidence is missing or invalid." >&2
+    return 1
+  fi
+
+  OLD_BACKEND_IMAGE="${container_image}"
+  OLD_BACKEND_IP="${container_ip}"
+}
+
+verify_old_backend_stopped_and_disconnected() {
+  local compose=(compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local running_state connection_count query deadline
+
+  if [[ -z "${OLD_BACKEND_CONTAINER_ID:-}" ]]; then
+    return 0
+  fi
+  if [[ ! "${OLD_BACKEND_IP:-}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+    echo "Existing backend network evidence is missing or invalid." >&2
+    return 1
+  fi
+
+  if ! running_state="$(read_backend_container_running_state "${OLD_BACKEND_CONTAINER_ID}")"; then
+    return 1
+  fi
+  if [[ "${running_state}" == "true" ]]; then
+    echo "Previous backend container is still running." >&2
+    return 1
+  fi
+  if [[ "${running_state}" != "false" && "${running_state}" != "removed" ]]; then
+    echo "Previous backend container state evidence is invalid." >&2
+    return 1
+  fi
+
+  query="SELECT COUNT(*) FROM information_schema.processlist WHERE HOST LIKE '${OLD_BACKEND_IP}:%'"
+  deadline=$((SECONDS + BACKEND_DB_CONNECTION_DRAIN_TIMEOUT_SECONDS))
+  while :; do
+    if ! connection_count="$("${compose[@]}" exec -T mysql sh -ec '
+      MYSQL_PWD="$MYSQL_PASSWORD" mysql --batch --skip-column-names --raw \
+        -u "$MYSQL_USER" "$MYSQL_DATABASE" -e "$1"
+    ' sh "${query}")"; then
+      echo "Could not verify previous backend database connection closure." >&2
+      return 1
+    fi
+    if [[ ! "${connection_count}" =~ ^[0-9]+$ ]]; then
+      echo "Previous backend database connection evidence is invalid." >&2
+      return 1
+    fi
+    if [[ "${connection_count}" == "0" ]]; then
+      return 0
+    fi
+    if (( SECONDS >= deadline )); then
+      echo "Previous backend database connections remain open." >&2
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+verify_new_backend_replacement() {
+  local compose=(compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local current_container_id current_evidence running_state current_image old_running_state
+
+  current_container_id="$("${compose[@]}" ps -q backend)"
+  if [[ -z "${current_container_id}" ]]; then
+    echo "Current backend container evidence is missing." >&2
+    return 1
+  fi
+  if [[ -n "${OLD_BACKEND_CONTAINER_ID:-}" && "${current_container_id}" == "${OLD_BACKEND_CONTAINER_ID}" ]]; then
+    echo "Previous backend container was selected as the current backend." >&2
+    return 1
+  fi
+
+  if ! current_evidence="$(docker inspect --format '{{.State.Running}}|{{.Config.Image}}' "${current_container_id}")"; then
+    echo "Could not inspect the current backend container." >&2
+    return 1
+  fi
+  IFS='|' read -r running_state current_image <<<"${current_evidence}"
+  if [[ "${running_state}" != "true" || "${current_image}" != "${BACKEND_IMAGE}" ]]; then
+    echo "Current backend is not running the selected immutable image." >&2
+    return 1
+  fi
+
+  if [[ -n "${OLD_BACKEND_CONTAINER_ID:-}" ]]; then
+    if ! old_running_state="$(read_backend_container_running_state "${OLD_BACKEND_CONTAINER_ID}")"; then
+      return 1
+    fi
+    if [[ "${old_running_state}" == "true" ]]; then
+      echo "Previous backend container is still running after replacement." >&2
+      return 1
+    fi
+  fi
+}
 
 publish_deployment_health() {
   local value="$1"
@@ -430,6 +566,10 @@ main() {
 
 # 실행 환경은 서버에만 두고 이미지와 배포 파일만 갱신한다.
   compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" pull
+  if ! capture_existing_backend; then
+    publish_deployment_health 0
+    return 1
+  fi
   # 구버전 writer를 멈춘 뒤에만 위험 사건 상태를 snapshot/backfill해 전환 중 count가 작아지지 않게 한다.
   if ! compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" stop backend; then
     echo "Could not stop the existing backend before risk event state backfill." >&2
@@ -443,6 +583,11 @@ main() {
     publish_deployment_health 0
     compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
     compose_command --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 mysql || true
+    return 1
+  fi
+
+  if ! verify_old_backend_stopped_and_disconnected; then
+    publish_deployment_health 0
     return 1
   fi
 
@@ -490,6 +635,11 @@ main() {
     fi
     sleep 3
   done
+
+  if ! verify_new_backend_replacement; then
+    publish_deployment_health 0
+    return 1
+  fi
 
   publish_deployment_health 1
 
