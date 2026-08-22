@@ -44,6 +44,9 @@ const SORT_SET = new Set<string>(SORT_OPTIONS)
 
 export const DEFAULT_SORT: SortOption = 'name,asc'
 export const DEFAULT_PAGE_SIZE = 20
+export const PAGE_SIZE_OPTIONS = [10, 20, 50] as const
+export type PageSize = (typeof PAGE_SIZE_OPTIONS)[number]
+const PAGE_SIZE_SET = new Set<number>(PAGE_SIZE_OPTIONS)
 
 /** 계약의 partySize 범위. */
 export const MIN_PARTY_SIZE = 1
@@ -69,6 +72,7 @@ export interface StoreSearchFilters {
   includesInfants: boolean
   availableOnly: boolean
   page: number
+  size: PageSize
   cursor: string
   sort: SortOption
 }
@@ -83,6 +87,7 @@ export const EMPTY_FILTERS: StoreSearchFilters = {
   includesInfants: false,
   availableOnly: false,
   page: 0,
+  size: DEFAULT_PAGE_SIZE,
   cursor: '',
   sort: DEFAULT_SORT,
 }
@@ -103,6 +108,7 @@ export function readFilters(search: URLSearchParams): StoreSearchFilters {
   const category = search.get('storeCategoryCode')
   const sort = search.get('sort')
   const page = Number.parseInt(search.get('page') ?? '', 10)
+  const size = Number.parseInt(search.get('size') ?? '', 10)
 
   return {
     keyword: (search.get('keyword') ?? '').slice(0, MAX_KEYWORD_LENGTH),
@@ -115,6 +121,7 @@ export function readFilters(search: URLSearchParams): StoreSearchFilters {
     includesInfants: search.get('includesInfants') === 'true',
     availableOnly: search.get('availableOnly') === 'true',
     page: Number.isInteger(page) && page > 0 ? page : 0,
+    size: PAGE_SIZE_SET.has(size) ? (size as PageSize) : DEFAULT_PAGE_SIZE,
     cursor: (search.get('cursor') ?? '').slice(0, MAX_CURSOR_LENGTH),
     sort: sort !== null && SORT_SET.has(sort) ? (sort as SortOption) : DEFAULT_SORT,
   }
@@ -157,6 +164,9 @@ export function writeFilters(filters: StoreSearchFilters): URLSearchParams {
   }
   if (filters.page > 0) {
     search.append('page', String(filters.page))
+  }
+  if (filters.size !== DEFAULT_PAGE_SIZE) {
+    search.append('size', String(filters.size))
   }
   appendIf(search, 'cursor', filters.cursor)
   if (filters.sort !== DEFAULT_SORT) {
@@ -250,7 +260,7 @@ export function toSearchQuery(filters: StoreSearchFilters): StoreSearchQuery {
     availableOnly: complete && filters.availableOnly ? true : undefined,
     page: !integrated && filters.page > 0 ? filters.page : undefined,
     cursor: integrated && filters.cursor.length > 0 ? filters.cursor : undefined,
-    size: DEFAULT_PAGE_SIZE,
+    size: filters.size,
     sort: integrated || filters.sort !== DEFAULT_SORT ? filters.sort : undefined,
   }
 }
