@@ -28,7 +28,10 @@ public class PaymentSecurityConfig {
 
     @Bean
     @Order(-3)
-    @ConditionalOnProperty(name = "miriyum.payment.enabled", havingValue = "true")
+    @ConditionalOnProperty(
+            name = "miriyum.payment.portone.webhook-enabled",
+            havingValue = "true"
+    )
     public SecurityFilterChain paymentWebhookFilterChain(HttpSecurity http) throws Exception {
         http
                 .securityMatcher(PORTONE_WEBHOOK)
@@ -74,8 +77,24 @@ public class PaymentSecurityConfig {
         http
                 .securityMatcher(
                         CONSUMER_PAYMENT_ROOT,
-                        CONSUMER_PAYMENT_FAMILY,
-                        PORTONE_WEBHOOK)
+                        CONSUMER_PAYMENT_FAMILY)
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+        return http.build();
+    }
+
+    @Bean
+    @Order(-3)
+    @ConditionalOnProperty(
+            name = "miriyum.payment.portone.webhook-enabled",
+            havingValue = "false",
+            matchIfMissing = true
+    )
+    public SecurityFilterChain disabledPaymentWebhookFilterChain(HttpSecurity http) throws Exception {
+        http
+                .securityMatcher(PORTONE_WEBHOOK)
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
