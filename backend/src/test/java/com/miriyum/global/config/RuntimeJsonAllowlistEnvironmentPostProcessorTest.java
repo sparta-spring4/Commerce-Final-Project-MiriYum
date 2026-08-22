@@ -53,6 +53,29 @@ class RuntimeJsonAllowlistEnvironmentPostProcessorTest {
     }
 
     @Test
+    void acceptsApprovedSseRuntimeProperties() {
+        String runtimeJson = """
+                {
+                  "miriyum": {
+                    "sse": {
+                      "enabled": true,
+                      "cursor-secret": "0123456789abcdef0123456789abcdef",
+                      "timeout": "PT30S",
+                      "heartbeat-interval": "PT5S",
+                      "correction-interval": "PT2S",
+                      "correction-batch-size": 100,
+                      "max-connections-total": 200,
+                      "max-connections-per-account": 6
+                    }
+                  }
+                }
+                """;
+
+        assertThatCode(() -> RuntimeJsonAllowlistEnvironmentPostProcessor.validate(runtimeJson))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     void rejectsMalformedRuntimeJsonWithoutEchoingItsContents() {
         assertThatThrownBy(() -> RuntimeJsonAllowlistEnvironmentPostProcessor.validate("{not-json"))
                 .isInstanceOf(IllegalStateException.class)
