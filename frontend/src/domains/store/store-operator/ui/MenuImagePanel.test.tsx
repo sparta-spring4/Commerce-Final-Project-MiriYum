@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { QueryClient } from '@tanstack/react-query'
 import { server } from '../../../../test/msw/server'
 import { authenticatedOperator } from '../test/handlers'
 import { renderOperator } from '../test/renderOperator'
@@ -22,6 +23,10 @@ function renderPanel() {
 }
 
 describe('메뉴 대표 이미지 패널', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   beforeEach(() => {
     currentImageUrl = null
     server.use(
@@ -323,5 +328,111 @@ describe('메뉴 대표 이미지 패널', () => {
     })
     releaseUpload()
     await screen.findByAltText('메뉴 대표 이미지')
+  })
+
+  it('지연된 초기 조회가 업로드 성공 뒤 대표 이미지를 덮어쓰지 않는다', async () => {
+    const cancelMenuImageQuery = vi.spyOn(QueryClient.prototype, 'cancelQueries')
+    let releaseInitialGet!: () => void
+    let markInitialGetDelivered!: () => void
+    const initialGetDelivered = new Promise<void>((resolve) => {
+      markInitialGetDelivered = resolve
+    })
+    let initialGetStarted = false
+    server.use(
+      authenticatedOperator(),
+      http.get(
+        IMAGE_PATH,
+        async () => {
+          await new Promise<void>((resolve) => {
+            initialGetStarted = true
+            releaseInitialGet = resolve
+          })
+          markInitialGetDelivered()
+          return new HttpResponse(null, { status: 204 })
+        },
+      ),
+      http.put(IMAGE_PATH, () =>
+        HttpResponse.json({
+          code: 'SUCCESS',
+          message: '업로드했습니다.',
+          data: { url: 'https://cdn.example/uploaded-menu.webp' },
+        }),
+      ),
+    )
+
+    renderPanel()
+    await waitFor(() => expect(initialGetStarted).toBe(true))
+    fireEvent.change(screen.getByLabelText('이미지 등록'), {
+      target: {
+        files: [new File(['image'], 'menu.webp', { type: 'image/webp' })],
+      },
+    })
+
+    expect(await screen.findByAltText('메뉴 대표 이미지')).toHaveAttribute(
+      'src',
+      'https://cdn.example/uploaded-menu.webp',
+    )
+    await waitFor(() => {
+      expect(cancelMenuImageQuery).toHaveBeenCalledWith({
+        queryKey: ['store-operator', '7', 'menus', '11', 'image'],
+        exact: true,
+      })
+    })
+    releaseInitialGet()
+    await initialGetDelivered
+
+    await waitFor(() => {
+      expect(screen.getByAltText('메뉴 대표 이미지')).toHaveAttribute(
+        'src',
+        'https://cdn.example/uploaded-menu.webp',
+      )
+    })
+  })
+
+  it('지연된 초기 조회가 삭제 성공 뒤 이전 대표 이미지를 되살리지 않는다', async () => {
+    const cancelMenuImageQuery = vi.spyOn(QueryClient.prototype, 'cancelQueries')
+    let releaseInitialGet!: () => void
+    let markInitialGetDelivered!: () => void
+    const initialGetDelivered = new Promise<void>((resolve) => {
+      markInitialGetDelivered = resolve
+    })
+    let initialGetStarted = false
+    server.use(
+      authenticatedOperator(),
+      http.get(
+        IMAGE_PATH,
+        async () => {
+          await new Promise<void>((resolve) => {
+            initialGetStarted = true
+            releaseInitialGet = resolve
+          })
+          markInitialGetDelivered()
+          return HttpResponse.json({
+            code: 'SUCCESS',
+            message: '조회했습니다.',
+            data: { url: 'https://cdn.example/stale-menu.webp' },
+          })
+        },
+      ),
+      http.delete(IMAGE_PATH, () => new HttpResponse(null, { status: 204 })),
+    )
+
+    renderPanel()
+    await waitFor(() => expect(initialGetStarted).toBe(true))
+    fireEvent.click(screen.getByRole('button', { name: '이미지 삭제' }))
+
+    expect(await screen.findByText('등록된 대표 이미지가 없습니다.')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(cancelMenuImageQuery).toHaveBeenCalledWith({
+        queryKey: ['store-operator', '7', 'menus', '11', 'image'],
+        exact: true,
+      })
+    })
+    releaseInitialGet()
+    await initialGetDelivered
+
+    await waitFor(() => {
+      expect(screen.queryByAltText('메뉴 대표 이미지')).not.toBeInTheDocument()
+    })
   })
 })

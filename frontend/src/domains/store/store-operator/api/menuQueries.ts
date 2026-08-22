@@ -288,6 +288,7 @@ export function useChangeMenuSellingStatus(storeId: string, menuId: string) {
 export function usePutMenuImage(storeId: string, menuId: string) {
   const { apiClient } = useStoreOperatorAuth()
   const queryClient = useQueryClient()
+  const menuImageKey = storeOperatorKeys.menuImage(storeId, menuId)
 
   return useMutation({
     mutationFn: async (variables: {
@@ -307,8 +308,14 @@ export function usePutMenuImage(storeId: string, menuId: string) {
       )
       return response.data.url
     },
+    onMutate: async () => {
+      await queryClient.cancelQueries({
+        queryKey: menuImageKey,
+        exact: true,
+      })
+    },
     onSuccess: (url) => {
-      queryClient.setQueryData(storeOperatorKeys.menuImage(storeId, menuId), url)
+      queryClient.setQueryData(menuImageKey, url)
       void queryClient.invalidateQueries({
         queryKey: storeOperatorKeys.menu(storeId, menuId),
         exact: true,
@@ -345,6 +352,7 @@ export function useMenuImage(storeId: string, menuId: string) {
 export function useDeleteMenuImage(storeId: string, menuId: string) {
   const { apiClient } = useStoreOperatorAuth()
   const queryClient = useQueryClient()
+  const menuImageKey = storeOperatorKeys.menuImage(storeId, menuId)
 
   return useMutation({
     mutationFn: async (idempotencyKey: string): Promise<void> => {
@@ -358,8 +366,14 @@ export function useDeleteMenuImage(storeId: string, menuId: string) {
         },
       )
     },
+    onMutate: async () => {
+      await queryClient.cancelQueries({
+        queryKey: menuImageKey,
+        exact: true,
+      })
+    },
     onSuccess: () => {
-      queryClient.setQueryData(storeOperatorKeys.menuImage(storeId, menuId), null)
+      queryClient.setQueryData(menuImageKey, null)
       void queryClient.invalidateQueries({
         queryKey: storeOperatorKeys.menu(storeId, menuId),
         exact: true,
