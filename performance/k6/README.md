@@ -50,6 +50,17 @@ foreach ($test in $tests) {
 }
 ```
 
+OpenAI 보완 검색과 대체 메뉴의 staging 품질·비용 검증은 별도
+[`search-llm`](../../docs/performance/staging-llm-search-validation.md) 하네스를 사용한다.
+이 하네스의 네 계약 테스트도 같은 고정 k6 이미지에서 실행하며 실제 OpenAI 호출은 하지 않는다.
+
+```powershell
+$tests = Get-ChildItem performance/k6/tests/search-llm-*-contract.js
+foreach ($test in $tests) {
+  docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 run "/scripts/tests/$($test.Name)"
+}
+```
+
 `main.js`는 k6 CLI의 `-e`로 비밀이 아닌 init 값을 전달해 inspect한다.
 
 ```powershell
