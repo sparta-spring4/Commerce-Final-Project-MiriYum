@@ -56,7 +56,10 @@ fi
             sleep.chmod(0o755)
 
             command = (
-                'fake_bin=$(cygpath -u "$1"); '
+                'fake_bin="$1"; '
+                'if command -v cygpath >/dev/null 2>&1; then '
+                'fake_bin=$(cygpath -u "$fake_bin"); '
+                'fi; '
                 'PATH="$fake_bin:$PATH" VALKEY_CONTROL_ACTION="$2" '
                 'bash "$3"'
             )
