@@ -35,6 +35,7 @@ function scenarioNames(value) {
   const names = text('LLM_SCENARIOS', value).split(',').map((name) => name.trim()).filter(Boolean)
   if (names.length === 0 || names.some((name) => !SCENARIOS.has(name))
     || new Set(names).size !== names.length) throw new Error('LLM_SCENARIOS is invalid')
+  if (names.length !== 1) throw new Error('LLM_SCENARIOS must contain exactly one scenario')
   return Object.freeze(names)
 }
 
@@ -60,9 +61,6 @@ export function loadSearchLlmConfig(env) {
     cumulativeCostUsd: decimal('LLM_CUMULATIVE_COST_USD', env.LLM_CUMULATIVE_COST_USD),
   })
   const scenarios = scenarioNames(env.LLM_SCENARIOS)
-  if (scenarios.includes('fallback') && scenarios.length !== 1) {
-    throw new Error('fallback must be the only LLM_SCENARIOS entry')
-  }
   const fallbackMode = scenarios.includes('fallback') ? text('LLM_FALLBACK_MODE', env.LLM_FALLBACK_MODE) : null
   if (fallbackMode !== null && !['disabled', 'timeout'].includes(fallbackMode)) {
     throw new Error('LLM_FALLBACK_MODE must be disabled or timeout')

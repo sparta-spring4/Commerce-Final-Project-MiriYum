@@ -42,7 +42,7 @@ exact case는 전후 `calls` 증분이 0이어야 한다. 자연어와 대체 �
 
 ## 실행
 
-각 scenario 묶음은 독립 run ID로 실행한다. 아래 예시는 자연어 검색 한 묶음이며 `$plannedCalls`, 누적값과 비용은 실행 승인 증거에서 가져온다.
+각 scenario는 독립 run ID로 실행한다. `LLM_SCENARIOS`에는 정확히 하나만 지정할 수 있으며, 하네스는 여러 scenario를 입력하면 init 단계에서 거부한다. 이 결속으로 run window의 CloudWatch meter delta를 해당 scenario의 증거로 사용한다. 아래 예시는 자연어 검색 한 묶음이며 `$plannedCalls`, 누적값과 비용은 실행 승인 증거에서 가져온다.
 
 ```powershell
 $backendSha = '<deployed-full-sha>'

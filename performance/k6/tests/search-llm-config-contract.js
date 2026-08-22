@@ -14,7 +14,7 @@ const VALID = {
   HARNESS_COMMIT_SHA: '0123456789abcdef0123456789abcdef01234567',
   LLM_RUN_ID: 'staging-llm-01', LLM_FIXTURE_PATH: '/scripts/fixtures/search-llm.local.json',
   LLM_BUDGET_PROOF_PATH: '/scripts/fixtures/search-llm-budget.local.json',
-  LLM_SCENARIOS: 'exact,natural-language,same-store,nearby-store',
+  LLM_SCENARIOS: 'exact',
   LLM_DURATION_SECONDS: '30',
   LLM_PLANNED_CALLS: '150', LLM_CUMULATIVE_CALLS: '20',
   LLM_PLANNED_COST_USD: '0.30', LLM_CUMULATIVE_COST_USD: '0.10',
@@ -29,6 +29,9 @@ export default function () {
       return config.limits.maxVus === undefined && config.limits.arrivalRate === undefined
     },
     'production target is rejected': () => throws(() => loadSearchLlmConfig({ ...VALID, BASE_URL: 'https://api.miriyum.com', ALLOWED_HOSTS: 'api.miriyum.com' })),
+    'each run is bound to exactly one scenario': () => throws(() => loadSearchLlmConfig({
+      ...VALID, LLM_SCENARIOS: 'exact,natural-language',
+    })),
     'fallback scenario requires its controlled runtime mode': () => throws(() => loadSearchLlmConfig({
       ...VALID, LLM_SCENARIOS: 'fallback',
     })),
