@@ -48,6 +48,7 @@ function copyMetricValues(values, allowedValueNames) {
 
 function safeMetadata(metadata) {
   const limits = metadata.limits || {}
+  const capacity = metadata.capacity
   return {
     schemaVersion: 'miriyum-k6-summary-v1',
     targetEnv: metadata.targetEnv,
@@ -64,6 +65,13 @@ function safeMetadata(metadata) {
       durationSeconds: limits.durationSeconds,
       arrivalRate: limits.arrivalRate,
     },
+    capacity: capacity === null || capacity === undefined
+      ? null
+      : {
+        stageNumber: capacity.stageNumber,
+        targetRps: capacity.targetRps,
+        previousStageNumber: capacity.previousStageNumber ?? null,
+      },
   }
 }
 
@@ -107,15 +115,20 @@ function renderMarkdown(summary) {
     `- runId: ${summary.runId}`,
     `- commitSha: ${summary.commitSha}`,
     `- harnessCommitSha: ${summary.harnessCommitSha}`,
+    ...(summary.capacity === null ? [] : [
+      `- capacityStage: ${summary.capacity.stageNumber}`,
+      `- plannedTargetRps: ${summary.capacity.targetRps}`,
+      `- previousCapacityStage: ${summary.capacity.previousStageNumber ?? '-'}`,
+    ]),
     '',
-    '| scenario | p50 ms | p95 ms | p99 ms | requests | dropped iterations | expected 4xx | unexpected 4xx | 5xx |',
-    '|---|---:|---:|---:|---:|---:|---:|---:|---:|',
+    '| scenario | p50 ms | p95 ms | p99 ms | requests | actual RPS | dropped iterations | expected 4xx | unexpected 4xx | 5xx |',
+    '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
   ]
   for (const scenario of ALLOWED_SCENARIOS) {
     const metrics = summary.metrics[scenario]
     if (metrics === undefined) continue
     const duration = metrics.httpReqDuration || {}
-    lines.push(`| ${scenario} | ${duration.p50 ?? '-'} | ${duration.p95 ?? '-'} | ${duration.p99 ?? '-'} | ${metrics.httpRequests?.count ?? '-'} | ${metrics.droppedIterations?.count ?? 0} | ${metrics.expected4xx?.count ?? 0} | ${metrics.unexpected4xx?.count ?? 0} | ${metrics.server5xx?.count ?? 0} |`)
+    lines.push(`| ${scenario} | ${duration.p50 ?? '-'} | ${duration.p95 ?? '-'} | ${duration.p99 ?? '-'} | ${metrics.httpRequests?.count ?? '-'} | ${metrics.httpRequests?.rate ?? '-'} | ${metrics.droppedIterations?.count ?? 0} | ${metrics.expected4xx?.count ?? 0} | ${metrics.unexpected4xx?.count ?? 0} | ${metrics.server5xx?.count ?? 0} |`)
   }
   return `${lines.join('\n')}\n`
 }
