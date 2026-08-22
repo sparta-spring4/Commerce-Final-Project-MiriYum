@@ -8,6 +8,7 @@ import com.miriyum.domain.auth.refreshtoken.RefreshTokenCreationResult;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenHash;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationResult;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenState;
+import com.miriyum.domain.auth.refreshtoken.ValkeyRefreshTokenRiskEventMarkerStore;
 import com.miriyum.domain.auth.refreshtoken.ValkeyRefreshTokenStore;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,8 +40,7 @@ import org.testcontainers.utility.DockerImageName;
             "miriyum.store.schedule.activation-enabled=false",
             "miriyum.reservation.time-policy.activation-enabled=false",
             "miriyum.reservation.hold-expiration.enabled=false",
-            "miriyum.auth.refresh-risk-event-delivery.enabled=true",
-            "miriyum.auth.refresh-risk-event-delivery-delay-ms=3600000"
+            "miriyum.auth.refresh-risk-event-delivery.enabled=false"
         })
 class RefreshTokenRiskEventLifecycleIntegrationTest {
 
@@ -63,8 +63,13 @@ class RefreshTokenRiskEventLifecycleIntegrationTest {
     @Autowired
     private ValkeyRefreshTokenStore refreshTokenStore;
 
-    @Autowired
     private RefreshTokenRiskEventDelivery delivery;
+
+    @Autowired
+    private ValkeyRefreshTokenRiskEventMarkerStore markerStore;
+
+    @Autowired
+    private AuthRiskEventStore authRiskEventStore;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -74,6 +79,7 @@ class RefreshTokenRiskEventLifecycleIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        delivery = new RefreshTokenRiskEventDelivery(markerStore, authRiskEventStore, 10);
         jdbcTemplate.execute("DELETE FROM auth_risk_events");
         try (RedisConnection connection = redisTemplate.getConnectionFactory().getConnection()) {
             connection.serverCommands().flushDb();
@@ -83,7 +89,7 @@ class RefreshTokenRiskEventLifecycleIntegrationTest {
     @Test
     @DisplayName("전달 후 삭제된 marker가 재생성돼도 MySQL 위험 사건 횟수는 누적된다")
     void accumulatesOccurrencesAcrossDeliveredMarkerLifecycles() {
-        Instant now = Instant.parse("2026-08-15T00:00:00Z");
+        Instant now = Instant.now();
         RefreshTokenState state = state(now);
         long sessionEpoch = refreshTokenStore.currentSessionEpoch(state.namespace(), state.accountId());
         assertThat(refreshTokenStore.create(state, sessionEpoch).status())
