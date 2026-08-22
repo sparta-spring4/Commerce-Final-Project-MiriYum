@@ -163,6 +163,16 @@ jobs:
       - name: Run integration test shard
         run: ./gradlew ${{ matrix.task }}
 
+      - name: Generate integration test duration report
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 ../scripts/backend-ci-test-duration-report.py \
+            --shard "${{ matrix.shard }}" \
+            --report-glob "build/test-results/${{ matrix.report_directory }}/*.xml" \
+            --summary-file "$GITHUB_STEP_SUMMARY" \
+            --output-file "test-duration-${{ matrix.shard }}.md"
+
       - name: Assert no skipped integration tests
         run: |
           python3 - <<'PY'
@@ -184,14 +194,16 @@ jobs:
               sys.exit(1)
           PY
 
-      - name: Upload integration test shard reports
-        if: failure()
+      - name: Upload integration test shard duration reports
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: backend-integration-test-${{ matrix.shard }}-reports
-          path: backend/build/reports/tests/${{ matrix.report_directory }}
+          name: backend-integration-test-${{ matrix.shard }}-duration
+          path: |
+            backend/build/test-results/${{ matrix.report_directory }}
+            backend/test-duration-${{ matrix.shard }}.md
           retention-days: 7
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
   backend-ci:
     name: backend-ci
