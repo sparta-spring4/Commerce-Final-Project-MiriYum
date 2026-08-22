@@ -285,15 +285,20 @@ export function useChangeMenuSellingStatus(storeId: string, menuId: string) {
   })
 }
 
-export function usePutMenuImage(storeId: string, menuId: string) {
+export function usePutMenuImage(storeId: string, fixedMenuId?: string) {
   const { apiClient } = useStoreOperatorAuth()
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: async (variables: {
+      menuId?: string
       file: File
       idempotencyKey: string
     }): Promise<string> => {
+      const menuId = variables.menuId ?? fixedMenuId
+      if (menuId === undefined || menuId.length === 0) {
+        throw new Error('메뉴 이미지 업로드 대상이 없습니다.')
+      }
       const multipart = new FormData()
       multipart.append('file', variables.file)
       const response = await apiClient(
@@ -307,7 +312,9 @@ export function usePutMenuImage(storeId: string, menuId: string) {
       )
       return response.data.url
     },
-    onSuccess: () => {
+    onSuccess: (_url, variables) => {
+      const menuId = variables.menuId ?? fixedMenuId
+      if (menuId === undefined) return
       void queryClient.invalidateQueries({
         queryKey: storeOperatorKeys.menu(storeId, menuId),
       })

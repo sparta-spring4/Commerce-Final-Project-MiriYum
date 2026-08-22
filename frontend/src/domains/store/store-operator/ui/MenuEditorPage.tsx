@@ -1,12 +1,21 @@
 import { STORE_OPERATOR_PATHS } from '../../../../app/routes/paths/storeOperatorPaths'
 import { fillPath } from '../../../../app/routes/path'
 import { useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
-import { createIdempotencyKeyCache } from '../../../../shared/api/idempotencyKey'
+import { Link, useLocation, useNavigate, useParams } from 'react-router'
+import {
+  createIdempotencyKey,
+  createIdempotencyKeyCache,
+} from '../../../../shared/api/idempotencyKey'
 import { Button } from '../../../../shared/ui/Button'
+import { FieldShell } from '../../../../shared/ui/Field'
 import { Alert, ErrorState, Loading } from '../../../../shared/ui/Feedback'
 import { useAdoptStoreFromRoute } from '../../../../app/shells/store-operator/CurrentStoreProvider'
-import { useCreateMenu, useManagedMenu, useUpdateMenuDraft } from '../api/menuQueries'
+import {
+  useCreateMenu,
+  useManagedMenu,
+  usePutMenuImage,
+  useUpdateMenuDraft,
+} from '../api/menuQueries'
 import { useManagedStore, useOperatorCatalog } from '../api/queries'
 import {
   createMenuDraftForm,
@@ -17,11 +26,15 @@ import {
 } from '../model/menuDraft'
 import { editableMenuVersion } from '../model/menuFilters'
 import { storeErrorMessage } from '../model/storeErrors'
+import { MENU_IMAGE_ACCEPT, validateMenuImage } from '../model/menuImage'
 import type { ManagedMenu } from '../model/types'
 import { MenuCommandPanel } from './MenuCommandPanel'
 import { MenuContentForm } from './MenuContentForm'
 import { MenuImagePanel } from './MenuImagePanel'
-import { PageHeader } from '../../../../app/shells/store-operator/OperatorPage'
+import {
+  PageHeader,
+  SectionCard,
+} from '../../../../app/shells/store-operator/OperatorPage'
 
 /**
  * 메뉴 등록·수정.
@@ -80,10 +93,13 @@ function MenuEditor({
   menu: ManagedMenu | null
 }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const categories = useOperatorCatalog('menu-categories')
   const createMenu = useCreateMenu(storeId)
   const updateDraft = useUpdateMenuDraft(storeId, menu?.menuId ?? '')
+  const uploadImage = usePutMenuImage(storeId)
   const draftKeys = useMemo(createIdempotencyKeyCache, [])
+  const imageKeys = useMemo(() => new WeakMap<File, string>(), [])
 
   const [form, setForm] = useState<MenuDraftForm>(() => {
     if (menu === null) {
@@ -93,7 +109,14 @@ function MenuEditor({
     return version === null ? createMenuDraftForm() : menuFormFromVersion(version)
   })
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({})
-  const [formError, setFormError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<string | null>(() =>
+    (location.state as { menuImageUploadFailed?: boolean } | null)
+      ?.menuImageUploadFailed
+      ? '메뉴 초안은 생성됐지만 대표 이미지 업로드에 실패했습니다. 이미지를 다시 선택해 주세요.'
+      : null,
+  )
+  const [selectedImage, setSelectedImage] = useState<File | undefined>()
+  const [imageError, setImageError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
 
   async function handleSave(event: React.FormEvent) {
@@ -103,7 +126,7 @@ function MenuEditor({
     setErrors(nextErrors)
     setFormError(null)
     setSaved(false)
-    if (Object.keys(nextErrors).length > 0) {
+    if (Object.keys(nextErrors).length > 0 || imageError !== null) {
       return
     }
 
@@ -119,12 +142,32 @@ function MenuEditor({
           body,
           idempotencyKey: draftKeys.keyFor(JSON.stringify(body)),
         })
+        let imageUploadFailed = false
+        if (selectedImage !== undefined) {
+          try {
+            let idempotencyKey = imageKeys.get(selectedImage)
+            if (idempotencyKey === undefined) {
+              idempotencyKey = createIdempotencyKey()
+              imageKeys.set(selectedImage, idempotencyKey)
+            }
+            await uploadImage.mutateAsync({
+              menuId: created.menuId,
+              file: selectedImage,
+              idempotencyKey,
+            })
+          } catch {
+            imageUploadFailed = true
+          }
+        }
         void navigate(
           fillPath(STORE_OPERATOR_PATHS.menu, {
             storeId,
             menuId: created.menuId,
           }),
-          { replace: true },
+          {
+            replace: true,
+            state: imageUploadFailed ? { menuImageUploadFailed: true } : null,
+          },
         )
         return
       }
@@ -138,7 +181,8 @@ function MenuEditor({
     }
   }
 
-  const saving = createMenu.isPending || updateDraft.isPending
+  const saving =
+    createMenu.isPending || updateDraft.isPending || uploadImage.isPending
 
   return (
     <>
@@ -177,6 +221,41 @@ function MenuEditor({
                 setSaved(false)
               }}
             />
+
+            {menu === null && (
+              <SectionCard
+                title="대표 이미지 (선택)"
+                hint="처음 만들 때 생략할 수 있고, 메뉴 생성 뒤에도 등록하거나 교체할 수 있습니다."
+              >
+                <FieldShell
+                  label="메뉴 대표 이미지 파일"
+                  help="JPG, PNG, WEBP · 최대 10MB"
+                  error={imageError}
+                >
+                  {({ controlId, describedBy, invalid }) => (
+                    <input
+                      id={controlId}
+                      className="mi-field__control"
+                      type="file"
+                      accept={MENU_IMAGE_ACCEPT}
+                      aria-invalid={invalid || undefined}
+                      aria-describedby={describedBy}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0]
+                        if (file === undefined) {
+                          setSelectedImage(undefined)
+                          setImageError(null)
+                          return
+                        }
+                        const message = validateMenuImage(file)
+                        setSelectedImage(message === null ? file : undefined)
+                        setImageError(message)
+                      }}
+                    />
+                  )}
+                </FieldShell>
+              </SectionCard>
+            )}
 
             <div className="op-actions">
               <Button type="submit" variant="primary" loading={saving}>

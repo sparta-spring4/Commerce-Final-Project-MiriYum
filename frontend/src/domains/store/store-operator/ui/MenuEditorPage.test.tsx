@@ -140,11 +140,16 @@ describe('메뉴 편집 화면', () => {
   })
 
   it('생성에 성공하면 해당 메뉴 상세로 이어 간다', async () => {
+    let imageUploadCalled = false
     server.use(
       authenticatedOperator(),
       managedStoreHandler,
       ...catalogHandlers(),
       http.post(MENUS_PATH, () => successResponse(managedMenu())),
+      http.put(`${MENU_PATH}/images`, () => {
+        imageUploadCalled = true
+        return successResponse({ url: 'https://cdn.example/menu.webp' })
+      }),
     )
 
     renderCreatePage()
@@ -159,6 +164,103 @@ describe('메뉴 편집 화면', () => {
         `/store-operator/stores/${STORE_ID}/menus/${MENU_ID}`,
       ),
     )
+    expect(imageUploadCalled).toBe(false)
+  })
+
+  it('새 메뉴 대표 이미지는 선택 사항이며 초안 생성 후 별도 업로드한다', async () => {
+    const calls: string[] = []
+    server.use(
+      authenticatedOperator(),
+      managedStoreHandler,
+      ...catalogHandlers(),
+      http.post(MENUS_PATH, () => {
+        calls.push('create')
+        return successResponse(managedMenu())
+      }),
+      http.put(`${MENU_PATH}/images`, ({ request }) => {
+        calls.push(`image:${request.headers.get('content-type')}`)
+        return successResponse({ url: 'https://cdn.example/menu.webp' })
+      }),
+    )
+
+    renderCreatePage()
+    await screen.findByLabelText('메뉴명')
+    fillContent()
+    chooseDisclosures()
+    fireEvent.change(screen.getByLabelText('메뉴 대표 이미지 파일'), {
+      target: {
+        files: [new File(['image'], 'menu.webp', { type: 'image/webp' })],
+      },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '메뉴 초안 만들기' }))
+
+    await waitFor(() => expect(calls).toHaveLength(2))
+    expect(calls[0]).toBe('create')
+    expect(calls[1]).toMatch(/^image:multipart\/form-data; boundary=/)
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      `/store-operator/stores/${STORE_ID}/menus/${MENU_ID}`,
+    )
+  })
+
+  it('이미지를 골랐더라도 형식이 잘못되면 초안을 만들지 않는다', async () => {
+    let createCalled = false
+    server.use(
+      authenticatedOperator(),
+      managedStoreHandler,
+      ...catalogHandlers(),
+      http.post(MENUS_PATH, () => {
+        createCalled = true
+        return successResponse(managedMenu())
+      }),
+    )
+
+    renderCreatePage()
+    await screen.findByLabelText('메뉴명')
+    fillContent()
+    chooseDisclosures()
+    fireEvent.change(screen.getByLabelText('메뉴 대표 이미지 파일'), {
+      target: { files: [new File(['gif'], 'menu.gif', { type: 'image/gif' })] },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '메뉴 초안 만들기' }))
+
+    expect(
+      await screen.findByText('JPG, PNG, WEBP 이미지 파일만 등록할 수 있습니다.'),
+    ).toBeInTheDocument()
+    expect(createCalled).toBe(false)
+  })
+
+  it('이미지 업로드가 실패해도 만들어진 메뉴 초안은 유지한다', async () => {
+    let createCount = 0
+    server.use(
+      authenticatedOperator(),
+      managedStoreHandler,
+      ...catalogHandlers(),
+      http.post(MENUS_PATH, () => {
+        createCount += 1
+        return successResponse(managedMenu())
+      }),
+      http.put(`${MENU_PATH}/images`, () =>
+        errorResponse(503, 'COMMON_012', '업로드 서버가 응답하지 않습니다.'),
+      ),
+    )
+
+    renderCreatePage()
+    await screen.findByLabelText('메뉴명')
+    fillContent()
+    chooseDisclosures()
+    fireEvent.change(screen.getByLabelText('메뉴 대표 이미지 파일'), {
+      target: {
+        files: [new File(['image'], 'menu.webp', { type: 'image/webp' })],
+      },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '메뉴 초안 만들기' }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(
+        `/store-operator/stores/${STORE_ID}/menus/${MENU_ID}`,
+      ),
+    )
+    expect(createCount).toBe(1)
   })
 
   it('새 메뉴에는 게시·노출·판매 명령을 아직 열지 않는다', async () => {

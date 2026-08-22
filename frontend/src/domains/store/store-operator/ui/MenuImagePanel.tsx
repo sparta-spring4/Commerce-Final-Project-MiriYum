@@ -5,9 +5,7 @@ import { Alert } from '../../../../shared/ui/Feedback'
 import { useDeleteMenuImage, usePutMenuImage } from '../api/menuQueries'
 import { storeErrorMessage } from '../model/storeErrors'
 import { SectionCard } from '../../../../app/shells/store-operator/OperatorPage'
-
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024
-const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+import { MENU_IMAGE_ACCEPT, validateMenuImage } from '../model/menuImage'
 
 export function MenuImagePanel({
   storeId,
@@ -31,12 +29,9 @@ export function MenuImagePanel({
     setMessage(null)
     setRetryFile(null)
 
-    if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
-      setMessage('JPG, PNG, WEBP 이미지 파일만 등록할 수 있습니다.')
-      return
-    }
-    if (file.size > MAX_IMAGE_BYTES) {
-      setMessage('이미지 파일은 10MB 이하만 등록할 수 있습니다.')
+    const validationMessage = validateMenuImage(file)
+    if (validationMessage !== null) {
+      setMessage(validationMessage)
       return
     }
 
@@ -127,7 +122,7 @@ export function MenuImagePanel({
             className="visually-hidden"
             type="file"
             disabled={busy}
-            accept="image/jpeg,image/png,image/webp"
+            accept={MENU_IMAGE_ACCEPT}
             onChange={(event) => {
               const file = event.target.files?.[0]
               event.target.value = ''
