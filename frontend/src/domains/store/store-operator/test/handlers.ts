@@ -1,7 +1,12 @@
 import { http } from 'msw'
 import { errorResponse, successResponse } from '../../../../test/msw/envelope'
 import { AuthErrorCode } from '../../../../shared/auth/authErrors'
-import type { ManagedMenu, ManagedStore, MenuVersion } from '../model/types'
+import type {
+  ManagedMenu,
+  ManagedStore,
+  MenuVersion,
+  StoreOnboardingApplication,
+} from '../model/types'
 
 /**
  * 매장 운영자 화면 테스트용 MSW 핸들러와 고정 데이터.
@@ -25,6 +30,20 @@ export const STORE_TAGS_PATH = '/api/v1/store-tags'
 export const MENU_CATEGORIES_PATH = '/api/v1/menu-categories'
 
 export const STORE_ID = '7'
+
+export function onboardingApplication(
+  overrides: Partial<StoreOnboardingApplication> = {},
+): StoreOnboardingApplication {
+  return {
+    applicationId: '31',
+    applicationVersion: 1,
+    status: 'RECEIVED',
+    reviewRequired: false,
+    nextAction: '자동 확인을 기다려 주세요.',
+    storeId: null,
+    ...overrides,
+  }
+}
 
 export function operatorStorePath(suffix = ''): string {
   return `${OPERATOR_STORES_PATH}/${STORE_ID}${suffix}`
@@ -89,8 +108,14 @@ export function catalogHandlers() {
     http.get(STORE_CATEGORIES_PATH, () =>
       successResponse({
         items: [
-          { code: 'CAFE_DESSERT', displayName: '카페·디저트' },
           { code: 'KOREAN', displayName: '한식' },
+          { code: 'CHINESE', displayName: '중식' },
+          { code: 'JAPANESE', displayName: '일식' },
+          { code: 'WESTERN', displayName: '양식' },
+          { code: 'ASIAN', displayName: '아시아 음식' },
+          { code: 'CAFE_BAKERY', displayName: '카페·베이커리' },
+          { code: 'BAR', displayName: '주점' },
+          { code: 'ETC', displayName: '기타' },
         ],
       }),
     ),

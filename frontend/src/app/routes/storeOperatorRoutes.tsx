@@ -6,6 +6,7 @@ import {
   OperatingHoursPage,
   ReservationTimeSlotsPage,
   StoreCreatePage,
+  StoreOnboardingStatusPage,
   StoreInfoPage,
   StoreOperatorHomePage,
   RepresentativeMenusPage,
@@ -44,6 +45,10 @@ export const storeOperatorRoutes = (
       <Route element={<StoreOperatorLayout />}>
         <Route path={STORE_OPERATOR_PATHS.home} element={<StoreOperatorHomePage />} />
         <Route path={STORE_OPERATOR_PATHS.storeCreate} element={<StoreCreatePage />} />
+        <Route
+          path={STORE_OPERATOR_PATHS.onboardingApplication}
+          element={<StoreOnboardingStatusPage />}
+        />
         <Route path={STORE_OPERATOR_PATHS.store} element={<StoreInfoPage />} />
         <Route path={STORE_OPERATOR_PATHS.operatingHours} element={<OperatingHoursPage />} />
         <Route path={STORE_OPERATOR_PATHS.reservationTimeSlots} element={<ReservationTimeSlotsPage />} />

@@ -7,7 +7,8 @@ import type {
   ManagedStore,
   PublicImage,
   PublicStoreDetail,
-  StoreCreateRequest,
+  StoreOnboardingApplication,
+  StoreOnboardingApplicationRequest,
   StoreUpdateRequest,
 } from '../model/types'
 
@@ -78,20 +79,76 @@ export function usePublishedStoreDetail(storeId: string, enabled = true) {
   })
 }
 
-export function useCreateStore() {
+export function useSubmitStoreOnboarding() {
   const { apiClient } = useStoreOperatorAuth()
 
   return useMutation({
     mutationFn: async (variables: {
-      body: StoreCreateRequest
+      body: StoreOnboardingApplicationRequest
+      evidence: File
       idempotencyKey: string
-    }): Promise<ManagedStore> => {
+    }): Promise<StoreOnboardingApplication> => {
+      const multipart = buildStoreOnboardingMultipart(
+        variables.body,
+        variables.evidence,
+      )
       const response = await apiClient('/api/v1/store-operators/stores', {
         method: 'post',
-        body: variables.body,
+        multipart,
         idempotencyKey: variables.idempotencyKey,
       })
       return response.data
+    },
+  })
+}
+
+export function buildStoreOnboardingMultipart(
+  body: StoreOnboardingApplicationRequest,
+  evidence: File,
+): FormData {
+  const multipart = new FormData()
+  multipart.append(
+    'application',
+    new File([JSON.stringify(body)], 'application.json', {
+      type: 'application/json',
+    }),
+  )
+  multipart.append('businessRegistrationEvidence', evidence)
+  return multipart
+}
+
+const TERMINAL_ONBOARDING_STATUSES = new Set([
+  'AUTO_APPROVED',
+  'APPROVED',
+  'REJECTED',
+])
+
+/** 승인 전에는 Store가 없으므로 신청 자체를 일정 간격으로 다시 조회한다. */
+export function useStoreOnboardingApplication(applicationId: string) {
+  const { apiClient } = useStoreOperatorAuth()
+
+  return useQuery({
+    enabled: /^[1-9][0-9]*$/.test(applicationId),
+    queryKey: [...storeOperatorKeys.all, 'onboarding-application', applicationId],
+    queryFn: async ({ signal }): Promise<StoreOnboardingApplication> => {
+      const response = await apiClient(
+        '/api/v1/store-operators/onboarding-applications/{applicationId}',
+        { method: 'get', pathParams: { applicationId }, signal },
+      )
+      return response.data
+    },
+    refetchInterval: (query) => {
+      const application = query.state.data
+      if (
+        application?.storeId !== null &&
+        application?.storeId !== undefined
+      ) {
+        return false
+      }
+      return application !== undefined &&
+        TERMINAL_ONBOARDING_STATUSES.has(application.status)
+        ? false
+        : 3_000
     },
   })
 }

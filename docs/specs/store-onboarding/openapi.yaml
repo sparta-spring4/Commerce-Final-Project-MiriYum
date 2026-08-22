@@ -101,7 +101,10 @@ components:
       required: true
       schema: {type: integer, format: int64, minimum: 1}
     IdempotencyKey:
-      $ref: '../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey'
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, format: uuid}
   schemas:
     StoreOnboardingApplicationRequest:
       type: object

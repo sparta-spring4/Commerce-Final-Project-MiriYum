@@ -29,15 +29,28 @@ import type { paths as WaitingPaths } from './generated/waiting'
  * 여기 한 번만 추가하면 검사와 합류가 함께 따라간다.
  */
 type StoreCollectionPath = '/api/v1/store-operators/stores'
+type StoreSearchCollectionOperations = StoreSearchPaths[StoreCollectionPath]
+type StoreOnboardingCollectionOperations =
+  StoreOnboardingPaths[StoreCollectionPath]
+type StoreCollectionMethodOverlap = Extract<
+  keyof StoreSearchCollectionOperations,
+  keyof StoreOnboardingCollectionOperations
+>
+type StoreSearchDisjointPaths = Omit<StoreSearchPaths, StoreCollectionPath>
 type StoreOnboardingDisjointPaths = Omit<
   StoreOnboardingPaths,
   StoreCollectionPath
 >
+type StoreCollectionPaths = Record<
+  StoreCollectionPath,
+  StoreSearchCollectionOperations & StoreOnboardingCollectionOperations
+>
 
 type PathDocs = [
   AuthAccountPaths,
-  StoreSearchPaths,
+  StoreSearchDisjointPaths,
   StoreOnboardingDisjointPaths,
+  StoreCollectionPaths,
   ReservationPaths,
   PaymentPaths,
   MenuHoldPickupPaths,
@@ -74,6 +87,10 @@ type OverlappingPaths<Docs extends readonly unknown[]> = Docs extends readonly [
  * 하나로 뭉개져도 알 수 없다. 아래 제약이 그 상황을 typecheck에서 드러낸다.
  */
 type AssertNoOverlap<T extends never> = T
+
+/** 같은 collection을 나누더라도 HTTP method까지 중복되면 컴파일을 막는다. */
+export type NoStoreCollectionMethodOverlap =
+  AssertNoOverlap<StoreCollectionMethodOverlap>
 
 export type NoPathOverlap = AssertNoOverlap<OverlappingPaths<PathDocs>>
 

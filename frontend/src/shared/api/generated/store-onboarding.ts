@@ -98,7 +98,7 @@ export interface components {
   };
   parameters: {
     ApplicationId: number;
-    IdempotencyKey: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+    IdempotencyKey: string;
   };
   requestBodies: never;
   headers: never;
@@ -240,6 +240,11 @@ export interface operations {
 
   /** 사업자등록증을 포함한 신규 매장 입점 신청 접수 */
   submitStoreOnboardingApplication: {
+    parameters: {
+      header: {
+        "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+      };
+    };
     requestBody: {
       content: {
         "multipart/form-data": {
@@ -274,6 +279,9 @@ export interface operations {
   /** 보완 요청된 입점 신청의 새 version 접수 */
   submitStoreOnboardingSupplement: {
     parameters: {
+      header: {
+        "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+      };
       path: {
         applicationId: components["parameters"]["ApplicationId"];
       };
