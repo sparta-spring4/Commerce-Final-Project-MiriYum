@@ -8,6 +8,11 @@ def load_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def load_optional_object_json(path):
+    content = Path(path).read_text(encoding="utf-8").strip()
+    return {} if not content else json.loads(content)
+
+
 def statements(policy):
     return policy.get("Statement", [])
 
@@ -68,7 +73,7 @@ def main():
     parameter_arn = f"arn:aws:ssm:{args.region}:{args.account_id}:parameter/miriyum/production/storage-s3-bucket"
     parameter = load_json(args.parameter_json)
     location = load_json(args.location_json)
-    versioning = load_json(args.versioning_json)
+    versioning = load_optional_object_json(args.versioning_json)
     encryption = load_json(args.encryption_json)
     public_access = load_json(args.public_access_json).get("PublicAccessBlockConfiguration", {})
     bucket_policy = load_json(args.bucket_policy_json)
