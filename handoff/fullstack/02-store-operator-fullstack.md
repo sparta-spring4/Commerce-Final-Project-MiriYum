@@ -30,22 +30,23 @@
 - 재발급 `POST /api/v1/store-operators/auth/token-refreshes`
 - 로그아웃 `DELETE /api/v1/store-operators/auth/sessions/current`
 - 실패는 `AUTH_005`, 제한은 `COMMON_010`, 만료 재발급 실패 시 사유를 보존해 로그인 이동
-- `returnTo` 복귀와 매장 등록 성공 뒤의 `storeId` 기반 이동은 대상 화면 Issue가 해당 경로와 테스트를 `routes.ts`에 등록한 경우에만 연결한다. 등록 전에는 목적 URL을 추측하지 않는다.
-- 현재 없는 계약은 로그인한 운영자 소유 매장 목록 `GET /api/v1/store-operators/stores`다. 따라서 일반 로그인 직후 `매장 없음/있음`을 추측해 자동 분기하거나 공개 검색 결과로 소유 매장을 찾지 않는다. 반면 알려진 `storeId`가 있으면 `GET /api/v1/store-operators/stores/{storeId}` 단건 조회를 사용할 수 있다.
+- `returnTo` 복귀를 지원하고, 로그인한 운영자 소유 매장은 `GET /api/v1/store-operators/stores`로 조회한다. 공개 검색 결과로 소유 매장을 추측하지 않는다.
+- 알려진 `storeId`가 있으면 `GET /api/v1/store-operators/stores/{storeId}` 단건 조회를 사용한다.
 
 ### 3. 매장 등록
-- 화면 경로: 현재 `routes.ts`에 미등록. 매장 등록 화면 Issue가 소유 파일과 테스트에 등록하기 전에는 URL을 추측하지 않는다.
+- 화면 경로: `/store-operator/stores/new`; 신청 상태는 `/store-operator/onboarding-applications/:applicationId`
 - catalog: `GET /api/v1/store-categories`, `/api/v1/store-tags`
-- 생성: `POST /api/v1/store-operators/stores` + Idempotency-Key
-- 요청: `businessRegistrationNumber`, `businessType(CAFE/BAKERY/OTHER)`, `name`, `description`, `region`, `address`, IANA `timeZoneId`, `storeCategoryCode`, `tagCodes`, `modes`, `applicantSelfAttested=true`, `requiredTermsAgreed=true`
+- 신청: `POST /api/v1/store-operators/stores` + `Idempotency-Key`의 `multipart/form-data`
+- `application` JSON에는 `businessRegistrationNumber`, `legalBusinessName`, `representativeName`, `openingDate`, `primaryBusinessCategory`, `primaryBusinessItem`, `name`, `description`, `region`, `address`, IANA `timeZoneId`, `storeCategoryCode`, `tagCodes`, `modes`, `applicantSelfAttested=true`, `requiredTermsAgreed=true`를 보낸다. `businessType`은 보내지 않는다.
+- `businessRegistrationEvidence`에는 PDF/JPEG/PNG 형식의 10 MiB 이하 사업자등록증 파일을 필수로 보낸다.
 - 주소나 브라우저 기본값으로 시간대를 추측하지 않고 사용자가 확인한 IANA 식별자를 제출한다. 자기확약과 필수 입점 약관 동의가 모두 확인되기 전에는 생성 요청을 보내지 않는다.
-- 운영자 ID·승인 필드·파일·이미지를 보내지 않는다.
-- 1차 성공 응답은 즉시 `verificationStatus=APPROVED`; 승인 대기 route를 만들지 않는다.
+- 운영자 ID·승인 필드는 보내지 않는다.
+- 접수 성공은 `202`와 신청 ID를 반환한다. 신청 상태 화면에서 `GET /api/v1/store-operators/onboarding-applications/{applicationId}`를 조회하고, 응답에 `storeId`가 생긴 뒤에만 매장 관리로 이동한다.
 - `STORE_002` 사업자등록번호 중복과 `STORE_004` catalog 오류를 필드에 연결한다. 등록 업종은 픽업 판정에 사용하지 않고 모든 업종에서 `pickupEnabled`를 허용한다.
 
 ### 4. 관리 홈
-- 화면 경로: 현재 `routes.ts`에 미등록. 관리 홈 화면 Issue가 소유 파일과 테스트에 등록하기 전에는 URL을 추측하지 않는다.
-- 등록 응답 또는 등록된 보호 경로의 알려진 `storeId`를 보존하되, 기본정보·설정 page link는 각 대상 화면 Issue가 `routes.ts`와 테스트에 경로를 등록한 항목만 구성한다. 현재 계약에 없는 운영 매장 목록 query를 만들지 않는다.
+- 화면 경로: `/store-operator`; 소유 매장 목록을 조회해 선택한 `storeId`를 보존한다.
+- 기본정보·설정 page link는 `routes.ts`와 테스트에 등록된 경로만 구성한다.
 - 1차에는 통계 API를 추측하지 않고 설정 완성도와 운영 상태만 표현한다.
 
 ### 5. 매장 정보

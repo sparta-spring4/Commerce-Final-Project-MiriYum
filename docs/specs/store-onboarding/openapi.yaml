@@ -128,7 +128,7 @@ components:
         - requiredTermsAgreed
       properties:
         name: {type: string, minLength: 1, maxLength: 100}
-        description: {type: string, minLength: 1, maxLength: 2000}
+        description: {type: string, maxLength: 1000}
         region:
           type: string
           enum: [SEOUL, BUSAN, DAEGU, DAEJEON, GWANGJU]
@@ -170,6 +170,15 @@ components:
         - AUTO_APPROVED
         - APPROVED
         - REJECTED
+    StoreOnboardingNextAction:
+      type: string
+      enum:
+        - WAIT
+        - UPLOAD_EVIDENCE
+        - SUBMIT_CHANGES
+        - COMPLETE
+        - NONE
+        - MANUAL_OPERATIONS_REVIEW
     StoreOnboardingApplicationData:
       type: object
       additionalProperties: false
@@ -185,7 +194,7 @@ components:
         applicationVersion: {type: integer, format: int64, minimum: 1}
         status: {$ref: '#/components/schemas/StoreOnboardingApplicationStatus'}
         reviewRequired: {type: boolean}
-        nextAction: {type: string, minLength: 1, maxLength: 100}
+        nextAction: {$ref: '#/components/schemas/StoreOnboardingNextAction'}
         storeId:
           type: [string, 'null']
           pattern: '^[1-9][0-9]*$'

@@ -51,13 +51,15 @@ export interface components {
     };
     /** @enum {string} */
     StoreOnboardingApplicationStatus: "RECEIVED" | "EVIDENCE_PENDING" | "AUTO_CHECKING" | "REVIEW_READY" | "UNDER_REVIEW" | "CHANGES_REQUESTED" | "AUTO_APPROVED" | "APPROVED" | "REJECTED";
+    /** @enum {string} */
+    StoreOnboardingNextAction: "WAIT" | "UPLOAD_EVIDENCE" | "SUBMIT_CHANGES" | "COMPLETE" | "NONE" | "MANUAL_OPERATIONS_REVIEW";
     StoreOnboardingApplicationData: {
       applicationId: string;
       /** Format: int64 */
       applicationVersion: number;
       status: components["schemas"]["StoreOnboardingApplicationStatus"];
       reviewRequired: boolean;
-      nextAction: string;
+      nextAction: components["schemas"]["StoreOnboardingNextAction"];
       storeId: string | null;
     };
     StoreOnboardingApplicationEnvelope: {

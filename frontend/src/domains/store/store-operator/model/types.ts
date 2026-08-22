@@ -15,6 +15,8 @@ export type StoreOnboardingApplication =
   OnboardingComponents['schemas']['StoreOnboardingApplicationData']
 export type StoreOnboardingApplicationStatus =
   OnboardingComponents['schemas']['StoreOnboardingApplicationStatus']
+export type StoreOnboardingNextAction =
+  OnboardingComponents['schemas']['StoreOnboardingNextAction']
 export type StoreUpdateRequest = components['schemas']['StoreUpdateRequest']
 export type StoreModes = components['schemas']['StoreModes']
 export type Region = components['schemas']['Region']

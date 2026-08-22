@@ -63,6 +63,25 @@ class StoreOpenApiContractTest {
         assertThat(map(map(multipartBody.get("encoding")).get("application")))
                 .containsEntry("contentType", "application/json");
         assertThat(map(post.get("responses"))).containsKey("202");
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> applicationRequest =
+                map(schemas.get("StoreOnboardingApplicationRequest"));
+        Map<String, Object> description =
+                map(map(applicationRequest.get("properties")).get("description"));
+        assertThat(description)
+                .containsEntry("maxLength", 1000)
+                .doesNotContainKey("minLength");
+
+        Map<String, Object> applicationData =
+                map(schemas.get("StoreOnboardingApplicationData"));
+        assertThat(map(map(applicationData.get("properties")).get("nextAction")))
+                .containsEntry(
+                        "$ref", "#/components/schemas/StoreOnboardingNextAction");
+        assertThat(list(map(schemas.get("StoreOnboardingNextAction")).get("enum")))
+                .containsExactly(
+                        "WAIT", "UPLOAD_EVIDENCE", "SUBMIT_CHANGES", "COMPLETE",
+                        "NONE", "MANUAL_OPERATIONS_REVIEW");
     }
 
     @Test

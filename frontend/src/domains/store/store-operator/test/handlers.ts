@@ -39,7 +39,7 @@ export function onboardingApplication(
     applicationVersion: 1,
     status: 'RECEIVED',
     reviewRequired: false,
-    nextAction: '자동 확인을 기다려 주세요.',
+    nextAction: 'WAIT',
     storeId: null,
     ...overrides,
   }

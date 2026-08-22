@@ -108,7 +108,7 @@ class StoreControllerTest {
                 .put("applicationVersion", 1)
                 .put("status", "AUTO_CHECKING")
                 .put("reviewRequired", true)
-                .put("nextAction", "WAIT_FOR_REVIEW");
+                .put("nextAction", "WAIT");
         given(onboardingSubmissionService.submit(
                 eq(11L), any(IdempotencyKey.class), any(), any()))
                 .willReturn(new IdempotentOutcome(
@@ -128,6 +128,7 @@ class StoreControllerTest {
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.data.applicationVersion").value(1))
                 .andExpect(jsonPath("$.data.status").value("AUTO_CHECKING"))
+                .andExpect(jsonPath("$.data.nextAction").value("WAIT"))
                 .andExpect(jsonPath("$.data.storeId").doesNotExist());
     }
 

@@ -28,7 +28,7 @@ describe('입점 신청 상태 화면', () => {
           onboardingApplication({
             applicationId: '41',
             status: 'AUTO_CHECKING',
-            nextAction: '사업자 정보 자동 확인을 기다려 주세요.',
+            nextAction: 'WAIT',
           }),
         ),
       ),
@@ -38,7 +38,7 @@ describe('입점 신청 상태 화면', () => {
 
     expect(await screen.findByText('자동 확인 중')).toBeInTheDocument()
     expect(
-      screen.getByText('사업자 정보 자동 확인을 기다려 주세요.'),
+      screen.getByText('자동 확인 또는 심사 진행을 기다려 주세요.'),
     ).toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: '매장 관리로 이동' }),
@@ -53,7 +53,7 @@ describe('입점 신청 상태 화면', () => {
           onboardingApplication({
             applicationId: '41',
             status: 'AUTO_APPROVED',
-            nextAction: '매장 관리를 시작할 수 있습니다.',
+            nextAction: 'COMPLETE',
             storeId: '7',
           }),
         ),
@@ -61,8 +61,13 @@ describe('입점 신청 상태 화면', () => {
     )
 
     renderStatus()
+    expect(
+      await screen.findByText(
+        '입점 승인이 완료되었습니다. 매장 관리를 시작할 수 있습니다.',
+      ),
+    ).toBeInTheDocument()
     fireEvent.click(
-      await screen.findByRole('button', { name: '매장 관리로 이동' }),
+      screen.getByRole('button', { name: '매장 관리로 이동' }),
     )
 
     expect(screen.getByTestId('location')).toHaveTextContent(
