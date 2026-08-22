@@ -1,0 +1,151 @@
+import os
+import shutil
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_PATH = ROOT / "scripts" / "staging-valkey-control.sh"
+BASH = shutil.which("bash")
+if BASH is None or Path(BASH).name.lower() == "bash.exe" and "system32" in BASH.lower():
+    BASH = r"C:\Program Files\Git\bin\bash.exe"
+
+
+class StagingValkeyControlTest(unittest.TestCase):
+    def run_control(self, action, *, fail_sleep=False, signal_sleep=False):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            command_log = temporary_path / "commands.log"
+            fake_bin = temporary_path / "bin"
+            fake_bin.mkdir()
+
+            docker = fake_bin / "docker"
+            docker.write_text(
+                """#!/usr/bin/env bash
+set -Eeuo pipefail
+printf 'docker %s\\n' \"$*\" >> \"$FAKE_COMMAND_LOG\"
+if [[ \"$1\" == \"inspect\" ]]; then
+  printf 'healthy\\n'
+elif [[ \"$*\" == *\" ps -q valkey\" ]]; then
+  printf 'staging-valkey-container\\n'
+fi
+""",
+                encoding="utf-8",
+                newline="\n",
+            )
+            docker.chmod(0o755)
+
+            sleep = fake_bin / "sleep"
+            sleep.write_text(
+                """#!/usr/bin/env bash
+set -Eeuo pipefail
+printf 'sleep %s\\n' \"$*\" >> \"$FAKE_COMMAND_LOG\"
+if [[ \"${FAIL_SLEEP:-false}\" == \"true\" ]]; then
+  exit 7
+fi
+if [[ \"${SIGNAL_SLEEP:-false}\" == \"true\" && \"$1\" == \"10\" ]]; then
+  kill -TERM \"$PPID\"
+  /usr/bin/sleep 1
+fi
+""",
+                encoding="utf-8",
+                newline="\n",
+            )
+            sleep.chmod(0o755)
+
+            command = (
+                'fake_bin="$1"; '
+                'if command -v cygpath >/dev/null 2>&1; then '
+                'fake_bin=$(cygpath -u "$fake_bin"); '
+                'fi; '
+                'PATH="$fake_bin:$PATH" VALKEY_CONTROL_ACTION="$2" '
+                'bash "$3"'
+            )
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "FAKE_COMMAND_LOG": command_log.as_posix(),
+                    "FAIL_SLEEP": "true" if fail_sleep else "false",
+                    "SIGNAL_SLEEP": "true" if signal_sleep else "false",
+                }
+            )
+            result = subprocess.run(
+                [
+                    BASH,
+                    "-c",
+                    command,
+                    "staging-valkey-test",
+                    fake_bin.as_posix(),
+                    action,
+                    SCRIPT_PATH.as_posix(),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
+            commands = (
+                command_log.read_text(encoding="utf-8").splitlines()
+                if command_log.exists()
+                else []
+            )
+            return result, commands
+
+    def test_interrupt_stops_for_ten_seconds_then_recovers_to_healthy(self):
+        result, commands = self.run_control("interrupt")
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        stop = commands.index(
+            "docker compose --env-file /opt/miriyum/.env -f "
+            "/opt/miriyum/docker-compose.prod.yml stop valkey"
+        )
+        wait = commands.index("sleep 10")
+        start = commands.index(
+            "docker compose --env-file /opt/miriyum/.env -f "
+            "/opt/miriyum/docker-compose.prod.yml up -d --no-deps valkey"
+        )
+        healthy = max(index for index, command in enumerate(commands) if command ==
+            "docker inspect --format {{.State.Health.Status}} staging-valkey-container"
+        )
+        self.assertLess(stop, wait)
+        self.assertLess(wait, start)
+        self.assertLess(start, healthy)
+
+    def test_recover_starts_and_checks_health_without_stopping(self):
+        result, commands = self.run_control("recover")
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertNotIn("sleep 10", commands)
+        self.assertFalse(any(" stop valkey" in command for command in commands))
+        self.assertTrue(any(" up -d --no-deps valkey" in command for command in commands))
+        self.assertTrue(any(command.startswith("docker inspect") for command in commands))
+
+    def test_interrupt_failure_still_recovers_and_preserves_failure(self):
+        result, commands = self.run_control("interrupt", fail_sleep=True)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertTrue(any(" stop valkey" in command for command in commands))
+        self.assertIn("sleep 10", commands)
+        self.assertTrue(any(" up -d --no-deps valkey" in command for command in commands))
+        self.assertTrue(any(command.startswith("docker inspect") for command in commands))
+
+    def test_interrupt_signal_still_recovers_and_returns_signal_status(self):
+        result, commands = self.run_control("interrupt", signal_sleep=True)
+
+        self.assertEqual(143, result.returncode, result.stdout + result.stderr)
+        self.assertTrue(any(" stop valkey" in command for command in commands))
+        self.assertIn("sleep 10", commands)
+        self.assertTrue(any(" up -d --no-deps valkey" in command for command in commands))
+        self.assertTrue(any(command.startswith("docker inspect") for command in commands))
+
+    def test_arbitrary_action_is_rejected_without_docker_access(self):
+        result, commands = self.run_control("stop")
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual([], commands)
+
+
+if __name__ == "__main__":
+    unittest.main()

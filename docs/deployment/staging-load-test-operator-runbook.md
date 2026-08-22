@@ -9,9 +9,11 @@ The operator does not need AWS Console, EC2, SSM Session Manager, Secrets Manage
 ## Access Boundary
 
 - GitHub repository write access is required to dispatch the workflow. GitHub Actions cannot grant dispatch access for only one workflow.
-- The workflow can perform only three fixed actions: `enable-load-test`, `disable-load-test`, and `safe-recovery`.
+- The workflow can perform only seven fixed actions: `enable-load-test`, `disable-load-test`, `enable-sse`, `disable-sse`, `safe-recovery`, `interrupt-valkey`, and `recover-valkey`.
 - It accepts an already-built immutable 40-character Git SHA image tag. It never builds a new image or deploys an arbitrary tag.
 - `safe-recovery` can only set the predefined staging flags to `false`: runtime JSON, payment, S3 storage, and store-search LLM. Re-enabling a feature still requires the normal deployment-owner process.
+- `interrupt-valkey` has no duration or command input. It stops only the staging Valkey container for 10 seconds, starts it in the same bounded SSM command, and waits for Docker health.
+- `recover-valkey` only starts the staging Valkey container and waits for Docker health.
 
 ## Before Starting
 
@@ -35,6 +37,19 @@ The workflow does not print the IP in shell output. The GitHub workflow input is
 1. Run only the approved k6 scenario from the load-test harness.
 2. The assigned CloudWatch observer records the start and finish time, selected SHA, request result, and dashboard capture.
 3. Stop the test immediately if staging health becomes non-`UP`, error rates rise unexpectedly, or an alarm fires.
+
+## Inject and Recover a Fixed Valkey Interruption
+
+Use this procedure only for an approved SSE `recovery` profile. The selected `image_tag` must equal the latest successful `staging-backend` deployment SHA; the workflow rejects an older or different SHA.
+
+1. Start the recovery harness and wait until it prints `SSE_RECOVERY_READY`.
+2. Confirm the approved synthetic store has no other Waiting writer during the recovery window.
+3. In `Staging Load-Test Control` on branch `dev`, choose `interrupt-valkey`.
+4. Enter the approved deployed SHA in `image_tag`, leave `source_ip` empty, and run the workflow.
+5. The fixed action stops Valkey for 10 seconds and then starts it automatically. Wait for the workflow to report success before interpreting the harness result.
+6. Confirm the harness records MySQL correction, the changed signal, the owner HTTP verification, cleanup, and all thresholds as specified by the SSE runbook.
+
+The remote script attempts to start Valkey from its exit and signal traps. If the action fails, is cancelled, or times out, immediately run `recover-valkey` with the same latest deployed SHA and do not continue testing until that action succeeds and staging private health is `UP`. Do not run both actions concurrently; the workflow serializes them with other staging load-test controls and staging deployment commands.
 
 ## Restore the Default Rate Limit
 
@@ -63,6 +78,7 @@ Do not attempt to repair these incidents through the load-test control workflow:
 - missing or invalid secrets, IAM permissions, or certificates;
 - a missing ECR image, wrong SHA, migration failure, or database outage;
 - arbitrary environment-variable changes;
+- a custom Valkey interruption duration, arbitrary container, or arbitrary shell command;
 - production deployment or production rate-limit changes.
 
 Escalate those cases to the deployment owner with the Actions run URL, selected SHA, health result, and relevant CloudWatch or workflow error evidence.

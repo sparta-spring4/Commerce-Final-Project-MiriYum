@@ -1,18 +1,22 @@
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTROL_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "staging-load-test-control.yml"
+VALKEY_CONTROL_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "staging-valkey-control.yml"
 BACKEND_CD_PATH = ROOT / ".github" / "workflows" / "backend-cd.yml"
 BACKEND_CI_PATH = ROOT / ".github" / "workflows" / "backend-ci.yml"
 IP_VALIDATOR_PATH = ROOT / "scripts" / "validate-staging-load-test-source-ip.js"
+VALKEY_CONTROL_TEST_PATH = ROOT / "scripts" / "test-staging-valkey-control.py"
 
 
 class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
     def setUp(self):
         self.control_workflow = CONTROL_WORKFLOW_PATH.read_text(encoding="utf-8")
+        self.valkey_control_workflow = VALKEY_CONTROL_WORKFLOW_PATH.read_text(encoding="utf-8")
         self.backend_cd = BACKEND_CD_PATH.read_text(encoding="utf-8")
         self.backend_ci = BACKEND_CI_PATH.read_text(encoding="utf-8")
 
@@ -24,6 +28,8 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertIn("enable-sse", self.control_workflow)
         self.assertIn("disable-sse", self.control_workflow)
         self.assertIn("safe-recovery", self.control_workflow)
+        self.assertIn("interrupt-valkey", self.control_workflow)
+        self.assertIn("recover-valkey", self.control_workflow)
         self.assertNotIn("environment_key", self.control_workflow)
         self.assertNotIn("environment_value", self.control_workflow)
         self.assertNotIn("shell_command", self.control_workflow)
@@ -67,8 +73,9 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_control_workflow_delegates_only_to_staging_cd(self):
+    def test_control_workflow_delegates_only_to_reviewed_reusable_workflows(self):
         self.assertIn("uses: ./.github/workflows/backend-cd.yml", self.control_workflow)
+        self.assertIn("uses: ./.github/workflows/staging-valkey-control.yml", self.control_workflow)
         self.assertIn("actions: read", self.control_workflow)
         self.assertIn("rate_limit_exception: ${{ inputs.action == 'enable-load-test' && 'enable' || inputs.action == 'disable-load-test' && 'disable' || inputs.action == 'safe-recovery' && 'disable' || 'preserve' }}", self.control_workflow)
         self.assertIn("runtime_recovery_mode: ${{ inputs.action == 'safe-recovery' && 'safe-disable' || 'preserve' }}", self.control_workflow)
@@ -76,6 +83,46 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("AWS-RunShellScript", self.control_workflow)
         self.assertNotIn("aws ssm send-command", self.control_workflow)
         self.assertNotIn("gh workflow run", self.control_workflow)
+
+    def test_valkey_control_is_staging_only_and_accepts_no_arbitrary_command_or_duration(self):
+        self.assertIn("name: Staging Valkey Control", self.valkey_control_workflow)
+        self.assertIn("workflow_call:", self.valkey_control_workflow)
+        self.assertNotIn("workflow_dispatch:", self.valkey_control_workflow)
+        self.assertIn("environment: staging", self.valkey_control_workflow)
+        self.assertIn("interrupt", self.valkey_control_workflow)
+        self.assertIn("recover", self.valkey_control_workflow)
+        self.assertNotIn("duration:", self.valkey_control_workflow)
+        self.assertNotIn("shell_command", self.valkey_control_workflow)
+        self.assertNotIn("production", self.valkey_control_workflow.lower())
+
+    def test_valkey_control_requires_the_reviewed_dev_caller_before_oidc(self):
+        self.assertIn("Staging Valkey controls must run from refs/heads/dev", self.control_workflow)
+        expected_caller = (
+            "$GITHUB_REPOSITORY/.github/workflows/"
+            "staging-load-test-control.yml@refs/heads/dev"
+        )
+        self.assertIn(expected_caller, self.valkey_control_workflow)
+        self.assertIn('CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}', self.valkey_control_workflow)
+        self.assertIn('if [ "$GITHUB_REF" != "refs/heads/dev" ]', self.valkey_control_workflow)
+        self.assertIn("ref: refs/heads/dev", self.valkey_control_workflow)
+        caller_check = self.valkey_control_workflow.index("expected_caller=")
+        oidc = self.valkey_control_workflow.index("Configure AWS credentials through OIDC")
+        self.assertLess(caller_check, oidc)
+
+    def test_valkey_control_requires_current_successful_staging_backend_sha(self):
+        self.assertIn("staging-backend", self.valkey_control_workflow)
+        self.assertIn("deployments?environment=", self.valkey_control_workflow)
+        self.assertIn("statuses?per_page=1", self.valkey_control_workflow)
+        self.assertIn("does not match the latest successful staging backend deployment", self.valkey_control_workflow)
+        self.assertIn("^[0-9a-f]{40}$", self.valkey_control_workflow)
+
+    def test_valkey_control_runs_only_the_reviewed_script_through_ssm(self):
+        self.assertIn("scripts/staging-valkey-control.sh", self.valkey_control_workflow)
+        self.assertIn("AWS-RunShellScript", self.valkey_control_workflow)
+        self.assertIn("aws ssm send-command", self.valkey_control_workflow)
+        self.assertIn("VALKEY_CONTROL_ACTION", self.valkey_control_workflow)
+        self.assertNotIn("StandardOutputContent", self.valkey_control_workflow)
+        self.assertNotIn("StandardErrorContent", self.valkey_control_workflow)
 
     def test_backend_cd_accepts_only_fixed_safe_recovery_mode(self):
         self.assertIn("runtime_recovery_mode:", self.backend_cd)
@@ -188,6 +235,15 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
     def test_backend_ci_runs_the_control_workflow_contract(self):
         self.assertIn("Verify staging load-test control workflow contract", self.backend_ci)
         self.assertIn("python3 scripts/test-staging-load-test-control-workflow.py", self.backend_ci)
+
+    def test_valkey_script_runtime_contract(self):
+        result = subprocess.run(
+            [sys.executable, str(VALKEY_CONTROL_TEST_PATH)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":
