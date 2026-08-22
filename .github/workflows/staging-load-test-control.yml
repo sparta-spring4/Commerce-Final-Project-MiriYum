@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "Apply a fixed staging load-test or SSE runtime control"
+        description: "Apply a fixed staging load-test, SSE, or Valkey control"
         required: true
         type: choice
         options:
@@ -13,6 +13,8 @@ on:
           - enable-sse
           - disable-sse
           - safe-recovery
+          - interrupt-valkey
+          - recover-valkey
       image_tag:
         description: "Existing immutable 40-character Git SHA image tag to redeploy"
         required: true
@@ -57,10 +59,15 @@ jobs:
             'enable-sse',
             'disable-sse',
             'safe-recovery',
+            'interrupt-valkey',
+            'recover-valkey',
           ]);
 
           if (!supportedActions.has(action)) {
             throw new Error(`Unsupported staging load-test action: ${action}`);
+          }
+          if ((action === 'interrupt-valkey' || action === 'recover-valkey') && process.env.GITHUB_REF !== 'refs/heads/dev') {
+            throw new Error('Staging Valkey controls must run from refs/heads/dev.');
           }
           if (!/^[0-9a-f]{40}$/.test(imageTag)) {
             throw new Error('Invalid immutable image tag. A lowercase 40-character Git SHA is required.');
@@ -81,6 +88,7 @@ jobs:
   deploy:
     name: apply-staging-load-test-control
     needs: validate
+    if: ${{ inputs.action != 'interrupt-valkey' && inputs.action != 'recover-valkey' }}
     uses: ./.github/workflows/backend-cd.yml
     with:
       image_tag: ${{ inputs.image_tag }}
@@ -88,6 +96,16 @@ jobs:
       load_test_source_ip: ${{ inputs.source_ip }}
       runtime_recovery_mode: ${{ inputs.action == 'safe-recovery' && 'safe-disable' || 'preserve' }}
       runtime_config_mode: ${{ inputs.action == 'enable-sse' && 'enable' || inputs.action == 'disable-sse' && 'disable' || 'preserve' }}
+    secrets: inherit
+
+  valkey-control:
+    name: apply-staging-valkey-control
+    needs: validate
+    if: ${{ inputs.action == 'interrupt-valkey' || inputs.action == 'recover-valkey' }}
+    uses: ./.github/workflows/staging-valkey-control.yml
+    with:
+      action: ${{ inputs.action == 'interrupt-valkey' && 'interrupt' || 'recover' }}
+      image_tag: ${{ inputs.image_tag }}
     secrets: inherit
 
   disable-after-failed-enable:
