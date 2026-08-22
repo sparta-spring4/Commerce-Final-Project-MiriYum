@@ -17,6 +17,8 @@ export const storeOperatorKeys = {
     [...storeOperatorKeys.store(storeId), 'menus'] as const,
   menu: (storeId: string, menuId: string) =>
     [...storeOperatorKeys.menus(storeId), menuId] as const,
+  menuImage: (storeId: string, menuId: string) =>
+    [...storeOperatorKeys.menu(storeId, menuId), 'image'] as const,
   representativeMenus: (storeId: string) =>
     [...storeOperatorKeys.store(storeId), 'representative-menus'] as const,
   reservations: (storeId: string) =>
