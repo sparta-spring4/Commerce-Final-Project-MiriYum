@@ -188,6 +188,12 @@ function validateBehavior(behavior) {
       || behavior.timeoutSeconds > 605)) {
     throw new Error('SSE stream timeout must be bounded')
   }
+  if (behavior.minimumLifetimeSeconds !== undefined
+    && (!Number.isInteger(behavior.minimumLifetimeSeconds)
+      || behavior.minimumLifetimeSeconds <= 0
+      || behavior.minimumLifetimeSeconds > 600)) {
+    throw new Error('SSE minimum lifetime must be bounded')
+  }
   return behavior
 }
 
@@ -246,6 +252,7 @@ export function openChangedStream({
   }
 
   let opened = false
+  let openedAt = null
   let validEvents = 0
   let heartbeatFrames = 0
   let contractError = false
@@ -266,6 +273,7 @@ export function openChangedStream({
         }
         client.on('open', () => {
           opened = true
+          openedAt = Date.now()
           emitMetric(metrics, 'opened', 1, selectedTags)
         })
         client.on('event', (event) => {
@@ -312,8 +320,18 @@ export function openChangedStream({
           }
         })
         client.on('error', () => {
-          transportError = true
-          emitMetric(metrics, 'transportError', 1, selectedTags)
+          const minimumValidEvents = selectedBehavior.minimumValidEvents ?? 1
+          const minimumLifetimeMilliseconds = selectedBehavior.minimumLifetimeSeconds === undefined
+            ? null
+            : selectedBehavior.minimumLifetimeSeconds * 1000
+          const expectedLifetimeCompleted = minimumLifetimeMilliseconds !== null
+            && openedAt !== null
+            && Date.now() - openedAt >= minimumLifetimeMilliseconds
+            && validEvents >= minimumValidEvents
+          if (!expectedLifetimeCompleted) {
+            transportError = true
+            emitMetric(metrics, 'transportError', 1, selectedTags)
+          }
           closeClient()
         })
       },
@@ -323,6 +341,11 @@ export function openChangedStream({
   }
 
   const minimumValidEvents = selectedBehavior.minimumValidEvents ?? 1
+  const minimumLifetimeMilliseconds = selectedBehavior.minimumLifetimeSeconds === undefined
+    ? null
+    : selectedBehavior.minimumLifetimeSeconds * 1000
+  const minimumLifetimeCompleted = minimumLifetimeMilliseconds === null
+    || (openedAt !== null && Date.now() - openedAt >= minimumLifetimeMilliseconds)
   const serverClosed = !clientClosedByHarness && !transportError && !contractError
   let classification
   if (transportError) {
@@ -331,10 +354,15 @@ export function openChangedStream({
     classification = 'contract_error'
   } else {
     classification = statusClassification(response?.status)
-      || (validEvents >= minimumValidEvents
-        && (!selectedBehavior.requireServerClose || serverClosed)
-        ? 'success'
-        : 'missing_event')
+      || (!opened
+        ? 'not_opened'
+        : validEvents < minimumValidEvents
+          ? 'missing_event'
+          : !minimumLifetimeCompleted
+            ? 'lifetime_too_short'
+            : (!selectedBehavior.requireServerClose || serverClosed)
+              ? 'success'
+              : 'missing_event')
   }
   emitMetric(metrics, 'connectionResult', classification, selectedTags)
 
@@ -347,4 +375,10 @@ export function openChangedStream({
     serverClosed,
     completed: classification === 'success',
   })
+}
+
+export function applySteadyMinimumLifetime(behavior, minimumLifetimeSeconds, profile) {
+  return profile === 'steady' && behavior.mode === 'steady'
+    ? { minimumLifetimeSeconds, ...behavior }
+    : behavior
 }

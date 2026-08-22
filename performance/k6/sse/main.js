@@ -24,7 +24,7 @@ import {
   verifyWaitingChange,
 } from './probe.js'
 import { runSseRecovery } from './recovery.js'
-import { openChangedStream, prepareSseSession } from './session.js'
+import { applySteadyMinimumLifetime, openChangedStream, prepareSseSession } from './session.js'
 import {
   createFixtureFingerprint,
   createTargetFingerprint,
@@ -271,10 +271,10 @@ function openSession(session, behavior, lastEventId = null) {
     accessToken: session.accessToken,
     lastEventId,
     endpointKind: target.kind,
-    behavior: {
+    behavior: applySteadyMinimumLifetime({
       timeoutSeconds: config.holdDurationSeconds + 5,
       ...behavior,
-    },
+    }, config.holdDurationSeconds, config.profile),
     metrics: metricAdapter(),
     tags: tagsFor(target),
   })
