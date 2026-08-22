@@ -263,6 +263,9 @@ jobs:
         shell: pwsh
         run: ./scripts/verify-backend-cd-workflow.ps1
 
+      - name: Verify staging load-test control workflow contract
+        run: python3 scripts/test-staging-load-test-control-workflow.py
+
       - name: Verify production ECS CD workflow contract
         run: python3 scripts/test-production-ecs-cd-workflow.py
 

@@ -2,6 +2,36 @@
 name: Backend CD (Staging)
 
 on:
+  workflow_call:
+    inputs:
+      image_tag:
+        description: "Deploy an existing immutable 40-character Git SHA image tag"
+        required: true
+        type: string
+      rate_limit_exception:
+        description: "Staging k6 rate-limit exception: preserve, enable, or disable"
+        required: false
+        default: preserve
+        type: string
+      load_test_source_ip:
+        description: "Public IPv4 address permitted only while staging load tests run"
+        required: false
+        default: ""
+        type: string
+      runtime_recovery_mode:
+        description: "Fixed staging runtime recovery mode"
+        required: false
+        default: preserve
+        type: string
+      cancel_ssm_command_id:
+        description: "Previously started SSM command that must reach a terminal state before this control deployment runs"
+        required: false
+        default: ""
+        type: string
+    outputs:
+      ssm_command_id:
+        description: "SSM command ID for the deployment invocation"
+        value: ${{ jobs.deploy.outputs.ssm_command_id }}
   workflow_run:
     workflows: ["Backend CI"]
     branches: [dev]
@@ -12,15 +42,6 @@ on:
         description: "Deploy an existing immutable 40-character Git SHA image tag"
         required: true
         type: string
-      rate_limit_exception:
-        description: "Staging k6 rate-limit exception: preserve (default), enable, or disable"
-        required: false
-        default: preserve
-        type: choice
-        options:
-          - preserve
-          - enable
-          - disable
 
 permissions:
   actions: read
@@ -54,7 +75,8 @@ jobs:
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'dev' &&
        github.event.workflow_run.head_repository.full_name == github.repository) ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev')
+      ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') &&
+       github.ref == 'refs/heads/dev')
     outputs:
       deployable: ${{ steps.source.outputs.deployable }}
 
@@ -149,6 +171,8 @@ jobs:
       id-token: write
       deployments: write
     if: needs.verify-source.outputs.deployable == 'true'
+    outputs:
+      ssm_command_id: ${{ steps.ssm.outputs.command_id }}
 
     steps:
       - name: Validate deployment configuration
@@ -192,6 +216,8 @@ jobs:
           cp scripts/test-notification-read-deployment-gate.py \
             "$RUNNER_TEMP/notification-read-deployment-gate.py"
           cp deploy/deploy.sh "$RUNNER_TEMP/notification-read-deploy.sh"
+          cp scripts/validate-staging-load-test-source-ip.js \
+            "$RUNNER_TEMP/validate-staging-load-test-source-ip.js"
 
       - name: Checkout selected deployment revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -239,8 +265,8 @@ jobs:
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "Reusing immutable ECR image tag: $IMAGE_TAG"
           else
-            if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-              echo "::error::Manual deployment requires an existing immutable ECR image tag: $IMAGE_TAG."
+            if [ "$EVENT_NAME" != "workflow_run" ]; then
+              echo "::error::Manual or reusable deployment requires an existing immutable ECR image tag: $IMAGE_TAG."
               exit 1
             fi
 
@@ -267,8 +293,8 @@ jobs:
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "Reusing immutable frontend ECR image tag: $frontend_tag"
           else
-            if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-              echo "::error::Manual deployment requires an existing immutable frontend ECR image tag: $frontend_tag."
+            if [ "$EVENT_NAME" != "workflow_run" ]; then
+              echo "::error::Manual or reusable deployment requires an existing immutable frontend ECR image tag: $frontend_tag."
               exit 1
             fi
 
@@ -348,29 +374,25 @@ jobs:
           ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
           IMAGE_TAG: ${{ steps.image.outputs.tag }}
           RATE_LIMIT_EXCEPTION: ${{ inputs.rate_limit_exception || 'preserve' }}
-          STAGING_LOAD_TEST_SOURCE_IP: ${{ secrets.MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP }}
+          RUNTIME_RECOVERY_MODE: ${{ inputs.runtime_recovery_mode || 'preserve' }}
+          STAGING_LOAD_TEST_SOURCE_IP: ${{ inputs.load_test_source_ip || secrets.MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP }}
+          CANCEL_SSM_COMMAND_ID: ${{ inputs.cancel_ssm_command_id || '' }}
+          CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
+          case "$RUNTIME_RECOVERY_MODE" in
+            preserve|safe-disable)
+              ;;
+            *)
+              echo "::error::Unsupported runtime recovery mode: $RUNTIME_RECOVERY_MODE"
+              exit 1
+              ;;
+          esac
+
           case "$RATE_LIMIT_EXCEPTION" in
             preserve|disable)
               ;;
             enable)
-              if ! node - <<'NODE'
-          const ip = process.env.STAGING_LOAD_TEST_SOURCE_IP || '';
-          const parts = ip.split('.').map(Number);
-          const invalid = parts.length !== 4
-            || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
-            || parts.join('.') !== ip
-            || parts[0] === 0
-            || parts[0] === 10
-            || parts[0] === 127
-            || parts[0] >= 224
-            || (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127)
-            || (parts[0] === 169 && parts[1] === 254)
-            || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
-            || (parts[0] === 192 && parts[1] === 168);
-          process.exit(invalid ? 1 : 0);
-          NODE
-              then
+              if ! node "$RUNNER_TEMP/validate-staging-load-test-source-ip.js" "$STAGING_LOAD_TEST_SOURCE_IP"; then
                 echo "::error::Invalid staging load-test source IP secret."
                 exit 1
               fi
@@ -380,6 +402,52 @@ jobs:
               exit 1
               ;;
           esac
+
+          if [ "$RATE_LIMIT_EXCEPTION" != "preserve" ] || [ "$RUNTIME_RECOVERY_MODE" != "preserve" ] || [ -n "$CANCEL_SSM_COMMAND_ID" ]; then
+            case "$CALLER_WORKFLOW_REF" in
+              "$GITHUB_REPOSITORY/.github/workflows/staging-load-test-control.yml@"*)
+                ;;
+              *)
+                echo "::error::Non-preserve staging control inputs are allowed only from Staging Load-Test Control."
+                exit 1
+                ;;
+            esac
+          fi
+
+          if [ -n "$CANCEL_SSM_COMMAND_ID" ]; then
+            if ! [[ "$CANCEL_SSM_COMMAND_ID" =~ ^[0-9a-f-]{36}$ ]]; then
+              echo "::error::Invalid SSM command ID supplied for cancellation."
+              exit 1
+            fi
+
+            aws ssm cancel-command --command-id "$CANCEL_SSM_COMMAND_ID"
+            for ((attempt = 0; attempt < 90; attempt++)); do
+              cancelled_status=$(aws ssm get-command-invocation \
+                --command-id "$CANCEL_SSM_COMMAND_ID" \
+                --instance-id "$EC2_INSTANCE_ID" \
+                --query 'Status' \
+                --output text 2>/dev/null || true)
+
+              case "$cancelled_status" in
+                Success|Failed|Cancelled|TimedOut)
+                  echo "Original SSM command reached terminal state: $cancelled_status"
+                  break
+                  ;;
+                Pending|InProgress|Delayed|Cancelling)
+                  sleep 10
+                  ;;
+                *)
+                  echo "::error::Could not determine terminal state for original SSM command."
+                  exit 1
+                  ;;
+              esac
+            done
+
+            if [[ "${cancelled_status:-}" != "Success" && "${cancelled_status:-}" != "Failed" && "${cancelled_status:-}" != "Cancelled" && "${cancelled_status:-}" != "TimedOut" ]]; then
+              echo "::error::Original SSM command did not reach a terminal state within 15 minutes."
+              exit 1
+            fi
+          fi
 
           load_test_source_ip_base64=$(printf %s "$STAGING_LOAD_TEST_SOURCE_IP" | base64 --wrap=0)
           # 실행 .env는 EC2의 제한된 권한으로만 유지하므로 의도적으로 전송 대상에서 제외한다.
@@ -405,6 +473,8 @@ jobs:
             "Parameters": {
               "commands": [
                 "set -Eeuo pipefail",
+                "backup_dir=\$(mktemp -d); cp /opt/miriyum/.env \"\$backup_dir/.env\"; cp /opt/miriyum/docker-compose.prod.yml \"\$backup_dir/backup-compose.yml\"; cp -a /opt/miriyum/nginx \"\$backup_dir/nginx\"; previous_backend_id=\$(BACKEND_IMAGE='$image_uri' FRONTEND_IMAGE='$frontend_image_uri' docker compose --env-file /opt/miriyum/.env -f /opt/miriyum/docker-compose.prod.yml ps -q backend); previous_frontend_id=\$(BACKEND_IMAGE='$image_uri' FRONTEND_IMAGE='$frontend_image_uri' docker compose --env-file /opt/miriyum/.env -f /opt/miriyum/docker-compose.prod.yml ps -q frontend); previous_backend_image=''; previous_frontend_image=''; if [ -n \"\$previous_backend_id\" ]; then previous_backend_image=\$(docker inspect --format '{{.Config.Image}}' \"\$previous_backend_id\"); fi; if [ -n \"\$previous_frontend_id\" ]; then previous_frontend_image=\$(docker inspect --format '{{.Config.Image}}' \"\$previous_frontend_id\"); fi",
+                "backup_env=\"\$backup_dir/.env\"; restore_env() { status=\$?; trap - EXIT HUP INT TERM; if [ \"\$status\" -ne 0 ]; then cp \"\$backup_env\" /opt/miriyum/.env; cp \"\$backup_dir/backup-compose.yml\" /opt/miriyum/docker-compose.prod.yml; rm -rf /opt/miriyum/nginx; cp -a \"\$backup_dir/nginx\" /opt/miriyum/nginx; case '$RUNTIME_RECOVERY_MODE' in safe-disable) sed -i '/^MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=/d; /^MIRIYUM_RUNTIME_CONFIG_ENABLED=/d; /^MIRIYUM_PAYMENT_ENABLED=/d; /^MIRIYUM_STORAGE_S3_ENABLED=/d; /^MIRIYUM_STORE_SEARCH_LLM_ENABLED=/d' /opt/miriyum/.env; printf '\nMIRIYUM_RUNTIME_CONFIG_ENABLED=false\nMIRIYUM_PAYMENT_ENABLED=false\nMIRIYUM_STORAGE_S3_ENABLED=false\nMIRIYUM_STORE_SEARCH_LLM_ENABLED=false\n' >> /opt/miriyum/.env ;; esac; if [ -n \"\$previous_backend_image\" ] && [ -n \"\$previous_frontend_image\" ]; then recovery_status=0; BACKEND_IMAGE=\"\$previous_backend_image\" FRONTEND_IMAGE=\"\$previous_frontend_image\" docker compose --env-file /opt/miriyum/.env -f \"\$backup_dir/backup-compose.yml\" up -d --force-recreate --remove-orphans || recovery_status=\$?; if [ \"\$recovery_status\" -eq 0 ]; then recovery_status=1; for ((recovery_attempt=0; recovery_attempt < 30; recovery_attempt++)); do if curl --fail --silent --show-error http://127.0.0.1:8080/actuator/health >/dev/null; then recovery_status=0; break; fi; sleep 3; done; if [ \"\$recovery_status\" -ne 0 ]; then echo 'Recovered backend did not become healthy.' >&2; fi; fi; if [ \"\$recovery_status\" -ne 0 ]; then echo 'Failed to recover the previous staging runtime after deployment failure.' >&2; fi; fi; fi; rm -rf \"\$backup_dir\"; exit \"\$status\"; }; trap restore_env EXIT HUP INT TERM",
                 "install -d -m 0755 /opt/miriyum/nginx/templates/snippets /opt/miriyum/nginx/entrypoint",
                 "echo '$compose_base64' | base64 --decode > /opt/miriyum/docker-compose.prod.yml",
                 "echo '$nginx_http_base64' | base64 --decode > /opt/miriyum/nginx/templates/http.conf.template",
@@ -423,11 +493,13 @@ jobs:
                 "chmod 700 /opt/miriyum/monitoring/publish-valkey-memory-metrics.sh",
                 "systemctl daemon-reload",
                 "systemd-analyze verify /etc/systemd/system/miriyum-valkey-memory-metrics.service /etc/systemd/system/miriyum-valkey-memory-metrics.timer",
-                "systemctl enable --now miriyum-valkey-memory-metrics.timer",
-                "chmod 700 /opt/miriyum/certbot.sh",
-                "chmod 755 /opt/miriyum/nginx/entrypoint/40-select-server-config.sh",
-                "case '$RATE_LIMIT_EXCEPTION' in enable) source_ip=\$(printf %s '$load_test_source_ip_base64' | base64 --decode); sed -i '/^MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=/d' /opt/miriyum/.env; printf '\\nMIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=%s\\n' \"\$source_ip\" >> /opt/miriyum/.env; unset source_ip; echo 'Staging load-test source IP enabled.' ;; disable) sed -i '/^MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=/d' /opt/miriyum/.env; echo 'Staging load-test source IP disabled.' ;; preserve) echo 'Staging load-test source IP preserved.' ;; esac",
-                "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' FRONTEND_IMAGE='$frontend_image_uri' /opt/miriyum/deploy.sh"
+                 "systemctl enable --now miriyum-valkey-memory-metrics.timer",
+                 "chmod 700 /opt/miriyum/certbot.sh",
+                 "chmod 755 /opt/miriyum/nginx/entrypoint/40-select-server-config.sh",
+                 "case '$RUNTIME_RECOVERY_MODE' in safe-disable) sed -i '/^MIRIYUM_RUNTIME_CONFIG_ENABLED=/d; /^MIRIYUM_PAYMENT_ENABLED=/d; /^MIRIYUM_STORAGE_S3_ENABLED=/d; /^MIRIYUM_STORE_SEARCH_LLM_ENABLED=/d' /opt/miriyum/.env; printf '\\nMIRIYUM_RUNTIME_CONFIG_ENABLED=false\\nMIRIYUM_PAYMENT_ENABLED=false\\nMIRIYUM_STORAGE_S3_ENABLED=false\\nMIRIYUM_STORE_SEARCH_LLM_ENABLED=false\\n' >> /opt/miriyum/.env; echo 'Approved staging runtime flags disabled.' ;; preserve) echo 'Staging runtime flags preserved.' ;; esac",
+                 "case '$RATE_LIMIT_EXCEPTION' in enable) source_ip=\$(printf %s '$load_test_source_ip_base64' | base64 --decode); sed -i '/^MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=/d' /opt/miriyum/.env; printf '\\nMIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=%s\\n' \"\$source_ip\" >> /opt/miriyum/.env; unset source_ip; echo 'Staging load-test source IP enabled.' ;; disable) sed -i '/^MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=/d' /opt/miriyum/.env; echo 'Staging load-test source IP disabled.' ;; preserve) : ;; esac",
+                 "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' FRONTEND_IMAGE='$frontend_image_uri' /opt/miriyum/deploy.sh",
+                 "trap - EXIT HUP INT TERM; rm -rf \"\$backup_dir\""
               ]
             }
           }

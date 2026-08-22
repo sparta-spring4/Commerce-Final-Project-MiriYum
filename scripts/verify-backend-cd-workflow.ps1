@@ -30,7 +30,7 @@ $requiredFragments = @(
     "FRONTEND_IMAGE='`$frontend_image_uri'",
     "Frontend CI did not complete successfully",
     "steps.ecr-image.outputs.exists != 'true'",
-    "Manual deployment requires an existing immutable ECR image tag",
+    "Manual or reusable deployment requires an existing immutable ECR image tag",
     'ref: ${{ steps.image.outputs.tag }}',
     "retry-max-attempts: 2",
     "BACKEND_DEPLOYMENT_ENVIRONMENT: staging-backend",
