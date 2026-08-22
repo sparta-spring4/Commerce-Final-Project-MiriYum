@@ -76,7 +76,7 @@ class ProductionS3StorageContractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             directory_path = Path(directory)
 
-            def run(payload):
+            def run(payload, empty_versioning_response=False):
                 fixtures = {
                     "parameter": payload["parameter"],
                     "location": payload["bucket"]["location"],
@@ -90,7 +90,10 @@ class ProductionS3StorageContractTest(unittest.TestCase):
                 paths = {}
                 for name, value in fixtures.items():
                     path = directory_path / f"{name}.json"
-                    path.write_text(json.dumps(value), encoding="utf-8")
+                    path.write_text(
+                        "" if name == "versioning" and empty_versioning_response else json.dumps(value),
+                        encoding="utf-8",
+                    )
                     paths[name] = path
                 return subprocess.run([
                     sys.executable, str(PREFLIGHT), "--account-id", account_id, "--region", region,
@@ -101,6 +104,7 @@ class ProductionS3StorageContractTest(unittest.TestCase):
                 ], capture_output=True, text=True)
 
             self.assertEqual(0, run(valid).returncode)
+            self.assertEqual(0, run(valid, empty_versioning_response=True).returncode)
             drift = json.loads(json.dumps(valid))
             drift["parameter"]["Value"] = "unexpected-bucket"
             self.assertNotEqual(0, run(drift).returncode)
