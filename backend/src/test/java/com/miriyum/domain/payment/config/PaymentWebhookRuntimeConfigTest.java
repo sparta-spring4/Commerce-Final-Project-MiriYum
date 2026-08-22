@@ -1,30 +1,88 @@
 package com.miriyum.domain.payment.config;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.ratelimit.RateLimiter;
 import com.miriyum.domain.payment.controller.publicapi.PortOneWebhookController;
 import com.miriyum.domain.payment.service.PaymentWebhookService;
 import com.miriyum.global.security.SecurityConfig;
-import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(
         controllers = PortOneWebhookController.class,
-        properties = "miriyum.payment.enabled=true"
+        properties = {
+                "miriyum.payment.enabled=true",
+                "miriyum.payment.portone.webhook-enabled=true"
+        }
 )
 @Import({PaymentSecurityConfig.class, SecurityConfig.class})
-class PaymentWebhookRuntimeConfigTest {
+class PaymentWebhookRuntimeConfigTest extends PaymentWebhookRuntimeConfigTestSupport {
 
-    @Autowired
-    private MockMvc mockMvc;
+    @Test
+    void registersControllerAndWebhookSecurityChainWhenBothRuntimeFlagsAreEnabled() {
+        assertThat(context.getBeansOfType(PortOneWebhookController.class)).hasSize(1);
+        assertThat(context.containsBean("paymentWebhookFilterChain")).isTrue();
+        assertThat(context.containsBean("disabledPaymentWebhookFilterChain")).isFalse();
+    }
+}
+
+@WebMvcTest(
+        controllers = PortOneWebhookController.class,
+        properties = {
+                "miriyum.payment.enabled=true",
+                "miriyum.payment.portone.webhook-enabled=false"
+        }
+)
+@Import({PaymentSecurityConfig.class, SecurityConfig.class})
+class PaymentOnlyWebhookRuntimeConfigTest extends PaymentWebhookRuntimeConfigTestSupport {
+
+    @Test
+    void doesNotRegisterControllerOrActiveWebhookSecurityChainWhenOnlyPaymentIsEnabled() {
+        assertWebhookIsDisabled(context);
+    }
+}
+
+@WebMvcTest(
+        controllers = PortOneWebhookController.class,
+        properties = {
+                "miriyum.payment.enabled=false",
+                "miriyum.payment.portone.webhook-enabled=true"
+        }
+)
+@Import({PaymentSecurityConfig.class, SecurityConfig.class})
+class WebhookOnlyRuntimeConfigTest extends PaymentWebhookRuntimeConfigTestSupport {
+
+    @Test
+    void doesNotRegisterControllerOrActiveWebhookSecurityChainWhenOnlyWebhookIsEnabled() {
+        assertWebhookIsDisabled(context);
+    }
+}
+
+@WebMvcTest(
+        controllers = PortOneWebhookController.class,
+        properties = {
+                "miriyum.payment.enabled=false",
+                "miriyum.payment.portone.webhook-enabled=false"
+        }
+)
+@Import({PaymentSecurityConfig.class, SecurityConfig.class})
+class PaymentAndWebhookDisabledRuntimeConfigTest extends PaymentWebhookRuntimeConfigTestSupport {
+
+    @Test
+    void doesNotRegisterControllerOrActiveWebhookSecurityChainWhenBothRuntimeFlagsAreDisabled() {
+        assertWebhookIsDisabled(context);
+    }
+}
+
+abstract class PaymentWebhookRuntimeConfigTestSupport {
+
+    @org.springframework.beans.factory.annotation.Autowired
+    protected ApplicationContext context;
 
     @MockitoBean
     private PaymentWebhookService webhookService;
@@ -35,10 +93,9 @@ class PaymentWebhookRuntimeConfigTest {
     @MockitoBean
     private RateLimiter rateLimiter;
 
-    @Test
-    @DisplayName("결제를 켜도 Webhook 활성화 값이 없으면 공개 Webhook 경로를 등록하지 않는다")
-    void doesNotExposeWebhookWhenWebhookRuntimeIsMissing() throws Exception {
-        mockMvc.perform(post("/api/v1/payments/webhooks/portone"))
-                .andExpect(status().isNotFound());
+    protected void assertWebhookIsDisabled(ApplicationContext context) {
+        assertThat(context.getBeansOfType(PortOneWebhookController.class)).isEmpty();
+        assertThat(context.containsBean("paymentWebhookFilterChain")).isFalse();
+        assertThat(context.containsBean("disabledPaymentWebhookFilterChain")).isTrue();
     }
 }
