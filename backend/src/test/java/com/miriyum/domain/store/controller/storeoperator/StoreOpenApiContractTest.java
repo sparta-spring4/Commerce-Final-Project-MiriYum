@@ -68,14 +68,18 @@ class StoreOpenApiContractTest {
     @Test
     void managedStoreGeocodingAndFailureResponsesMatchControllerContract()
             throws IOException {
+        Map<String, Object> onboardingDocument = document(Path.of(
+                "..", "docs", "specs", "store-onboarding", "openapi.yaml"));
+        Map<String, Object> onboardingPaths = map(onboardingDocument.get("paths"));
+        Map<String, Object> registration =
+                map(onboardingPaths.get("/api/v1/store-operators/stores"));
+        assertThat(map(map(registration.get("post")).get("responses")))
+                .containsKeys("400", "503");
+
         Path contract = Path.of("..", "docs", "specs", "store-search", "openapi.yaml");
         Map<String, Object> document = document(contract);
 
         Map<String, Object> paths = map(document.get("paths"));
-        Map<String, Object> collection = map(paths.get("/api/v1/store-operators/stores"));
-        assertThat(map(map(collection.get("post")).get("responses")))
-                .containsKeys("400", "503");
-
         Map<String, Object> item = map(paths.get("/api/v1/store-operators/stores/{storeId}"));
         assertThat(map(map(item.get("patch")).get("responses")))
                 .containsKeys("400", "409", "503");
