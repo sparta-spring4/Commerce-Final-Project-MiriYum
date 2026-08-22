@@ -1,0 +1,95 @@
+name: Staging Load-Test Control
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Enable a temporary test IP, remove it, or apply the fixed safe recovery"
+        required: true
+        type: choice
+        options:
+          - enable-load-test
+          - disable-load-test
+          - safe-recovery
+      image_tag:
+        description: "Existing immutable 40-character Git SHA image tag to redeploy"
+        required: true
+        type: string
+      source_ip:
+        description: "Current public IPv4 for enable-load-test only"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  deployments: write
+  id-token: write
+
+concurrency:
+  group: staging-load-test-control
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: validate-staging-load-test-control-inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Validate fixed action, immutable SHA, and public IPv4
+        env:
+          ACTION: ${{ inputs.action }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          SOURCE_IP: ${{ inputs.source_ip }}
+        run: |
+          node - <<'NODE'
+          const action = process.env.ACTION || '';
+          const imageTag = process.env.IMAGE_TAG || '';
+          const sourceIp = process.env.SOURCE_IP || '';
+          const supportedActions = new Set([
+            'enable-load-test',
+            'disable-load-test',
+            'safe-recovery',
+          ]);
+
+          if (!supportedActions.has(action)) {
+            throw new Error(`Unsupported staging load-test action: ${action}`);
+          }
+          if (!/^[0-9a-f]{40}$/.test(imageTag)) {
+            throw new Error('Invalid immutable image tag. A lowercase 40-character Git SHA is required.');
+          }
+          if (action !== 'enable-load-test') {
+            if (sourceIp !== '') {
+              throw new Error('source_ip is accepted only for enable-load-test.');
+            }
+            process.exit(0);
+          }
+
+          const parts = sourceIp.split('.').map(Number);
+          const invalid = parts.length !== 4
+            || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+            || parts.join('.') !== sourceIp
+            || parts[0] === 0
+            || parts[0] === 10
+            || parts[0] === 127
+            || parts[0] >= 224
+            || (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127)
+            || (parts[0] === 169 && parts[1] === 254)
+            || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
+            || (parts[0] === 192 && parts[1] === 168);
+          if (invalid) {
+            throw new Error('Invalid staging load-test source IP. Use one public IPv4 address.');
+          }
+          NODE
+
+  deploy:
+    name: apply-staging-load-test-control
+    needs: validate
+    uses: ./.github/workflows/backend-cd.yml
+    with:
+      image_tag: ${{ inputs.image_tag }}
+      rate_limit_exception: ${{ inputs.action == 'enable-load-test' && 'enable' || 'disable' }}
+      load_test_source_ip: ${{ inputs.source_ip }}
+      runtime_recovery_mode: ${{ inputs.action == 'safe-recovery' && 'safe-disable' || 'preserve' }}
+    secrets: inherit

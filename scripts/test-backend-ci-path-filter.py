@@ -38,8 +38,10 @@ class BackendCiPathFilterTest(unittest.TestCase):
         self.assert_scope(["performance/k6/config.js"], "contract")
         self.assert_scope(["deploy/docker-compose.prod.yml"], "unit")
         self.assert_scope([".github/workflows/backend-cd.yml"], "contract")
+        self.assert_scope([".github/workflows/staging-load-test-control.yml"], "contract")
         self.assert_scope([".github/workflows/frontend-ci.yml"], "contract")
         self.assert_scope([".github/workflows/k6-contract.yml"], "contract")
+        self.assert_scope(["scripts/test-staging-load-test-control-workflow.py"], "contract")
 
     def test_unknown_or_empty_path_fails_safe_to_full_tests(self):
         self.assert_scope(["infra/unknown.yml"], "full")

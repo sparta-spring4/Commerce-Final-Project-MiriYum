@@ -31,6 +31,8 @@ The runtime `.env` is created manually on EC2 and remains server-local. The CD w
 
 Manual dispatch is reserved for rollback or redeployment of an image that already exists in ECR. Enter only an existing 40-character Git SHA tag. The workflow stops before SSM if that image cannot be found, so a typo cannot reach the server as a failed `docker pull`.
 
+An approved load-test operator uses the restricted `Staging Load-Test Control` workflow rather than the general CD workflow. Its fixed enable, restore, and safe-recovery actions are documented in [the operator runbook](staging-load-test-operator-runbook.md).
+
 ## One-time AWS setup
 
 1. Configure a GitHub OIDC provider with issuer `https://token.actions.githubusercontent.com` and audience `sts.amazonaws.com`.

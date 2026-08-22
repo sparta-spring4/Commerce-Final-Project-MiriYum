@@ -2,6 +2,27 @@
 name: Backend CD (Staging)
 
 on:
+  workflow_call:
+    inputs:
+      image_tag:
+        description: "Deploy an existing immutable 40-character Git SHA image tag"
+        required: true
+        type: string
+      rate_limit_exception:
+        description: "Staging k6 rate-limit exception: preserve, enable, or disable"
+        required: false
+        default: preserve
+        type: string
+      load_test_source_ip:
+        description: "Public IPv4 address permitted only while staging load tests run"
+        required: false
+        default: ""
+        type: string
+      runtime_recovery_mode:
+        description: "Fixed staging runtime recovery mode"
+        required: false
+        default: preserve
+        type: string
   workflow_run:
     workflows: ["Backend CI"]
     branches: [dev]
@@ -21,6 +42,19 @@ on:
           - preserve
           - enable
           - disable
+      load_test_source_ip:
+        description: "Public IPv4 address permitted only while staging load tests run"
+        required: false
+        default: ""
+        type: string
+      runtime_recovery_mode:
+        description: "Fixed staging runtime recovery mode"
+        required: false
+        default: preserve
+        type: choice
+        options:
+          - preserve
+          - safe-disable
 
 permissions:
   actions: read
@@ -54,7 +88,8 @@ jobs:
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'dev' &&
        github.event.workflow_run.head_repository.full_name == github.repository) ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev')
+      ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') &&
+       github.ref == 'refs/heads/dev')
     outputs:
       deployable: ${{ steps.source.outputs.deployable }}
 
@@ -239,8 +274,8 @@ jobs:
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "Reusing immutable ECR image tag: $IMAGE_TAG"
           else
-            if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-              echo "::error::Manual deployment requires an existing immutable ECR image tag: $IMAGE_TAG."
+            if [ "$EVENT_NAME" != "workflow_run" ]; then
+              echo "::error::Manual or reusable deployment requires an existing immutable ECR image tag: $IMAGE_TAG."
               exit 1
             fi
 
@@ -267,8 +302,8 @@ jobs:
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "Reusing immutable frontend ECR image tag: $frontend_tag"
           else
-            if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-              echo "::error::Manual deployment requires an existing immutable frontend ECR image tag: $frontend_tag."
+            if [ "$EVENT_NAME" != "workflow_run" ]; then
+              echo "::error::Manual or reusable deployment requires an existing immutable frontend ECR image tag: $frontend_tag."
               exit 1
             fi
 
@@ -348,8 +383,18 @@ jobs:
           ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
           IMAGE_TAG: ${{ steps.image.outputs.tag }}
           RATE_LIMIT_EXCEPTION: ${{ inputs.rate_limit_exception || 'preserve' }}
-          STAGING_LOAD_TEST_SOURCE_IP: ${{ secrets.MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP }}
+          RUNTIME_RECOVERY_MODE: ${{ inputs.runtime_recovery_mode || 'preserve' }}
+          STAGING_LOAD_TEST_SOURCE_IP: ${{ inputs.load_test_source_ip || secrets.MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP }}
         run: |
+          case "$RUNTIME_RECOVERY_MODE" in
+            preserve|safe-disable)
+              ;;
+            *)
+              echo "::error::Unsupported runtime recovery mode: $RUNTIME_RECOVERY_MODE"
+              exit 1
+              ;;
+          esac
+
           case "$RATE_LIMIT_EXCEPTION" in
             preserve|disable)
               ;;
@@ -426,6 +471,7 @@ jobs:
                 "systemctl enable --now miriyum-valkey-memory-metrics.timer",
                 "chmod 700 /opt/miriyum/certbot.sh",
                 "chmod 755 /opt/miriyum/nginx/entrypoint/40-select-server-config.sh",
+                "case '$RUNTIME_RECOVERY_MODE' in safe-disable) sed -i '/^MIRIYUM_RUNTIME_CONFIG_ENABLED=/d; /^MIRIYUM_PAYMENT_ENABLED=/d; /^MIRIYUM_STORAGE_S3_ENABLED=/d; /^MIRIYUM_STORE_SEARCH_LLM_ENABLED=/d' /opt/miriyum/.env; printf '\\nMIRIYUM_RUNTIME_CONFIG_ENABLED=false\\nMIRIYUM_PAYMENT_ENABLED=false\\nMIRIYUM_STORAGE_S3_ENABLED=false\\nMIRIYUM_STORE_SEARCH_LLM_ENABLED=false\\n' >> /opt/miriyum/.env; echo 'Approved staging runtime flags disabled.' ;; preserve) echo 'Staging runtime flags preserved.' ;; esac",
                 "case '$RATE_LIMIT_EXCEPTION' in enable) source_ip=\$(printf %s '$load_test_source_ip_base64' | base64 --decode); sed -i '/^MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=/d' /opt/miriyum/.env; printf '\\nMIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=%s\\n' \"\$source_ip\" >> /opt/miriyum/.env; unset source_ip; echo 'Staging load-test source IP enabled.' ;; disable) sed -i '/^MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=/d' /opt/miriyum/.env; echo 'Staging load-test source IP disabled.' ;; preserve) echo 'Staging load-test source IP preserved.' ;; esac",
                 "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' FRONTEND_IMAGE='$frontend_image_uri' /opt/miriyum/deploy.sh"
               ]
