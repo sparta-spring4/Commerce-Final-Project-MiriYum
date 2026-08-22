@@ -166,8 +166,12 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
     def test_staging_cd_rate_limit_exception_is_explicit_and_fail_closed(self):
         self.assertIn("rate_limit_exception:", self.workflow)
         self.assertIn("default: preserve", self.workflow)
-        self.assertIn("- enable", self.workflow)
-        self.assertIn("- disable", self.workflow)
+        self.assertIn("preserve|disable)", self.workflow)
+        self.assertIn("enable)", self.workflow)
+        self.assertIn(
+            "Non-preserve staging control inputs are allowed only from Staging Load-Test Control.",
+            self.workflow,
+        )
         self.assertIn(
             "secrets.MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP", self.workflow
         )
