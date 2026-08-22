@@ -104,6 +104,7 @@ miriyum:
     cursor-secret: ${MIRIYUM_PAYMENT_CURSOR_SECRET:}
     portone:
       api-secret: ${MIRIYUM_PORTONE_API_SECRET:}
+      webhook-enabled: ${MIRIYUM_PORTONE_WEBHOOK_ENABLED:false}
       webhook-secret: ${MIRIYUM_PORTONE_WEBHOOK_SECRET:}
       store-id: ${MIRIYUM_PORTONE_STORE_ID:}
       base-url: ${MIRIYUM_PORTONE_BASE_URL:https://api.portone.io}

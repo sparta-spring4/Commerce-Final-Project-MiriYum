@@ -25,7 +25,10 @@ import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(
         controllers = PortOneWebhookController.class,
-        properties = "miriyum.payment.enabled=true"
+        properties = {
+                "miriyum.payment.enabled=true",
+                "miriyum.payment.portone.webhook-enabled=true"
+        }
 )
 @Import({PaymentSecurityConfig.class, GlobalExceptionHandler.class})
 class PortOneWebhookControllerTest {
