@@ -17,6 +17,9 @@ def collect_class_durations_with_warnings(report_paths):
     totals = defaultdict(lambda: [0.0, 0])
     warnings = []
 
+    if not report_paths:
+        return [], ["no JUnit XML reports found"]
+
     for report_path in report_paths:
         try:
             root = ET.parse(report_path).getroot()

@@ -59,6 +59,14 @@ class BackendCiTestDurationReportTest(unittest.TestCase):
         self.assertEqual(1, len(warnings))
         self.assertIn("could not parse", warnings[0])
 
+    def test_warns_when_the_junit_xml_glob_matches_no_reports(self):
+        reporter = load_reporter_module()
+
+        durations, warnings = reporter.collect_class_durations_with_warnings([])
+
+        self.assertEqual([], durations)
+        self.assertEqual(["no JUnit XML reports found"], warnings)
+
 
 class temporary_junit_report:
     def __init__(self, content):
