@@ -19,6 +19,7 @@ const EXPECTED = {
   fixtureSha256: 'b'.repeat(64),
   commitSha: '0123456789abcdef0123456789abcdef01234567',
   harnessCommitSha: 'fedcba9876543210fedcba9876543210fedcba98',
+  scenarioNames: ['storeSearch', 'notificationHistory'],
 }
 
 function proof(overrides = {}) {
@@ -31,7 +32,12 @@ function proof(overrides = {}) {
     fixtureSha256: EXPECTED.fixtureSha256,
     commitSha: EXPECTED.commitSha,
     harnessCommitSha: EXPECTED.harnessCommitSha,
+    scenarioNames: [...EXPECTED.scenarioNames],
     capacity: { stageNumber: 1, targetRps: 10 },
+    metrics: {
+      storeSearch: { httpRequests: { count: 60, rate: 6 } },
+      notificationHistory: { httpRequests: { count: 40, rate: 4 } },
+    },
     ...overrides,
   }
 }
@@ -52,5 +58,14 @@ export default function () {
       throws(() => validateCapacityProof(proof({ commitSha: '1'.repeat(40) }), EXPECTED)),
     'different harness commit is rejected': () =>
       throws(() => validateCapacityProof(proof({ harnessCommitSha: '2'.repeat(40) }), EXPECTED)),
+    'capacity proof below its planned target RPS is rejected': () =>
+      throws(() => validateCapacityProof(proof({
+        metrics: {
+          storeSearch: { httpRequests: { count: 50, rate: 5 } },
+          notificationHistory: { httpRequests: { count: 39, rate: 3.9 } },
+        },
+      }), EXPECTED)),
+    'different scenario composition is rejected': () =>
+      throws(() => validateCapacityProof(proof({ scenarioNames: ['storeSearch'] }), EXPECTED)),
   })
 }

@@ -44,6 +44,7 @@ const prerequisiteCapacityProof = config.capacityPreviousProofPath === null
     fixtureSha256,
     commitSha: config.commitSha,
     harnessCommitSha: config.harnessCommitSha,
+    scenarioNames: config.scenarioNames,
   })
 
 function buildThresholds() {

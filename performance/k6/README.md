@@ -168,7 +168,7 @@ staging smoke에는 `TARGET_ENV=staging`, HTTPS `BASE_URL`, `STAGING_APPROVED=tr
 
 Issue #567의 용량 측정은 smoke·baseline 성공 뒤 `PROFILE=staging-capacity`로 실행한다. `ARRIVAL_RATE`는 iteration/s이고 `CAPACITY_TARGET_RPS`는 승인된 계획값을 결과에 연결하는 메타데이터다. 실제 HTTP RPS는 결과 JSON의 scenario별 `httpRequests.rate`로 판단한다. backend task 수를 1개로 고정했다는 배포 증거와 CloudWatch CPU·메모리 측정은 k6가 만들지 않으며, 동일 run ID와 시간 범위로 [`docs/performance/staging-backend-capacity.md`](../../docs/performance/staging-backend-capacity.md)에 연결한다.
 
-1단계는 동일 target·backend SHA·harness SHA·fixture의 성공한 staging smoke artifact가 필요하다. 2단계부터는 바로 이전 단계의 성공 JSON도 `CAPACITY_PREVIOUS_PROOF_PATH`로 전달한다. 이전 artifact의 target fingerprint, 두 SHA, fixture fingerprint, profile, threshold와 단계 번호가 일치하지 않으면 요청 전에 중단한다. `storeSearch`를 선택하면 실제 OpenAI 비호출 상태를 배포 설정과 CloudWatch `miriyum.search.llm.calls` 증가량 0으로 검증하고 `CAPACITY_LLM_DISABLED_CONFIRMED=true`를 전달해야 한다.
+1단계는 동일 target·backend SHA·harness SHA·fixture의 성공한 staging smoke artifact가 필요하다. 2단계부터는 바로 이전 단계의 성공 JSON도 `CAPACITY_PREVIOUS_PROOF_PATH`로 전달한다. 이전 artifact의 target fingerprint, 두 SHA, fixture fingerprint, profile, threshold, 단계 번호와 시나리오 구성이 일치하지 않으면 요청 전에 중단한다. 또한 이전 단계의 scenario별 실제 `httpRequests.rate` 합계가 해당 artifact의 `capacity.targetRps`보다 작으면 다음 단계로 승격하지 않는다. `storeSearch`를 선택하면 실제 OpenAI 비호출 상태를 배포 설정과 CloudWatch `miriyum.search.llm.calls` 증가량 0으로 검증하고 `CAPACITY_LLM_DISABLED_CONFIRMED=true`를 전달해야 한다.
 
 ```powershell
 $runId = 'staging-capacity-stage-01-YYYYMMDD-NN'

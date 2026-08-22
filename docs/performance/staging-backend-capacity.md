@@ -34,7 +34,7 @@ Issue #567의 결과 기록 문서다. 목표는 성능 한계가 아니라 back
 ## 단계 진행과 중단
 
 - 1단계는 같은 target·두 full SHA·fixture의 성공한 staging smoke JSON을 요구한다.
-- 2단계부터는 바로 이전 단계의 성공 JSON을 요구한다. 단계 번호가 연속하지 않거나 target·두 SHA·fixture가 다르면 init 단계에서 중단한다.
+- 2단계부터는 바로 이전 단계의 성공 JSON을 요구한다. 단계 번호가 연속하지 않거나 target·두 SHA·fixture·시나리오 구성이 다르면 init 단계에서 중단한다. 이전 단계의 scenario별 실제 RPS 합계가 그 단계의 계획 target RPS보다 작아도 다음 단계로 승격하지 않는다.
 - unexpected 4xx/5xx, dropped iteration, 장애 징후 또는 사전 합의한 CPU·메모리 임계치 초과 시 즉시 중단한다.
 - `storeSearch`는 OpenAI가 비활성인 배포에서만 실행하고 해당 시간대 `miriyum.search.llm.calls` 증가량이 0인지 확인한다.
 - 성공·실패·중단 모두 결과 artifact와 CloudWatch 캡처를 동일 run ID와 시간 범위로 연결한다.

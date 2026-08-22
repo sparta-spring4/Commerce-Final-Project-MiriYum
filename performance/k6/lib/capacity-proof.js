@@ -8,6 +8,16 @@ function requireObject(value, name) {
   return value
 }
 
+function requireScenarioNames(value, name) {
+  if (!Array.isArray(value)
+    || value.length === 0
+    || value.some((scenario) => typeof scenario !== 'string' || scenario === '')
+    || new Set(value).size !== value.length) {
+    throw new Error(`${name} must contain unique scenario names`)
+  }
+  return value
+}
+
 export function validateCapacityProof(proofValue, expectedValue) {
   const proof = requireObject(proofValue, 'capacity proof')
   const expected = requireObject(expectedValue, 'capacity proof expectation')
@@ -39,6 +49,32 @@ export function validateCapacityProof(proofValue, expectedValue) {
   }
   if (!Number.isSafeInteger(capacity.targetRps) || capacity.targetRps <= 0) {
     throw new Error('capacity proof target RPS is invalid')
+  }
+  const proofScenarioNames = requireScenarioNames(proof.scenarioNames, 'capacity proof scenarios')
+  const expectedScenarioNames = requireScenarioNames(
+    expected.scenarioNames,
+    'capacity proof expected scenarios',
+  )
+  if (proofScenarioNames.length !== expectedScenarioNames.length
+    || expectedScenarioNames.some((scenario) => !proofScenarioNames.includes(scenario))) {
+    throw new Error('capacity proof scenario composition does not match')
+  }
+  const metrics = requireObject(proof.metrics, 'capacity proof metrics')
+  const actualRps = expectedScenarioNames.reduce((total, scenario) => {
+    const scenarioMetrics = requireObject(metrics[scenario], `capacity proof ${scenario} metrics`)
+    const httpRequests = requireObject(
+      scenarioMetrics.httpRequests,
+      `capacity proof ${scenario} HTTP requests`,
+    )
+    if (typeof httpRequests.rate !== 'number'
+      || !Number.isFinite(httpRequests.rate)
+      || httpRequests.rate < 0) {
+      throw new Error(`capacity proof ${scenario} actual RPS is invalid`)
+    }
+    return total + httpRequests.rate
+  }, 0)
+  if (actualRps < capacity.targetRps) {
+    throw new Error('capacity proof actual RPS is below its planned target')
   }
   return proof
 }
