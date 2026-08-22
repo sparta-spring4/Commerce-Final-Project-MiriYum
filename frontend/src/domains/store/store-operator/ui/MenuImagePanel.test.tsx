@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { server } from '../../../../test/msw/server'
 import { authenticatedOperator } from '../test/handlers'
 import { renderOperator } from '../test/renderOperator'
@@ -8,6 +8,8 @@ import { MenuImagePanel } from './MenuImagePanel'
 
 const IMAGE_PATH =
   '/api/v1/store-operators/stores/7/menus/11/images'
+
+let currentImageUrl: string | null = null
 
 function renderPanel() {
   return renderOperator(
@@ -20,12 +22,49 @@ function renderPanel() {
 }
 
 describe('메뉴 대표 이미지 패널', () => {
+  beforeEach(() => {
+    currentImageUrl = null
+    server.use(
+      authenticatedOperator(),
+      http.get(IMAGE_PATH, () =>
+        currentImageUrl === null
+          ? new HttpResponse(null, { status: 204 })
+          : HttpResponse.json({
+              code: 'SUCCESS',
+              message: '조회했습니다.',
+              data: { url: currentImageUrl },
+            }),
+      ),
+    )
+  })
+
+  it('새로고침 뒤에도 확정된 대표 이미지를 다시 조회해 표시한다', async () => {
+    server.use(
+      authenticatedOperator(),
+      http.get(IMAGE_PATH, () =>
+        HttpResponse.json({
+          code: 'SUCCESS',
+          message: '조회했습니다.',
+          data: { url: '/api/v1/public-files/current-menu-image' },
+        }),
+      ),
+    )
+
+    renderPanel()
+
+    expect(await screen.findByAltText('메뉴 대표 이미지')).toHaveAttribute(
+      'src',
+      '/api/v1/public-files/current-menu-image',
+    )
+  })
+
   it('multipart 업로드와 응답 URL 표시를 처리한다', async () => {
     let contentType: string | null = null
     server.use(
       authenticatedOperator(),
       http.put(IMAGE_PATH, ({ request }) => {
         contentType = request.headers.get('content-type')
+        currentImageUrl = 'https://cdn.example/menu-11.webp'
         return HttpResponse.json({
           code: 'SUCCESS',
           message: '업로드했습니다.',
@@ -51,15 +90,17 @@ describe('메뉴 대표 이미지 패널', () => {
     let deleteCalled = false
     server.use(
       authenticatedOperator(),
-      http.put(IMAGE_PATH, () =>
-        HttpResponse.json({
+      http.put(IMAGE_PATH, () => {
+        currentImageUrl = 'https://cdn.example/menu-11.webp'
+        return HttpResponse.json({
           code: 'SUCCESS',
           message: '업로드했습니다.',
           data: { url: 'https://cdn.example/menu-11.webp' },
-        }),
-      ),
+        })
+      }),
       http.delete(IMAGE_PATH, () => {
         deleteCalled = true
+        currentImageUrl = null
         return new HttpResponse(null, { status: 204 })
       }),
     )
@@ -142,6 +183,7 @@ describe('메뉴 대표 이미지 패널', () => {
             { status: 503 },
           )
         }
+        currentImageUrl = 'https://cdn.example/menu-11.webp'
         return HttpResponse.json({
           code: 'SUCCESS',
           message: '업로드했습니다.',
@@ -254,7 +296,8 @@ describe('메뉴 대표 이미지 패널', () => {
         IMAGE_PATH,
         () =>
           new Promise((resolve) => {
-            releaseUpload = () =>
+            releaseUpload = () => {
+              currentImageUrl = 'https://cdn.example/menu-11.webp'
               resolve(
                 HttpResponse.json({
                   code: 'SUCCESS',
@@ -262,6 +305,7 @@ describe('메뉴 대표 이미지 패널', () => {
                   data: { url: 'https://cdn.example/menu-11.webp' },
                 }),
               )
+            }
           }),
       ),
     )

@@ -307,14 +307,37 @@ export function usePutMenuImage(storeId: string, menuId: string) {
       )
       return response.data.url
     },
-    onSuccess: () => {
+    onSuccess: (url) => {
+      queryClient.setQueryData(storeOperatorKeys.menuImage(storeId, menuId), url)
       void queryClient.invalidateQueries({
         queryKey: storeOperatorKeys.menu(storeId, menuId),
+        exact: true,
       })
       void queryClient.invalidateQueries({
         queryKey: storeOperatorKeys.menus(storeId),
       })
       void queryClient.invalidateQueries({ queryKey: ['store-search'] })
+    },
+  })
+}
+
+export function useMenuImage(storeId: string, menuId: string) {
+  const { apiClient } = useStoreOperatorAuth()
+
+  return useQuery({
+    enabled: storeId.length > 0 && menuId.length > 0,
+    queryKey: storeOperatorKeys.menuImage(storeId, menuId),
+    queryFn: async ({ signal }): Promise<string | null> => {
+      const response = await apiClient(
+        '/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images',
+        {
+          method: 'get',
+          pathParams: { storeId, menuId },
+          signal,
+          allowNoContent: true,
+        },
+      )
+      return response?.data.url ?? null
     },
   })
 }
@@ -336,8 +359,10 @@ export function useDeleteMenuImage(storeId: string, menuId: string) {
       )
     },
     onSuccess: () => {
+      queryClient.setQueryData(storeOperatorKeys.menuImage(storeId, menuId), null)
       void queryClient.invalidateQueries({
         queryKey: storeOperatorKeys.menu(storeId, menuId),
+        exact: true,
       })
       void queryClient.invalidateQueries({
         queryKey: storeOperatorKeys.menus(storeId),
