@@ -13,6 +13,7 @@ import type { paths as PlatformOperatorCapabilitiesPaths } from './generated/pla
 import type { paths as PlatformOperatorManagementAuditPaths } from './generated/platform-operator-management-audit'
 import type { paths as ReservationPaths } from './generated/reservation'
 import type { paths as StoreSearchPaths } from './generated/store-search'
+import type { paths as StoreOnboardingPaths } from './generated/store-onboarding'
 import type { paths as WaitingPaths } from './generated/waiting'
 
 /**
@@ -27,9 +28,16 @@ import type { paths as WaitingPaths } from './generated/waiting'
  * 빠졌다는 사실이 드러나지 않는다. 아래 판정이 이 목록을 훑으므로 문서를
  * 여기 한 번만 추가하면 검사와 합류가 함께 따라간다.
  */
+type StoreCollectionPath = '/api/v1/store-operators/stores'
+type StoreOnboardingDisjointPaths = Omit<
+  StoreOnboardingPaths,
+  StoreCollectionPath
+>
+
 type PathDocs = [
   AuthAccountPaths,
   StoreSearchPaths,
+  StoreOnboardingDisjointPaths,
   ReservationPaths,
   PaymentPaths,
   MenuHoldPickupPaths,
