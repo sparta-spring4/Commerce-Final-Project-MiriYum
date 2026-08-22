@@ -1,0 +1,98 @@
+name: Staging Load-Test Control
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Enable a temporary test IP, remove it, or apply the fixed safe recovery"
+        required: true
+        type: choice
+        options:
+          - enable-load-test
+          - disable-load-test
+          - safe-recovery
+      image_tag:
+        description: "Existing immutable 40-character Git SHA image tag to redeploy"
+        required: true
+        type: string
+      source_ip:
+        description: "Current public IPv4 for enable-load-test only"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  deployments: write
+  id-token: write
+
+concurrency:
+  group: staging-load-test-control
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: validate-staging-load-test-control-inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout trusted validation revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate fixed action, immutable SHA, and public IPv4
+        env:
+          ACTION: ${{ inputs.action }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          SOURCE_IP: ${{ inputs.source_ip }}
+        run: |
+          node - <<'NODE'
+          const action = process.env.ACTION || '';
+          const imageTag = process.env.IMAGE_TAG || '';
+          const sourceIp = process.env.SOURCE_IP || '';
+          const supportedActions = new Set([
+            'enable-load-test',
+            'disable-load-test',
+            'safe-recovery',
+          ]);
+
+          if (!supportedActions.has(action)) {
+            throw new Error(`Unsupported staging load-test action: ${action}`);
+          }
+          if (!/^[0-9a-f]{40}$/.test(imageTag)) {
+            throw new Error('Invalid immutable image tag. A lowercase 40-character Git SHA is required.');
+          }
+          if (action !== 'enable-load-test') {
+            if (sourceIp !== '') {
+              throw new Error('source_ip is accepted only for enable-load-test.');
+            }
+            process.exit(0);
+          }
+
+          const { spawnSync } = require('node:child_process');
+          if (spawnSync('node', ['scripts/validate-staging-load-test-source-ip.js', sourceIp]).status !== 0) {
+            throw new Error('Invalid staging load-test source IP. Use one public IPv4 address.');
+          }
+          NODE
+
+  deploy:
+    name: apply-staging-load-test-control
+    needs: validate
+    uses: ./.github/workflows/backend-cd.yml
+    with:
+      image_tag: ${{ inputs.image_tag }}
+      rate_limit_exception: ${{ inputs.action == 'enable-load-test' && 'enable' || 'disable' }}
+      load_test_source_ip: ${{ inputs.source_ip }}
+      runtime_recovery_mode: ${{ inputs.action == 'safe-recovery' && 'safe-disable' || 'preserve' }}
+    secrets: inherit
+
+  disable-after-failed-enable:
+    name: disable-after-failed-enable
+    needs: [validate, deploy]
+    if: ${{ always() && inputs.action == 'enable-load-test' && (needs.deploy.result == 'failure' || needs.deploy.result == 'cancelled') }}
+    uses: ./.github/workflows/backend-cd.yml
+    with:
+      image_tag: ${{ inputs.image_tag }}
+      rate_limit_exception: disable
+      runtime_recovery_mode: preserve
+      cancel_ssm_command_id: ${{ needs.deploy.outputs.ssm_command_id }}
+    secrets: inherit
