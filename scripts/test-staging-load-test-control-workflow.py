@@ -21,6 +21,8 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertIn("workflow_dispatch:", self.control_workflow)
         self.assertIn("enable-load-test", self.control_workflow)
         self.assertIn("disable-load-test", self.control_workflow)
+        self.assertIn("enable-sse", self.control_workflow)
+        self.assertIn("disable-sse", self.control_workflow)
         self.assertIn("safe-recovery", self.control_workflow)
         self.assertNotIn("environment_key", self.control_workflow)
         self.assertNotIn("environment_value", self.control_workflow)
@@ -68,8 +70,9 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
     def test_control_workflow_delegates_only_to_staging_cd(self):
         self.assertIn("uses: ./.github/workflows/backend-cd.yml", self.control_workflow)
         self.assertIn("actions: read", self.control_workflow)
-        self.assertIn("rate_limit_exception: ${{ inputs.action == 'enable-load-test' && 'enable' || 'disable' }}", self.control_workflow)
+        self.assertIn("rate_limit_exception: ${{ inputs.action == 'enable-load-test' && 'enable' || inputs.action == 'disable-load-test' && 'disable' || inputs.action == 'safe-recovery' && 'disable' || 'preserve' }}", self.control_workflow)
         self.assertIn("runtime_recovery_mode: ${{ inputs.action == 'safe-recovery' && 'safe-disable' || 'preserve' }}", self.control_workflow)
+        self.assertIn("runtime_config_mode: ${{ inputs.action == 'enable-sse' && 'enable' || inputs.action == 'disable-sse' && 'disable' || 'preserve' }}", self.control_workflow)
         self.assertNotIn("AWS-RunShellScript", self.control_workflow)
         self.assertNotIn("aws ssm send-command", self.control_workflow)
         self.assertNotIn("gh workflow run", self.control_workflow)
@@ -86,17 +89,39 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("runtime_recovery_key", self.backend_cd)
         self.assertNotIn("runtime_recovery_value", self.backend_cd)
 
+    def test_backend_cd_accepts_only_fixed_runtime_config_mode(self):
+        self.assertIn("runtime_config_mode:", self.backend_cd)
+        self.assertIn("RUNTIME_CONFIG_MODE", self.backend_cd)
+        self.assertIn("Unsupported runtime config mode", self.backend_cd)
+        self.assertIn("MIRIYUM_RUNTIME_CONFIG_ENABLED=true", self.backend_cd)
+        self.assertIn("MIRIYUM_RUNTIME_CONFIG_ENABLED=false", self.backend_cd)
+        self.assertNotIn("runtime_config_key", self.backend_cd)
+        self.assertNotIn("runtime_config_value", self.backend_cd)
+
     def test_backend_cd_accepts_a_dispatch_ip_without_printing_it(self):
         self.assertIn("load_test_source_ip:", self.backend_cd)
         self.assertIn("inputs.load_test_source_ip", self.backend_cd)
         self.assertIn("Invalid staging load-test source IP", self.backend_cd)
         self.assertNotIn("echo \"Staging load-test source IP: $STAGING_LOAD_TEST_SOURCE_IP\"", self.backend_cd)
 
+    def test_backend_cd_resolves_and_encodes_load_test_ip_only_when_enabling_exception(self):
+        self.assertIn(
+            "STAGING_LOAD_TEST_SOURCE_IP: ${{ inputs.rate_limit_exception == 'enable' && (inputs.load_test_source_ip || secrets.MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP) || '' }}",
+            self.backend_cd,
+        )
+        self.assertIn('if [ "$RATE_LIMIT_EXCEPTION" = "enable" ]; then', self.backend_cd)
+        self.assertIn('load_test_source_ip_base64=$(printf %s "$STAGING_LOAD_TEST_SOURCE_IP" | base64 --wrap=0)', self.backend_cd)
+        self.assertNotIn(
+            "STAGING_LOAD_TEST_SOURCE_IP: ${{ inputs.load_test_source_ip || secrets.MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP }}",
+            self.backend_cd,
+        )
+
     def test_backend_cd_keeps_control_inputs_private_to_reusable_calls(self):
         dispatch = self.backend_cd.split("workflow_dispatch:", 1)[1].split("permissions:", 1)[0]
         self.assertNotIn("rate_limit_exception:", dispatch)
         self.assertNotIn("load_test_source_ip:", dispatch)
         self.assertNotIn("runtime_recovery_mode:", dispatch)
+        self.assertNotIn("runtime_config_mode:", dispatch)
 
     def test_backend_cd_allows_non_preserve_control_only_from_the_fixed_control_workflow(self):
         self.assertIn("CALLER_WORKFLOW_REF", self.backend_cd)
@@ -129,8 +154,17 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
 
     def test_enable_failure_or_cancellation_runs_disable_cleanup(self):
         self.assertIn("disable-after-failed-enable", self.control_workflow)
+        self.assertIn("inputs.action == 'enable-load-test' || inputs.action == 'enable-sse'", self.control_workflow)
         self.assertIn("needs.deploy.result == 'failure' || needs.deploy.result == 'cancelled'", self.control_workflow)
-        self.assertIn("rate_limit_exception: disable", self.control_workflow)
+        self.assertIn("rate_limit_exception: ${{ inputs.action == 'enable-load-test' && 'disable' || 'preserve' }}", self.control_workflow)
+        self.assertIn("runtime_config_mode: ${{ inputs.action == 'enable-sse' && 'disable' || 'preserve' }}", self.control_workflow)
+
+    def test_runtime_config_toggle_is_applied_before_the_deployment(self):
+        deploy_command = "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' FRONTEND_IMAGE='$frontend_image_uri' /opt/miriyum/deploy.sh"
+        enable_command = "Staging runtime config enabled."
+        disable_command = "Staging runtime config disabled."
+        self.assertLess(self.backend_cd.index(enable_command), self.backend_cd.index(deploy_command))
+        self.assertLess(self.backend_cd.index(disable_command), self.backend_cd.index(deploy_command))
 
     def test_cleanup_cancels_and_waits_for_the_original_ssm_command(self):
         self.assertIn("ssm_command_id:", self.backend_cd)

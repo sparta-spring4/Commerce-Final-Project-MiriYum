@@ -4,12 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "Enable a temporary test IP, remove it, or apply the fixed safe recovery"
+        description: "Apply a fixed staging load-test or SSE runtime control"
         required: true
         type: choice
         options:
           - enable-load-test
           - disable-load-test
+          - enable-sse
+          - disable-sse
           - safe-recovery
       image_tag:
         description: "Existing immutable 40-character Git SHA image tag to redeploy"
@@ -52,6 +54,8 @@ jobs:
           const supportedActions = new Set([
             'enable-load-test',
             'disable-load-test',
+            'enable-sse',
+            'disable-sse',
             'safe-recovery',
           ]);
 
@@ -80,19 +84,21 @@ jobs:
     uses: ./.github/workflows/backend-cd.yml
     with:
       image_tag: ${{ inputs.image_tag }}
-      rate_limit_exception: ${{ inputs.action == 'enable-load-test' && 'enable' || 'disable' }}
+      rate_limit_exception: ${{ inputs.action == 'enable-load-test' && 'enable' || inputs.action == 'disable-load-test' && 'disable' || inputs.action == 'safe-recovery' && 'disable' || 'preserve' }}
       load_test_source_ip: ${{ inputs.source_ip }}
       runtime_recovery_mode: ${{ inputs.action == 'safe-recovery' && 'safe-disable' || 'preserve' }}
+      runtime_config_mode: ${{ inputs.action == 'enable-sse' && 'enable' || inputs.action == 'disable-sse' && 'disable' || 'preserve' }}
     secrets: inherit
 
   disable-after-failed-enable:
     name: disable-after-failed-enable
     needs: [validate, deploy]
-    if: ${{ always() && inputs.action == 'enable-load-test' && (needs.deploy.result == 'failure' || needs.deploy.result == 'cancelled') }}
+    if: ${{ always() && (inputs.action == 'enable-load-test' || inputs.action == 'enable-sse') && (needs.deploy.result == 'failure' || needs.deploy.result == 'cancelled') }}
     uses: ./.github/workflows/backend-cd.yml
     with:
       image_tag: ${{ inputs.image_tag }}
-      rate_limit_exception: disable
+      rate_limit_exception: ${{ inputs.action == 'enable-load-test' && 'disable' || 'preserve' }}
       runtime_recovery_mode: preserve
+      runtime_config_mode: ${{ inputs.action == 'enable-sse' && 'disable' || 'preserve' }}
       cancel_ssm_command_id: ${{ needs.deploy.outputs.ssm_command_id }}
     secrets: inherit

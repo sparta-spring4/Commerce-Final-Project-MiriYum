@@ -23,6 +23,11 @@ on:
         required: false
         default: preserve
         type: string
+      runtime_config_mode:
+        description: "Staging runtime config: preserve, enable, or disable"
+        required: false
+        default: preserve
+        type: string
       cancel_ssm_command_id:
         description: "Previously started SSM command that must reach a terminal state before this control deployment runs"
         required: false
@@ -375,7 +380,8 @@ jobs:
           IMAGE_TAG: ${{ steps.image.outputs.tag }}
           RATE_LIMIT_EXCEPTION: ${{ inputs.rate_limit_exception || 'preserve' }}
           RUNTIME_RECOVERY_MODE: ${{ inputs.runtime_recovery_mode || 'preserve' }}
-          STAGING_LOAD_TEST_SOURCE_IP: ${{ inputs.load_test_source_ip || secrets.MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP }}
+          RUNTIME_CONFIG_MODE: ${{ inputs.runtime_config_mode || 'preserve' }}
+          STAGING_LOAD_TEST_SOURCE_IP: ${{ inputs.rate_limit_exception == 'enable' && (inputs.load_test_source_ip || secrets.MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP) || '' }}
           CANCEL_SSM_COMMAND_ID: ${{ inputs.cancel_ssm_command_id || '' }}
           CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
@@ -384,6 +390,15 @@ jobs:
               ;;
             *)
               echo "::error::Unsupported runtime recovery mode: $RUNTIME_RECOVERY_MODE"
+              exit 1
+              ;;
+          esac
+
+          case "$RUNTIME_CONFIG_MODE" in
+            preserve|enable|disable)
+              ;;
+            *)
+              echo "::error::Unsupported runtime config mode: $RUNTIME_CONFIG_MODE"
               exit 1
               ;;
           esac
@@ -403,7 +418,7 @@ jobs:
               ;;
           esac
 
-          if [ "$RATE_LIMIT_EXCEPTION" != "preserve" ] || [ "$RUNTIME_RECOVERY_MODE" != "preserve" ] || [ -n "$CANCEL_SSM_COMMAND_ID" ]; then
+          if [ "$RATE_LIMIT_EXCEPTION" != "preserve" ] || [ "$RUNTIME_RECOVERY_MODE" != "preserve" ] || [ "$RUNTIME_CONFIG_MODE" != "preserve" ] || [ -n "$CANCEL_SSM_COMMAND_ID" ]; then
             case "$CALLER_WORKFLOW_REF" in
               "$GITHUB_REPOSITORY/.github/workflows/staging-load-test-control.yml@"*)
                 ;;
@@ -449,7 +464,10 @@ jobs:
             fi
           fi
 
-          load_test_source_ip_base64=$(printf %s "$STAGING_LOAD_TEST_SOURCE_IP" | base64 --wrap=0)
+          load_test_source_ip_base64=''
+          if [ "$RATE_LIMIT_EXCEPTION" = "enable" ]; then
+            load_test_source_ip_base64=$(printf %s "$STAGING_LOAD_TEST_SOURCE_IP" | base64 --wrap=0)
+          fi
           # 실행 .env는 EC2의 제한된 권한으로만 유지하므로 의도적으로 전송 대상에서 제외한다.
           compose_base64=$(base64 --wrap=0 deploy/docker-compose.prod.yml)
           nginx_http_base64=$(base64 --wrap=0 deploy/nginx/templates/http.conf.template)
@@ -474,7 +492,7 @@ jobs:
               "commands": [
                 "set -Eeuo pipefail",
                 "backup_dir=\$(mktemp -d); cp /opt/miriyum/.env \"\$backup_dir/.env\"; cp /opt/miriyum/docker-compose.prod.yml \"\$backup_dir/backup-compose.yml\"; cp -a /opt/miriyum/nginx \"\$backup_dir/nginx\"; previous_backend_id=\$(BACKEND_IMAGE='$image_uri' FRONTEND_IMAGE='$frontend_image_uri' docker compose --env-file /opt/miriyum/.env -f /opt/miriyum/docker-compose.prod.yml ps -q backend); previous_frontend_id=\$(BACKEND_IMAGE='$image_uri' FRONTEND_IMAGE='$frontend_image_uri' docker compose --env-file /opt/miriyum/.env -f /opt/miriyum/docker-compose.prod.yml ps -q frontend); previous_backend_image=''; previous_frontend_image=''; if [ -n \"\$previous_backend_id\" ]; then previous_backend_image=\$(docker inspect --format '{{.Config.Image}}' \"\$previous_backend_id\"); fi; if [ -n \"\$previous_frontend_id\" ]; then previous_frontend_image=\$(docker inspect --format '{{.Config.Image}}' \"\$previous_frontend_id\"); fi",
-                "backup_env=\"\$backup_dir/.env\"; restore_env() { status=\$?; trap - EXIT HUP INT TERM; if [ \"\$status\" -ne 0 ]; then cp \"\$backup_env\" /opt/miriyum/.env; cp \"\$backup_dir/backup-compose.yml\" /opt/miriyum/docker-compose.prod.yml; rm -rf /opt/miriyum/nginx; cp -a \"\$backup_dir/nginx\" /opt/miriyum/nginx; case '$RUNTIME_RECOVERY_MODE' in safe-disable) sed -i '/^MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=/d; /^MIRIYUM_RUNTIME_CONFIG_ENABLED=/d; /^MIRIYUM_PAYMENT_ENABLED=/d; /^MIRIYUM_STORAGE_S3_ENABLED=/d; /^MIRIYUM_STORE_SEARCH_LLM_ENABLED=/d' /opt/miriyum/.env; printf '\nMIRIYUM_RUNTIME_CONFIG_ENABLED=false\nMIRIYUM_PAYMENT_ENABLED=false\nMIRIYUM_STORAGE_S3_ENABLED=false\nMIRIYUM_STORE_SEARCH_LLM_ENABLED=false\n' >> /opt/miriyum/.env ;; esac; if [ -n \"\$previous_backend_image\" ] && [ -n \"\$previous_frontend_image\" ]; then recovery_status=0; BACKEND_IMAGE=\"\$previous_backend_image\" FRONTEND_IMAGE=\"\$previous_frontend_image\" docker compose --env-file /opt/miriyum/.env -f \"\$backup_dir/backup-compose.yml\" up -d --force-recreate --remove-orphans || recovery_status=\$?; if [ \"\$recovery_status\" -eq 0 ]; then recovery_status=1; for ((recovery_attempt=0; recovery_attempt < 30; recovery_attempt++)); do if curl --fail --silent --show-error http://127.0.0.1:8080/actuator/health >/dev/null; then recovery_status=0; break; fi; sleep 3; done; if [ \"\$recovery_status\" -ne 0 ]; then echo 'Recovered backend did not become healthy.' >&2; fi; fi; if [ \"\$recovery_status\" -ne 0 ]; then echo 'Failed to recover the previous staging runtime after deployment failure.' >&2; fi; fi; fi; rm -rf \"\$backup_dir\"; exit \"\$status\"; }; trap restore_env EXIT HUP INT TERM",
+                "backup_env=\"\$backup_dir/.env\"; restore_env() { status=\$?; trap - EXIT HUP INT TERM; if [ \"\$status\" -ne 0 ]; then cp \"\$backup_env\" /opt/miriyum/.env; cp \"\$backup_dir/backup-compose.yml\" /opt/miriyum/docker-compose.prod.yml; rm -rf /opt/miriyum/nginx; cp -a \"\$backup_dir/nginx\" /opt/miriyum/nginx; case '$RUNTIME_RECOVERY_MODE' in safe-disable) sed -i '/^MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=/d; /^MIRIYUM_RUNTIME_CONFIG_ENABLED=/d; /^MIRIYUM_PAYMENT_ENABLED=/d; /^MIRIYUM_STORAGE_S3_ENABLED=/d; /^MIRIYUM_STORE_SEARCH_LLM_ENABLED=/d' /opt/miriyum/.env; printf '\nMIRIYUM_RUNTIME_CONFIG_ENABLED=false\nMIRIYUM_PAYMENT_ENABLED=false\nMIRIYUM_STORAGE_S3_ENABLED=false\nMIRIYUM_STORE_SEARCH_LLM_ENABLED=false\n' >> /opt/miriyum/.env ;; esac; case '$RUNTIME_CONFIG_MODE' in disable) sed -i '/^MIRIYUM_RUNTIME_CONFIG_ENABLED=/d' /opt/miriyum/.env; printf '\nMIRIYUM_RUNTIME_CONFIG_ENABLED=false\n' >> /opt/miriyum/.env ;; esac; if [ -n \"\$previous_backend_image\" ] && [ -n \"\$previous_frontend_image\" ]; then recovery_status=0; BACKEND_IMAGE=\"\$previous_backend_image\" FRONTEND_IMAGE=\"\$previous_frontend_image\" docker compose --env-file /opt/miriyum/.env -f \"\$backup_dir/backup-compose.yml\" up -d --force-recreate --remove-orphans || recovery_status=\$?; if [ \"\$recovery_status\" -eq 0 ]; then recovery_status=1; for ((recovery_attempt=0; recovery_attempt < 30; recovery_attempt++)); do if curl --fail --silent --show-error http://127.0.0.1:8080/actuator/health >/dev/null; then recovery_status=0; break; fi; sleep 3; done; if [ \"\$recovery_status\" -ne 0 ]; then echo 'Recovered backend did not become healthy.' >&2; fi; fi; if [ \"\$recovery_status\" -ne 0 ]; then echo 'Failed to recover the previous staging runtime after deployment failure.' >&2; fi; fi; fi; rm -rf \"\$backup_dir\"; exit \"\$status\"; }; trap restore_env EXIT HUP INT TERM",
                 "install -d -m 0755 /opt/miriyum/nginx/templates/snippets /opt/miriyum/nginx/entrypoint",
                 "echo '$compose_base64' | base64 --decode > /opt/miriyum/docker-compose.prod.yml",
                 "echo '$nginx_http_base64' | base64 --decode > /opt/miriyum/nginx/templates/http.conf.template",
@@ -497,6 +515,7 @@ jobs:
                  "chmod 700 /opt/miriyum/certbot.sh",
                  "chmod 755 /opt/miriyum/nginx/entrypoint/40-select-server-config.sh",
                  "case '$RUNTIME_RECOVERY_MODE' in safe-disable) sed -i '/^MIRIYUM_RUNTIME_CONFIG_ENABLED=/d; /^MIRIYUM_PAYMENT_ENABLED=/d; /^MIRIYUM_STORAGE_S3_ENABLED=/d; /^MIRIYUM_STORE_SEARCH_LLM_ENABLED=/d' /opt/miriyum/.env; printf '\\nMIRIYUM_RUNTIME_CONFIG_ENABLED=false\\nMIRIYUM_PAYMENT_ENABLED=false\\nMIRIYUM_STORAGE_S3_ENABLED=false\\nMIRIYUM_STORE_SEARCH_LLM_ENABLED=false\\n' >> /opt/miriyum/.env; echo 'Approved staging runtime flags disabled.' ;; preserve) echo 'Staging runtime flags preserved.' ;; esac",
+                 "case '$RUNTIME_CONFIG_MODE' in enable) sed -i '/^MIRIYUM_RUNTIME_CONFIG_ENABLED=/d' /opt/miriyum/.env; printf '\\nMIRIYUM_RUNTIME_CONFIG_ENABLED=true\\n' >> /opt/miriyum/.env; echo 'Staging runtime config enabled.' ;; disable) sed -i '/^MIRIYUM_RUNTIME_CONFIG_ENABLED=/d' /opt/miriyum/.env; printf '\\nMIRIYUM_RUNTIME_CONFIG_ENABLED=false\\n' >> /opt/miriyum/.env; echo 'Staging runtime config disabled.' ;; preserve) : ;; esac",
                  "case '$RATE_LIMIT_EXCEPTION' in enable) source_ip=\$(printf %s '$load_test_source_ip_base64' | base64 --decode); sed -i '/^MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=/d' /opt/miriyum/.env; printf '\\nMIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=%s\\n' \"\$source_ip\" >> /opt/miriyum/.env; unset source_ip; echo 'Staging load-test source IP enabled.' ;; disable) sed -i '/^MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=/d' /opt/miriyum/.env; echo 'Staging load-test source IP disabled.' ;; preserve) : ;; esac",
                  "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' FRONTEND_IMAGE='$frontend_image_uri' /opt/miriyum/deploy.sh",
                  "trap - EXIT HUP INT TERM; rm -rf \"\$backup_dir\""
