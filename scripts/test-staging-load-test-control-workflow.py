@@ -115,10 +115,17 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertIn("previous_frontend_image=", self.backend_cd)
         self.assertIn("backup-compose.yml", self.backend_cd)
         self.assertIn('FRONTEND_IMAGE=\\"\\$previous_frontend_image\\"', self.backend_cd)
-        self.assertIn('docker compose --env-file /opt/miriyum/.env -f \\"\\$backup_dir/backup-compose.yml\\" up -d --force-recreate backend || recovery_status=\\$?', self.backend_cd)
+        self.assertIn('docker compose --env-file /opt/miriyum/.env -f \\"\\$backup_dir/backup-compose.yml\\" up -d --force-recreate --remove-orphans || recovery_status=\\$?', self.backend_cd)
         self.assertIn("recovery_attempt=0", self.backend_cd)
         self.assertIn("Recovered backend did not become healthy", self.backend_cd)
         self.assertLess(self.backend_cd.index("trap restore_env EXIT HUP INT TERM"), self.backend_cd.index("echo '$compose_base64' | base64 --decode > /opt/miriyum/docker-compose.prod.yml"))
+
+    def test_safe_disable_failure_keeps_runtime_flags_off_and_restores_the_full_stack(self):
+        self.assertIn('cp -a /opt/miriyum/nginx \\"\\$backup_dir/nginx\\"', self.backend_cd)
+        self.assertIn('rm -rf /opt/miriyum/nginx; cp -a \\"\\$backup_dir/nginx\\" /opt/miriyum/nginx', self.backend_cd)
+        self.assertIn("safe-disable) sed -i '/^MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP=/d; /^MIRIYUM_RUNTIME_CONFIG_ENABLED=/d; /^MIRIYUM_PAYMENT_ENABLED=/d; /^MIRIYUM_STORAGE_S3_ENABLED=/d; /^MIRIYUM_STORE_SEARCH_LLM_ENABLED=/d'", self.backend_cd)
+        self.assertIn('MIRIYUM_RUNTIME_CONFIG_ENABLED=false\\nMIRIYUM_PAYMENT_ENABLED=false\\nMIRIYUM_STORAGE_S3_ENABLED=false\\nMIRIYUM_STORE_SEARCH_LLM_ENABLED=false\\n', self.backend_cd)
+        self.assertIn('up -d --force-recreate --remove-orphans || recovery_status=\\$?', self.backend_cd)
 
     def test_enable_failure_or_cancellation_runs_disable_cleanup(self):
         self.assertIn("disable-after-failed-enable", self.control_workflow)
