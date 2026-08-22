@@ -51,8 +51,6 @@ export function loadSearchLlmConfig(env) {
     harnessSourceVerified: env.STAGING_HARNESS_SOURCE_VERIFIED === 'true',
   })
   const limits = Object.freeze({
-    maxVus: parsePositiveInt('LLM_MAX_VUS', env.LLM_MAX_VUS, 2),
-    arrivalRate: parsePositiveInt('LLM_ARRIVAL_RATE', env.LLM_ARRIVAL_RATE, 1),
     durationSeconds: parsePositiveInt('LLM_DURATION_SECONDS', env.LLM_DURATION_SECONDS, 600),
   })
   const budget = validateBudget({

@@ -6,7 +6,7 @@ Issue #568의 exact-first OpenAI 보완 검색과 같은 매장·인근 매장 �
 
 - 실제 staging 실행은 #357 종료, PR #434가 포함된 backend 배포, private health `UP`, OpenAI Secret 전달, CloudWatch LLM meter 조회, 저장소 밖 합성 fixture와 실행 승인이 모두 확인된 뒤에만 진행한다.
 - `LLM_LIVE_TEST_APPROVED=true`가 없거나 계획·누적 합계가 200회 또는 USD 0.50을 초과하면 init context에서 HTTP 요청 전에 실패한다.
-- 최대 VU는 2, scenario 실행률은 1 iteration/s 이하로 유지한다. 실제 OpenAI 최대 처리량이나 production 용량을 측정하지 않는다.
+- 하네스는 scenario를 겹치지 않게 배치하고 각 scenario를 고정 `vus: 1`로 실행한다. 각 iteration 뒤 1초를 대기하므로 실행률은 1 iteration/s 미만이며 fixture case 수는 scenario별 상한과 duration 여유를 함께 통과해야 한다. 실제 OpenAI 최대 처리량이나 production 용량을 측정하지 않는다.
 - fixture·환경 파일·결과에는 자격증명, Token, Secret, 검색어, 응답 body, 계정·store·menu ID를 기록하지 않는다.
 
 ## 입력 준비
@@ -65,8 +65,6 @@ docker run --rm `
   -e LLM_FIXTURE_PATH=/scripts/fixtures/search-llm.local.json `
   -e LLM_BUDGET_PROOF_PATH=/scripts/fixtures/search-llm-budget.local.json `
   -e LLM_SCENARIOS=natural-language `
-  -e LLM_MAX_VUS=2 `
-  -e LLM_ARRIVAL_RATE=1 `
   -e LLM_DURATION_SECONDS=180 `
   -e LLM_PLANNED_CALLS=$plannedCalls `
   -e LLM_CUMULATIVE_CALLS=$cumulativeCalls `

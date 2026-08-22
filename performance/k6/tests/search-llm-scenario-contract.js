@@ -29,7 +29,18 @@ export default function () {
     'nearby distance overflow is rejected': () => throws(() => validateAlternativeResponse(envelope('NEARBY_STORE', [{ ...item, distanceMeters: 3000.1, coordinates: { latitude: 37.5, longitude: 127 } }]), { sourceStoreId: 1, sourceUnitPrice: 10000 })),
     'price outside plus or minus twenty percent is rejected': () => throws(() => validateAlternativeResponse(envelope('SAME_STORE', [{ ...item, storeId: 1, unitPrice: 12001 }]), { sourceStoreId: 1, sourceUnitPrice: 10000 })),
     'score must equal its breakdown': () => throws(() => validateAlternativeResponse(envelope('SAME_STORE', [{ ...item, storeId: 1, alternativeScore: 79 }]), { sourceStoreId: 1, sourceUnitPrice: 10000 })),
-    'five scenarios remain independently scheduled': () => Object.keys(buildSearchLlmScenarios({ scenarios: ['exact', 'natural-language', 'same-store', 'nearby-store', 'fallback'], limits: { maxVus: 2, arrivalRate: 1, durationSeconds: 30 }, budget: { plannedCalls: 4 } }, { cases: [{ scenario: 'exact' }, { scenario: 'natural-language' }, { scenario: 'same-store' }, { scenario: 'nearby-store' }, { scenario: 'fallback' }] })).length === 5,
+    'five scenarios remain independently scheduled': () => Object.keys(buildSearchLlmScenarios({ scenarios: ['exact', 'natural-language', 'same-store', 'nearby-store', 'fallback'], limits: { durationSeconds: 30 }, budget: { plannedCalls: 4 } }, { cases: [{ scenario: 'exact' }, { scenario: 'natural-language' }, { scenario: 'same-store' }, { scenario: 'nearby-store' }, { scenario: 'fallback' }] })).length === 5,
+    'execution options enforce one sequential VU and fixture-bounded iterations': () => {
+      const options = buildSearchLlmScenarios({ scenarios: ['exact', 'natural-language'], limits: { durationSeconds: 30 }, budget: { plannedCalls: 1 } }, { cases: [{ scenario: 'exact' }, { scenario: 'exact' }, { scenario: 'natural-language' }] })
+      return options.exact.executor === 'shared-iterations'
+        && options.exact.vus === 1
+        && options.exact.iterations === 2
+        && options.exact.startTime === '0s'
+        && options['natural-language'].vus === 1
+        && options['natural-language'].iterations === 1
+        && options['natural-language'].startTime === '30s'
+        && options['natural-language'].maxDuration === '30s'
+    },
     'exact search uses the public integrated search endpoint': () => {
       calls.length = 0
       const result = runSearchLlmCase({ client, baseUrl: 'https://staging.example', fixtureCase: { scenario: 'exact', searchInput: 'synthetic exact', minimumItems: 0 } })

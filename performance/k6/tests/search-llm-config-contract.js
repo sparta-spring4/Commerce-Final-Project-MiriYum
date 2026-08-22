@@ -16,17 +16,19 @@ const VALID = {
   LLM_BUDGET_PROOF_PATH: '/scripts/fixtures/search-llm-budget.local.json',
   LLM_SCENARIOS: 'exact,natural-language,same-store,nearby-store,fallback',
   LLM_FALLBACK_MODE: 'disabled',
-  LLM_MAX_VUS: '2', LLM_ARRIVAL_RATE: '1', LLM_DURATION_SECONDS: '30',
+  LLM_DURATION_SECONDS: '30',
   LLM_PLANNED_CALLS: '150', LLM_CUMULATIVE_CALLS: '20',
   LLM_PLANNED_COST_USD: '0.30', LLM_CUMULATIVE_COST_USD: '0.10',
 }
 
 export default function () {
   check(null, {
-    'approved bounded staging config is accepted': () => loadSearchLlmConfig(VALID).limits.maxVus === 2,
+    'approved bounded staging config is accepted': () => loadSearchLlmConfig(VALID).limits.durationSeconds === 30,
     'live approval is mandatory': () => throws(() => loadSearchLlmConfig({ ...VALID, LLM_LIVE_TEST_APPROVED: 'false' })),
-    'VU ceiling is two': () => throws(() => loadSearchLlmConfig({ ...VALID, LLM_MAX_VUS: '3' })),
-    'arrival ceiling is one': () => throws(() => loadSearchLlmConfig({ ...VALID, LLM_ARRIVAL_RATE: '2' })),
+    'unused VU and arrival inputs are not part of the execution contract': () => {
+      const config = loadSearchLlmConfig({ ...VALID, LLM_MAX_VUS: '99', LLM_ARRIVAL_RATE: '99' })
+      return config.limits.maxVus === undefined && config.limits.arrivalRate === undefined
+    },
     'production target is rejected': () => throws(() => loadSearchLlmConfig({ ...VALID, BASE_URL: 'https://api.miriyum.com', ALLOWED_HOSTS: 'api.miriyum.com' })),
     'fallback scenario requires its controlled runtime mode': () => {
       const env = { ...VALID }; delete env.LLM_FALLBACK_MODE
