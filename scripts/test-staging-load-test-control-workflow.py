@@ -92,13 +92,16 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("load_test_source_ip:", dispatch)
         self.assertNotIn("runtime_recovery_mode:", dispatch)
 
-    def test_enable_changes_ip_only_after_successful_deploy_and_restores_env_on_failure(self):
+    def test_enable_deploys_with_ip_and_recovers_original_runtime_on_failure(self):
         deploy_command = "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' FRONTEND_IMAGE='$frontend_image_uri' /opt/miriyum/deploy.sh"
         enable_command = "Staging load-test source IP enabled."
-        self.assertLess(self.backend_cd.index(deploy_command), self.backend_cd.index(enable_command))
+        self.assertLess(self.backend_cd.index(enable_command), self.backend_cd.index(deploy_command))
         self.assertIn("backup_env=", self.backend_cd)
         self.assertIn("restore_env", self.backend_cd)
         self.assertIn("trap restore_env EXIT HUP INT TERM", self.backend_cd)
+        self.assertIn('cp \\"\\$backup_env\\" /opt/miriyum/.env', self.backend_cd)
+        self.assertIn("previous_backend_image=", self.backend_cd)
+        self.assertIn("docker compose --env-file /opt/miriyum/.env -f /opt/miriyum/docker-compose.prod.yml up -d --force-recreate backend || recovery_status=\\$?", self.backend_cd)
 
     def test_enable_failure_or_cancellation_runs_disable_cleanup(self):
         self.assertIn("disable-after-failed-enable", self.control_workflow)
