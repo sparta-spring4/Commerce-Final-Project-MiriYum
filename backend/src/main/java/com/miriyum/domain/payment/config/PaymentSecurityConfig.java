@@ -7,8 +7,12 @@ import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Condition;
+import org.springframework.context.annotation.ConditionContext;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.type.AnnotatedTypeMetadata;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -28,7 +32,10 @@ public class PaymentSecurityConfig {
 
     @Bean
     @Order(-3)
-    @ConditionalOnProperty(name = "miriyum.payment.enabled", havingValue = "true")
+    @ConditionalOnProperty(
+            name = {"miriyum.payment.enabled", "miriyum.payment.portone.webhook-enabled"},
+            havingValue = "true"
+    )
     public SecurityFilterChain paymentWebhookFilterChain(HttpSecurity http) throws Exception {
         http
                 .securityMatcher(PORTONE_WEBHOOK)
@@ -74,12 +81,35 @@ public class PaymentSecurityConfig {
         http
                 .securityMatcher(
                         CONSUMER_PAYMENT_ROOT,
-                        CONSUMER_PAYMENT_FAMILY,
-                        PORTONE_WEBHOOK)
+                        CONSUMER_PAYMENT_FAMILY)
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
         return http.build();
     }
+
+    @Bean
+    @Order(-3)
+    @Conditional(WebhookRuntimeDisabledCondition.class)
+    public SecurityFilterChain disabledPaymentWebhookFilterChain(HttpSecurity http) throws Exception {
+        http
+                .securityMatcher(PORTONE_WEBHOOK)
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+        return http.build();
+    }
+
+    static class WebhookRuntimeDisabledCondition implements Condition {
+
+        @Override
+        public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
+            return !Boolean.parseBoolean(context.getEnvironment().getProperty("miriyum.payment.enabled"))
+                    || !Boolean.parseBoolean(context.getEnvironment().getProperty(
+                            "miriyum.payment.portone.webhook-enabled"));
+        }
+    }
+
 }

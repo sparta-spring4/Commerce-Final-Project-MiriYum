@@ -11,7 +11,7 @@ import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.PropertySource;
 
 /**
- * Restricts centrally supplied runtime JSON to the non-secret S3 settings approved for deployment.
+ * Restricts centrally supplied runtime JSON to approved deployment settings.
  */
 public final class RuntimeJsonAllowlistEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
 
@@ -28,7 +28,15 @@ public final class RuntimeJsonAllowlistEnvironmentPostProcessor implements Envir
             "miriyum.storage.s3.reconciliation.pending-min-age-seconds",
             "miriyum.storage.s3.reconciliation.long-stay-threshold-seconds",
             "miriyum.storage.s3.reconciliation.retry-base-delay-seconds",
-            "miriyum.storage.s3.reconciliation.claim-lease-seconds"
+            "miriyum.storage.s3.reconciliation.claim-lease-seconds",
+            "miriyum.sse.enabled",
+            "miriyum.sse.cursor-secret",
+            "miriyum.sse.timeout",
+            "miriyum.sse.heartbeat-interval",
+            "miriyum.sse.correction-interval",
+            "miriyum.sse.correction-batch-size",
+            "miriyum.sse.max-connections-total",
+            "miriyum.sse.max-connections-per-account"
     );
 
     @Override
