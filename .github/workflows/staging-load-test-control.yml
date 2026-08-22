@@ -37,6 +37,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - name: Checkout trusted validation revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate fixed action, immutable SHA, and public IPv4
         env:
           ACTION: ${{ inputs.action }}
@@ -92,4 +94,5 @@ jobs:
       image_tag: ${{ inputs.image_tag }}
       rate_limit_exception: disable
       runtime_recovery_mode: preserve
+      cancel_ssm_command_id: ${{ needs.deploy.outputs.ssm_command_id }}
     secrets: inherit

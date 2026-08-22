@@ -33,6 +33,12 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertIn("validate-staging-load-test-source-ip.js", self.control_workflow)
         self.assertIn("validate-staging-load-test-source-ip.js", self.backend_cd)
 
+    def test_control_validation_checks_out_the_validator_before_running_it(self):
+        checkout = "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+        validator = "validate-staging-load-test-source-ip.js"
+        self.assertIn(checkout, self.control_workflow)
+        self.assertLess(self.control_workflow.index(checkout), self.control_workflow.index(validator))
+
     def test_rejects_special_use_ipv4_ranges_and_accepts_global_ipv4(self):
         self.assertTrue(IP_VALIDATOR_PATH.exists())
 
@@ -92,6 +98,11 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("load_test_source_ip:", dispatch)
         self.assertNotIn("runtime_recovery_mode:", dispatch)
 
+    def test_backend_cd_allows_non_preserve_control_only_from_the_fixed_control_workflow(self):
+        self.assertIn("CALLER_WORKFLOW_REF", self.backend_cd)
+        self.assertIn(".github/workflows/staging-load-test-control.yml@", self.backend_cd)
+        self.assertIn("Non-preserve staging control inputs are allowed only", self.backend_cd)
+
     def test_enable_deploys_with_ip_and_recovers_original_runtime_on_failure(self):
         deploy_command = "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' FRONTEND_IMAGE='$frontend_image_uri' /opt/miriyum/deploy.sh"
         enable_command = "Staging load-test source IP enabled."
@@ -101,12 +112,26 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertIn("trap restore_env EXIT HUP INT TERM", self.backend_cd)
         self.assertIn('cp \\"\\$backup_env\\" /opt/miriyum/.env', self.backend_cd)
         self.assertIn("previous_backend_image=", self.backend_cd)
-        self.assertIn("docker compose --env-file /opt/miriyum/.env -f /opt/miriyum/docker-compose.prod.yml up -d --force-recreate backend || recovery_status=\\$?", self.backend_cd)
+        self.assertIn("previous_frontend_image=", self.backend_cd)
+        self.assertIn("backup-compose.yml", self.backend_cd)
+        self.assertIn('FRONTEND_IMAGE=\\"\\$previous_frontend_image\\"', self.backend_cd)
+        self.assertIn('docker compose --env-file /opt/miriyum/.env -f \\"\\$backup_dir/backup-compose.yml\\" up -d --force-recreate backend || recovery_status=\\$?', self.backend_cd)
+        self.assertIn("recovery_attempt=0", self.backend_cd)
+        self.assertIn("Recovered backend did not become healthy", self.backend_cd)
+        self.assertLess(self.backend_cd.index("trap restore_env EXIT HUP INT TERM"), self.backend_cd.index("echo '$compose_base64' | base64 --decode > /opt/miriyum/docker-compose.prod.yml"))
 
     def test_enable_failure_or_cancellation_runs_disable_cleanup(self):
         self.assertIn("disable-after-failed-enable", self.control_workflow)
         self.assertIn("needs.deploy.result == 'failure' || needs.deploy.result == 'cancelled'", self.control_workflow)
         self.assertIn("rate_limit_exception: disable", self.control_workflow)
+
+    def test_cleanup_cancels_and_waits_for_the_original_ssm_command(self):
+        self.assertIn("ssm_command_id:", self.backend_cd)
+        self.assertIn("jobs.deploy.outputs.ssm_command_id", self.backend_cd)
+        self.assertIn("cancel_ssm_command_id:", self.backend_cd)
+        self.assertIn("aws ssm cancel-command", self.backend_cd)
+        self.assertIn("Original SSM command reached terminal state", self.backend_cd)
+        self.assertIn("cancel_ssm_command_id: ${{ needs.deploy.outputs.ssm_command_id }}", self.control_workflow)
 
     def test_backend_cd_requires_existing_images_for_reusable_deployment(self):
         self.assertIn('if [ "$EVENT_NAME" != "workflow_run" ]; then', self.backend_cd)
