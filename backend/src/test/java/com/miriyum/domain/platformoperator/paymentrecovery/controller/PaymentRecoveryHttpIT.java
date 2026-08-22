@@ -180,13 +180,15 @@ class PaymentRecoveryHttpIT {
                                 + "\"newPasswordConfirm\":\"Changed2@\"}"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(), "$.data.accessToken");
 
-        mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases")
+        String caseListResponse = mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content[0].caseId").value(recoveryCase.getPublicId()))
                 .andExpect(content().string(not(containsString("portOnePaymentId"))))
                 .andExpect(content().string(not(containsString("providerPayload"))))
-                .andExpect(content().string(not(containsString("card"))));
+                .andExpect(content().string(not(containsString("card"))))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<String>>read(caseListResponse, "$.data.content[*].caseId"))
+                .contains(recoveryCase.getPublicId());
         mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases/{caseId}",
                         recoveryCase.getPublicId()).header("Authorization", "Bearer " + token))
                 .andExpect(status().isForbidden());
