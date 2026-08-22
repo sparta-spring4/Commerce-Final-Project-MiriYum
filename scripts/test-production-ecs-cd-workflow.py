@@ -64,6 +64,44 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("imageTagMutability", self.workflow)
         self.assertIn('Production deployment requires an IMMUTABLE ECR repository.', self.workflow)
 
+    def test_live_waiting_history_cursor_secret_mapping_is_verified_before_image_rollout(self):
+        step_name = "- name: Verify live waiting history cursor secret mapping"
+        self.assertIn(step_name, self.workflow)
+        preflight = self.workflow.split(
+            step_name, 1
+        )[1].split("- name:", 1)[0]
+
+        self.assertIn("aws ecs describe-services", preflight)
+        self.assertIn("aws ecs describe-task-definition", preflight)
+        self.assertIn('MIRIYUM_WAITING_HISTORY_CURSOR_SECRET', preflight)
+        self.assertIn("waiting_cursor_mapping_count", preflight)
+        self.assertIn('[ \"$waiting_cursor_mapping_count\" != \"1\" ]', preflight)
+        self.assertIn(':MIRIYUM_WAITING_HISTORY_CURSOR_SECRET::', preflight)
+        self.assertIn("Production live task must map exactly one waiting history cursor secret", preflight)
+        self.assertNotIn("get-secret-value", preflight)
+        self.assertLess(
+            self.workflow.index(step_name),
+            self.workflow.index("- name: Log in to Amazon ECR"),
+        )
+
+    def test_live_waiting_history_cursor_secret_uses_the_application_secret_arn(self):
+        preflight = self.workflow.split(
+            "- name: Verify live waiting history cursor secret mapping", 1
+        )[1].split("- name:", 1)[0]
+
+        self.assertIn('select(.name == "MIRIYUM_DB_URL")', preflight)
+        self.assertIn("application_secret_mapping_count", preflight)
+        self.assertIn('[ "$application_secret_mapping_count" != "1" ]', preflight)
+        self.assertIn("application_secret_arn", preflight)
+        self.assertIn(
+            '"${application_secret_arn}:MIRIYUM_WAITING_HISTORY_CURSOR_SECRET::"',
+            preflight,
+        )
+        self.assertIn(
+            "Waiting history cursor secret must use the production application secret ARN",
+            preflight,
+        )
+
     def test_task_definition_rejects_missing_or_wrong_backend_container(self):
         self.assertIn("Expected exactly one $ECS_CONTAINER_NAME container", self.workflow)
         self.assertIn("updated_container_count", self.workflow)
@@ -128,9 +166,79 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("did not stabilize within the 20-minute deployment budget", stability_step)
         self.assertNotIn("aws ecs wait services-stable", stability_step)
 
+    def test_automatic_and_manual_sources_enforce_the_notification_writer_floor(self):
+        self.assertIn(
+            "NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA: "
+            "515531e122ebbce13d8eead4a3ff15a94c25e0b3",
+            self.workflow,
+        )
+        self.assertGreaterEqual(
+            self.workflow.count("verify-ancestor"),
+            2,
+        )
+        self.assertGreaterEqual(
+            self.workflow.count("fetch-depth: 0"),
+            2,
+        )
+
+    def test_completed_rollout_requires_task_and_target_lifecycle_evidence(self):
+        capture_step = self.workflow.split(
+            "- name: Capture previous ECS task identities", 1
+        )[1].split("- name: Update ECS service", 1)[0]
+        evidence_step = self.workflow.split(
+            "- name: Verify production ECS replacement evidence", 1
+        )[1]
+
+        self.assertIn("aws ecs list-tasks", capture_step)
+        self.assertIn("--desired-status RUNNING", capture_step)
+        self.assertIn("--desired-status STOPPED", capture_step)
+        self.assertIn("aws ecs describe-tasks", capture_step)
+        self.assertIn("notification-read-stopped-task-arns.json", capture_step)
+        self.assertIn("notification-read-stopped-tasks.json", capture_step)
+        self.assertIn("select-previous-ecs-tasks", capture_step)
+        self.assertIn("aws ecs describe-services", capture_step)
+        self.assertIn("consecutive_stable_snapshots", capture_step)
+        self.assertIn("cmp -s", capture_step)
+        self.assertIn("sleep 5", capture_step)
+        self.assertIn("umask 077", capture_step)
+        self.assertIn("notification-read-previous-task-arns.json", capture_step)
+        self.assertIn("aws ecs list-tasks", evidence_step)
+        self.assertIn("--desired-status RUNNING", evidence_step)
+        self.assertIn("--desired-status STOPPED", evidence_step)
+        self.assertNotIn("--desired-status PENDING", evidence_step)
+        self.assertIn("aws ecs describe-tasks", evidence_step)
+        self.assertIn("previous-task-arns.json", evidence_step)
+        self.assertIn("previous-tasks.json", evidence_step)
+        self.assertIn("final-stopped-task-arns.json", evidence_step)
+        self.assertIn("final-stopped-tasks.json", evidence_step)
+        self.assertIn("aws elbv2 describe-target-health", evidence_step)
+        self.assertIn("verify-production-ecs", evidence_step)
+        self.assertIn("--expected-task-definition", evidence_step)
+
+        cleanup_step = self.workflow.split(
+            "- name: Cleanup previous ECS task identity evidence", 1
+        )[1]
+        self.assertIn("if: always()", cleanup_step)
+        self.assertIn("notification-read-previous-task-arns.json", cleanup_step)
+
+    def test_revision_gate_runs_from_the_trusted_workflow_revision(self):
+        self.assertGreaterEqual(self.workflow.count("github.workflow_sha"), 2)
+        self.assertGreaterEqual(
+            self.workflow.count("$RUNNER_TEMP/notification-read-deployment-gate.py"),
+            4,
+        )
+        self.assertNotIn(
+            "python3 scripts/test-notification-read-deployment-gate.py verify-ancestor",
+            self.workflow,
+        )
+
     def test_backend_ci_runs_the_workflow_contract_test(self):
         self.assertIn("Verify production ECS CD workflow contract", self.backend_ci)
         self.assertIn("python3 scripts/test-production-ecs-cd-workflow.py", self.backend_ci)
+        self.assertIn(
+            "python3 scripts/test-notification-read-deployment-gate.py",
+            self.backend_ci,
+        )
 
 
 if __name__ == "__main__":

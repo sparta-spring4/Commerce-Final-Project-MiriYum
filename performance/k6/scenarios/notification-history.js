@@ -14,6 +14,7 @@ const ITEM_FIELDS = [
   'occurredAt',
   'createdAt',
   'deliveredAt',
+  'readAt',
   'action',
 ]
 
@@ -113,6 +114,9 @@ function validateItem(item) {
   requireOffsetDateTime(item.occurredAt, 'notification history occurredAt')
   requireOffsetDateTime(item.createdAt, 'notification history createdAt')
   requireOffsetDateTime(item.deliveredAt, 'notification history deliveredAt')
+  if (item.readAt !== null) {
+    requireOffsetDateTime(item.readAt, 'notification history readAt')
+  }
   if (RESERVATION_TERMINAL_PURPOSES.has(item.purpose) && item.action !== null) {
     throw new Error('reservation terminal notification action must be null')
   }

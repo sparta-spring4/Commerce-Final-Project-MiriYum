@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router'
 import { EmptyState, ErrorState, Loading } from '../../../../shared/ui/Feedback'
 import { Icon, type IconName } from '../../../../shared/ui/Icon'
 import { Pagination } from '../../../../shared/ui/Pagination'
+import { Button } from '../../../../shared/ui/Button'
 import { hasErrorCode } from '../../../../shared/api/apiError'
 import { CommonErrorCode } from '../../../../shared/api/envelope'
 import { toDisplayNameMap, useCatalog, useStoreSearch } from '../api/queries'
@@ -83,7 +84,7 @@ export function StoreSearchPage() {
   }, [search.isSuccess, selectedInResults, selectedStoreId])
 
   function applyFilters(next: StoreSearchFilters) {
-    setSearchParams(writeFilters(next))
+    setSearchParams(writeFilters({ ...next, cursor: '' }))
   }
 
   /**
@@ -106,7 +107,15 @@ export function StoreSearchPage() {
     applyFilters({ ...filters, page })
   }
 
-  const detailSearch = writeFilters({ ...filters, page: 0 }).toString()
+  function goToCursor(cursor: string) {
+    setSearchParams(writeFilters({ ...filters, page: 0, cursor }))
+  }
+
+  const detailSearch = writeFilters({
+    ...filters,
+    page: 0,
+    cursor: '',
+  }).toString()
   const conditionState = reservationConditionState(filters)
 
   return (
@@ -145,7 +154,9 @@ export function StoreSearchPage() {
           <div className="store-search__results-head">
             <p className="store-search__count" aria-live="polite">
               {search.isSuccess
-                ? `총 ${search.data.page.totalElements}개의 매장`
+                ? 'page' in search.data
+                  ? `총 ${search.data.page.totalElements}개의 매장`
+                  : `현재 ${search.data.items.length}개의 매장`
                 : '매장을 찾는 중입니다.'}
             </p>
 
@@ -199,6 +210,7 @@ export function StoreSearchPage() {
                 onShowOnMap={showOnMap}
                 onRetry={() => void search.refetch()}
                 onPageChange={goToPage}
+                onCursorChange={goToCursor}
               />
             </div>
 
@@ -421,6 +433,7 @@ interface ResultsProps {
   onShowOnMap: (storeId: string) => void
   onRetry: () => void
   onPageChange: (page: number) => void
+  onCursorChange: (cursor: string) => void
 }
 
 function SearchResults({
@@ -432,6 +445,7 @@ function SearchResults({
   onShowOnMap,
   onRetry,
   onPageChange,
+  onCursorChange,
 }: ResultsProps) {
   if (search.isPending) {
     return <Loading label="매장을 찾는 중입니다." />
@@ -447,7 +461,9 @@ function SearchResults({
     )
   }
 
-  const { items, page } = search.data
+  const response = search.data
+  const { items } = response
+  const nextCursor = 'page' in response ? null : response.nextCursor
 
   // 빈 배열은 오류가 아니라 정상 empty result다.
   if (items.length === 0) {
@@ -481,13 +497,27 @@ function SearchResults({
           />
         ))}
       </ul>
-      <Pagination
-        number={page.number}
-        totalPages={page.totalPages}
-        totalElements={page.totalElements}
-        hasNext={page.hasNext}
-        onChange={onPageChange}
-      />
+      {'page' in response ? (
+        <Pagination
+          number={response.page.number}
+          totalPages={response.page.totalPages}
+          totalElements={response.page.totalElements}
+          hasNext={response.page.hasNext}
+          onChange={onPageChange}
+        />
+      ) : (
+        nextCursor !== null && (
+          <nav className="mi-pagination" aria-label="검색 결과 이동">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onCursorChange(nextCursor)}
+            >
+              다음 결과
+            </Button>
+          </nav>
+        )
+      )}
     </>
   )
 }

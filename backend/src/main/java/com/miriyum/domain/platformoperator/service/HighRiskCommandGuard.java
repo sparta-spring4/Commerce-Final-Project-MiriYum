@@ -83,6 +83,25 @@ public class HighRiskCommandGuard {
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
+    public AdminAuditContext authorizeInitialOnboardingAssignment(
+            HighRiskCommandRequest request) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("high-risk authorization requires an active command transaction");
+        }
+        if (request.caseType() != AdminCaseType.ONBOARDING_REVIEW
+                || request.purpose() != AdminCommandPurpose.ONBOARDING_ASSIGNMENT
+                || request.targetType() != AdminTargetType.ONBOARDING_APPLICATION
+                || request.requiredPermission() != PlatformOperatorPermission.ONBOARDING_REVIEW) {
+            deny();
+        }
+        try {
+            return authorizeAgainstStores(request, false);
+        } catch (DataAccessException exception) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
     public AdminAuditContext authorizeSecondaryPaymentRecoveryCommand(
             HighRiskCommandRequest request) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {

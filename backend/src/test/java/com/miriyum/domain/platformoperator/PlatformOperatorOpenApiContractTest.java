@@ -62,12 +62,20 @@ class PlatformOperatorOpenApiContractTest {
             "/api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions/{sanctionId}/releases");
     private static final Set<String> PAYMENT_RECOVERY_PATHS = Set.of(
             "/api/v1/platform-operators/payment-recovery-cases",
+            "/api/v1/platform-operators/payment-recovery-cases/pending-additional-approvals",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}/assignments",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}/requeries",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}/proposals/{proposalVersion}/approvals",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}/failed-unresolved-closures");
+    private static final Set<String> ONBOARDING_REVIEW_PATHS = Set.of(
+            "/api/v1/platform-operators/onboarding-review-cases",
+            "/api/v1/platform-operators/onboarding-review-cases/{caseId}",
+            "/api/v1/platform-operators/onboarding-review-cases/{caseId}/assignments",
+            "/api/v1/platform-operators/onboarding-review-cases/{caseId}/reassignments",
+            "/api/v1/platform-operators/onboarding-review-cases/{caseId}/decisions",
+            "/api/v1/platform-operators/onboarding-review-cases/{caseId}/evidence");
     private static final Set<String> ADMIN_MONITORING_PATHS = Set.of(
             "/api/v1/platform-operators/monitoring-cases",
             "/api/v1/platform-operators/monitoring-cases/{caseType}/{caseId}");
@@ -75,7 +83,8 @@ class PlatformOperatorOpenApiContractTest {
                     AUTH_PATHS.stream(), java.util.stream.Stream.of(REAUTHENTICATION_PATH),
                     java.util.stream.Stream.of(CAPABILITIES_PATH), MEMBER_SUPPORT_PATHS.stream(),
                     MANAGEMENT_AUDIT_PATHS.stream(), ADMIN_STORE_PATHS.stream(),
-                    ADMIN_MONITORING_PATHS.stream(), PAYMENT_RECOVERY_PATHS.stream())
+                    ADMIN_MONITORING_PATHS.stream(), PAYMENT_RECOVERY_PATHS.stream(),
+                    ONBOARDING_REVIEW_PATHS.stream())
             .flatMap(java.util.function.Function.identity())
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
@@ -118,6 +127,8 @@ class PlatformOperatorOpenApiContractTest {
                 feature = "admin-store";
             } else if (PAYMENT_RECOVERY_PATHS.contains(entry.getKey())) {
                 feature = "payment-recovery";
+            } else if (ONBOARDING_REVIEW_PATHS.contains(entry.getKey())) {
+                feature = "platform-operator-onboarding-review";
             } else if (ADMIN_MONITORING_PATHS.contains(entry.getKey())) {
                 feature = "admin-monitoring";
             } else {
@@ -126,6 +137,19 @@ class PlatformOperatorOpenApiContractTest {
             assertThat(ref).startsWith("./" + feature + "/openapi.yaml#/paths/");
             assertThat(map(document(feature + "/openapi.yaml").get("paths"))).containsKey(entry.getKey());
         }
+    }
+
+    @Test
+    void onboardingEvidenceContractExposesBytesWithoutStorageIdentity() throws Exception {
+        Map<String, Object> feature = document("platform-operator-onboarding-review/openapi.yaml");
+        String path = "/api/v1/platform-operators/onboarding-review-cases/{caseId}/evidence";
+        Map<String, Object> operation = map(map(feature.get("paths")).get(path));
+        assertThat(map(operation.get("get"))).containsEntry(
+                "operationId", "readOnboardingReviewEvidence");
+        String serialized = feature.toString();
+        assertThat(serialized).doesNotContain(
+                "objectKey", "fileId", "evidenceId", "businessRegistrationNumber",
+                "representativeName", "approvalFingerprint");
     }
 
     @Test

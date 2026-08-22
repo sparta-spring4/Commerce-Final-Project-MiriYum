@@ -193,6 +193,24 @@ paths:
           $ref: "#/components/responses/StoreNotFound"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/stores/{storeId}/images:
+    get:
+      tags: [Store Search]
+      summary: 매장 공개 이미지 조회
+      operationId: getStoreImages
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      responses:
+        "200":
+          description: CONFIRMED 이미지 중 생성 시각이 가장 이른 대표 공개 이미지 한 장
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicStoreImageListSuccessResponse"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/stores/{storeId}/menus/{menuId}/alternative-searches:
     post:
       tags: [Store Search]
@@ -991,6 +1009,36 @@ paths:
         "409":
           $ref: "#/components/responses/MenuStateConflict"
   /api/v1/store-operators/stores/{storeId}/menus/{menuId}/images:
+    get:
+      tags: [Menu Public Image]
+      summary: 메뉴 공개 이미지 조회
+      description: >-
+        메뉴 운영자가 확정된 공개 대표 이미지를 조회한다. 이미지가 없는 메뉴는 204를 반환한다.
+      operationId: getMenuImage
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/MenuId"
+      responses:
+        "200":
+          description: 확정된 메뉴 공개 이미지
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MenuPublicImageSuccessResponse"
+        "204":
+          description: 공개 이미지가 없는 메뉴
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/MenuImageTargetNotFound"
+        "409":
+          $ref: "#/components/responses/MenuImageStateConflict"
     put:
       tags: [Menu Public Image]
       summary: 메뉴 공개 이미지 저장 또는 교체
@@ -2609,6 +2657,21 @@ components:
         data:
           type: array
           maxItems: 10
+          items:
+            $ref: "#/components/schemas/PublicImage"
+    PublicStoreImageListSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          type: array
+          maxItems: 1
+          description: CONFIRMED 이미지 중 createdAt 오름차순, 동률이면 파일 ID 오름차순으로 선택한 대표 이미지 한 장
           items:
             $ref: "#/components/schemas/PublicImage"
     MenuPublicationRequest:

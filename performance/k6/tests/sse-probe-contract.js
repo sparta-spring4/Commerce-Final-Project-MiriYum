@@ -9,6 +9,8 @@ import {
   requireSlowCleanupResult,
   runOwnedHttpProbe,
   triggerWaitingChange,
+  cleanupWaitingChange,
+  verifyWaitingChange,
 } from '../sse/probe.js'
 
 export const options = {
@@ -156,9 +158,54 @@ export default function () {
       traffic: 'trigger',
     },
   })
+  const recoveryClient = recordingClient([
+    response(200, 5, {
+      waitingTeamId: '901', storeId: '301', status: 'CALLED', version: 5,
+    }),
+    response(200, 7, {
+      waitingTeamId: '901', storeId: '301', status: 'CANCELLED', version: 6,
+    }),
+  ])
+  const recovered = verifyWaitingChange({
+    client: recoveryClient,
+    baseUrl: BASE_URL,
+    session: { target: targets.waitingOperator, accessToken: TOKEN },
+    mutation: { waitingTeamId: '901', version: 5 },
+    tags: { ...TAGS, profile: 'recovery', audience: 'store-operator', endpoint_kind: 'waiting-store-operator' },
+  })
+  const cleaned = cleanupWaitingChange({
+    client: recoveryClient,
+    baseUrl: BASE_URL,
+    session: { target: targets.waitingOperator, accessToken: TOKEN },
+    mutation: { waitingTeamId: '901', version: 5 },
+    idempotencyKey: '223e4567-e89b-12d3-a456-426614174000',
+    tags: { ...TAGS, profile: 'recovery', audience: 'store-operator', endpoint_kind: 'waiting-store-operator' },
+  })
 
+  const diagnosticFailure = response(503, 1)
+  diagnosticFailure.body = `sensitive-response ${TOKEN} waitingTeamId=901`
   const badStatus = errorMessage(() => captureOwnedHttpBaseline({
-    client: recordingClient([response(503, 1), response(200, 1), response(200, 1)]),
+    client: recordingClient([diagnosticFailure, response(200, 1), response(200, 1)]),
+    baseUrl: BASE_URL,
+    session: { target: targets.notification, accessToken: TOKEN },
+    samples: 3,
+    metrics: recordingMetrics(),
+    tags: { ...TAGS, phase: 'baseline' },
+  }))
+  const invalidEnvelope = response(200, 1)
+  invalidEnvelope.body = `sensitive-response ${TOKEN} waitingTeamId=901`
+  const badEnvelope = errorMessage(() => captureOwnedHttpBaseline({
+    client: recordingClient([invalidEnvelope, response(200, 1), response(200, 1)]),
+    baseUrl: BASE_URL,
+    session: { target: targets.notification, accessToken: TOKEN },
+    samples: 3,
+    metrics: recordingMetrics(),
+    tags: { ...TAGS, phase: 'baseline' },
+  }))
+  const invalidTiming = response(200, 1)
+  invalidTiming.timings.duration = null
+  const badTiming = errorMessage(() => captureOwnedHttpBaseline({
+    client: recordingClient([invalidTiming, response(200, 1), response(200, 1)]),
     baseUrl: BASE_URL,
     session: { target: targets.notification, accessToken: TOKEN },
     samples: 3,
@@ -216,6 +263,16 @@ export default function () {
   }
   const capacityScenarios = buildSseScenarioOptions(capacityConfig)
   const capacityThresholds = buildSseThresholds(capacityConfig)
+  const recoveryConfig = {
+    profile: 'recovery',
+    connections: 1,
+    holdDurationSeconds: 30,
+    recoveryArmDelaySeconds: 15,
+    recoveryMaxSeconds: 6,
+    endpointKinds: ['waiting-store-operator'],
+  }
+  const recoveryScenarios = buildSseScenarioOptions(recoveryConfig)
+  const recoveryThresholds = buildSseThresholds(recoveryConfig)
   const roleSessions = assignSlowClientRoles([
     { target: targets.waitingOperator, accessToken: TOKEN, baselineMilliseconds: 10 },
     { target: targets.waitingOperator, accessToken: TOKEN, baselineMilliseconds: 10 },
@@ -258,11 +315,21 @@ export default function () {
       && triggerClient.calls[1].url.endsWith('/waiting-teams/901/calls')
       && JSON.parse(triggerClient.calls[1].body).expectedVersion === 4
       && triggerMetrics.entries.some((entry) => entry.name === 'trigger' && entry.value === 1),
+    'recovery verifies MySQL state through HTTP and cleans up the synthetic team': () =>
+      recovered === true
+      && cleaned === true
+      && recoveryClient.calls[0].method === 'GET'
+      && recoveryClient.calls[0].url.endsWith('/waiting-teams/901')
+      && recoveryClient.calls[1].method === 'POST'
+      && recoveryClient.calls[1].url.endsWith('/waiting-teams/901/cancellations')
+      && JSON.parse(recoveryClient.calls[1].body).expectedVersion === 5,
     'failures are fail-closed without identifier leakage': () =>
-      badStatus === 'owned HTTP baseline request failed'
+      badStatus === 'owned HTTP baseline request failed (endpoint_kind=notification-consumer status=503)'
+      && badEnvelope === 'owned HTTP baseline request failed (endpoint_kind=notification-consumer status=200)'
+      && badTiming === 'owned HTTP baseline request failed (endpoint_kind=notification-consumer status=200)'
       && missingTeam === 'slow-client trigger fixture is unavailable'
-      && !`${badStatus}${missingTeam}`.includes('901')
-      && !`${badStatus}${missingTeam}`.includes(TOKEN),
+      && !`${badStatus}${badEnvelope}${badTiming}${missingTeam}`.includes('901')
+      && !`${badStatus}${badEnvelope}${badTiming}${missingTeam}`.includes(TOKEN),
     'steady and reconnect run owned HTTP probes concurrently': () =>
       steadyScenarios.sse.exec === 'sseSteady'
       && steadyScenarios.owned_http_probe.exec === 'ownedHttpProbe'
@@ -297,5 +364,12 @@ export default function () {
       capacityScenarios.sse.exec === 'sseCapacity'
       && capacityScenarios.sse.vus === 7
       && capacityThresholds['slow_client_triggers{phase:measured,profile:slow-client,traffic:trigger}'] === undefined,
+    'recovery runs one bounded stream and requires event HTTP and cleanup evidence': () =>
+      recoveryScenarios.sse.exec === 'sseRecovery'
+      && recoveryScenarios.sse.vus === 1
+      && recoveryScenarios.owned_http_probe === undefined
+      && recoveryThresholds['sse_recovery_duration{phase:measured,profile:recovery,endpoint_kind:waiting-store-operator}'][0] === 'max<=6000'
+      && recoveryThresholds['sse_recovery_http_verified{phase:measured,profile:recovery,traffic:owned-http}'][0] === 'count==1'
+      && recoveryThresholds['sse_recovery_cleanup_successful{phase:cleanup,profile:recovery,traffic:cleanup}'][0] === 'count==1',
   })
 }

@@ -32,6 +32,7 @@ describe('readFilters', () => {
       includesInfants: true,
       availableOnly: true,
       page: 2,
+      cursor: '',
       sort: 'name,desc',
     })
   })
@@ -118,9 +119,12 @@ describe('reservationConditionState', () => {
 })
 
 describe('toSearchQuery', () => {
-  it('완전한 예약 조건만 서버로 보낸다', () => {
+  it('검색 조건을 하나의 자연어 통합 검색문으로 보낸다', () => {
     const query = toSearchQuery(
       filters({
+        keyword: '얼큰한 국물',
+        region: 'SEOUL',
+        storeCategoryCode: 'KOREAN',
         serviceDate: '2026-09-01',
         startTime: '19:00',
         partySize: '2',
@@ -129,22 +133,31 @@ describe('toSearchQuery', () => {
       }),
     )
 
-    expect(query.serviceDate).toBe('2026-09-01')
-    expect(query.startTime).toBe('19:00')
-    expect(query.partySize).toBe(2)
+    expect(query.searchInput).toBe(
+      '얼큰한 국물 SEOUL KOREAN 2026-09-01 19:00 2명',
+    )
+    expect(query.keyword).toBeUndefined()
+    expect(query.region).toBeUndefined()
+    expect(query.storeCategoryCode).toBeUndefined()
+    expect(query.serviceDate).toBeUndefined()
+    expect(query.startTime).toBeUndefined()
+    expect(query.partySize).toBeUndefined()
     expect(query.includesInfants).toBe(true)
     expect(query.availableOnly).toBe(true)
   })
 
-  it('부분 예약 조건은 서버로 보내지 않는다', () => {
-    // 계약이 부분 조건을 COMMON_001로 거절하므로 아예 싣지 않는다.
+  it('통합 검색 cursor를 URL에서 왕복 보존한다', () => {
+    const next = filters({ keyword: '파스타', cursor: 'signed-cursor' })
+
+    expect(readFilters(writeFilters(next)).cursor).toBe('signed-cursor')
+  })
+
+  it('부분 예약 조건은 통합 검색문에 포함하지 않는다', () => {
     const query = toSearchQuery(
-      filters({ serviceDate: '2026-09-01', partySize: '2' }),
+      filters({ keyword: '파스타', serviceDate: '2026-09-01', partySize: '2' }),
     )
 
-    expect(query.serviceDate).toBeUndefined()
-    expect(query.startTime).toBeUndefined()
-    expect(query.partySize).toBeUndefined()
+    expect(query.searchInput).toBe('파스타')
   })
 
   it('예약 조건이 불완전하면 availableOnly를 보내지 않는다', () => {
@@ -155,13 +168,51 @@ describe('toSearchQuery', () => {
     expect(query.availableOnly).toBeUndefined()
   })
 
-  it('임의 기본 날짜·시간·인원을 만들지 않는다', () => {
+  it('검색 조건이 없으면 기존 전체 목록 조회를 유지한다', () => {
     const query = toSearchQuery(EMPTY_FILTERS)
 
-    expect(query.serviceDate).toBeUndefined()
-    expect(query.startTime).toBeUndefined()
-    expect(query.partySize).toBeUndefined()
+    expect(query.searchInput).toBeUndefined()
+    expect(query.page).toBeUndefined()
+    expect(query.size).toBe(20)
     expect(query.availableOnly).toBeUndefined()
+  })
+
+  it('지역이나 카테고리만 선택해도 통합 검색을 사용한다', () => {
+    const query = toSearchQuery(
+      filters({ region: 'BUSAN', storeCategoryCode: 'JAPANESE' }),
+    )
+
+    expect(query.searchInput).toBe('BUSAN JAPANESE')
+    expect(query).not.toHaveProperty('keyword')
+    expect(query).not.toHaveProperty('region')
+    expect(query).not.toHaveProperty('storeCategoryCode')
+  })
+
+  it('통합 검색은 화면에 표시된 기본 정렬도 명시해서 보낸다', () => {
+    const query = toSearchQuery(filters({ keyword: '파스타' }))
+
+    expect(query.sort).toBe('name,asc')
+  })
+
+  it('상세 조건을 보존하면서 통합 검색문의 100자 계약을 지킨다', () => {
+    const query = toSearchQuery(
+      filters({
+        keyword: '가'.repeat(100),
+        region: 'SEOUL',
+        storeCategoryCode: 'KOREAN',
+      }),
+    )
+
+    expect(query.searchInput).toBe(`${'가'.repeat(87)} SEOUL KOREAN`)
+  })
+
+  it('통합 검색에는 cursor만 보내고 page를 섞지 않는다', () => {
+    const query = toSearchQuery(
+      filters({ keyword: '파스타', page: 3, cursor: 'signed-cursor' }),
+    )
+
+    expect(query.cursor).toBe('signed-cursor')
+    expect(query.page).toBeUndefined()
   })
 })
 

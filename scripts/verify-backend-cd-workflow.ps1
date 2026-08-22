@@ -30,8 +30,8 @@ $requiredFragments = @(
     "FRONTEND_IMAGE='`$frontend_image_uri'",
     "Frontend CI did not complete successfully",
     "steps.ecr-image.outputs.exists != 'true'",
-    "Manual deployment requires an existing immutable ECR image tag",
-    'ref: ${{ inputs.image_tag }}',
+    "Manual or reusable deployment requires an existing immutable ECR image tag",
+    'ref: ${{ steps.image.outputs.tag }}',
     "retry-max-attempts: 2",
     "BACKEND_DEPLOYMENT_ENVIRONMENT: staging-backend",
     "deployments: write",
@@ -50,12 +50,23 @@ $requiredFragments = @(
     "deploy/nginx/templates/snippets/sse-location.conf",
     "nginx_sse_base64",
     "/opt/miriyum/nginx/templates/snippets/sse-location.conf"
+    "NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA: 515531e122ebbce13d8eead4a3ff15a94c25e0b3"
+    "Verify notification read minimum compatible writer revision"
+    "github.workflow_sha"
+    "Preserve trusted notification read deployment controls"
+    '$RUNNER_TEMP/notification-read-deployment-gate.py'
+    '$RUNNER_TEMP/notification-read-deploy.sh'
+    "fetch-depth: 0"
 )
 
 foreach ($fragment in $requiredFragments) {
     if (-not $workflow.Contains($fragment)) {
         throw "Missing CD retry safeguard: $fragment"
     }
+}
+
+if ($workflow.Contains('script_base64=$(base64 --wrap=0 deploy/deploy.sh)')) {
+    throw "Staging CD must upload the trusted deploy script, not the selected candidate copy."
 }
 
 $frontendBuildArgumentsMatch = [regex]::Match(
@@ -91,12 +102,11 @@ $publicPortOneNames = @(
     'MIRIYUM_PORTONE_CHANNEL_KEY'
 )
 $serverPortOneSecretNames = @(
-    'MIRIYUM_PORTONE_API_SECRET'
-)
-$allPortOneNames = @($publicPortOneNames + $serverPortOneSecretNames)
-$excludedPortOneNames = @(
+    'MIRIYUM_PORTONE_API_SECRET',
+    'MIRIYUM_PAYMENT_CURSOR_SECRET',
     'MIRIYUM_PORTONE_WEBHOOK_SECRET'
 )
+$allPortOneNames = @($publicPortOneNames + $serverPortOneSecretNames)
 
 foreach ($name in $publicPortOneNames) {
     $escapedName = [regex]::Escape($name)
@@ -121,17 +131,6 @@ foreach ($name in $serverPortOneSecretNames) {
         $frontendDockerfile.Contains($name)
     ) {
         throw "$name must not be a Frontend build argument."
-    }
-}
-
-foreach ($name in $excludedPortOneNames) {
-    if (
-        $workflow.Contains($name) -or
-        $frontendDockerfile.Contains($name) -or
-        $composeSource.Contains($name) -or
-        $composeEnvironmentExample.Contains($name)
-    ) {
-        throw "$name is outside the #520 deployment contract."
     }
 }
 
@@ -160,14 +159,25 @@ if (
     throw "PortOne Channel Key must not be passed to a Compose service."
 }
 
-$cursorSecretName = "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET"
-$cursorSecret = "test-only-notification-history-cursor-secret"
+$cursorSecrets = [ordered]@{
+    MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET = "test-only-notification-history-cursor-secret"
+    MIRIYUM_WAITING_HISTORY_CURSOR_SECRET = "test-only-waiting-history-cursor-secret"
+}
 $portOneStoreId = 'test-only-portone-store-id'
-$portOneApiSecret = 'test-only-portone-api-secret'
+$portOneSecrets = [ordered]@{
+    MIRIYUM_PORTONE_API_SECRET = 'test-only-portone-api-secret'
+    MIRIYUM_PAYMENT_CURSOR_SECRET = 'test-only-payment-cursor-secret'
+    MIRIYUM_PORTONE_WEBHOOK_SECRET = 'test-only-portone-webhook-secret'
+}
 $testEnvironment = @{
-    $cursorSecretName = $cursorSecret
     MIRIYUM_PORTONE_STORE_ID = $portOneStoreId
-    MIRIYUM_PORTONE_API_SECRET = $portOneApiSecret
+    MIRIYUM_PAYMENT_ENABLED = 'true'
+}
+foreach ($entry in $portOneSecrets.GetEnumerator()) {
+    $testEnvironment[$entry.Key] = $entry.Value
+}
+foreach ($entry in $cursorSecrets.GetEnumerator()) {
+    $testEnvironment[$entry.Key] = $entry.Value
 }
 $previousEnvironment = @{}
 
@@ -184,17 +194,20 @@ try {
     }
 
     $compose = ($composeJson -join "`n") | ConvertFrom-Json
-    $renderedCursorSecret = $compose.services.backend.environment.$cursorSecretName
-
-    if ($renderedCursorSecret -ne $cursorSecret) {
-        throw "Production backend does not receive $cursorSecretName."
+    foreach ($entry in $cursorSecrets.GetEnumerator()) {
+        $renderedCursorSecret = $compose.services.backend.environment.($entry.Key)
+        if ($renderedCursorSecret -ne $entry.Value) {
+            throw "Production backend does not receive $($entry.Key)."
+        }
     }
 
     if ($compose.services.backend.environment.MIRIYUM_PORTONE_STORE_ID -ne $portOneStoreId) {
         throw "Production backend does not receive MIRIYUM_PORTONE_STORE_ID."
     }
-    if ($compose.services.backend.environment.MIRIYUM_PORTONE_API_SECRET -ne $portOneApiSecret) {
-        throw "Production backend does not receive MIRIYUM_PORTONE_API_SECRET."
+    foreach ($entry in $portOneSecrets.GetEnumerator()) {
+        if ($compose.services.backend.environment.($entry.Key) -ne $entry.Value) {
+            throw "Production backend does not receive $($entry.Key)."
+        }
     }
     foreach ($serviceProperty in $compose.services.PSObject.Properties) {
         if ($serviceProperty.Name -eq 'backend') {
@@ -202,6 +215,11 @@ try {
         }
 
         $serviceEnvironment = $serviceProperty.Value.environment
+        foreach ($name in $cursorSecrets.Keys) {
+            if ($null -ne $serviceEnvironment -and $null -ne $serviceEnvironment.PSObject.Properties[$name]) {
+                throw "Compose service $($serviceProperty.Name) must not receive $name."
+            }
+        }
         foreach ($name in $allPortOneNames) {
             if ($null -ne $serviceEnvironment -and $null -ne $serviceEnvironment.PSObject.Properties[$name]) {
                 throw "Compose service $($serviceProperty.Name) must not receive $name."

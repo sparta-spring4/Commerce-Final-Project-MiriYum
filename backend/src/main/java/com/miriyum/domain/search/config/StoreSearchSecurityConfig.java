@@ -48,6 +48,7 @@ public class StoreSearchSecurityConfig {
                                 "/api/v1/stores",
                                 "/api/v1/stores/{storeId}",
                                 "/api/v1/stores/{storeId}/menus",
+                                "/api/v1/stores/{storeId}/images",
                                 "/api/v1/stores/{storeId}/menu-hold-availability")
                         .permitAll()
                         .requestMatchers(HttpMethod.POST,

@@ -20,6 +20,10 @@ export interface paths {
     /** 매장 공개 메뉴 조회 */
     get: operations["getStoreMenus"];
   };
+  "/api/v1/stores/{storeId}/images": {
+    /** 매장 공개 이미지 조회 */
+    get: operations["getStoreImages"];
+  };
   "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches": {
     /** 품절 메뉴 대안 검색 */
     post: operations["searchMenuAlternatives"];
@@ -137,6 +141,11 @@ export interface paths {
     put: operations["updateMenu"];
   };
   "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images": {
+    /**
+     * 메뉴 공개 이미지 조회
+     * @description 메뉴 운영자가 확정된 공개 대표 이미지를 조회한다. 이미지가 없는 메뉴는 204를 반환한다.
+     */
+    get: operations["getMenuImage"];
     /**
      * 메뉴 공개 이미지 저장 또는 교체
      * @description 메뉴당 공개 이미지 한 장을 유지한다. 새 파일의 저장·검증이 끝나기 전까지 기존 공개 이미지를 유지한다. S3 버킷·IAM·환경 변수 구성과 staging smoke 검증(#223) 전에는 저장소가 비활성화되어 503으로 실패 폐쇄한다.
@@ -656,6 +665,12 @@ export interface components {
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["PublicImage"][];
     };
+    PublicStoreImageListSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      /** @description CONFIRMED 이미지 중 createdAt 오름차순, 동률이면 파일 ID 오름차순으로 선택한 대표 이미지 한 장 */
+      data: components["schemas"]["PublicImage"][];
+    };
     MenuPublicationRequest: WithRequired<{
       /** @enum {string} */
       mode: "IMMEDIATE" | "SCHEDULED";
@@ -1090,6 +1105,24 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["MenuListSuccessResponse"];
+        };
+      };
+      404: components["responses"]["StoreNotFound"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 매장 공개 이미지 조회 */
+  getStoreImages: {
+    parameters: {
+      path: {
+        storeId: components["parameters"]["StoreId"];
+      };
+    };
+    responses: {
+      /** @description CONFIRMED 이미지 중 생성 시각이 가장 이른 대표 공개 이미지 한 장 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PublicStoreImageListSuccessResponse"];
         };
       };
       404: components["responses"]["StoreNotFound"];
@@ -1847,6 +1880,35 @@ export interface operations {
       403: components["responses"]["StoreAccessDenied"];
       404: components["responses"]["MenuNotFound"];
       409: components["responses"]["MenuStateConflict"];
+    };
+  };
+  /**
+   * 메뉴 공개 이미지 조회
+   * @description 메뉴 운영자가 확정된 공개 대표 이미지를 조회한다. 이미지가 없는 메뉴는 204를 반환한다.
+   */
+  getMenuImage: {
+    parameters: {
+      path: {
+        storeId: components["parameters"]["StoreId"];
+        menuId: components["parameters"]["MenuId"];
+      };
+    };
+    responses: {
+      /** @description 확정된 메뉴 공개 이미지 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MenuPublicImageSuccessResponse"];
+        };
+      };
+      /** @description 공개 이미지가 없는 메뉴 */
+      204: {
+        content: never;
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["StoreAccessDenied"];
+      404: components["responses"]["MenuImageTargetNotFound"];
+      409: components["responses"]["MenuImageStateConflict"];
     };
   };
   /**

@@ -69,8 +69,12 @@ class ApiUrlConventionTest {
                 route(RequestMethod.PUT, "/api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/end-at"),
                 route(RequestMethod.GET, "/api/v1/store-operators/stores/{storeId}/waiting-settings/deactivation-impact"),
                 route(RequestMethod.POST, "/api/v1/platform-operators/auth/sessions"),
+                route(RequestMethod.GET, "/api/v1/platform-operators/onboarding-review-cases"),
+                route(RequestMethod.POST, "/api/v1/platform-operators/onboarding-review-cases/{caseId}/assignments"),
+                route(RequestMethod.GET, "/api/v1/platform-operators/onboarding-review-cases/{caseId}/evidence"),
                 route(RequestMethod.PUT, "/api/v1/platform-operators/accounts/{operatorId}/authority"),
                 route(RequestMethod.PUT, "/api/v1/platform-operators/accounts/{operatorId}/suspension"),
+                route(RequestMethod.GET, "/api/v1/consumers/me/notifications/unread-count"),
                 route(RequestMethod.POST, "/api/v1/payments/webhooks/portone"));
 
         assertThat(ApiUrlConvention.violations(valid)).isEmpty();

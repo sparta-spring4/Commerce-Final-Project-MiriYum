@@ -45,7 +45,11 @@ paths:
   /api/v1/store-operators/me/kakao-links:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1me~1kakao-links"
   /api/v1/store-operators/stores:
-    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores"
+    $ref: "./store-onboarding/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores"
+  /api/v1/store-operators/onboarding-applications/{applicationId}:
+    $ref: "./store-onboarding/openapi.yaml#/paths/~1api~1v1~1store-operators~1onboarding-applications~1{applicationId}"
+  /api/v1/store-operators/onboarding-applications/{applicationId}/versions:
+    $ref: "./store-onboarding/openapi.yaml#/paths/~1api~1v1~1store-operators~1onboarding-applications~1{applicationId}~1versions"
   /api/v1/store-operators/stores/{storeId}:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}"
   /api/v1/store-operators/stores/{storeId}/images:

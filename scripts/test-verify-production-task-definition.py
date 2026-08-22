@@ -592,6 +592,26 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
         self.assertNotIn(legacy_key, secrets)
         self.assertTrue(secrets[canonical_key].endswith(f":{canonical_key}::"))
 
+    def test_production_task_definition_supplies_waiting_history_cursor_secret(self):
+        secret_name = "MIRIYUM_WAITING_HISTORY_CURSOR_SECRET"
+        contract = json.loads(
+                Path("deploy/ecs/production-secret-contract.json").read_text(encoding="utf-8"))
+        task_definition = json.loads(
+                Path("deploy/ecs/production-task-definition.json").read_text(encoding="utf-8"))
+        backend = next(
+                container
+                for container in task_definition["containerDefinitions"]
+                if container["name"] == "backend"
+        )
+        secrets = {
+                item["name"]: item["valueFrom"]
+                for item in backend["secrets"]
+        }
+
+        self.assertIn(secret_name, contract["requiredSecrets"])
+        self.assertIn(secret_name, secrets)
+        self.assertTrue(secrets[secret_name].endswith(f":{secret_name}::"))
+
     def test_accepts_a_whole_runtime_config_secret_with_parameter_secrets(self):
         validate = load_validator()
 

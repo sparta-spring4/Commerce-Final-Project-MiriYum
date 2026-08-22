@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
 import { http } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { errorResponse, successResponse } from '../../../../test/msw/envelope'
@@ -25,6 +25,7 @@ function respondWithDetail(
     http.get('/api/v1/stores/:storeId/menus', () =>
       successResponse({ items: menus }),
     ),
+    http.get('/api/v1/stores/:storeId/images', () => successResponse([])),
   )
 }
 
@@ -50,6 +51,49 @@ describe('매장 상세 화면', () => {
     expect(
       screen.getByText('서울 · 서울특별시 성동구 연무장길 14'),
     ).toBeInTheDocument()
+  })
+
+  it('등록된 공개 매장 이미지를 hero에 먼저 표시한다', async () => {
+    respondWithDetail(storeDetail())
+    server.use(
+      http.get('/api/v1/stores/:storeId/images', () =>
+        successResponse([
+          {
+            imageId: 'd2719d4a-6174-4f23-ae57-18b7e4eeab40',
+            url: '/api/v1/public-files/d2719d4a-6174-4f23-ae57-18b7e4eeab40',
+          },
+        ]),
+      ),
+    )
+
+    renderDetail()
+
+    expect(await screen.findByAltText('매장 대표 이미지')).toHaveAttribute(
+      'src',
+      '/api/v1/public-files/d2719d4a-6174-4f23-ae57-18b7e4eeab40',
+    )
+  })
+
+  it('대표 이미지 로드 오류 시 카테고리 일러스트를 hero에 표시한다', async () => {
+    respondWithDetail(storeDetail({ storeCategoryCode: 'KOREAN' }))
+    server.use(
+      http.get('/api/v1/stores/:storeId/images', () =>
+        successResponse([
+          {
+            imageId: 'd2719d4a-6174-4f23-ae57-18b7e4eeab40',
+            url: '/api/v1/public-files/d2719d4a-6174-4f23-ae57-18b7e4eeab40',
+          },
+        ]),
+      ),
+    )
+
+    const { container } = renderDetail()
+    const primaryImage = await screen.findByAltText('매장 대표 이미지')
+
+    fireEvent.error(primaryImage)
+
+    expect(screen.queryByAltText('매장 대표 이미지')).not.toBeInTheDocument()
+    expect(container.querySelector('img[alt=""]')).toBeInTheDocument()
   })
 
   it('태그 표시명을 서버 catalog에서 받아 쓴다', async () => {

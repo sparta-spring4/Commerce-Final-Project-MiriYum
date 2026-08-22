@@ -13,23 +13,17 @@ import type {
 type StoreSearchResponseData =
   components['schemas']['StoreSearchSuccessResponse']['data']
 
-/**
- * 2차 MVP가 `searchStores` 응답을 union으로 넓혔다.
- *
- * - `searchInput`을 보내면 cursor 모드(`IntegratedStoreSearchData`)
- * - 보내지 않으면 page 모드(`StorePageData`)
- *
- * 1차 MVP 검색은 `searchInput`을 만들지 않으므로 언제나 page 모드다. 그 사실을
- * 여기서 한 번 좁혀 두면 화면은 `page`가 있는 타입만 다루면 된다.
- * 통합 검색 화면은 2차 MVP #112가 자기 query로 따로 소유한다.
- */
-function toPageData(
+/** 요청 모드와 응답 union이 일치하지 않으면 빈 결과로 숨기지 않는다. */
+function toSearchData(
   data: StoreSearchResponseData,
-): Extract<StoreSearchResponseData, { page: unknown }> {
-  if (!('page' in data)) {
-    // searchInput을 보내지 않았는데 cursor 모드가 왔다. 조용히 빈 목록으로
-    // 넘기면 사용자에게 결과 없음을 잘못 보여 주므로 계약 위반으로 올린다.
-    throw new ApiContractError(200, 'expectedPagedStoreSearch')
+  integrated: boolean,
+): StoreSearchResponseData {
+  const paged = 'page' in data
+  if (integrated === paged) {
+    throw new ApiContractError(
+      200,
+      integrated ? 'expectedIntegratedStoreSearch' : 'expectedPagedStoreSearch',
+    )
   }
   return data
 }
@@ -49,6 +43,8 @@ export const storeSearchKeys = {
     [...storeSearchKeys.all, 'store', storeId, query] as const,
   menus: (storeId: string) =>
     [...storeSearchKeys.all, 'store', storeId, 'menus'] as const,
+  images: (storeId: string) =>
+    [...storeSearchKeys.all, 'store', storeId, 'images'] as const,
 }
 
 type CatalogName = 'store-categories' | 'store-tags' | 'menu-categories'
@@ -96,11 +92,14 @@ export function useStoreSearch(query: StoreSearchQuery, enabled = true) {
         query,
         signal,
       })
-      return toPageData(response.data)
+      return toSearchData(
+        response.data,
+        typeof query.searchInput === 'string' && query.searchInput.length > 0,
+      )
     },
     enabled,
     /*
-     * 페이지를 넘길 때만 이전 결과를 유지한다.
+     * 기존 page 모드에서 페이지를 넘길 때만 이전 결과를 유지한다.
      *
      * 조건이 바뀔 때도 유지하면 칩과 총 개수는 새 조건인데 목록은 이전 조건의
      * 결과인 구간이 생긴다. 그 사이 카드를 누르면 이전 조건의 매장에 새 예약
@@ -138,6 +137,20 @@ export function useStoreMenus(storeId: string) {
         signal,
       })
       return response.data.items
+    },
+  })
+}
+
+export function useStoreImages(storeId: string) {
+  return useQuery({
+    queryKey: storeSearchKeys.images(storeId),
+    queryFn: async ({ signal }) => {
+      const response = await publicApiClient('/api/v1/stores/{storeId}/images', {
+        method: 'get',
+        pathParams: { storeId },
+        signal,
+      })
+      return response.data
     },
   })
 }

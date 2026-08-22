@@ -26,13 +26,18 @@ import com.miriyum.domain.search.repository.PublicStoreSnapshot;
 import com.miriyum.domain.search.repository.StorePublicReadRepository;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.storage.FileStorageOwner;
+import com.miriyum.global.storage.FileStorageMetadata;
 import com.miriyum.global.storage.FileStoragePurpose;
+import com.miriyum.global.storage.FileStorageStatus;
+import com.miriyum.global.storage.FileStorageVisibility;
 import com.miriyum.global.storage.service.FileStorageFacade;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.Map;
+import java.util.UUID;
 import org.springframework.beans.factory.ObjectProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -104,6 +109,81 @@ class StorePublicQueryServiceTest {
         List<PublicMenu> result = service.getMenus(7L);
 
         assertThat(result).singleElement().satisfies(found -> assertThat(found.imageUrl()).isNull());
+    }
+
+    @Test
+    void publicImagesExposeConfirmedStoreImagesOnlyAfterPublicStoreCheck() {
+        FileStorageOwner owner = new FileStorageOwner("STORE", 7L);
+        UUID imageId = UUID.fromString("d2719d4a-6174-4f23-ae57-18b7e4eeab40");
+        given(publicReadRepository.findPublicStore(7L)).willReturn(Optional.of(publicStore(7L)));
+        given(fileStorageFacadeProvider.getIfAvailable()).willReturn(fileStorageFacade);
+        given(fileStorageFacade.findPublicMetadata(
+                owner,
+                FileStoragePurpose.STORE_IMAGE,
+                List.of(FileStorageStatus.CONFIRMED)))
+                .willReturn(List.of(new FileStorageMetadata(
+                        imageId,
+                        owner,
+                        FileStoragePurpose.STORE_IMAGE,
+                        "public/stores/7/store.webp",
+                        "image/webp",
+                        123L,
+                        "a".repeat(64),
+                        FileStorageVisibility.PUBLIC,
+                        FileStorageStatus.CONFIRMED,
+                        "PUBLIC_STORE_IMAGE",
+                        Instant.parse("2026-08-21T00:00:00Z"),
+                        null)));
+
+        var result = service.getImages(7L);
+
+        assertThat(result).singleElement().satisfies(image -> {
+            assertThat(image.imageId()).isEqualTo(imageId);
+            assertThat(image.url()).isEqualTo("/api/v1/public-files/" + imageId);
+        });
+    }
+
+    @Test
+    void publicImagesExposeOnlyTheDeterministicRepresentativeWhenMultipleImagesAreConfirmed() {
+        FileStorageOwner owner = new FileStorageOwner("STORE", 7L);
+        UUID earlierImageId = UUID.fromString("d2719d4a-6174-4f23-ae57-18b7e4eeab40");
+        UUID laterImageId = UUID.fromString("e3719d4a-6174-4f23-ae57-18b7e4eeab40");
+        given(publicReadRepository.findPublicStore(7L)).willReturn(Optional.of(publicStore(7L)));
+        given(fileStorageFacadeProvider.getIfAvailable()).willReturn(fileStorageFacade);
+        given(fileStorageFacade.findPublicMetadata(
+                owner,
+                FileStoragePurpose.STORE_IMAGE,
+                List.of(FileStorageStatus.CONFIRMED)))
+                .willReturn(List.of(
+                        confirmedStoreImage(owner, laterImageId, Instant.parse("2026-08-22T00:00:00Z")),
+                        confirmedStoreImage(owner, earlierImageId, Instant.parse("2026-08-21T00:00:00Z"))));
+
+        var result = service.getImages(7L);
+
+        assertThat(result).singleElement().satisfies(image ->
+                assertThat(image.imageId()).isEqualTo(earlierImageId));
+    }
+
+    @Test
+    void publicImagesBreakRepresentativeTimestampTiesByImageId() {
+        FileStorageOwner owner = new FileStorageOwner("STORE", 7L);
+        Instant createdAt = Instant.parse("2026-08-21T00:00:00Z");
+        UUID firstImageId = UUID.fromString("d2719d4a-6174-4f23-ae57-18b7e4eeab40");
+        UUID secondImageId = UUID.fromString("e3719d4a-6174-4f23-ae57-18b7e4eeab40");
+        given(publicReadRepository.findPublicStore(7L)).willReturn(Optional.of(publicStore(7L)));
+        given(fileStorageFacadeProvider.getIfAvailable()).willReturn(fileStorageFacade);
+        given(fileStorageFacade.findPublicMetadata(
+                owner,
+                FileStoragePurpose.STORE_IMAGE,
+                List.of(FileStorageStatus.CONFIRMED)))
+                .willReturn(List.of(
+                        confirmedStoreImage(owner, secondImageId, createdAt),
+                        confirmedStoreImage(owner, firstImageId, createdAt)));
+
+        var result = service.getImages(7L);
+
+        assertThat(result).singleElement().satisfies(image ->
+                assertThat(image.imageId()).isEqualTo(firstImageId));
     }
 
     @Test
@@ -276,6 +356,26 @@ class StorePublicQueryServiceTest {
         return new PublicMenu(
                 Long.toString(id), "아메리카노", "", 4500, true, "COFFEE",
                 List.of(), List.of(), false, false, MenuSellingStatus.SELLING);
+    }
+
+    private static FileStorageMetadata confirmedStoreImage(
+            FileStorageOwner owner,
+            UUID imageId,
+            Instant createdAt
+    ) {
+        return new FileStorageMetadata(
+                imageId,
+                owner,
+                FileStoragePurpose.STORE_IMAGE,
+                "public/stores/7/" + imageId + ".webp",
+                "image/webp",
+                123L,
+                "a".repeat(64),
+                FileStorageVisibility.PUBLIC,
+                FileStorageStatus.CONFIRMED,
+                "PUBLIC_STORE_IMAGE",
+                createdAt,
+                null);
     }
 
     private static RepresentativeMenuItem representative(

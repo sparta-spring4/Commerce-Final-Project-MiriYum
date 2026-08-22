@@ -9,6 +9,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.time.ZoneId;
+import java.time.LocalDate;
 import java.util.List;
 
 public record StoreCreateRequest(
@@ -53,6 +54,21 @@ public record StoreCreateRequest(
         @Valid
         StoreModesRequest modes,
 
+        @NotBlank @Size(max = 200)
+        String legalBusinessName,
+
+        @NotBlank @Size(max = 100)
+        String representativeName,
+
+        @NotNull
+        LocalDate openingDate,
+
+        @NotBlank @Size(max = 100)
+        String primaryBusinessCategory,
+
+        @NotBlank @Size(max = 100)
+        String primaryBusinessItem,
+
         @NotNull
         @AssertTrue
         Boolean applicantSelfAttested,
@@ -61,6 +77,28 @@ public record StoreCreateRequest(
         @AssertTrue
         Boolean requiredTermsAgreed
 ) {
+    /** 기존 내부 Store 생성 테스트·호출자를 위한 호환 생성자다. 신규 HTTP 신청에서는 확장 필드가 필수다. */
+    public StoreCreateRequest(
+            String businessRegistrationNumber,
+            BusinessType businessType,
+            String name,
+            String description,
+            Region region,
+            String address,
+            String timeZoneId,
+            String storeCategoryCode,
+            List<String> tagCodes,
+            StoreModesRequest modes,
+            Boolean applicantSelfAttested,
+            Boolean requiredTermsAgreed
+    ) {
+        this(
+                businessRegistrationNumber, businessType, name, description, region, address,
+                timeZoneId, storeCategoryCode, tagCodes, modes,
+                "LEGACY", "LEGACY", LocalDate.of(1970, 1, 1), "LEGACY", "LEGACY",
+                applicantSelfAttested, requiredTermsAgreed);
+    }
+
     @AssertTrue(message = "유효한 IANA 시간대여야 합니다.")
     public boolean isTimeZoneIdValid() {
         if (timeZoneId == null || timeZoneId.isBlank()) {
