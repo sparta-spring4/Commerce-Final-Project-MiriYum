@@ -123,6 +123,33 @@ class MenuImageServiceTest {
     }
 
     @Test
+    void getsConfirmedImageForManagedMenu() {
+        UUID imageId = UUID.fromString("323e4567-e89b-12d3-a456-426614174000");
+        given(menuRepository.findManagedById(13L)).willReturn(Optional.of(menu));
+        given(menu.getStoreId()).willReturn(7L);
+        given(fileStorageFacadeProvider.getIfAvailable()).willReturn(fileStorageFacade);
+        given(fileStorageFacade.findPublicMetadata(any(), org.mockito.ArgumentMatchers.eq(FileStoragePurpose.MENU_IMAGE), any()))
+                .willReturn(List.of(confirmedMenuImage(imageId).toPublicMetadata()));
+
+        MenuPublicImageResponse result = service.getMenuImage(11L, 7L, 13L);
+
+        assertThat(result).isEqualTo(new MenuPublicImageResponse("/api/v1/public-files/" + imageId));
+        then(storeService).should().requireManagementOwnership(11L, 7L);
+        then(storeService).should().requireMenuMutationAuthority(11L, 7L);
+    }
+
+    @Test
+    void returnsNoImageForManagedMenuWithoutConfirmedMetadata() {
+        given(menuRepository.findManagedById(13L)).willReturn(Optional.of(menu));
+        given(menu.getStoreId()).willReturn(7L);
+        given(fileStorageFacadeProvider.getIfAvailable()).willReturn(fileStorageFacade);
+        given(fileStorageFacade.findPublicMetadata(any(), org.mockito.ArgumentMatchers.eq(FileStoragePurpose.MENU_IMAGE), any()))
+                .willReturn(List.of());
+
+        assertThat(service.getMenuImage(11L, 7L, 13L)).isNull();
+    }
+
+    @Test
     void retriesDeletedImageCleanupWhenPutIsReplayed() {
         UUID deletedImageId = UUID.fromString("523e4567-e89b-12d3-a456-426614174000");
         FileStorageMetadata deleted = deletedMenuImage(deletedImageId);

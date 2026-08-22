@@ -95,6 +95,16 @@ public class MenuImageService {
         return result(outcome);
     }
 
+    @Transactional(readOnly = true)
+    public MenuPublicImageResponse getMenuImage(long operatorAccountId, long storeId, long menuId) {
+        requireManagementAuthority(operatorAccountId, storeId);
+        requireManagedMenu(storeId, menuId);
+        return confirmedImages(menuId).stream()
+                .findFirst()
+                .map(MenuPublicImageResponse::from)
+                .orElse(null);
+    }
+
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 15)
     public void deleteMenuImage(
             long operatorAccountId,
@@ -127,6 +137,16 @@ public class MenuImageService {
         requireManagementAuthority(operatorAccountId, storeId);
         Menu menu = menuRepository.findByIdForUpdate(menuId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.MENU_NOT_FOUND));
+        requireMenuBelongsToStore(menu, storeId);
+    }
+
+    private void requireManagedMenu(long storeId, long menuId) {
+        Menu menu = menuRepository.findManagedById(menuId)
+                .orElseThrow(() -> new ServiceException(StoreErrorCode.MENU_NOT_FOUND));
+        requireMenuBelongsToStore(menu, storeId);
+    }
+
+    private void requireMenuBelongsToStore(Menu menu, long storeId) {
         if (menu.getStoreId() != storeId) {
             throw new ServiceException(StoreErrorCode.MENU_NOT_FOUND);
         }
