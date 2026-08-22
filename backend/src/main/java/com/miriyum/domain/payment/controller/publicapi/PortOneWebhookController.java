@@ -14,7 +14,10 @@ import org.springframework.web.bind.annotation.RestController;
 /** PortOne V2 Webhook의 raw body와 Standard Webhooks 헤더를 수신한다. */
 @RestController
 @RequestMapping("/api/v1/payments/webhooks")
-@ConditionalOnProperty(name = "miriyum.payment.enabled", havingValue = "true")
+@ConditionalOnProperty(
+        name = {"miriyum.payment.enabled", "miriyum.payment.portone.webhook-enabled"},
+        havingValue = "true"
+)
 public class PortOneWebhookController {
 
     private final PaymentWebhookService webhookService;
