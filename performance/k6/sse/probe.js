@@ -194,19 +194,26 @@ function headers(accessToken, json = false) {
   }
 }
 
-function parseSuccess(response, errorMessage) {
-  if (response?.status !== 200) throw new Error(errorMessage)
+function diagnosticError(errorMessage, response, diagnosticTags) {
+  if (diagnosticTags === null) return new Error(errorMessage)
+  const endpointKind = requireText('endpoint_kind tag', diagnosticTags.endpoint_kind)
+  const status = Number.isInteger(response?.status) ? response.status : 'transport'
+  return new Error(`${errorMessage} (endpoint_kind=${endpointKind} status=${status})`)
+}
+
+function parseSuccess(response, errorMessage, diagnosticTags = null) {
+  if (response?.status !== 200) throw diagnosticError(errorMessage, response, diagnosticTags)
   let parsed
   try {
     parsed = JSON.parse(response.body)
   } catch (_) {
-    throw new Error(errorMessage)
+    throw diagnosticError(errorMessage, response, diagnosticTags)
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)
     || parsed.code !== 'SUCCESS'
     || typeof parsed.message !== 'string'
     || parsed.data === undefined) {
-    throw new Error(errorMessage)
+    throw diagnosticError(errorMessage, response, diagnosticTags)
   }
   return parsed.data
 }
@@ -222,10 +229,10 @@ function requireRecoveryMutation(mutation) {
   return mutation
 }
 
-function durationMilliseconds(response, errorMessage) {
+function durationMilliseconds(response, errorMessage, diagnosticTags = null) {
   const duration = response?.timings?.duration
   if (typeof duration !== 'number' || !Number.isFinite(duration) || duration < 0) {
-    throw new Error(errorMessage)
+    throw diagnosticError(errorMessage, response, diagnosticTags)
   }
   return duration
 }
@@ -278,8 +285,8 @@ export function captureOwnedHttpBaseline({
   const durations = []
   for (let index = 0; index < samples; index += 1) {
     const response = get(client, url, selected.accessToken, selectedTags)
-    parseSuccess(response, 'owned HTTP baseline request failed')
-    const duration = durationMilliseconds(response, 'owned HTTP baseline request failed')
+    parseSuccess(response, 'owned HTTP baseline request failed', selectedTags)
+    const duration = durationMilliseconds(response, 'owned HTTP baseline request failed', selectedTags)
     durations.push(duration)
     emit(metrics, 'baseline', duration, selectedTags)
   }
