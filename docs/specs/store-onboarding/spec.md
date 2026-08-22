@@ -11,7 +11,11 @@
 - 기존 `POST /api/v1/store-operators/stores`가 유일한 신규 신청 진입점이다. 별도 신규 신청 API를 안내하지 않는다.
 - 요청은 `multipart/form-data`이며 JSON `application` part와 `businessRegistrationEvidence` part를 각각 정확히 하나 요구한다.
 - 증빙은 PDF, JPEG, PNG만 허용하고 최대 10,485,760 bytes다. 선언 MIME과 파일 signature가 일치해야 하며 암호화 PDF는 거절한다.
+- `application`은 사업자등록번호·법적 상호명·대표자명·개업일·주업태명·주종목명, 사업장 주소와 검색용 매장 주 카테고리 코드를 서로 다른 필드로 받는다. 사업자등록증의 업태·종목을 검색 카테고리로 변환하지 않는다.
+- 과거 픽업 업종 제한을 위해 사용한 `businessType(CAFE/BAKERY/OTHER)`은 신청 입력·snapshot·Store와 공개 계약에서 제거한다. 모든 업종의 거래 기능은 `modes`가 결정하며 클라이언트가 호환용 임의 값을 만들지 않는다.
+- 매장 등록 화면은 활성 `GET /api/v1/store-categories` 결과를 사용해 한식·중식·일식·양식·아시아 음식·카페·베이커리·주점·기타의 현재 활성 catalog를 선택하게 한다. 표시명이나 code를 프런트에 별도 하드코딩하지 않는다.
 - 접수 성공은 Store가 아니라 `202 Accepted` 신청 데이터를 반환한다. 데이터는 `applicationId`, `applicationVersion`, `status`, `reviewRequired`, `nextAction`, nullable `storeId`만 포함한다.
+- 프런트는 `202`를 매장 생성 완료로 낙관하지 않고 소유 신청 상태 화면으로 이동한다. 상태 화면은 같은 신청 GET을 재조회하며 `storeId`가 생긴 승인 상태에서만 매장 관리 진입을 제공한다.
 - 같은 운영자·멱등 키·요청 fingerprint 재전송은 최초 결과를 반환한다. JSON 또는 증빙 SHA-256이 다른 재사용은 충돌로 거절한다.
 - 보완 요청 뒤 `POST /api/v1/store-operators/onboarding-applications/{applicationId}/versions`로 새 불변 version을 제출한다. 이전 version의 배정·결정·증빙 접근은 무효다.
 
@@ -40,9 +44,19 @@
 - 증빙 조회 성공과 실패를 별도 감사 트랜잭션에 public ID, version, actor/authority snapshot, 허용된 결과·사유와 correlation ID만 기록한다.
 - #344의 CURRENT/REPLACED 원장, 보존·파기 정책과 private confirmed 파일 조건을 그대로 사용한다.
 
+## Migration and Frontend Handoff
+
+- 순방향 Flyway migration은 `stores.business_type`의 check constraint와 column, `store_onboarding_application_versions.business_type` column을 제거한다. 기존 매장과 신청의 다른 상태·감사·증빙 데이터는 변경하지 않는다.
+- Store 생성·수정·멱등 fingerprint, onboarding snapshot·자동검사·finalizer와 공개 DTO에서 `BusinessType`을 제거한다. 검색 카테고리 또는 사업자등록증 업태·종목에서 호환 값을 파생하지 않는다.
+- `docs/specs/store-onboarding/openapi.yaml`이 신규 신청 POST와 신청 상태 GET을 소유한다. `docs/specs/store-search/openapi.yaml`은 같은 collection의 소유 매장 GET만 유지하고 과거 JSON POST를 제거한다.
+- 프런트 codegen은 onboarding OpenAPI를 별도 생성한다. 공통 typed client는 동일 URL의 Store Search GET과 Store Onboarding POST를 method 단위로 합성하며, 문서 간 중복 path를 교집합으로 조용히 병합하지 않는다.
+- 로컬 mock 사업자 검증 adapter는 실제 PDF/JPEG/PNG signature 검사를 통과한 증빙과 일치하는 구조화 입력에 대해서만 기존 자동검사 흐름을 진행한다. production 성공을 가짜 응답으로 대체하지 않는다.
+
 ## Acceptance Criteria
 
 - 두 switch 모드 모두 사업자등록증과 자동검사 없이는 Store가 생성되지 않는다.
+- 신규 신청은 `businessType` 없이 접수·snapshot·자동검사·최종 Store 생성까지 완료되며 기존 Store와 진행 중 신청의 해당 column은 순방향 migration으로 제거한다.
+- 매장 운영자는 사업자등록증의 구조화 필수 정보, 비공개 증빙 한 개와 활성 검색 카테고리 한 개를 제출할 수 있고 `202` 이후 신청 상태를 다시 확인할 수 있다.
 - switch 변경은 이미 접수된 version의 `reviewRequired`에 영향을 주지 않는다.
 - 자동 모드는 검사 통과 뒤 Store 하나, 수동 모드는 운영자 승인 전 Store 0개다.
 - 보완 version 제출 뒤 이전 version 명령과 열람은 거절된다.

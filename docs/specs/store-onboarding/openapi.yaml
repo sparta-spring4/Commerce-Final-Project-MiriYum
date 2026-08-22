@@ -116,7 +116,6 @@ components:
         - tagCodes
         - modes
         - businessRegistrationNumber
-        - businessType
         - legalBusinessName
         - representativeName
         - openingDate
@@ -149,9 +148,6 @@ components:
         businessRegistrationNumber:
           type: string
           pattern: '^[0-9]{10}$'
-        businessType:
-          type: string
-          enum: [CAFE, BAKERY, OTHER]
         legalBusinessName: {type: string, minLength: 1, maxLength: 200}
         representativeName: {type: string, minLength: 1, maxLength: 100}
         openingDate: {type: string, format: date}
