@@ -182,8 +182,30 @@ export default function () {
     tags: { ...TAGS, profile: 'recovery', audience: 'store-operator', endpoint_kind: 'waiting-store-operator' },
   })
 
+  const diagnosticFailure = response(503, 1)
+  diagnosticFailure.body = `sensitive-response ${TOKEN} waitingTeamId=901`
   const badStatus = errorMessage(() => captureOwnedHttpBaseline({
-    client: recordingClient([response(503, 1), response(200, 1), response(200, 1)]),
+    client: recordingClient([diagnosticFailure, response(200, 1), response(200, 1)]),
+    baseUrl: BASE_URL,
+    session: { target: targets.notification, accessToken: TOKEN },
+    samples: 3,
+    metrics: recordingMetrics(),
+    tags: { ...TAGS, phase: 'baseline' },
+  }))
+  const invalidEnvelope = response(200, 1)
+  invalidEnvelope.body = `sensitive-response ${TOKEN} waitingTeamId=901`
+  const badEnvelope = errorMessage(() => captureOwnedHttpBaseline({
+    client: recordingClient([invalidEnvelope, response(200, 1), response(200, 1)]),
+    baseUrl: BASE_URL,
+    session: { target: targets.notification, accessToken: TOKEN },
+    samples: 3,
+    metrics: recordingMetrics(),
+    tags: { ...TAGS, phase: 'baseline' },
+  }))
+  const invalidTiming = response(200, 1)
+  invalidTiming.timings.duration = null
+  const badTiming = errorMessage(() => captureOwnedHttpBaseline({
+    client: recordingClient([invalidTiming, response(200, 1), response(200, 1)]),
     baseUrl: BASE_URL,
     session: { target: targets.notification, accessToken: TOKEN },
     samples: 3,
@@ -302,10 +324,12 @@ export default function () {
       && recoveryClient.calls[1].url.endsWith('/waiting-teams/901/cancellations')
       && JSON.parse(recoveryClient.calls[1].body).expectedVersion === 5,
     'failures are fail-closed without identifier leakage': () =>
-      badStatus === 'owned HTTP baseline request failed'
+      badStatus === 'owned HTTP baseline request failed (endpoint_kind=notification-consumer status=503)'
+      && badEnvelope === 'owned HTTP baseline request failed (endpoint_kind=notification-consumer status=200)'
+      && badTiming === 'owned HTTP baseline request failed (endpoint_kind=notification-consumer status=200)'
       && missingTeam === 'slow-client trigger fixture is unavailable'
-      && !`${badStatus}${missingTeam}`.includes('901')
-      && !`${badStatus}${missingTeam}`.includes(TOKEN),
+      && !`${badStatus}${badEnvelope}${badTiming}${missingTeam}`.includes('901')
+      && !`${badStatus}${badEnvelope}${badTiming}${missingTeam}`.includes(TOKEN),
     'steady and reconnect run owned HTTP probes concurrently': () =>
       steadyScenarios.sse.exec === 'sseSteady'
       && steadyScenarios.owned_http_probe.exec === 'ownedHttpProbe'
