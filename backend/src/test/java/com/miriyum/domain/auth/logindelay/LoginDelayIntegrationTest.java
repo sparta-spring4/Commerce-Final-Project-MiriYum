@@ -92,7 +92,7 @@ class LoginDelayIntegrationTest {
     @MockitoBean
     private RefreshTokenStore refreshTokenStore;
 
-    @Autowired
+    @MockitoSpyBean
     private LoginDelayGuard loginDelayGuard;
 
     @Autowired
@@ -336,11 +336,19 @@ class LoginDelayIntegrationTest {
         int threadCount = 10;
         CountDownLatch readyLatch = new CountDownLatch(threadCount);
         CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch attemptAcquiredLatch = new CountDownLatch(threadCount);
         List<Future<?>> futures = new ArrayList<>();
         boolean completedInTime;
 
         willAnswer(invocation -> {
-            Thread.sleep(500);
+            LoginAttempt loginAttempt = (LoginAttempt) invocation.callRealMethod();
+            attemptAcquiredLatch.countDown();
+            return loginAttempt;
+        }).given(loginDelayGuard).tryAcquireAttempt(eq(TokenNamespace.CONSUMER), eq(accountId));
+
+        willAnswer(invocation -> {
+            // 모든 경쟁 요청이 lease 획득을 시도한 뒤에만 비교를 마쳐 재현성을 확보한다.
+            assertThat(attemptAcquiredLatch.await(5, TimeUnit.SECONDS)).isTrue();
             return invocation.callRealMethod();
         }).given(passwordEncoder).matches(eq(WRONG_PASSWORD), anyString());
 
