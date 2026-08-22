@@ -8,6 +8,7 @@ import {
   validateFixture,
 } from './lib/contracts.js'
 import { COOKIE_LIFETIME_OPTIONS } from './lib/runtime-options.js'
+import { validateCapacityProof } from './lib/capacity-proof.js'
 import {
   createFixtureFingerprint,
   createTargetFingerprint,
@@ -33,6 +34,16 @@ const prerequisiteSmokeProof = config.profile === 'smoke'
     harnessCommitSha: config.harnessCommitSha,
     fixtureText,
     smokeRunId: config.prerequisiteSmokeRunId,
+    scenarioNames: config.scenarioNames,
+  })
+const prerequisiteCapacityProof = config.capacityPreviousProofPath === null
+  ? null
+  : validateCapacityProof(JSON.parse(open(config.capacityPreviousProofPath)), {
+    previousStageNumber: config.capacityStageNumber - 1,
+    targetFingerprint,
+    fixtureSha256,
+    commitSha: config.commitSha,
+    harnessCommitSha: config.harnessCommitSha,
     scenarioNames: config.scenarioNames,
   })
 
@@ -197,6 +208,15 @@ export function handleSummary(data) {
     targetFingerprint,
     fixtureSha256,
     limits: config.limits,
+    capacity: config.profile === 'staging-capacity'
+      ? {
+        stageNumber: config.capacityStageNumber,
+        targetRps: config.capacityTargetRps,
+        previousStageNumber: prerequisiteCapacityProof === null
+          ? null
+          : prerequisiteCapacityProof.capacity.stageNumber,
+      }
+      : null,
   })
   return {
     stdout: rendered.stdout,
