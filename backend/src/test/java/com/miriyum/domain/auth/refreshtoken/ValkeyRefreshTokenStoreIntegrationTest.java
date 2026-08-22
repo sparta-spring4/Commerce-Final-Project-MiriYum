@@ -73,7 +73,7 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     @Test
     @DisplayName("현재 Refresh Token만 한 번 회전하고 이전 토큰 재사용은 family를 폐기한다")
     void rotatesOnlyCurrentTokenAndRevokesOnReuse() {
-        Instant now = Instant.parse("2026-08-08T00:00:00Z");
+        Instant now = Instant.now();
         String familyId = "family-integration";
         String firstTokenId = "token-1";
         String firstTokenHash = RefreshTokenHash.sha256("refresh-token-1");
