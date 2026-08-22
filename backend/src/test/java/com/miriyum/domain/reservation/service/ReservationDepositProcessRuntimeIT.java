@@ -566,13 +566,13 @@ class ReservationDepositProcessRuntimeIT {
         jdbcTemplate.update("""
                 INSERT INTO stores (
                     store_id, store_operator_account_id, business_registration_number,
-                    business_type, name, description, region, address, time_zone_id,
+                    name, description, region, address, time_zone_id,
                     applicant_self_attested_at, required_terms_agreed_at,
                     required_terms_version, store_category_code, verification_status,
                     operation_status, reservation_enabled, menu_hold_enabled,
                     pickup_enabled, created_at, updated_at
                 ) VALUES (
-                    30077, 20077, '9876543277', 'CAFE', '예약금 런타임 매장', '',
+                    30077, 20077, '9876543277', '예약금 런타임 매장', '',
                     'SEOUL', '서울시 중구', 'Asia/Seoul', NOW(6), NOW(6),
                     'STORE_ONBOARDING_REQUIRED_TERMS_V1', 'CAFE_BAKERY',
                     'APPROVED', 'OPEN', TRUE, TRUE, TRUE, NOW(6), NOW(6)

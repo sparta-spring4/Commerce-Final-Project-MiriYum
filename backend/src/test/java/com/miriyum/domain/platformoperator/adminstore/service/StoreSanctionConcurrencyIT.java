@@ -44,7 +44,7 @@ class StoreSanctionConcurrencyIT {
 
  @Test void exactlyOneConcurrentReleaseTransitionSucceeds() throws Exception {
   var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner279@example.com","hash","owner"));
-  Store store=stores.saveAndFlush(Store.create(owner.getId(),"1234567890",BusinessType.CAFE,"race-store","",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
+  Store store=stores.saveAndFlush(Store.create(owner.getId(),"1234567890","race-store","",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
   var admin=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("admin279@example.com",encoder.encode("Password1!"),"admin",Instant.now().plusSeconds(600)));
   StoreSanctionCase c=cases.saveAndFlush(StoreSanctionCase.create(store.getId(),admin.getId(),"FRAUD",Set.of("evidence://race"),"ADMIN-007-v1",Instant.now()));
   StoreSanction s=sanctions.saveAndFlush(StoreSanction.create(c.getPublicId(),store.getId(),SanctionType.FEATURE_RESTRICTION,Set.of(RestrictedFeature.WAITING),"race",Instant.now(),null,admin.getId(),false,1,Instant.now()));
@@ -59,7 +59,7 @@ class StoreSanctionConcurrencyIT {
  }
  @Test void automaticExpiryAndManualReleaseAllowOnlyOneTerminalTransition() throws Exception {
   var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner-expiry279@example.com","hash","owner"));
-  Store store=stores.saveAndFlush(Store.create(owner.getId(),"1234567891",BusinessType.CAFE,"expiry-race-store","",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
+  Store store=stores.saveAndFlush(Store.create(owner.getId(),"1234567891","expiry-race-store","",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
   var admin=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("admin-expiry279@example.com",encoder.encode("Password1!"),"admin",Instant.now().plusSeconds(600)));
   StoreSanctionCase c=cases.saveAndFlush(StoreSanctionCase.create(store.getId(),admin.getId(),"FRAUD",Set.of("evidence://expiry-race"),"ADMIN-007-v1",Instant.now()));
   StoreSanction s=sanctions.saveAndFlush(StoreSanction.create(c.getPublicId(),store.getId(),SanctionType.TEMPORARY_SUSPENSION,Set.of(),"race",Instant.now().minusSeconds(60),Instant.now().minusSeconds(1),admin.getId(),false,1,Instant.now().minusSeconds(60)));
@@ -73,7 +73,7 @@ class StoreSanctionConcurrencyIT {
  }
  @Test void automaticExpiryPersistsStoreSnapshotAuditInTheSameTransaction() {
   var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner-expiry-audit@example.com","hash","owner"));
-  Store store=stores.saveAndFlush(Store.create(owner.getId(),"1234567894",BusinessType.CAFE,"expiry-audit","",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
+  Store store=stores.saveAndFlush(Store.create(owner.getId(),"1234567894","expiry-audit","",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
   var admin=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("admin-expiry-audit@example.com",encoder.encode("Password1!"),"admin",Instant.now().plusSeconds(600)));
   StoreSanctionCase c=cases.saveAndFlush(StoreSanctionCase.create(store.getId(),admin.getId(),"FRAUD",Set.of("evidence://expiry-audit"),"ADMIN-007-v1",Instant.now()));
   StoreSanction sanction=sanctions.saveAndFlush(StoreSanction.create(c.getPublicId(),store.getId(),SanctionType.TEMPORARY_SUSPENSION,Set.of(),"expiry-audit",Instant.now().minusSeconds(600),Instant.now().minusSeconds(1),admin.getId(),false,0,Instant.now().minusSeconds(600)));
@@ -86,7 +86,7 @@ class StoreSanctionConcurrencyIT {
  }
  @Test void activeRestrictionSurvivesOperatorModeUpdateAndReleaseRestoresLatestBase() {
   var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner-base279@example.com","hash","owner"));
-  Store store=stores.saveAndFlush(Store.create(owner.getId(),"1234567895",BusinessType.CAFE,"base-effective","",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
+  Store store=stores.saveAndFlush(Store.create(owner.getId(),"1234567895","base-effective","",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
   var admin=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("admin-base279@example.com",encoder.encode("Password1!"),"admin",Instant.now().plusSeconds(600)));
   StoreSanctionCase c=cases.saveAndFlush(StoreSanctionCase.create(store.getId(),admin.getId(),"FRAUD",Set.of("evidence://base"),"ADMIN-007-v1",Instant.now()));
   StoreSanction restriction=sanctions.saveAndFlush(StoreSanction.create(c.getPublicId(),store.getId(),SanctionType.FEATURE_RESTRICTION,Set.of(RestrictedFeature.RESERVATION),"reservation",Instant.now(),null,admin.getId(),false,0,Instant.now()));
@@ -111,7 +111,7 @@ class StoreSanctionConcurrencyIT {
  }
  @Test void permanentClosureBindsApprovalAndRejectsGenericRelease() {
   var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner-permanent279@example.com","hash","owner"));
-  Store store=stores.saveAndFlush(Store.create(owner.getId(),"1234567898",BusinessType.CAFE,"permanent","",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
+  Store store=stores.saveAndFlush(Store.create(owner.getId(),"1234567898","permanent","",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
   var creator=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("creator-permanent279@example.com",encoder.encode("Password1!"),"creator",Instant.now().plusSeconds(600)));
   var approver=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("approver-permanent279@example.com",encoder.encode("Password1!"),"approver",Instant.now().plusSeconds(600)));
   StoreSanctionCase c=cases.saveAndFlush(StoreSanctionCase.create(store.getId(),creator.getId(),"FRAUD",Set.of("evidence://permanent"),"ADMIN-007-v9",Instant.now()));
@@ -141,7 +141,7 @@ class StoreSanctionConcurrencyIT {
  }
  private void assertTemporaryFeatureOrder(String suffix,String businessNumber,boolean temporaryFirst){
   var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner-"+suffix+"279@example.com","hash","owner"));
-  Store store=stores.saveAndFlush(Store.create(owner.getId(),businessNumber,BusinessType.CAFE,"order-"+suffix,"",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
+  Store store=stores.saveAndFlush(Store.create(owner.getId(),businessNumber,"order-"+suffix,"",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
   var admin=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("admin-"+suffix+"279@example.com",encoder.encode("Password1!"),"admin",Instant.now().plusSeconds(600)));
   StoreSanctionCase c=cases.saveAndFlush(StoreSanctionCase.create(store.getId(),admin.getId(),"FRAUD",Set.of("evidence://"+suffix),"ADMIN-007-v1",Instant.now()));
   StoreSanction temporary=sanctions.saveAndFlush(StoreSanction.create(c.getPublicId(),store.getId(),SanctionType.TEMPORARY_SUSPENSION,Set.of(),"temporary",Instant.now(),Instant.now().plusSeconds(3600),admin.getId(),false,0,Instant.now()));
@@ -156,7 +156,7 @@ class StoreSanctionConcurrencyIT {
  }
  private void assertOverlappingReleaseOrder(String suffix,boolean releaseEarlier){
   var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner-overlap-"+suffix+"@example.com","hash","owner"));
-  Store store=stores.saveAndFlush(Store.create(owner.getId(),releaseEarlier?"1234567893":"1234567892",BusinessType.CAFE,"overlap-"+suffix,"",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
+  Store store=stores.saveAndFlush(Store.create(owner.getId(),releaseEarlier?"1234567893":"1234567892","overlap-"+suffix,"",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
   var admin=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("admin-overlap-"+suffix+"@example.com",encoder.encode("Password1!"),"admin",Instant.now().plusSeconds(600)));
   StoreSanctionCase c=cases.saveAndFlush(StoreSanctionCase.create(store.getId(),admin.getId(),"FRAUD",Set.of("evidence://"+suffix),"ADMIN-007-v1",Instant.now()));
   StoreSanction reservation=sanctions.saveAndFlush(StoreSanction.create(c.getPublicId(),store.getId(),SanctionType.FEATURE_RESTRICTION,Set.of(RestrictedFeature.RESERVATION),"reservation",Instant.now(),null,admin.getId(),false,0,Instant.now()));

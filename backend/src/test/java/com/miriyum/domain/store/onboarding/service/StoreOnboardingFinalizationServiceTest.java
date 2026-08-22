@@ -9,7 +9,6 @@ import static org.mockito.BDDMockito.given;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.model.VerifiedStoreGeocoding;
 import com.miriyum.domain.store.onboarding.entity.StoreOnboardingApplication;
@@ -79,7 +78,7 @@ class StoreOnboardingFinalizationServiceTest {
 
     private static StoreCreateRequest request() {
         return new StoreCreateRequest(
-                "1234567890", BusinessType.CAFE, "미리윰", "", Region.SEOUL,
+                "1234567890", "미리윰", "", Region.SEOUL,
                 "서울 중구 세종대로 110", "Asia/Seoul", "CAFE_BAKERY", List.of("DATE"),
                 new StoreModesRequest(true, true, true), "미리윰 주식회사", "김대표",
                 LocalDate.of(2020, 1, 1), "음식점업", "카페", true, true);

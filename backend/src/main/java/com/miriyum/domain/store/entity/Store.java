@@ -1,6 +1,5 @@
 package com.miriyum.domain.store.entity;
 
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.GeocodingStatus;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
@@ -60,10 +59,6 @@ public class Store extends BaseEntity {
 
     @Column(name = "business_registration_number", nullable = false, length = 10)
     private String businessRegistrationNumber;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "business_type", nullable = false, length = 20)
-    private BusinessType businessType;
 
     @Column(name = "name", nullable = false, length = 100)
     private String name;
@@ -148,7 +143,6 @@ public class Store extends BaseEntity {
     private Store(
             long storeOperatorAccountId,
             String businessRegistrationNumber,
-            BusinessType businessType,
             String name,
             String description,
             Region region,
@@ -164,7 +158,6 @@ public class Store extends BaseEntity {
     ) {
         this.storeOperatorAccountId = storeOperatorAccountId;
         this.businessRegistrationNumber = businessRegistrationNumber;
-        this.businessType = businessType;
         this.name = name;
         this.description = description;
         this.region = region;
@@ -187,7 +180,6 @@ public class Store extends BaseEntity {
     public static Store create(
             long storeOperatorAccountId,
             String businessRegistrationNumber,
-            BusinessType businessType,
             String name,
             String description,
             Region region,
@@ -207,7 +199,6 @@ public class Store extends BaseEntity {
         Store store = new Store(
                 storeOperatorAccountId,
                 businessRegistrationNumber,
-                businessType,
                 name,
                 description,
                 region,
@@ -235,7 +226,6 @@ public class Store extends BaseEntity {
     public static Store createVerified(
             long storeOperatorAccountId,
             String businessRegistrationNumber,
-            BusinessType businessType,
             String name,
             String description,
             Region region,
@@ -253,7 +243,6 @@ public class Store extends BaseEntity {
         Store store = create(
                 storeOperatorAccountId,
                 businessRegistrationNumber,
-                businessType,
                 name,
                 description,
                 region,

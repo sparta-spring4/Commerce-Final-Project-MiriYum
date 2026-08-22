@@ -32,7 +32,6 @@ import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.service.WaitingReservationConversionService.BeginCommand;
 import com.miriyum.domain.reservation.waiting.service.WaitingReservationConversionService.CompletionCommand;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -830,8 +829,7 @@ class WaitingLedgerConcurrencyIT {
     }
 
     private long createStore(long operatorId) {
-        long storeId = stores.saveAndFlush(Store.create(operatorId, registrationNumber(), BusinessType.CAFE,
-                "Concurrency Store", "", Region.SEOUL, "Seoul", "CAFE_BAKERY", Set.of(),
+        long storeId = stores.saveAndFlush(Store.create(operatorId, registrationNumber(), "Concurrency Store", "", Region.SEOUL, "Seoul", "CAFE_BAKERY", Set.of(),
                 true, true, true, "Asia/Seoul", LocalDateTime.of(2026, 8, 1, 9, 0),
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();
         insertWaitingSetting(storeId, true, "MANUAL", 1L);

@@ -14,7 +14,6 @@ public final class StoreCommandFingerprint {
     public static String forCreate(StoreCreateRequest request) {
         StringBuilder canonical = new StringBuilder("POST|/api/v1/store-operators/stores|");
         append(canonical, "businessRegistrationNumber", request.businessRegistrationNumber());
-        append(canonical, "businessType", request.businessType().name());
         append(canonical, "name", request.name());
         append(canonical, "description", request.description());
         append(canonical, "region", request.region().name());

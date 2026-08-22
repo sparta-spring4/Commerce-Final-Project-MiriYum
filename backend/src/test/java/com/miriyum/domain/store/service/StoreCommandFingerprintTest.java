@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreUpdateRequest;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.global.idempotency.RequestFingerprint;
 import java.util.List;
@@ -101,7 +100,6 @@ class StoreCommandFingerprintTest {
     ) {
         return new StoreCreateRequest(
                 "1234567890",
-                BusinessType.CAFE,
                 "미리윰",
                 "",
                 Region.SEOUL,

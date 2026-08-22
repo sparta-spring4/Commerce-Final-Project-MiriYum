@@ -13,7 +13,6 @@ import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingClosureJobItemRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingClosureJobRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -461,8 +460,7 @@ class WaitingClosureServiceIT {
     private Fixture fixture() {
         long operatorId = operators.saveAndFlush(
                 StoreOperatorAccount.create("closure@example.com", "hashed", "owner")).getId();
-        long storeId = stores.saveAndFlush(Store.create(operatorId, "1234567899", BusinessType.CAFE,
-                "Closure Store", "", Region.SEOUL, "Seoul", "CAFE_BAKERY", Set.of(),
+        long storeId = stores.saveAndFlush(Store.create(operatorId, "1234567899", "Closure Store", "", Region.SEOUL, "Seoul", "CAFE_BAKERY", Set.of(),
                 true, true, true, "Asia/Seoul", LocalDateTime.of(2026, 8, 1, 9, 0),
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();
         jdbc.update("INSERT INTO consumer_accounts (email,password_hash,name,status,created_at,updated_at) "

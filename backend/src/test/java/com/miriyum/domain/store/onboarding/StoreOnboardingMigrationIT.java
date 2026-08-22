@@ -51,6 +51,12 @@ class StoreOnboardingMigrationIT {
                         "attempt_count", "next_attempt_at", "row_version");
                 assertThat(columns(connection, "store_onboarding_decisions"))
                         .contains("idempotency_key");
+                assertThat(columns(connection, "stores"))
+                        .doesNotContain("business_type");
+                assertThat(columns(connection, "store_onboarding_application_versions"))
+                        .doesNotContain("business_type");
+                assertThat(constraints(connection))
+                        .doesNotContain("ck_stores_business_type");
                 assertThat(constraints(connection))
                         .contains("uk_store_onboarding_decision_idempotency");
                 assertThat(triggers(connection)).contains(

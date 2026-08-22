@@ -19,7 +19,6 @@ import com.miriyum.domain.schedule.model.WeeklyInterval;
 import com.miriyum.domain.schedule.repository.OperatingScheduleVersionRepository;
 import com.miriyum.domain.schedule.repository.StoreScheduleStateRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
@@ -256,7 +255,6 @@ class WaitingAutoOpenServiceIT {
         Store store = storeRepository.saveAndFlush(Store.create(
                 operatorId,
                 "1234567890",
-                BusinessType.CAFE,
                 "웨이팅 매장",
                 "",
                 Region.SEOUL,

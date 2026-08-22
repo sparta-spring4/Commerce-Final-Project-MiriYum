@@ -7,7 +7,6 @@ import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.store.dto.contract.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.dto.contract.StoreReservationTransactionEligibility;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
@@ -208,7 +207,6 @@ class StoreTransactionEligibilityServiceIT {
         return storeRepository.saveAndFlush(Store.create(
                 operatorId,
                 "1234567890",
-                BusinessType.CAFE,
                 "거래 자격 매장",
                 "",
                 Region.SEOUL,

@@ -1,6 +1,5 @@
 package com.miriyum.domain.store.dto.storeoperator;
 
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
@@ -16,9 +15,6 @@ public record StoreCreateRequest(
         @NotBlank
         @Pattern(regexp = "^[0-9]{10}$")
         String businessRegistrationNumber,
-
-        @NotNull
-        BusinessType businessType,
 
         @NotBlank
         @Size(max = 100)
@@ -80,7 +76,6 @@ public record StoreCreateRequest(
     /** 기존 내부 Store 생성 테스트·호출자를 위한 호환 생성자다. 신규 HTTP 신청에서는 확장 필드가 필수다. */
     public StoreCreateRequest(
             String businessRegistrationNumber,
-            BusinessType businessType,
             String name,
             String description,
             Region region,
@@ -93,7 +88,7 @@ public record StoreCreateRequest(
             Boolean requiredTermsAgreed
     ) {
         this(
-                businessRegistrationNumber, businessType, name, description, region, address,
+                businessRegistrationNumber, name, description, region, address,
                 timeZoneId, storeCategoryCode, tagCodes, modes,
                 "LEGACY", "LEGACY", LocalDate.of(1970, 1, 1), "LEGACY", "LEGACY",
                 applicantSelfAttested, requiredTermsAgreed);

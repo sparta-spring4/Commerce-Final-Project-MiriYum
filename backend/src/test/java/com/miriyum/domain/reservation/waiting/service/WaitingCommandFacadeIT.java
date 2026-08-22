@@ -16,7 +16,6 @@ import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembership
 import com.miriyum.domain.reservation.waiting.repository.WaitingQueueSequenceRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -185,7 +184,6 @@ class WaitingCommandFacadeIT {
         long storeId = storeRepository.saveAndFlush(Store.create(
                 operatorId,
                 registrationNumber,
-                BusinessType.CAFE,
                 "Waiting Store",
                 "",
                 Region.SEOUL,

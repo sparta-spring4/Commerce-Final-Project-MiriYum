@@ -7,7 +7,6 @@ import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.store.dto.contract.StoreReservationDepositPolicy;
 import com.miriyum.domain.store.dto.contract.StoreReservationDepositPolicy.Status;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.store.repository.StoreReservationDepositPolicyRepository;
@@ -117,7 +116,6 @@ class StoreReservationDepositPolicyQueryServiceIT {
         return storeRepository.saveAndFlush(Store.create(
                 operatorId,
                 "1234567890",
-                BusinessType.CAFE,
                 "예약금 조회 매장",
                 "",
                 Region.SEOUL,

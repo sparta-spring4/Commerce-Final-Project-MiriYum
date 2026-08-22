@@ -454,7 +454,6 @@ class StoreControllerTest {
         return """
                 {
                   "businessRegistrationNumber": "1234567890",
-                  "businessType": "CAFE",
                   "name": "미리윰",
                   "description": "",
                   "region": "SEOUL",

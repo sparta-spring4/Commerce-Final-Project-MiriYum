@@ -22,7 +22,6 @@ import com.miriyum.domain.schedule.model.WeeklyInterval;
 import com.miriyum.domain.schedule.repository.OperatingScheduleVersionRepository;
 import com.miriyum.domain.schedule.repository.StoreScheduleStateRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -166,7 +165,7 @@ class WaitingAutoOpenConcurrencyIT {
         long operatorId = operatorRepository.saveAndFlush(StoreOperatorAccount.create(
                 "waiting-concurrency@example.com", "hashed", "운영자")).getId();
         Store store = storeRepository.saveAndFlush(Store.create(
-                operatorId, "1234567890", BusinessType.CAFE, "경합 매장", "",
+                operatorId, "1234567890", "경합 매장", "",
                 Region.SEOUL, "서울시 중구", "CAFE_BAKERY", Set.of(),
                 true, true, true, "Asia/Seoul",
                 LocalDateTime.of(2026, 8, 16, 12, 0),

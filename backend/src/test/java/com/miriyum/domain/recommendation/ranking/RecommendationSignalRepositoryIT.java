@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.recommendation.repository.RecommendationSignalRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.menu.entity.Menu;
@@ -171,7 +170,6 @@ class RecommendationSignalRepositoryIT {
         Store store = Store.create(
                 operatorId,
                 String.format("%010d", 9_000_000 + sequence),
-                BusinessType.CAFE,
                 name,
                 "추천 신호 통합 테스트 매장",
                 Region.SEOUL,

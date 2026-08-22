@@ -21,7 +21,6 @@ import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.schedule.dto.contract.StoreReservationWindowResult;
@@ -492,7 +491,6 @@ class ReservationTimePolicyPublicationIT {
         long storeId = storeRepository.saveAndFlush(Store.create(
                 operatorId,
                 "1234567890",
-                BusinessType.CAFE,
                 "예약 정책 매장",
                 "",
                 Region.SEOUL,

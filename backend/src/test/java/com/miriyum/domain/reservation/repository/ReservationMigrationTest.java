@@ -193,7 +193,6 @@ class ReservationMigrationTest {
                             store_id,
                             store_operator_account_id,
                             business_registration_number,
-                            business_type,
                             name,
                             description,
                             region,
@@ -212,7 +211,7 @@ class ReservationMigrationTest {
                             updated_at
                         )
                         VALUES (
-                            ?, ?, '1234567890', 'CAFE', '미리윰', '', 'SEOUL', '서울시 중구',
+                            ?, ?, '1234567890', '미리윰', '', 'SEOUL', '서울시 중구',
                             'Asia/Seoul', NOW(6), NOW(6), 'STORE_ONBOARDING_REQUIRED_TERMS_V1',
                             'CAFE_BAKERY', 'APPROVED', 'OPEN',
                             TRUE, TRUE, TRUE, NOW(6), NOW(6)
@@ -1979,7 +1978,8 @@ class ReservationMigrationTest {
                     """);
             statement.executeUpdate("""
                     INSERT INTO stores (
-                        store_id, store_operator_account_id, business_registration_number, business_type,
+                        store_id, store_operator_account_id, business_registration_number,
+                        business_type,
                         name, description, region, address, time_zone_id, applicant_self_attested_at,
                         required_terms_agreed_at, required_terms_version, store_category_code,
                         verification_status, operation_status, reservation_enabled, menu_hold_enabled,
@@ -2452,7 +2452,6 @@ class ReservationMigrationTest {
                             store_id,
                             store_operator_account_id,
                             business_registration_number,
-                            business_type,
                             name,
                             description,
                             region,
@@ -2471,7 +2470,7 @@ class ReservationMigrationTest {
                             updated_at
                         )
                         VALUES (
-                            ?, ?, ?, 'CAFE', ?, '', 'SEOUL', '서울시 중구',
+                            ?, ?, ?, ?, '', 'SEOUL', '서울시 중구',
                             'Asia/Seoul', NOW(6), NOW(6),
                             'STORE_ONBOARDING_REQUIRED_TERMS_V1',
                             'CAFE_BAKERY', 'APPROVED', 'OPEN',

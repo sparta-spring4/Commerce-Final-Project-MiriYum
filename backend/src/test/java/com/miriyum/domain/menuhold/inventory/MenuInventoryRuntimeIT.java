@@ -26,7 +26,6 @@ import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryPolicyAudit
 import com.miriyum.domain.menuhold.inventory.dto.InventoryPolicyChange;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryBucketCreateCommand;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.store.service.StoreScheduleAuthority;
@@ -156,7 +155,7 @@ class MenuInventoryRuntimeIT {
                             "inventory-owner-" + sequence + "@example.com", "hashed", "owner"))
                     .getId();
             Store store = storeRepository.saveAndFlush(Store.create(
-                    operatorId, String.format("%010d", sequence), BusinessType.CAFE, "store", "",
+                    operatorId, String.format("%010d", sequence), "store", "",
                     Region.SEOUL, "address", "CAFE_BAKERY", Set.of(),
                     true, true, true, "Asia/Seoul",
                     LocalDateTime.of(2026, 8, 1, 9, 0),
