@@ -99,6 +99,6 @@ jobs:
       image_tag: ${{ inputs.image_tag }}
       rate_limit_exception: ${{ inputs.action == 'enable-load-test' && 'disable' || 'preserve' }}
       runtime_recovery_mode: preserve
-      runtime_config_mode: ${{ inputs.action == 'enable-sse' && 'disable' || 'preserve' }}
+      runtime_config_mode: preserve
       cancel_ssm_command_id: ${{ needs.deploy.outputs.ssm_command_id }}
     secrets: inherit

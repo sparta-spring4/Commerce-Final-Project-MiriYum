@@ -152,12 +152,18 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertIn('MIRIYUM_RUNTIME_CONFIG_ENABLED=false\\nMIRIYUM_PAYMENT_ENABLED=false\\nMIRIYUM_STORAGE_S3_ENABLED=false\\nMIRIYUM_STORE_SEARCH_LLM_ENABLED=false\\n', self.backend_cd)
         self.assertIn('up -d --force-recreate --remove-orphans || recovery_status=\\$?', self.backend_cd)
 
-    def test_enable_failure_or_cancellation_runs_disable_cleanup(self):
+    def test_enable_failure_or_cancellation_runs_state_preserving_cleanup(self):
         self.assertIn("disable-after-failed-enable", self.control_workflow)
         self.assertIn("inputs.action == 'enable-load-test' || inputs.action == 'enable-sse'", self.control_workflow)
         self.assertIn("needs.deploy.result == 'failure' || needs.deploy.result == 'cancelled'", self.control_workflow)
         self.assertIn("rate_limit_exception: ${{ inputs.action == 'enable-load-test' && 'disable' || 'preserve' }}", self.control_workflow)
-        self.assertIn("runtime_config_mode: ${{ inputs.action == 'enable-sse' && 'disable' || 'preserve' }}", self.control_workflow)
+        self.assertIn("runtime_config_mode: preserve", self.control_workflow)
+        self.assertNotIn("runtime_config_mode: ${{ inputs.action == 'enable-sse' && 'disable' || 'preserve' }}", self.control_workflow)
+
+    def test_failed_sse_enable_restores_the_pre_deployment_runtime_state(self):
+        restore_handler = self.backend_cd.split('"backup_env=', 1)[1].split('",\n', 1)[0]
+        self.assertIn('cp \\"\\$backup_env\\" /opt/miriyum/.env', restore_handler)
+        self.assertNotIn("case '$RUNTIME_CONFIG_MODE' in enable)", restore_handler)
 
     def test_runtime_config_toggle_is_applied_before_the_deployment(self):
         deploy_command = "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' FRONTEND_IMAGE='$frontend_image_uri' /opt/miriyum/deploy.sh"
