@@ -26,9 +26,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 class NotificationSseHighWatermarkSourceTest {
 
     @Test
-    void readsEveryWatermarkInsideOneReadOnlyTransaction() {
+    void readsAccountChangeVersionInsideOneReadOnlyTransaction() {
         ConsumerAccountService accounts = mock(ConsumerAccountService.class);
-        NotificationTaskRepository tasks = mock(NotificationTaskRepository.class);
         NotificationReadRepository reads = mock(NotificationReadRepository.class);
         doAnswer(invocation -> {
             assertReadOnlyTransaction();
@@ -38,12 +37,8 @@ class NotificationSseHighWatermarkSourceTest {
             assertReadOnlyTransaction();
             return 113L;
         }).when(reads).findChangeVersion(41L);
-        doAnswer(invocation -> {
-            assertReadOnlyTransaction();
-            return 109L;
-        }).when(tasks).findDeliveredInAppHighWatermark(41L);
         NotificationSseHighWatermarkSource source = transactional(
-                new NotificationSseHighWatermarkSource(accounts, tasks, reads));
+                new NotificationSseHighWatermarkSource(accounts, reads));
 
         source.read(SseStreamScope.notificationConsumer(41L));
     }
