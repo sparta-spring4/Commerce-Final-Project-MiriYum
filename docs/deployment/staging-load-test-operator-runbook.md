@@ -42,12 +42,14 @@ The workflow does not print the IP in shell output. The GitHub workflow input is
 
 Use this procedure only for an approved SSE `recovery` profile. The selected `image_tag` must equal the latest successful `staging-backend` deployment SHA; the workflow rejects an older or different SHA.
 
-1. Start the recovery harness and wait until it prints `SSE_RECOVERY_READY`.
+1. Prepare a fresh synthetic `WAITING` team in the approved store. A successful earlier recovery ends its team as terminal `CANCELLED`, so never reuse that team for another attempt. The fixture fingerprint proves only the static fixture file and does not prove current database state.
 2. Confirm the approved synthetic store has no other Waiting writer during the recovery window.
-3. In `Staging Load-Test Control` on branch `dev`, choose `interrupt-valkey`.
-4. Enter the approved deployed SHA in `image_tag`, leave `source_ip` empty, and run the workflow.
-5. The fixed action stops Valkey for 10 seconds and then starts it automatically. Wait for the workflow to report success before interpreting the harness result.
-6. Confirm the harness records MySQL correction, the changed signal, the owner HTTP verification, cleanup, and all thresholds as specified by the SSE runbook.
+3. Start the recovery harness. Its setup verifies the owner WAITING list before arming; if the request contract fails or no valid team exists, it exits without printing `SSE_RECOVERY_READY` and Valkey must not be interrupted.
+4. Wait until the harness prints `SSE_RECOVERY_READY`.
+5. In `Staging Load-Test Control` on branch `dev`, choose `interrupt-valkey`.
+6. Enter the approved deployed SHA in `image_tag`, leave `source_ip` empty, and run the workflow.
+7. The fixed action stops Valkey for 10 seconds and then starts it automatically. Wait for the workflow to report success before interpreting the harness result.
+8. Confirm the harness records MySQL correction, the changed signal, the owner HTTP verification, cleanup, and all thresholds as specified by the SSE runbook. If it fails, use only the safe summary counters for trigger list, fixture, call, and response-contract stages; do not copy response bodies or identifiers into the Issue.
 
 The remote script attempts to start Valkey from its exit and signal traps. If the action fails, is cancelled, or times out, immediately run `recover-valkey` with the same latest deployed SHA and do not continue testing until that action succeeds and staging private health is `UP`. Do not run both actions concurrently; the workflow serializes them with other staging load-test controls and staging deployment commands.
 
