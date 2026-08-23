@@ -137,6 +137,22 @@ validate_interrupt_schedule() {
   SCHEDULE_WAIT_SECONDS="${delta}"
 }
 
+refresh_interrupt_schedule_after_preflight() {
+  local execute_at="${VALKEY_CONTROL_EXECUTE_AT_EPOCH}" now delta
+
+  now="$(date +%s)"
+  delta=$((execute_at - now))
+  if ((delta < MIN_SCHEDULE_LEAD_SECONDS)); then
+    emit_failure preflight scheduled-epoch-too-close-after-preflight 2
+    return 2
+  fi
+  if ((delta > MAX_SCHEDULE_LEAD_SECONDS)); then
+    emit_failure preflight invalid-scheduled-epoch 2
+    return 2
+  fi
+  SCHEDULE_WAIT_SECONDS="${delta}"
+}
+
 reject_recovery_schedule() {
   if [[ -n "${VALKEY_CONTROL_EXECUTE_AT_EPOCH:-}" ]]; then
     emit_failure preflight unexpected-scheduled-epoch 2
@@ -164,6 +180,7 @@ case "${VALKEY_CONTROL_ACTION:-}" in
     bind_runtime_images
     validate_compose_contract
     wait_for_valkey_health
+    refresh_interrupt_schedule_after_preflight
     trap recover_on_exit EXIT
     trap 'exit 129' HUP
     trap 'exit 130' INT
