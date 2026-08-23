@@ -14,7 +14,14 @@ if BASH is None or Path(BASH).name.lower() == "bash.exe" and "system32" in BASH.
 
 
 class StagingValkeyControlTest(unittest.TestCase):
-    def run_control(self, action, *, fail_sleep=False, signal_sleep=False):
+    def run_control(
+        self,
+        action,
+        *,
+        fail_sleep=False,
+        signal_sleep=False,
+        fail_docker_contains="",
+    ):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)
             command_log = temporary_path / "commands.log"
@@ -26,6 +33,10 @@ class StagingValkeyControlTest(unittest.TestCase):
                 """#!/usr/bin/env bash
 set -Eeuo pipefail
 printf 'docker %s\\n' \"$*\" >> \"$FAKE_COMMAND_LOG\"
+if [[ -n \"${FAIL_DOCKER_CONTAINS:-}\" && \"$*\" == *\"$FAIL_DOCKER_CONTAINS\"* ]]; then
+  printf 'raw-sensitive-docker-error\\n' >&2
+  exit 23
+fi
 if [[ \"$1\" == \"inspect\" ]]; then
   printf 'healthy\\n'
 elif [[ \"$*\" == *\" ps -q valkey\" ]]; then
@@ -69,6 +80,7 @@ fi
                     "FAKE_COMMAND_LOG": command_log.as_posix(),
                     "FAIL_SLEEP": "true" if fail_sleep else "false",
                     "SIGNAL_SLEEP": "true" if signal_sleep else "false",
+                    "FAIL_DOCKER_CONTAINS": fail_docker_contains,
                 }
             )
             result = subprocess.run(
@@ -145,6 +157,57 @@ fi
 
         self.assertNotEqual(0, result.returncode)
         self.assertEqual([], commands)
+
+    def assert_safe_failure(self, result, *, phase, reason):
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn(
+            "event=staging_valkey_control_failed "
+            f"action={result.args[-2]} phase={phase} reason={reason} exit_code=23",
+            combined,
+        )
+        self.assertNotIn("raw-sensitive-docker-error", combined)
+
+    def test_recover_reports_safe_start_failure_without_raw_docker_error(self):
+        result, _ = self.run_control(
+            "recover",
+            fail_docker_contains="up -d --no-deps valkey",
+        )
+
+        self.assert_safe_failure(result, phase="start", reason="compose-up-failed")
+
+    def test_recover_reports_safe_health_failure_without_raw_docker_error(self):
+        result, _ = self.run_control(
+            "recover",
+            fail_docker_contains="ps -q valkey",
+        )
+
+        self.assert_safe_failure(
+            result,
+            phase="health-check",
+            reason="compose-ps-failed",
+        )
+
+    def test_interrupt_reports_safe_stop_failure_without_raw_docker_error(self):
+        result, _ = self.run_control(
+            "interrupt",
+            fail_docker_contains="stop valkey",
+        )
+
+        self.assert_safe_failure(result, phase="stop", reason="compose-stop-failed")
+
+    def test_recover_reports_safe_compose_preflight_failure(self):
+        result, commands = self.run_control(
+            "recover",
+            fail_docker_contains="config --quiet",
+        )
+
+        self.assert_safe_failure(
+            result,
+            phase="preflight",
+            reason="compose-config-invalid",
+        )
+        self.assertFalse(any("up -d --no-deps valkey" in command for command in commands))
 
 
 if __name__ == "__main__":

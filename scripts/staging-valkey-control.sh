@@ -11,11 +11,48 @@ compose() {
   docker compose --env-file "${COMPOSE_ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
 }
 
+emit_failure() {
+  local phase="$1" reason="$2" exit_code="$3"
+  printf 'event=staging_valkey_control_failed action=%s phase=%s reason=%s exit_code=%s\n' \
+    "${VALKEY_CONTROL_ACTION:-unknown}" "${phase}" "${reason}" "${exit_code}" >&2
+}
+
+run_compose() {
+  local phase="$1" reason="$2" status
+  shift 2
+
+  if compose "$@" >/dev/null 2>&1; then
+    return 0
+  else
+    status=$?
+    emit_failure "${phase}" "${reason}" "${status}"
+    return "${status}"
+  fi
+}
+
+validate_compose_contract() {
+  local status
+
+  if compose config --quiet >/dev/null 2>&1; then
+    return 0
+  else
+    status=$?
+    emit_failure preflight compose-config-invalid "${status}"
+    return "${status}"
+  fi
+}
+
 wait_for_valkey_health() {
-  local attempt container_id health
+  local attempt container_id health status
 
   for ((attempt = 1; attempt <= HEALTH_ATTEMPTS; attempt++)); do
-    container_id="$(compose ps -q valkey)"
+    if container_id="$(compose ps -q valkey 2>/dev/null)"; then
+      :
+    else
+      status=$?
+      emit_failure health-check compose-ps-failed "${status}"
+      return "${status}"
+    fi
     if [[ -n "${container_id}" ]]; then
       health="$(docker inspect --format '{{.State.Health.Status}}' "${container_id}" 2>/dev/null || true)"
       if [[ "${health}" == "healthy" ]]; then
@@ -25,12 +62,12 @@ wait_for_valkey_health() {
     sleep "${HEALTH_INTERVAL_SECONDS}"
   done
 
-  echo "Valkey did not become healthy within the fixed recovery window." >&2
+  emit_failure health-check valkey-health-timeout 1
   return 1
 }
 
 start_and_verify_valkey() {
-  compose up -d --no-deps valkey
+  run_compose start compose-up-failed up -d --no-deps valkey
   wait_for_valkey_health
 }
 
@@ -50,21 +87,29 @@ recover_on_exit() {
 
 case "${VALKEY_CONTROL_ACTION:-}" in
   interrupt)
+    validate_compose_contract
     wait_for_valkey_health
     trap recover_on_exit EXIT
     trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
 
-    compose stop valkey
+    run_compose stop compose-stop-failed stop valkey
     echo "event=staging_valkey_interruption_started duration_seconds=${INTERRUPTION_SECONDS}"
-    sleep "${INTERRUPTION_SECONDS}"
+    if sleep "${INTERRUPTION_SECONDS}"; then
+      :
+    else
+      status=$?
+      emit_failure interrupt interruption-wait-failed "${status}"
+      exit "${status}"
+    fi
     start_and_verify_valkey
 
     trap - EXIT HUP INT TERM
     echo "event=staging_valkey_interruption_completed duration_seconds=${INTERRUPTION_SECONDS} health=healthy"
     ;;
   recover)
+    validate_compose_contract
     start_and_verify_valkey
     echo "event=staging_valkey_recovery_completed health=healthy"
     ;;
