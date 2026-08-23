@@ -209,6 +209,14 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("aws ecs describe-tasks", evidence_step)
         self.assertIn("previous-task-arns.json", evidence_step)
         self.assertIn("previous-tasks.json", evidence_step)
+        self.assertIn("refresh_previous_task_evidence", evidence_step)
+        self.assertIn("for attempt in $(seq 1 60)", evidence_step)
+        self.assertIn("a previous ECS task has not reached STOPPED", evidence_step)
+        self.assertIn("sleep 5", evidence_step)
+        self.assertIn(
+            "Previous ECS tasks did not reach STOPPED within the 5-minute evidence budget",
+            evidence_step,
+        )
         self.assertIn("final-stopped-task-arns.json", evidence_step)
         self.assertIn("final-stopped-tasks.json", evidence_step)
         self.assertIn("aws elbv2 describe-target-health", evidence_step)
