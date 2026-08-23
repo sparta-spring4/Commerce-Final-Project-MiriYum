@@ -100,4 +100,6 @@ CloudWatch 1분 평균 그래프에서 승인 시간대의 backend memory 약 48
 - SSE 비활성화 [32638764488](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/actions/runs/32638764488): `PASS`
 - load-test 예외 제거 [32638866551](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/actions/runs/32638866551): `PASS`
 
-모든 재배포는 같은 backend full SHA를 사용했고 private health를 통과했다. 기본 로그인 429 recovery verifier는 예외 제거 뒤 새로운 600초 제한 창에서 실행하지 않았으므로 이번 결과에서는 `NOT RUN`이다. 따라서 이 기록은 staging SSE 간소화 smoke와 Valkey recovery 완료 증거이며 #357의 HTTP baseline, 대규모 SSE 연결과 기본 429 복구까지 완료했다는 근거가 아니다.
+모든 재배포는 같은 backend full SHA를 사용했고 private health를 통과했다. 이 마지막 recovery 직후에는 새 600초 창의 429 verifier를 반복하지 않았지만, 같은 backend SHA의 앞선 원복에서 `staging-rate-limit-recovery-20260823-05`가 로그인 5회 성공·6번째 정확한 429와 threshold 성공을 확인했다. 해당 ignored artifact SHA-256은 `543dfe14ee1ba52d5bb94764f1c108a0d293028378b1c12ce8a00b47274ba0f`다.
+
+#357의 저부하 HTTP smoke·baseline과 기본 429 복구는 [k6 핵심 API 기준선](k6-baseline.md)이 소유하고, 이 문서는 staging SSE 간소화 smoke·Valkey recovery를 소유한다. 두 결과로 #357의 승인된 저부하 인수 범위를 충족한다. 25→50→100→200, reconnect, slow-client, capacity와 backend replacement는 #357 완료 조건이 아니라 [#250](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/250)의 후속 부하·장애 검증 범위다.
