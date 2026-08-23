@@ -24,7 +24,11 @@ import {
   verifyWaitingTriggerFixture,
   verifyWaitingChange,
 } from './probe.js'
-import { awaitRecoveryArmedMarker, runSseRecovery } from './recovery.js'
+import {
+  awaitRecoveryArmedMarker,
+  awaitRecoveryMutationEpoch,
+  runSseRecovery,
+} from './recovery.js'
 import { applySteadyMinimumLifetime, openChangedStream, prepareSseSession } from './session.js'
 import {
   createFixtureFingerprint,
@@ -358,11 +362,14 @@ export function sseRecovery(data) {
   safelyExecute(() => {
     recoveryAttempts.add(1, tagsFor(session.target))
     const rendezvous = config.recoveryRendezvous
+    const diagnostic = (phase, observedAtEpoch) =>
+      console.log(`event=sse_recovery_phase phase=${phase} observed_at_epoch=${observedAtEpoch}`)
     runSseRecovery({
       armWindowSeconds: rendezvous === null
         ? config.recoveryArmDelaySeconds
         : rendezvous.armWindowSeconds,
       maxRecoverySeconds: config.recoveryMaxSeconds,
+      armBeforeStream: rendezvous !== null,
       arm: rendezvous === null
         ? () => sleep(config.recoveryArmDelaySeconds)
         : () => awaitRecoveryArmedMarker({
@@ -372,6 +379,16 @@ export function sseRecovery(data) {
           runId: rendezvous.runId,
           rendezvousId: rendezvous.rendezvousId,
           maxWaitSeconds: rendezvous.maxWaitSeconds,
+          delay: sleep,
+          diagnostic,
+          waitUntilMutation: false,
+          minimumLeadSeconds: 5,
+          maximumLeadSeconds: 30,
+        }),
+      waitAfterArm: rendezvous === null
+        ? undefined
+        : (armed) => awaitRecoveryMutationEpoch({
+          executeAtEpoch: armed.executeAtEpoch,
           delay: sleep,
         }),
       ready: () => console.log(rendezvous === null
@@ -407,6 +424,7 @@ export function sseRecovery(data) {
         idempotencyKey: config.recoveryCleanupIdempotencyKey,
         tags: tagsFor(session.target, 'cleanup', 'cleanup'),
       }),
+      diagnostic,
       metrics: {
         duration: (value) => recoveryMilliseconds.add(value, tagsFor(session.target)),
         httpVerified: (value) => recoveryHttpVerified.add(

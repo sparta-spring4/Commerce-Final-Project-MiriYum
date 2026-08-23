@@ -1,6 +1,10 @@
 import { check } from 'k6'
 
-import { awaitRecoveryArmedMarker, runSseRecovery } from '../sse/recovery.js'
+import {
+  awaitRecoveryArmedMarker,
+  awaitRecoveryMutationEpoch,
+  runSseRecovery,
+} from '../sse/recovery.js'
 
 export const options = { thresholds: { checks: ['rate==1'] } }
 
@@ -11,6 +15,7 @@ function errorMessage(action) {
 export default function () {
   const order = []
   const metrics = []
+  const diagnostics = []
   let now = 1000
   const result = runSseRecovery({
     armWindowSeconds: 15,
@@ -31,6 +36,7 @@ export default function () {
     trigger: () => { order.push('trigger'); return { waitingTeamId: '901', version: 5 } },
     verify: () => { order.push('verify'); return true },
     cleanup: () => { order.push('cleanup'); return true },
+    diagnostic: (phase, observedAtEpoch) => diagnostics.push([phase, observedAtEpoch]),
     metrics: {
       duration: (value) => metrics.push(['duration', value]),
       httpVerified: (value) => metrics.push(['http', value]),
@@ -54,9 +60,78 @@ export default function () {
     cleanup: () => { failureOrder.push('cleanup'); return true },
   }))
 
+  const stagingOrder = []
+  let stagingNow = 1000
+  const stagingResult = runSseRecovery({
+    armWindowSeconds: 60,
+    maxRecoverySeconds: 6,
+    armBeforeStream: true,
+    arm: () => { stagingOrder.push('arm'); return { executeAtEpoch: 30 } },
+    waitAfterArm: (armed) => {
+      stagingOrder.push(`wait:${armed.executeAtEpoch}`)
+      stagingNow = 3100
+    },
+    ready: () => stagingOrder.push('ready'),
+    now: () => stagingNow,
+    openStream: (behavior) => {
+      stagingOrder.push('open')
+      stagingOrder.push('initial')
+      behavior.onFirstValidEvent()
+      stagingNow = 4100
+      behavior.onRecoveryValidEvent()
+      return { completed: true, validEvents: 2 }
+    },
+    trigger: () => { stagingOrder.push('trigger'); return { waitingTeamId: '903', version: 3 } },
+    verify: () => { stagingOrder.push('verify'); return true },
+    cleanup: () => { stagingOrder.push('cleanup'); return true },
+  })
+
+  const stagingArmFailureOrder = []
+  const stagingArmFailure = errorMessage(() => runSseRecovery({
+    armWindowSeconds: 60,
+    maxRecoverySeconds: 6,
+    armBeforeStream: true,
+    arm: () => { stagingArmFailureOrder.push('arm'); throw new Error('unsafe armed lead') },
+    waitAfterArm: () => stagingArmFailureOrder.push('wait'),
+    ready: () => stagingArmFailureOrder.push('ready'),
+    now: () => 1787469000000,
+    openStream: () => { stagingArmFailureOrder.push('open'); return {} },
+    trigger: () => { stagingArmFailureOrder.push('trigger'); return {} },
+    verify: () => true,
+    cleanup: () => true,
+  }))
+
+  const elapsedEpochOrder = []
+  const elapsedEpochFailure = errorMessage(() => runSseRecovery({
+    armWindowSeconds: 60,
+    maxRecoverySeconds: 6,
+    armBeforeStream: true,
+    arm: () => ({ executeAtEpoch: 1787469030 }),
+    waitAfterArm: (armed) => {
+      elapsedEpochOrder.push('wait')
+      awaitRecoveryMutationEpoch({
+        executeAtEpoch: armed.executeAtEpoch,
+        delay: () => elapsedEpochOrder.push('delay'),
+        now: () => 1787469033001,
+      })
+    },
+    ready: () => elapsedEpochOrder.push('ready'),
+    now: () => 1787469000000,
+    openStream: (behavior) => {
+      elapsedEpochOrder.push('open')
+      elapsedEpochOrder.push('initial')
+      behavior.onFirstValidEvent()
+      return { completed: false, validEvents: 1 }
+    },
+    trigger: () => { elapsedEpochOrder.push('trigger'); return {} },
+    verify: () => true,
+    cleanup: () => { elapsedEpochOrder.push('cleanup'); return true },
+  }))
+
   const rendezvousNow = 1787469000000
   const rendezvousDelays = []
   const rendezvousRequests = []
+  const rendezvousDiagnostics = []
   const rendezvousResult = awaitRecoveryArmedMarker({
     client: {
       get: (url, options) => {
@@ -78,7 +153,84 @@ export default function () {
     maxWaitSeconds: 60,
     delay: (seconds) => rendezvousDelays.push(seconds),
     now: () => rendezvousNow,
+    diagnostic: (phase, observedAtEpoch) =>
+      rendezvousDiagnostics.push([phase, observedAtEpoch]),
   })
+
+  const deferredDelays = []
+  const deferredResult = awaitRecoveryArmedMarker({
+    client: {
+      get: () => ({
+        status: 200,
+        json: () => [{
+          user: { login: 'github-actions[bot]' },
+          created_at: new Date(rendezvousNow).toISOString(),
+          body: 'SSE_RECOVERY_ARMED run_id=32623080912 rendezvous_id=323e4567-e89b-12d3-a456-426614174000 execute_at_epoch=1787469030',
+        }],
+      }),
+    },
+    repository: 'sparta-spring4/Commerce-Final-Project-MiriYum',
+    issue: 357,
+    runId: '32623080912',
+    rendezvousId: '323e4567-e89b-12d3-a456-426614174000',
+    maxWaitSeconds: 60,
+    delay: (seconds) => deferredDelays.push(seconds),
+    now: () => rendezvousNow,
+    waitUntilMutation: false,
+    minimumLeadSeconds: 5,
+    maximumLeadSeconds: 30,
+  })
+  awaitRecoveryMutationEpoch({
+    executeAtEpoch: deferredResult.executeAtEpoch,
+    delay: (seconds) => deferredDelays.push(seconds),
+    now: () => rendezvousNow + 1000,
+  })
+
+  const excessiveLeadFailure = errorMessage(() => awaitRecoveryArmedMarker({
+    client: {
+      get: () => ({
+        status: 200,
+        json: () => [{
+          user: { login: 'github-actions[bot]' },
+          created_at: new Date(rendezvousNow).toISOString(),
+          body: 'SSE_RECOVERY_ARMED run_id=32623080912 rendezvous_id=323e4567-e89b-12d3-a456-426614174000 execute_at_epoch=1787469031',
+        }],
+      }),
+    },
+    repository: 'sparta-spring4/Commerce-Final-Project-MiriYum',
+    issue: 357,
+    runId: '32623080912',
+    rendezvousId: '323e4567-e89b-12d3-a456-426614174000',
+    maxWaitSeconds: 60,
+    delay: () => {},
+    now: () => rendezvousNow,
+    waitUntilMutation: false,
+    minimumLeadSeconds: 5,
+    maximumLeadSeconds: 30,
+  }))
+
+  const fractionalMinimumLeadFailure = errorMessage(() => awaitRecoveryArmedMarker({
+    client: {
+      get: () => ({
+        status: 200,
+        json: () => [{
+          user: { login: 'github-actions[bot]' },
+          created_at: new Date(rendezvousNow).toISOString(),
+          body: 'SSE_RECOVERY_ARMED run_id=32623080912 rendezvous_id=323e4567-e89b-12d3-a456-426614174000 execute_at_epoch=1787469005',
+        }],
+      }),
+    },
+    repository: 'sparta-spring4/Commerce-Final-Project-MiriYum',
+    issue: 357,
+    runId: '32623080912',
+    rendezvousId: '323e4567-e89b-12d3-a456-426614174000',
+    maxWaitSeconds: 60,
+    delay: () => {},
+    now: () => rendezvousNow + 1,
+    waitUntilMutation: false,
+    minimumLeadSeconds: 5,
+    maximumLeadSeconds: 30,
+  }))
 
   let timedOutTriggerCalled = false
   const timeoutFailure = errorMessage(() => runSseRecovery({
@@ -141,17 +293,42 @@ export default function () {
       && result.recoveryMilliseconds === 2100
       && JSON.stringify(metrics) === JSON.stringify([
         ['duration', 2100], ['http', 1], ['cleanup', 1],
+      ])
+      && JSON.stringify(diagnostics) === JSON.stringify([
+        ['initial-event-observed', 1],
+        ['mutation-started', 1],
+        ['recovery-event-observed', 3],
+        ['stream-finished', 3],
       ]),
     'recovery cleans up a successful mutation even when the second frame is missing': () =>
       failure === 'SSE recovery did not observe the corrected event'
       && failureOrder.join(',') === 'cleanup',
+    'staging recovery arms before opening the finite-lived stream': () =>
+      stagingOrder.join(',') === 'ready,arm,open,initial,wait:30,trigger,verify,cleanup'
+      && stagingResult.recoveryMilliseconds === 1000,
+    'staging recovery arm failure consumes neither stream nor fixture': () =>
+      stagingArmFailure === 'unsafe armed lead'
+      && stagingArmFailureOrder.join(',') === 'ready,arm',
+    'elapsed mutation epoch fails after initial event without consuming the fixture': () =>
+      elapsedEpochFailure === 'SSE recovery mutation epoch elapsed before the stream was ready'
+      && elapsedEpochOrder.join(',') === 'ready,open,initial,wait',
     'armed marker is exact, bot-authored, bounded, and unauthenticated': () =>
       rendezvousResult.executeAtEpoch === 1787469030
       && rendezvousDelays.length === 1
       && rendezvousDelays[0] === 33
       && rendezvousRequests.length === 1
       && rendezvousRequests[0][0].startsWith('https://api.github.com/repos/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357/comments?')
-      && rendezvousRequests[0][1].headers.Authorization === undefined,
+      && rendezvousRequests[0][1].headers.Authorization === undefined
+      && JSON.stringify(rendezvousDiagnostics) === JSON.stringify([
+        ['armed-marker-observed', 1787469000],
+      ]),
+    'staging marker defers the shared-epoch wait until after stream open': () =>
+      deferredResult.executeAtEpoch === 1787469030
+      && JSON.stringify(deferredDelays) === JSON.stringify([32]),
+    'staging marker rejects a lead that consumes the finite stream budget': () =>
+      excessiveLeadFailure === 'SSE recovery armed epoch is outside the bounded window',
+    'staging marker rejects a fractional lead below the five-second minimum': () =>
+      fractionalMinimumLeadFailure === 'SSE recovery armed epoch is outside the bounded window',
     'rendezvous timeout fails before fixture-consuming mutation': () =>
       timeoutFailure === 'SSE recovery armed marker timed out'
       && timedOutTriggerCalled === false,
