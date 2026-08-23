@@ -9,6 +9,7 @@ import com.miriyum.global.sse.SseStreamScope;
 import com.miriyum.global.sse.SseWakeUpTarget;
 import java.util.Set;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /** 활성 소비자 본인의 공개 IN_APP 이력 watermark만 제공한다. */
 @Component
@@ -31,6 +32,7 @@ public class NotificationSseHighWatermarkSource implements SseHighWatermarkSourc
     }
 
     @Override
+    @Transactional(readOnly = true)
     public SseSignalState read(SseStreamScope scope) {
         if (!supports(scope.audience())) {
             throw new IllegalArgumentException("unsupported notification SSE audience");

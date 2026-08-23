@@ -34,16 +34,19 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("environment_value", self.control_workflow)
         self.assertNotIn("shell_command", self.control_workflow)
 
-    def test_control_workflow_validates_immutable_sha_and_public_ipv4(self):
+    def test_control_workflow_validates_immutable_sha_and_delegates_ip_secret(self):
         self.assertIn("^[0-9a-f]{40}$", self.control_workflow)
         self.assertIn("Invalid immutable image tag", self.control_workflow)
-        self.assertIn("Invalid staging load-test source IP", self.control_workflow)
-        self.assertIn("validate-staging-load-test-source-ip.js", self.control_workflow)
+        self.assertNotRegex(self.control_workflow, r"(?m)^      source_ip:")
+        self.assertNotIn("inputs.source_ip", self.control_workflow)
+        self.assertIn('load_test_source_ip: ""', self.control_workflow)
+        self.assertNotIn("Invalid staging load-test source IP", self.control_workflow)
         self.assertIn("validate-staging-load-test-source-ip.js", self.backend_cd)
+        self.assertIn("Invalid staging load-test source IP", self.backend_cd)
 
-    def test_control_validation_checks_out_the_validator_before_running_it(self):
+    def test_control_validation_checks_out_before_running_inline_validation(self):
         checkout = "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
-        validator = "validate-staging-load-test-source-ip.js"
+        validator = "node - <<'NODE'"
         self.assertIn(checkout, self.control_workflow)
         self.assertLess(self.control_workflow.index(checkout), self.control_workflow.index(validator))
 
@@ -84,6 +87,19 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("aws ssm send-command", self.control_workflow)
         self.assertNotIn("gh workflow run", self.control_workflow)
 
+    def test_rendezvous_inputs_are_delegated_only_to_valkey_control(self):
+        deploy = self.control_workflow.split("\n  deploy:\n", 1)[1].split(
+            "\n  valkey-control:\n", 1
+        )[0]
+        valkey = self.control_workflow.split("\n  valkey-control:\n", 1)[1].split(
+            "\n  disable-after-failed-enable:\n", 1
+        )[0]
+
+        self.assertNotIn("rendezvous_issue:", deploy)
+        self.assertNotIn("rendezvous_id:", deploy)
+        self.assertIn("rendezvous_issue: ${{ inputs.rendezvous_issue }}", valkey)
+        self.assertIn("rendezvous_id: ${{ inputs.rendezvous_id }}", valkey)
+
     def test_valkey_control_is_staging_only_and_accepts_no_arbitrary_command_or_duration(self):
         self.assertIn("name: Staging Valkey Control", self.valkey_control_workflow)
         self.assertIn("workflow_call:", self.valkey_control_workflow)
@@ -94,6 +110,54 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("duration:", self.valkey_control_workflow)
         self.assertNotIn("shell_command", self.valkey_control_workflow)
         self.assertNotIn("production", self.valkey_control_workflow.lower())
+
+    def test_interrupt_requires_a_scoped_issue_comment_rendezvous(self):
+        self.assertIn("rendezvous_issue:", self.control_workflow)
+        self.assertIn("rendezvous_id:", self.control_workflow)
+        self.assertIn("Rendezvous inputs are required only for interrupt-valkey", self.control_workflow)
+        self.assertIn("^[1-9][0-9]{0,9}$", self.control_workflow)
+        self.assertIn("standard UUID", self.control_workflow)
+        self.assertIn("issues: write", self.valkey_control_workflow)
+        self.assertIn("inputs.rendezvous_issue", self.valkey_control_workflow)
+        self.assertIn("inputs.rendezvous_id", self.valkey_control_workflow)
+
+    def test_valkey_rendezvous_is_actor_time_and_scope_bound_after_oidc(self):
+        self.assertIn("SSE_RECOVERY_FIRE run_id=", self.valkey_control_workflow)
+        self.assertIn("github.triggering_actor", self.valkey_control_workflow)
+        self.assertIn("created_at", self.valkey_control_workflow)
+        self.assertIn("wait_started_at", self.valkey_control_workflow)
+        self.assertIn("SSE_RECOVERY_ARMED run_id=", self.valkey_control_workflow)
+        self.assertIn("github-actions[bot]", self.valkey_control_workflow)
+        oidc = self.valkey_control_workflow.index("Configure AWS credentials through OIDC")
+        wait = self.valkey_control_workflow.index("Wait for the exact recovery fire marker")
+        submit = self.valkey_control_workflow.index("aws ssm send-command")
+        armed = self.valkey_control_workflow.index("SSE_RECOVERY_ARMED run_id=")
+        self.assertLess(oidc, wait)
+        self.assertLess(wait, submit)
+        self.assertLess(submit, armed)
+        self.assertIn('"InProgress"', self.valkey_control_workflow)
+
+    def test_armed_marker_requires_a_successful_remote_readiness_probe(self):
+        submit = self.valkey_control_workflow.split(
+            "      - name: Run fixed Valkey control through SSM\n", 1
+        )[1].split("\n      - name: Acknowledge the armed recovery interruption", 1)[0]
+        acknowledge = self.valkey_control_workflow.split(
+            "      - name: Acknowledge the armed recovery interruption\n", 1
+        )[1].split("\n      - name: Wait for bounded Valkey control result", 1)[0]
+
+        self.assertIn("VALKEY_CONTROL_READY_FILE=", submit)
+        self.assertIn("ready_file=$ready_file", submit)
+        self.assertIn("READY_FILE: ${{ steps.ssm.outputs.ready_file }}", acknowledge)
+        self.assertIn("readiness_probe_command=", acknowledge)
+        self.assertIn("aws ssm send-command", acknowledge)
+        self.assertIn("readiness_command_id=", acknowledge)
+        self.assertIn('if [ "$readiness_status" = "Success" ]', acknowledge)
+        self.assertIn('[ "$status" = "InProgress" ]', acknowledge)
+        self.assertLess(
+            acknowledge.index('if [ "$readiness_status" = "Success" ]'),
+            acknowledge.index('marker="SSE_RECOVERY_ARMED'),
+        )
+        self.assertNotIn("StandardOutputContent", acknowledge)
 
     def test_valkey_control_requires_the_reviewed_dev_caller_before_oidc(self):
         self.assertIn("Staging Valkey controls must run from refs/heads/dev", self.control_workflow)
@@ -121,8 +185,23 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertIn("AWS-RunShellScript", self.valkey_control_workflow)
         self.assertIn("aws ssm send-command", self.valkey_control_workflow)
         self.assertIn("VALKEY_CONTROL_ACTION", self.valkey_control_workflow)
-        self.assertNotIn("StandardOutputContent", self.valkey_control_workflow)
-        self.assertNotIn("StandardErrorContent", self.valkey_control_workflow)
+        self.assertIn("StandardOutputContent", self.valkey_control_workflow)
+        self.assertIn("StandardErrorContent", self.valkey_control_workflow)
+
+    def test_valkey_control_failure_logs_only_bounded_allowlisted_diagnostics(self):
+        self.assertIn("ResponseCode", self.valkey_control_workflow)
+        self.assertIn("staging_valkey_control_failed", self.valkey_control_workflow)
+        self.assertIn("remote-command-failed", self.valkey_control_workflow)
+        self.assertIn("grep -E", self.valkey_control_workflow)
+        self.assertNotIn('echo "$invocation"', self.valkey_control_workflow)
+        self.assertNotIn('printf \'%s\\n\' "$standard_error"', self.valkey_control_workflow)
+
+    def test_valkey_control_success_logs_only_bounded_phase_diagnostics(self):
+        self.assertIn("report_success", self.valkey_control_workflow)
+        self.assertIn("staging_valkey_control_phase", self.valkey_control_workflow)
+        self.assertIn("observed_at_epoch=[0-9]{10}", self.valkey_control_workflow)
+        self.assertNotIn('echo "$invocation"', self.valkey_control_workflow)
+        self.assertNotIn('printf \'%s\\n\' "$standard_output"', self.valkey_control_workflow)
 
     def test_backend_cd_accepts_only_fixed_safe_recovery_mode(self):
         self.assertIn("runtime_recovery_mode:", self.backend_cd)
