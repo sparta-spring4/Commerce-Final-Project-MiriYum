@@ -1,6 +1,8 @@
 spring:
   application:
     name: miriyum-backend
+  jpa:
+    open-in-view: false
   datasource:
     url: ${MIRIYUM_DB_URL}
     username: ${MIRIYUM_DB_USERNAME}
