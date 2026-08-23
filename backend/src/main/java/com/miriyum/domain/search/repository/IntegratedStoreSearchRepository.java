@@ -30,6 +30,10 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class IntegratedStoreSearchRepository {
 
+    private static final int MAX_EXPANDED_CANDIDATES = 200;
+    private static final int FORWARD_EXPANDED_TIER = 1;
+    private static final int REVERSE_EXPANDED_TIER = 0;
+
     private final JPAQueryFactory queryFactory;
     private final IntegratedSearchCursorCodec cursorCodec;
 
@@ -102,9 +106,41 @@ public class IntegratedStoreSearchRepository {
         if (validated.isEmpty()) {
             return List.of();
         }
+        int boundedLimit = Math.min(limit, MAX_EXPANDED_CANDIDATES);
         QStore store = QStore.store;
-        BooleanBuilder predicate = IntegratedStoreSearchPredicates.createExpanded(
+        List<IntegratedStoreSearchCandidate> forward = searchExpandedTier(
+                store,
+                IntegratedStoreSearchPredicates.createExpandedForward(
+                        store, query, validated),
+                FORWARD_EXPANDED_TIER,
+                boundedLimit);
+        if (forward.size() >= boundedLimit) {
+            return forward;
+        }
+        BooleanBuilder reversePredicate = IntegratedStoreSearchPredicates.createExpandedReverse(
                 store, query, validated);
+        if (!forward.isEmpty()) {
+            reversePredicate.and(store.id.notIn(forward.stream()
+                    .map(IntegratedStoreSearchCandidate::storeId)
+                    .toList()));
+        }
+        List<IntegratedStoreSearchCandidate> reverse = searchExpandedTier(
+                store,
+                reversePredicate,
+                REVERSE_EXPANDED_TIER,
+                boundedLimit - forward.size());
+        List<IntegratedStoreSearchCandidate> combined = new ArrayList<>(boundedLimit);
+        combined.addAll(forward);
+        combined.addAll(reverse);
+        return List.copyOf(combined);
+    }
+
+    private List<IntegratedStoreSearchCandidate> searchExpandedTier(
+            QStore store,
+            BooleanBuilder predicate,
+            int relevanceTier,
+            int limit
+    ) {
         BooleanExpression currentVerifiedCoordinates = store.geocodingStatus
                 .eq(GeocodingStatus.VERIFIED)
                 .and(store.geocodingAddressVersion.eq(store.addressVersion));
@@ -121,7 +157,7 @@ public class IntegratedStoreSearchRepository {
                         store.menuHoldEnabled,
                         store.pickupEnabled,
                         store.createdAt,
-                        Expressions.asNumber(1),
+                        Expressions.asNumber(relevanceTier),
                         new CaseBuilder().when(currentVerifiedCoordinates)
                                 .then(store.latitude)
                                 .otherwise(Expressions.nullExpression(BigDecimal.class)),

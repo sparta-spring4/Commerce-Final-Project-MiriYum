@@ -35,9 +35,9 @@ public record OpenAiSearchInterpretationProperties(
         if (maxConcepts < 1 || maxConcepts > 8) {
             throw new IllegalArgumentException("maxConcepts must be between 1 and 8");
         }
-        if (supplementCandidateLimit < 1 || supplementCandidateLimit > 5_000) {
+        if (supplementCandidateLimit < 1 || supplementCandidateLimit > 200) {
             throw new IllegalArgumentException(
-                    "supplementCandidateLimit must be between 1 and 5000");
+                    "supplementCandidateLimit must be between 1 and 200");
         }
         apiKey = apiKey == null ? "" : apiKey;
     }
