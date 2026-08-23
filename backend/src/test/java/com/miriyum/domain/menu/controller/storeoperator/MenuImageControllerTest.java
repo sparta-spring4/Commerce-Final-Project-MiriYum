@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -67,6 +68,39 @@ class MenuImageControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.url").value("/api/v1/public-files/123e4567-e89b-12d3-a456-426614174000"))
                 .andExpect(jsonPath("$.data.imageId").doesNotExist());
+    }
+
+    @Test
+    void getMenuImageReturnsCurrentPublicUrlWithoutInternalImageId() throws Exception {
+        given(menuImageService.getMenuImage(11L, 7L, 13L))
+                .willReturn(new MenuPublicImageResponse("/api/v1/public-files/123e4567-e89b-12d3-a456-426614174000"));
+
+        mockMvc.perform(get("/api/v1/store-operators/stores/7/menus/13/images")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.url").value("/api/v1/public-files/123e4567-e89b-12d3-a456-426614174000"))
+                .andExpect(jsonPath("$.data.imageId").doesNotExist());
+    }
+
+    @Test
+    void getMenuImageWithoutConfirmedImageReturnsNoContent() throws Exception {
+        given(menuImageService.getMenuImage(11L, 7L, 13L)).willReturn(null);
+
+        mockMvc.perform(get("/api/v1/store-operators/stores/7/menus/13/images")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void getMenuImageRejectsAnotherStoreOperator() throws Exception {
+        given(menuImageService.getMenuImage(11L, 7L, 13L))
+                .willThrow(new ServiceException(StoreErrorCode.ACCESS_DENIED));
+
+        mockMvc.perform(get("/api/v1/store-operators/stores/7/menus/13/images")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("STORE_003"));
     }
 
     @Test

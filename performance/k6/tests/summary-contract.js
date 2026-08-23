@@ -21,6 +21,11 @@ const SUMMARY_INPUT = {
       contains: 'time',
       values: { avg: 11.2, 'p(50)': 10.1, 'p(95)': 20.2, 'p(99)': 25.3, max: 30.4 },
     },
+    'http_reqs{phase:measured,scenario:notificationHistory}': {
+      type: 'counter',
+      contains: 'default',
+      values: { count: 60, rate: 12.5 },
+    },
     'dropped_iterations{phase:measured,scenario:notificationHistory}': {
       type: 'counter',
       contains: 'default',
@@ -51,6 +56,7 @@ export default function () {
     targetFingerprint: 'a'.repeat(64),
     fixtureSha256: 'b'.repeat(64),
     limits: { maxVus: 1, durationSeconds: 1, arrivalRate: 1 },
+    capacity: { stageNumber: 2, targetRps: 25 },
     forbiddenProbe: 'Bearer secret-token cursor-secret response-body',
   })
   const combined = `${rendered.stdout}\n${rendered.json}\n${rendered.markdown}`
@@ -68,6 +74,10 @@ export default function () {
       && parsed.targetFingerprint === 'a'.repeat(64)
       && parsed.fixtureSha256 === 'b'.repeat(64)
       && parsed.scenarioNames.join(',') === 'notificationHistory',
+    'summary keeps capacity stage and planned target separately from measured RPS': () =>
+      parsed.capacity.stageNumber === 2
+      && parsed.capacity.targetRps === 25
+      && parsed.metrics.notificationHistory.httpRequests.rate === 12.5,
     'summary keeps measured scenario percentiles': () =>
       parsed.metrics.notificationHistory.httpReqDuration.p95 === 20.2,
     'summary discloses dropped configured arrivals': () =>

@@ -1,6 +1,6 @@
 import { assertSafeTarget, parsePositiveInt } from './lib/safety.js'
 
-const VALID_PROFILES = new Set(['smoke', 'local-baseline', 'staging-baseline'])
+const VALID_PROFILES = new Set(['smoke', 'local-baseline', 'staging-baseline', 'staging-capacity'])
 export const SCENARIO_NAMES = Object.freeze([
   'authRefresh',
   'storeSearch',
@@ -79,6 +79,14 @@ function requireJsonPath(name, rawValue) {
   return path
 }
 
+function requirePositiveInteger(name, rawValue) {
+  const value = Number(requireText(name, rawValue))
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer`)
+  }
+  return value
+}
+
 function parseAllowedHosts(rawValue) {
   const hosts = requireText('ALLOWED_HOSTS', rawValue)
     .split(',')
@@ -128,7 +136,7 @@ export function loadConfig(env) {
   const allowedHosts = parseAllowedHosts(env.ALLOWED_HOSTS)
   const profile = requireText('PROFILE', env.PROFILE)
   if (!VALID_PROFILES.has(profile)) {
-    throw new Error('PROFILE must be smoke, local-baseline, or staging-baseline')
+    throw new Error('PROFILE must be smoke, local-baseline, staging-baseline, or staging-capacity')
   }
 
   if (targetEnv === 'staging' && env.STAGING_APPROVED !== 'true') {
@@ -140,9 +148,15 @@ export function loadConfig(env) {
   if (profile === 'staging-baseline' && targetEnv !== 'staging') {
     throw new Error('staging-baseline requires TARGET_ENV=staging')
   }
+  if (profile === 'staging-capacity' && targetEnv !== 'staging') {
+    throw new Error('staging-capacity requires TARGET_ENV=staging')
+  }
+  if (profile === 'staging-capacity' && env.CAPACITY_TEST_APPROVED !== 'true') {
+    throw new Error('staging-capacity requires CAPACITY_TEST_APPROVED=true')
+  }
   const prerequisiteSmokeRunId = profile === 'local-baseline'
     ? requireRunId(env.LOCAL_SMOKE_RUN_ID)
-    : profile === 'staging-baseline'
+    : profile === 'staging-baseline' || profile === 'staging-capacity'
       ? requireRunId(env.STAGING_SMOKE_RUN_ID)
       : null
   const smokeProofPath = profile === 'smoke'
@@ -160,6 +174,20 @@ export function loadConfig(env) {
 
   const limits = loadLimits(profile, env)
   const scenarioNames = loadScenarioNames(env.SCENARIOS)
+  const capacityStageNumber = profile === 'staging-capacity'
+    ? requirePositiveInteger('CAPACITY_STAGE_NUMBER', env.CAPACITY_STAGE_NUMBER)
+    : null
+  const capacityTargetRps = profile === 'staging-capacity'
+    ? requirePositiveInteger('CAPACITY_TARGET_RPS', env.CAPACITY_TARGET_RPS)
+    : null
+  const capacityPreviousProofPath = capacityStageNumber !== null && capacityStageNumber > 1
+    ? requireJsonPath('CAPACITY_PREVIOUS_PROOF_PATH', env.CAPACITY_PREVIOUS_PROOF_PATH)
+    : null
+  if (profile === 'staging-capacity'
+    && scenarioNames.includes('storeSearch')
+    && env.CAPACITY_LLM_DISABLED_CONFIRMED !== 'true') {
+    throw new Error('storeSearch capacity requires CAPACITY_LLM_DISABLED_CONFIRMED=true')
+  }
   if (targetEnv === 'staging'
     && scenarioNames.includes('reservationCreate')
     && env.STAGING_RESERVATION_FIXTURE_APPROVED !== 'true') {
@@ -190,6 +218,9 @@ export function loadConfig(env) {
     ...shaEvidence,
     limits,
     scenarioNames,
+    capacityStageNumber,
+    capacityTargetRps,
+    capacityPreviousProofPath,
   })
 }
 

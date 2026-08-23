@@ -38,8 +38,13 @@ class BackendCiPathFilterTest(unittest.TestCase):
         self.assert_scope(["performance/k6/config.js"], "contract")
         self.assert_scope(["deploy/docker-compose.prod.yml"], "unit")
         self.assert_scope([".github/workflows/backend-cd.yml"], "contract")
+        self.assert_scope([".github/workflows/staging-load-test-control.yml"], "contract")
+        self.assert_scope([".github/workflows/staging-valkey-control.yml"], "contract")
         self.assert_scope([".github/workflows/frontend-ci.yml"], "contract")
         self.assert_scope([".github/workflows/k6-contract.yml"], "contract")
+        self.assert_scope(["scripts/test-staging-load-test-control-workflow.py"], "contract")
+        self.assert_scope(["scripts/staging-valkey-control.sh"], "contract")
+        self.assert_scope(["scripts/test-staging-valkey-control.py"], "contract")
 
     def test_unknown_or_empty_path_fails_safe_to_full_tests(self):
         self.assert_scope(["infra/unknown.yml"], "full")
@@ -53,6 +58,16 @@ class BackendCiPathFilterTest(unittest.TestCase):
         self.assertIn('test "$UNIT_TEST_RESULT" = "skipped"', workflow)
         self.assertIn('test "$INTEGRATION_TEST_RESULT" = "skipped"', workflow)
         self.assertIn('git diff --name-only --no-renames "$BASE_SHA...$HEAD_SHA"', workflow)
+
+    def test_integration_shards_publish_duration_reports_on_success_and_failure(self):
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("Generate integration test duration report", workflow)
+        self.assertIn("backend-ci-test-duration-report.py", workflow)
+        self.assertIn("if: always()", workflow)
+        self.assertIn("backend-integration-test-${{ matrix.shard }}-duration", workflow)
+        self.assertIn("backend/build/test-results/${{ matrix.report_directory }}", workflow)
+        self.assertIn("backend/test-duration-${{ matrix.shard }}.md", workflow)
 
     def test_merge_base_diff_ignores_backend_changes_added_only_to_base(self):
         with temporary_git_repository() as repository:

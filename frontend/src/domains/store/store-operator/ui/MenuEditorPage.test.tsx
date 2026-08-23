@@ -1,8 +1,8 @@
 import { STORE_OPERATOR_PATHS } from '../../../../app/routes/paths/storeOperatorPaths'
 import { fillPath } from '../../../../app/routes/path'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
-import { http } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { errorResponse, successResponse } from '../../../../test/msw/envelope'
 import { server } from '../../../../test/msw/server'
 import {
@@ -59,6 +59,14 @@ function chooseDisclosures(allergen = 'NOT_REGISTERED', origin = 'NOT_APPLICABLE
 }
 
 describe('메뉴 편집 화면', () => {
+  beforeEach(() => {
+    server.use(
+      http.get(`${MENU_PATH}/images`, () =>
+        new HttpResponse(null, { status: 204 }),
+      ),
+    )
+  })
+
   it('표시 정보를 고르지 않으면 저장하지 않는다', async () => {
     let called = false
     server.use(

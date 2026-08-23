@@ -180,13 +180,15 @@ class PaymentRecoveryHttpIT {
                                 + "\"newPasswordConfirm\":\"Changed2@\"}"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(), "$.data.accessToken");
 
-        mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases")
+        String caseListResponse = mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content[0].caseId").value(recoveryCase.getPublicId()))
                 .andExpect(content().string(not(containsString("portOnePaymentId"))))
                 .andExpect(content().string(not(containsString("providerPayload"))))
-                .andExpect(content().string(not(containsString("card"))));
+                .andExpect(content().string(not(containsString("card"))))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<String>>read(caseListResponse, "$.data.content[*].caseId"))
+                .contains(recoveryCase.getPublicId());
         mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases/{caseId}",
                         recoveryCase.getPublicId()).header("Authorization", "Bearer " + token))
                 .andExpect(status().isForbidden());
@@ -224,11 +226,16 @@ class PaymentRecoveryHttpIT {
                 """, Long.class, recoveryCase.getPublicId())).isEqualTo(operator.getId());
         assertThat(jdbc.queryForObject("select case_version from payment_recovery_cases where case_public_id = ?",
                 Long.class, recoveryCase.getPublicId())).isEqualTo(2L);
-        mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases")
+        String assignedCaseListResponse = mvc.perform(get("/api/v1/platform-operators/payment-recovery-cases")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content[0].assignedOperatorId").value(operator.getId()))
-                .andExpect(jsonPath("$.data.content[0].assignedToCurrentOperator").value(true));
+                .andReturn().getResponse().getContentAsString();
+        List<Map<String, Object>> assignedCases = JsonPath.read(assignedCaseListResponse,
+                "$.data.content[?(@.caseId == '" + recoveryCase.getPublicId() + "')]");
+        assertThat(assignedCases).hasSize(1);
+        Map<String, Object> assignedCase = assignedCases.get(0);
+        assertThat(((Number) assignedCase.get("assignedOperatorId")).longValue()).isEqualTo(operator.getId());
+        assertThat(assignedCase.get("assignedToCurrentOperator")).isEqualTo(true);
         Long auditId = jdbc.queryForObject("""
                 select platform_operator_audit_event_id from platform_operator_audit_events
                 where action = 'PAYMENT_RECOVERY_CASE_ASSIGNED' and case_id = ?

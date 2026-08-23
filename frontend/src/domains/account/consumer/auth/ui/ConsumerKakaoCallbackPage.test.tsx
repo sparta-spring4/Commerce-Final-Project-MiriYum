@@ -97,7 +97,9 @@ describe('일반 사용자 카카오 콜백', () => {
 
     renderCallback('/auth/kakao/callback?code=authorization-code&state=signed-state')
 
-    expect(await screen.findByTestId('auth-status')).toHaveTextContent('authenticated')
+    await waitFor(() =>
+      expect(screen.getByTestId('auth-status')).toHaveTextContent('authenticated'),
+    )
     expect(requestBody).toEqual({
       authorizationCode: 'authorization-code',
       state: 'signed-state',

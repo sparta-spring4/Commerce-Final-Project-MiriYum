@@ -250,6 +250,10 @@ docker compose --env-file deploy/local/.env `
 
 staging에서는 위와 같은 입력을 승인된 staging host·SHA·clean harness gate로 바꾼다. summary의 `recoveryDuration.max`, `recoveryHttpVerified.count=1`, `recoveryCleanupSuccessful.count=1`과 threshold 전체 성공을 기록한다. 계정·매장·팀·cursor·Token·idempotency key 원문은 기록하지 않는다.
 
+staging 장애 주입은 EC2 shell에서 아래 로컬 Compose 명령을 직접 실행하지 않는다. 하네스가 `SSE_RECOVERY_READY`를 출력한 뒤 GitHub Actions의 `Staging Load-Test Control`을 `dev`에서 실행하고, `action=interrupt-valkey`, 실제 최신 성공 `staging-backend` 배포 full SHA, 빈 `source_ip`를 입력한다. 이 고정 action은 Valkey만 10초 중단하고 같은 SSM 명령에서 자동 재기동·health 확인까지 수행한다. 실패·취소·timeout이면 같은 SHA로 `recover-valkey`를 즉시 실행하고 성공 및 private health `UP` 전에는 테스트를 계속하지 않는다. 세부 권한과 실행 순서는 [Staging Load-Test Operator Runbook](staging-load-test-operator-runbook.md)을 따른다.
+
+아래 명령은 local 환경에서만 사용한다.
+
 ```powershell
 docker compose --env-file deploy/local/.env `
   -f deploy/local/docker-compose.dev.yml `

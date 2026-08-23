@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { createIdempotencyKey } from '../../../../shared/api/idempotencyKey'
 import { Button } from '../../../../shared/ui/Button'
 import { Alert } from '../../../../shared/ui/Feedback'
-import { useDeleteMenuImage, usePutMenuImage } from '../api/menuQueries'
+import { useDeleteMenuImage, useMenuImage, usePutMenuImage } from '../api/menuQueries'
 import { storeErrorMessage } from '../model/storeErrors'
 import { SectionCard } from '../../../../app/shells/store-operator/OperatorPage'
 import { MENU_IMAGE_ACCEPT, validateMenuImage } from '../model/menuImage'
@@ -16,13 +16,19 @@ export function MenuImagePanel({
 }) {
   const upload = usePutMenuImage(storeId, menuId)
   const remove = useDeleteMenuImage(storeId, menuId)
+  const image = useMenuImage(storeId, menuId)
   const uploadKeys = useRef(new WeakMap<File, string>())
   const deleteKey = useRef<string | null>(null)
-  const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [retryFile, setRetryFile] = useState<File | null>(null)
 
   const busy = upload.isPending || remove.isPending
+  const imageUrl = image.data ?? null
+  const emptyImageMessage = image.isLoading
+    ? '대표 이미지를 불러오는 중입니다.'
+    : image.isError
+      ? '대표 이미지 상태를 확인하지 못했습니다.'
+      : '등록된 대표 이미지가 없습니다.'
 
   async function handleFileChange(file: File | undefined) {
     if (file === undefined) return
@@ -42,13 +48,12 @@ export function MenuImagePanel({
     // 새 업로드는 이전 삭제 시도의 결과를 재사용하면 안 된다.
     deleteKey.current = null
     try {
-      const url = await upload.mutateAsync({
+      await upload.mutateAsync({
         file,
         idempotencyKey:
           uploadKeys.current.get(file) ??
           createUploadKey(file, uploadKeys.current),
       })
-      setImageUrl(url)
       setMessage(null)
       deleteKey.current = null
       setRetryFile(null)
@@ -65,7 +70,6 @@ export function MenuImagePanel({
       const key =
         deleteKey.current ?? (deleteKey.current = createIdempotencyKey())
       await remove.mutateAsync(key)
-      setImageUrl(null)
       deleteKey.current = null
     } catch (error) {
       setMessage(storeErrorMessage(error))
@@ -98,11 +102,14 @@ export function MenuImagePanel({
       {upload.isPending && (
         <Alert tone="info" title="이미지를 업로드하는 중입니다." />
       )}
+      {image.isError && (
+        <Alert tone="error" title="대표 이미지를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요." />
+      )}
       <div className="op-menu-image">
         {imageUrl !== null ? (
           <img className="op-menu-image__preview" src={imageUrl} alt="메뉴 대표 이미지" />
         ) : (
-          <div className="op-menu-image__empty">등록된 대표 이미지가 없습니다.</div>
+          <div className="op-menu-image__empty">{emptyImageMessage}</div>
         )}
         <div className="op-menu-image__actions">
           <label

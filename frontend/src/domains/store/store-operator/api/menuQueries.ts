@@ -312,11 +312,24 @@ export function usePutMenuImage(storeId: string, fixedMenuId?: string) {
       )
       return response.data.url
     },
-    onSuccess: (_url, variables) => {
+    onMutate: async (variables) => {
       const menuId = variables.menuId ?? fixedMenuId
       if (menuId === undefined) return
+      await queryClient.cancelQueries({
+        queryKey: storeOperatorKeys.menuImage(storeId, menuId),
+        exact: true,
+      })
+    },
+    onSuccess: (url, variables) => {
+      const menuId = variables.menuId ?? fixedMenuId
+      if (menuId === undefined) return
+      queryClient.setQueryData(
+        storeOperatorKeys.menuImage(storeId, menuId),
+        url,
+      )
       void queryClient.invalidateQueries({
         queryKey: storeOperatorKeys.menu(storeId, menuId),
+        exact: true,
       })
       void queryClient.invalidateQueries({
         queryKey: storeOperatorKeys.menus(storeId),
@@ -326,9 +339,31 @@ export function usePutMenuImage(storeId: string, fixedMenuId?: string) {
   })
 }
 
+export function useMenuImage(storeId: string, menuId: string) {
+  const { apiClient } = useStoreOperatorAuth()
+
+  return useQuery({
+    enabled: storeId.length > 0 && menuId.length > 0,
+    queryKey: storeOperatorKeys.menuImage(storeId, menuId),
+    queryFn: async ({ signal }): Promise<string | null> => {
+      const response = await apiClient(
+        '/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images',
+        {
+          method: 'get',
+          pathParams: { storeId, menuId },
+          signal,
+          allowNoContent: true,
+        },
+      )
+      return response?.data.url ?? null
+    },
+  })
+}
+
 export function useDeleteMenuImage(storeId: string, menuId: string) {
   const { apiClient } = useStoreOperatorAuth()
   const queryClient = useQueryClient()
+  const menuImageKey = storeOperatorKeys.menuImage(storeId, menuId)
 
   return useMutation({
     mutationFn: async (idempotencyKey: string): Promise<void> => {
@@ -342,9 +377,17 @@ export function useDeleteMenuImage(storeId: string, menuId: string) {
         },
       )
     },
+    onMutate: async () => {
+      await queryClient.cancelQueries({
+        queryKey: menuImageKey,
+        exact: true,
+      })
+    },
     onSuccess: () => {
+      queryClient.setQueryData(menuImageKey, null)
       void queryClient.invalidateQueries({
         queryKey: storeOperatorKeys.menu(storeId, menuId),
+        exact: true,
       })
       void queryClient.invalidateQueries({
         queryKey: storeOperatorKeys.menus(storeId),
