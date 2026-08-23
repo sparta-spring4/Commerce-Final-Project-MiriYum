@@ -51,6 +51,8 @@ Use this procedure only for an approved SSE `recovery` profile. The selected `im
 
 The remote script attempts to start Valkey from its exit and signal traps. If the action fails, is cancelled, or times out, immediately run `recover-valkey` with the same latest deployed SHA and do not continue testing until that action succeeds and staging private health is `UP`. Do not run both actions concurrently; the workflow serializes them with other staging load-test controls and staging deployment commands.
 
+Before Compose validation or any Valkey operation, the remote script resolves exactly one running, non-one-off backend container and one running, non-one-off frontend container from the fixed `miriyum` Compose project labels. It passes their image references only to the Compose process and never prints them. If either service is stopped, only a Compose one-off container exists, or either binding is missing or ambiguous, the action fails closed with `phase=preflight reason=runtime-image-binding-failed` before it starts or stops Valkey.
+
 On failure, the Actions log reports the SSM status, response code, and only bounded diagnostics in the form `event=staging_valkey_control_failed action=... phase=... reason=... exit_code=...`. It does not print the full remote stdout or stderr. If the remote command ends before it can emit a diagnostic event, the workflow reports `phase=remote-command reason=remote-command-failed` with the command ID. Use the phase and fixed reason for triage; do not copy environment values, Compose output, credentials, tokens, or Valkey data into the Issue.
 
 ## Restore the Default Rate Limit
