@@ -769,28 +769,6 @@ jobs:
           previous_task_arns_file="$RUNNER_TEMP/notification-read-previous-task-arns.json"
           trap 'rm -rf "$evidence_directory"; rm -f "$previous_task_arns_file"' EXIT
 
-          aws ecs describe-services \
-            --cluster "$ECS_CLUSTER" \
-            --services "$ECS_SERVICE" \
-            --query 'services[0]' \
-            --output json > "$evidence_directory/service.json"
-
-          running_task_arns=$(aws ecs list-tasks \
-            --cluster "$ECS_CLUSTER" \
-            --service-name "$ECS_SERVICE" \
-            --desired-status RUNNING \
-            --query 'taskArns' \
-            --output text)
-          read -r -a task_arns <<< "$running_task_arns"
-          if [ "${#task_arns[@]}" -lt 1 ]; then
-            echo "::error::Active ECS task evidence is missing."
-            exit 1
-          fi
-          aws ecs describe-tasks \
-            --cluster "$ECS_CLUSTER" \
-            --tasks "${task_arns[@]}" \
-            --output json > "$evidence_directory/tasks.json"
-
           mapfile -t previous_task_arns < <(jq -r '.[]' "$previous_task_arns_file")
           if [ "${#previous_task_arns[@]}" -lt 1 ]; then
             echo "::error::Previous ECS task identity evidence is missing."
@@ -841,41 +819,72 @@ jobs:
               "$evidence_directory/final-stopped-tasks.json"
           }
 
-          refresh_previous_task_evidence
+          refresh_replacement_evidence() {
+            local running_task_arns
+            local -a task_arns
+            local target_group_index=0
+            local target_group_arn
+            local target_health_file
 
-          jq -n \
-            --slurpfile service "$evidence_directory/service.json" \
-            --slurpfile tasks "$evidence_directory/tasks.json" \
-            --slurpfile previous_task_arns "$previous_task_arns_file" \
-            --slurpfile previous_tasks "$evidence_directory/previous-tasks.json" \
-            --slurpfile stopped_task_arns "$evidence_directory/final-stopped-task-arns.json" \
-            --slurpfile stopped_tasks "$evidence_directory/final-stopped-tasks.json" \
-            '{
-              service: $service[0],
-              tasks: $tasks[0],
-              previousTaskArns: $previous_task_arns[0],
-              previousTasks: $previous_tasks[0],
-              stoppedTaskArns: $stopped_task_arns[0],
-              stoppedTasks: $stopped_tasks[0],
-              targetHealthByArn: {}
-            }' \
-            > "$evidence_directory/evidence.json"
+            aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$ECS_SERVICE" \
+              --query 'services[0]' \
+              --output json > "$evidence_directory/service.json"
 
-          target_group_index=0
-          while IFS= read -r target_group_arn; do
-            [ -n "$target_group_arn" ] || continue
-            target_group_index=$((target_group_index + 1))
-            target_health_file="$evidence_directory/target-health-$target_group_index.json"
-            aws elbv2 describe-target-health \
-              --target-group-arn "$target_group_arn" \
-              --output json > "$target_health_file"
-            jq --arg arn "$target_group_arn" \
-              --slurpfile health "$target_health_file" \
-              '.targetHealthByArn[$arn] = $health[0]' \
-              "$evidence_directory/evidence.json" \
-              > "$evidence_directory/evidence.next.json"
-            mv "$evidence_directory/evidence.next.json" "$evidence_directory/evidence.json"
-          done < <(jq -r '.loadBalancers[]?.targetGroupArn // empty' "$evidence_directory/service.json")
+            running_task_arns=$(aws ecs list-tasks \
+              --cluster "$ECS_CLUSTER" \
+              --service-name "$ECS_SERVICE" \
+              --desired-status RUNNING \
+              --query 'taskArns' \
+              --output text)
+            read -r -a task_arns <<< "$running_task_arns"
+            if [ "${#task_arns[@]}" -lt 1 ]; then
+              echo "::error::Active ECS task evidence is missing."
+              exit 1
+            fi
+            aws ecs describe-tasks \
+              --cluster "$ECS_CLUSTER" \
+              --tasks "${task_arns[@]}" \
+              --output json > "$evidence_directory/tasks.json"
+
+            refresh_previous_task_evidence
+
+            jq -n \
+              --slurpfile service "$evidence_directory/service.json" \
+              --slurpfile tasks "$evidence_directory/tasks.json" \
+              --slurpfile previous_task_arns "$previous_task_arns_file" \
+              --slurpfile previous_tasks "$evidence_directory/previous-tasks.json" \
+              --slurpfile stopped_task_arns "$evidence_directory/final-stopped-task-arns.json" \
+              --slurpfile stopped_tasks "$evidence_directory/final-stopped-tasks.json" \
+              '{
+                service: $service[0],
+                tasks: $tasks[0],
+                previousTaskArns: $previous_task_arns[0],
+                previousTasks: $previous_tasks[0],
+                stoppedTaskArns: $stopped_task_arns[0],
+                stoppedTasks: $stopped_tasks[0],
+                targetHealthByArn: {}
+              }' \
+              > "$evidence_directory/evidence.json"
+
+            while IFS= read -r target_group_arn; do
+              [ -n "$target_group_arn" ] || continue
+              target_group_index=$((target_group_index + 1))
+              target_health_file="$evidence_directory/target-health-$target_group_index.json"
+              aws elbv2 describe-target-health \
+                --target-group-arn "$target_group_arn" \
+                --output json > "$target_health_file"
+              jq --arg arn "$target_group_arn" \
+                --slurpfile health "$target_health_file" \
+                '.targetHealthByArn[$arn] = $health[0]' \
+                "$evidence_directory/evidence.json" \
+                > "$evidence_directory/evidence.next.json"
+              mv "$evidence_directory/evidence.next.json" "$evidence_directory/evidence.json"
+            done < <(jq -r '.loadBalancers[]?.targetGroupArn // empty' "$evidence_directory/service.json")
+          }
+
+          refresh_replacement_evidence
 
           verification_output_file="$evidence_directory/verification-output.txt"
           for attempt in $(seq 1 60); do
@@ -902,17 +911,7 @@ jobs:
 
             echo "Waiting for previous ECS tasks to reach STOPPED ($attempt/60)..."
             sleep 5
-            refresh_previous_task_evidence
-            jq \
-              --slurpfile previous_tasks "$evidence_directory/previous-tasks.json" \
-              --slurpfile stopped_task_arns "$evidence_directory/final-stopped-task-arns.json" \
-              --slurpfile stopped_tasks "$evidence_directory/final-stopped-tasks.json" \
-              '.previousTasks = $previous_tasks[0]
-                | .stoppedTaskArns = $stopped_task_arns[0]
-                | .stoppedTasks = $stopped_tasks[0]' \
-              "$evidence_directory/evidence.json" \
-              > "$evidence_directory/evidence.next.json"
-            mv "$evidence_directory/evidence.next.json" "$evidence_directory/evidence.json"
+            refresh_replacement_evidence
           done
 
       - name: Cleanup previous ECS task identity evidence
