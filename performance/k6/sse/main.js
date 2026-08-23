@@ -21,6 +21,7 @@ import {
   requireSlowCleanupResult,
   runOwnedHttpProbe,
   triggerWaitingChange,
+  verifyWaitingTriggerFixture,
   verifyWaitingChange,
 } from './probe.js'
 import { runSseRecovery } from './recovery.js'
@@ -87,6 +88,10 @@ const companionLifetimeMilliseconds = new Trend('sse_companion_lifetime', true)
 const recoveryMilliseconds = new Trend('sse_recovery_duration', true)
 const recoveryHttpVerified = new Counter('sse_recovery_http_verified')
 const recoveryCleanupSuccessful = new Counter('sse_recovery_cleanup_successful')
+const recoveryTriggerListFailures = new Counter('sse_recovery_trigger_list_failures')
+const recoveryTriggerFixtureFailures = new Counter('sse_recovery_trigger_fixture_failures')
+const recoveryTriggerCallFailures = new Counter('sse_recovery_trigger_call_failures')
+const recoveryTriggerResponseFailures = new Counter('sse_recovery_trigger_response_failures')
 
 function thresholds() {
   const expectedCapacityRejections = config.profile === 'capacity'
@@ -112,6 +117,10 @@ function thresholds() {
     sse_unexpected_4xx: ['count==0'],
     sse_server_5xx: ['count==0'],
     sse_unexpected_status: ['count==0'],
+    sse_recovery_trigger_list_failures: ['count==0'],
+    sse_recovery_trigger_fixture_failures: ['count==0'],
+    sse_recovery_trigger_call_failures: ['count==0'],
+    sse_recovery_trigger_response_failures: ['count==0'],
   }
   Object.assign(result, buildSseThresholds(config))
   if (config.profile === 'reconnect') {
@@ -211,6 +220,16 @@ export function setup() {
   if (config.profile === 'slow-client') {
     sessions = assignSlowClientRoles(sessions, config.slowClientConnections)
   }
+  if (config.profile === 'recovery') {
+    const session = sessions[0]
+    verifyWaitingTriggerFixture({
+      client: http,
+      baseUrl: config.baseUrl,
+      session,
+      metrics: recoveryTriggerFailureMetrics(),
+      tags: tagsFor(session.target, 'trigger', 'preflight'),
+    })
+  }
   return sessions
 }
 
@@ -234,6 +253,16 @@ function tagsFor(target, traffic = 'sse-stream', phase = 'measured') {
     audience: target.audience,
     endpoint_kind: target.kind,
     traffic,
+  }
+}
+
+function recoveryTriggerFailureMetrics() {
+  const tags = { phase: 'measured', profile: config.profile, traffic: 'trigger' }
+  return {
+    listFailure: (value) => recoveryTriggerListFailures.add(value, tags),
+    fixtureFailure: (value) => recoveryTriggerFixtureFailures.add(value, tags),
+    callFailure: (value) => recoveryTriggerCallFailures.add(value, tags),
+    responseFailure: (value) => recoveryTriggerResponseFailures.add(value, tags),
   }
 }
 
@@ -343,6 +372,7 @@ export function sseRecovery(data) {
           baseUrl: config.baseUrl,
           session,
           idempotencyKey: config.recoveryTriggerIdempotencyKey,
+          metrics: recoveryTriggerFailureMetrics(),
           tags: tagsFor(session.target, 'trigger'),
           onMutation: (value) => { mutation = value },
         })

@@ -39,6 +39,10 @@ const RUN_METRICS = Object.freeze({
   dropped_iterations: ['droppedIterations', ['count', 'rate']],
   sse_recovery_http_verified: ['recoveryHttpVerified', ['count', 'rate']],
   sse_recovery_cleanup_successful: ['recoveryCleanupSuccessful', ['count', 'rate']],
+  sse_recovery_trigger_list_failures: ['recoveryTriggerListFailures', ['count', 'rate']],
+  sse_recovery_trigger_fixture_failures: ['recoveryTriggerFixtureFailures', ['count', 'rate']],
+  sse_recovery_trigger_call_failures: ['recoveryTriggerCallFailures', ['count', 'rate']],
+  sse_recovery_trigger_response_failures: ['recoveryTriggerResponseFailures', ['count', 'rate']],
 })
 
 const VALUE_NAMES = Object.freeze({
@@ -231,6 +235,10 @@ function renderMarkdown(summary) {
       `- recovery max ms: ${recovery?.max ?? '-'}`,
       `- HTTP verified: ${summary.runMetrics.recoveryHttpVerified?.count ?? 0}`,
       `- cleanup successful: ${summary.runMetrics.recoveryCleanupSuccessful?.count ?? 0}`,
+      `- trigger list failures: ${summary.runMetrics.recoveryTriggerListFailures?.count ?? 0}`,
+      `- trigger fixture failures: ${summary.runMetrics.recoveryTriggerFixtureFailures?.count ?? 0}`,
+      `- trigger call failures: ${summary.runMetrics.recoveryTriggerCallFailures?.count ?? 0}`,
+      `- trigger response failures: ${summary.runMetrics.recoveryTriggerResponseFailures?.count ?? 0}`,
     )
   }
   return `${lines.join('\n')}\n`

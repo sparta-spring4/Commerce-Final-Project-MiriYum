@@ -10,6 +10,7 @@ import {
   runOwnedHttpProbe,
   triggerWaitingChange,
   cleanupWaitingChange,
+  verifyWaitingTriggerFixture,
   verifyWaitingChange,
 } from '../sse/probe.js'
 
@@ -68,6 +69,10 @@ function recordingMetrics() {
     success: (value, tags) => entries.push({ name: 'success', value, tags }),
     error: (value, tags) => entries.push({ name: 'error', value, tags }),
     trigger: (value, tags) => entries.push({ name: 'trigger', value, tags }),
+    listFailure: (value, tags) => entries.push({ name: 'listFailure', value, tags }),
+    fixtureFailure: (value, tags) => entries.push({ name: 'fixtureFailure', value, tags }),
+    callFailure: (value, tags) => entries.push({ name: 'callFailure', value, tags }),
+    responseFailure: (value, tags) => entries.push({ name: 'responseFailure', value, tags }),
   }
 }
 
@@ -220,6 +225,67 @@ export default function () {
     metrics: recordingMetrics(),
     tags: { ...TAGS, profile: 'slow-client', audience: 'store-operator', endpoint_kind: 'waiting-store-operator', traffic: 'trigger' },
   }))
+  const recoveryTags = {
+    phase: 'preflight',
+    profile: 'recovery',
+    audience: 'store-operator',
+    endpoint_kind: 'waiting-store-operator',
+    traffic: 'trigger',
+  }
+  const exhaustedClient = recordingClient([
+    response(200, 1, { items: [], nextCursor: null }),
+  ])
+  const exhaustedMetrics = recordingMetrics()
+  const exhaustedFixture = errorMessage(() => verifyWaitingTriggerFixture({
+    client: exhaustedClient,
+    baseUrl: BASE_URL,
+    session: { target: targets.waitingOperator, accessToken: TOKEN },
+    metrics: exhaustedMetrics,
+    tags: recoveryTags,
+  }))
+  const validWaitingList = {
+    items: [{
+      waitingTeamId: '901', status: 'WAITING', queueSequence: 1,
+      partySize: 2, createdAt: '2026-08-20T00:00:00Z', version: 4,
+    }],
+    nextCursor: null,
+  }
+  const stageMetrics = recordingMetrics()
+  const listFailure = errorMessage(() => triggerWaitingChange({
+    client: recordingClient([response(503, 1)]),
+    baseUrl: BASE_URL,
+    session: { target: targets.waitingOperator, accessToken: TOKEN },
+    idempotencyKey: '323e4567-e89b-12d3-a456-426614174000',
+    metrics: stageMetrics,
+    tags: recoveryTags,
+  }))
+  const fixtureFailure = errorMessage(() => triggerWaitingChange({
+    client: recordingClient([response(200, 1, { items: [], nextCursor: null })]),
+    baseUrl: BASE_URL,
+    session: { target: targets.waitingOperator, accessToken: TOKEN },
+    idempotencyKey: '423e4567-e89b-12d3-a456-426614174000',
+    metrics: stageMetrics,
+    tags: recoveryTags,
+  }))
+  const callFailure = errorMessage(() => triggerWaitingChange({
+    client: recordingClient([response(200, 1, validWaitingList), response(503, 1)]),
+    baseUrl: BASE_URL,
+    session: { target: targets.waitingOperator, accessToken: TOKEN },
+    idempotencyKey: '523e4567-e89b-12d3-a456-426614174000',
+    metrics: stageMetrics,
+    tags: recoveryTags,
+  }))
+  const responseFailure = errorMessage(() => triggerWaitingChange({
+    client: recordingClient([
+      response(200, 1, validWaitingList),
+      response(200, 1, { waitingTeamId: '901', status: 'WAITING', version: 4 }),
+    ]),
+    baseUrl: BASE_URL,
+    session: { target: targets.waitingOperator, accessToken: TOKEN },
+    idempotencyKey: '623e4567-e89b-12d3-a456-426614174000',
+    metrics: stageMetrics,
+    tags: recoveryTags,
+  }))
 
   const steadyConfig = {
     profile: 'steady',
@@ -330,6 +396,19 @@ export default function () {
       && missingTeam === 'slow-client trigger fixture is unavailable'
       && !`${badStatus}${badEnvelope}${badTiming}${missingTeam}`.includes('901')
       && !`${badStatus}${badEnvelope}${badTiming}${missingTeam}`.includes(TOKEN),
+    'recovery preflight rejects an exhausted fixture before mutation': () =>
+      exhaustedFixture === 'recovery trigger fixture is unavailable'
+      && exhaustedClient.calls.map((call) => call.method).join(',') === 'GET'
+      && exhaustedMetrics.entries.some((entry) => entry.name === 'fixtureFailure'),
+    'recovery trigger failures use fixed non-identifying stages': () =>
+      listFailure === 'recovery trigger list request failed'
+      && fixtureFailure === 'recovery trigger fixture is unavailable'
+      && callFailure === 'recovery trigger call request failed'
+      && responseFailure === 'recovery trigger call response is invalid'
+      && stageMetrics.entries.map((entry) => entry.name).join(',')
+        === 'listFailure,fixtureFailure,callFailure,responseFailure'
+      && !`${listFailure}${fixtureFailure}${callFailure}${responseFailure}`.includes('901')
+      && !`${listFailure}${fixtureFailure}${callFailure}${responseFailure}`.includes(TOKEN),
     'steady and reconnect run owned HTTP probes concurrently': () =>
       steadyScenarios.sse.exec === 'sseSteady'
       && steadyScenarios.owned_http_probe.exec === 'ownedHttpProbe'
