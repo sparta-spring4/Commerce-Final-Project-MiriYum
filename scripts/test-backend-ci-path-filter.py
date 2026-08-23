@@ -84,7 +84,9 @@ class BackendCiPathFilterTest(unittest.TestCase):
     def test_integration_test_jvm_disables_default_enabled_database_schedulers(self):
         build_script = (ROOT / "backend" / "build.gradle.kts").read_text(encoding="utf-8")
         integration_shard_start = build_script.index("fun registerIntegrationTestShard")
-        unit_test_configuration = build_script[:integration_shard_start]
+        integration_test_start = build_script.index("val integrationTest")
+        unit_test_configuration = build_script[:integration_test_start]
+        integration_test_configuration = build_script[integration_test_start:integration_shard_start]
         integration_shard_configuration = build_script[integration_shard_start:]
         store_schedule_job = (
             ROOT / "backend" / "src" / "main" / "java" / "com" / "miriyum"
@@ -118,10 +120,14 @@ class BackendCiPathFilterTest(unittest.TestCase):
         )
         self.assertNotIn('systemProperty("miriyum.reservation.hold-expiration.enabled", "false")', unit_test_configuration)
         self.assertNotIn('systemProperty("miriyum.waiting.compensation.enabled", "false")', unit_test_configuration)
-        self.assertIn(
-            'systemProperty("miriyum.store.schedule.activation-enabled", "false")',
-            build_script,
-        )
+        for property_name in [
+            "miriyum.menu.schedule.enabled",
+            "miriyum.store.schedule.activation-enabled",
+        ]:
+            property_setting = f'systemProperty("{property_name}", "false")'
+            self.assertNotIn(property_setting, unit_test_configuration)
+            self.assertIn(property_setting, integration_test_configuration)
+            self.assertIn(property_setting, integration_shard_configuration)
         self.assertIn(scheduler_gate, store_schedule_job)
         self.assertIn(scheduler_gate, regular_closure_job)
         self.assertIn(menu_scheduler_gate, menu_schedule_worker)
