@@ -37,6 +37,7 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -410,6 +411,8 @@ public class IntegratedStoreSearchService {
                         llmProperties.supplementCandidateLimit())
                 .stream()
                 .filter(candidate -> !exactStoreIds.contains(candidate.storeId()))
+                .sorted(Comparator.comparingInt(
+                        IntegratedStoreSearchCandidate::relevanceTier).reversed())
                 .toList();
         List<IntegratedStoreSearchCandidate> before =
                 repository.refreshCurrentlyPublic(expanded);
@@ -421,7 +424,8 @@ public class IntegratedStoreSearchService {
         List<IntegratedStoreSearchCandidate> after =
                 repository.refreshCurrentlyPublic(before);
         Map<Long, CandidateState> supplementalStates = new LinkedHashMap<>();
-        List<RecommendationSearchCandidate> supplementalRanking = new ArrayList<>();
+        Map<Integer, List<RecommendationSearchCandidate>> supplementalRankingByTier =
+                new java.util.TreeMap<>(Comparator.reverseOrder());
         for (IntegratedStoreSearchCandidate candidate : after) {
             ReservationAvailability candidateAvailability = availability.values().getOrDefault(
                     candidate.storeId(),
@@ -439,27 +443,32 @@ public class IntegratedStoreSearchService {
                     new CandidateState(candidate, candidateAvailability)) != null) {
                 continue;
             }
-            supplementalRanking.add(new RecommendationSearchCandidate(
-                    candidate.storeId(),
-                    candidate.relevanceTier(),
-                    toRecommendationAvailability(candidateAvailability),
-                    null));
+            supplementalRankingByTier.computeIfAbsent(
+                            candidate.relevanceTier(), ignored -> new ArrayList<>())
+                    .add(new RecommendationSearchCandidate(
+                            candidate.storeId(),
+                            candidate.relevanceTier(),
+                            toRecommendationAvailability(candidateAvailability),
+                            null));
         }
-        List<RankedRecommendation> supplementalRanked = recommendationService.rank(
-                consumerAccountId,
-                supplementalRanking,
-                signals,
-                clock.instant());
-        for (RankedRecommendation ranked : supplementalRanked) {
-            if (items.size() >= query.size()) {
-                return;
-            }
-            CandidateState state = supplementalStates.get(ranked.candidate().storeId());
-            if (state != null) {
-                items.add(toItem(
-                        state.candidate(),
-                        state.availability(),
-                        ranked.reason()));
+        for (List<RecommendationSearchCandidate> supplementalRanking
+                : supplementalRankingByTier.values()) {
+            List<RankedRecommendation> supplementalRanked = recommendationService.rank(
+                    consumerAccountId,
+                    supplementalRanking,
+                    signals,
+                    clock.instant());
+            for (RankedRecommendation ranked : supplementalRanked) {
+                if (items.size() >= query.size()) {
+                    return;
+                }
+                CandidateState state = supplementalStates.get(ranked.candidate().storeId());
+                if (state != null) {
+                    items.add(toItem(
+                            state.candidate(),
+                            state.availability(),
+                            ranked.reason()));
+                }
             }
         }
     }
@@ -545,6 +554,8 @@ public class IntegratedStoreSearchService {
                         llmProperties.supplementCandidateLimit())
                 .stream()
                 .filter(candidate -> !existingIds.contains(candidate.storeId()))
+                .sorted(Comparator.comparingInt(
+                        IntegratedStoreSearchCandidate::relevanceTier).reversed())
                 .toList();
         List<IntegratedStoreSearchCandidate> before =
                 repository.refreshCurrentlyPublic(expanded);
