@@ -3,6 +3,7 @@ package com.miriyum.domain.pickup.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
@@ -26,6 +27,7 @@ import com.miriyum.domain.pickup.dto.request.PickupReservationCreateRequest;
 import com.miriyum.domain.pickup.dto.request.PickupCancellationRequest;
 import com.miriyum.domain.pickup.entity.PickupItemSnapshot;
 import com.miriyum.domain.pickup.dto.response.PickupReservationResponse;
+import com.miriyum.domain.pickup.dto.response.PickupReservationPageResponse;
 import com.miriyum.domain.pickup.entity.PickupReservation;
 import com.miriyum.domain.pickup.exception.PickupErrorCode;
 import com.miriyum.domain.pickup.notification.PickupNotificationEventFactory;
@@ -62,6 +64,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -114,6 +118,22 @@ class PickupReservationServiceTest {
                     result.resourceType(), result.resourceId(),
                     new ObjectMapper().valueToTree(result.data()));
                 });
+    }
+
+    @Test
+    void listsOnlyOwnedPickupsWithItemsInNewestPickupOrder() {
+        PickupReservation pickup = confirmedPickup();
+        ReflectionTestUtils.setField(pickup, "id", 77L);
+        given(repository.findAllByConsumerAccountId(eq(11L), any()))
+                .willReturn(new PageImpl<>(List.of(pickup), PageRequest.of(0, 20), 1));
+        given(repository.findAllWithItemsByIdIn(List.of(77L))).willReturn(List.of(pickup));
+
+        PickupReservationPageResponse result = service.listConsumerPickups(11L, 0, 20);
+
+        assertThat(result.items()).extracting(PickupReservationResponse::pickupReservationId)
+                .containsExactly("77");
+        assertThat(result.page().totalElements()).isEqualTo(1);
+        then(consumerAccountService).should().requireActiveAccount(11L);
     }
 
     @Test

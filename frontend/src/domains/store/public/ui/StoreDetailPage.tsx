@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { hasErrorCode } from '../../../../shared/api/apiError'
 import { Badge } from '../../../../shared/ui/Badge'
@@ -8,6 +8,7 @@ import {
   toDisplayNameMap,
   useCatalog,
   useStoreDetail,
+  useStoreImages,
   useStoreMenus,
 } from '../api/queries'
 import { categoryArt, categoryTint } from '../model/categoryArt'
@@ -46,10 +47,12 @@ export function StoreDetailPage() {
   const filters = readFilters(searchParams)
 
   const detail = useStoreDetail(storeId, toDetailQuery(filters))
+  const images = useStoreImages(storeId)
   const menus = useStoreMenus(storeId)
   const storeCategories = useCatalog('store-categories')
   const storeTags = useCatalog('store-tags')
   const menuCategories = useCatalog('menu-categories')
+  const [failedPrimaryImageUrl, setFailedPrimaryImageUrl] = useState<string | null>(null)
 
   const backToSearch = `/stores?${writeFilters(filters).toString()}`
 
@@ -90,19 +93,28 @@ export function StoreDetailPage() {
 
   const art = categoryArt(store.storeCategoryCode)
   const tint = categoryTint(store.storeCategoryCode)
+  const primaryImageUrl = images.data?.[0]?.url
+  const canDisplayPrimaryImage = primaryImageUrl !== undefined
+    && primaryImageUrl !== failedPrimaryImageUrl
 
   return (
     <div className="store-detail">
-      {/*
-        시안 `_6`의 히어로 밴드. 사진 자리에는 검색 결과 카드와 같은 이유로
-        카테고리 일러스트를 둔다. 이름·주소는 이미지 위 글자가 아니라 아래
-        그라디언트 위에 놓아 대비를 확보한다.
-      */}
+      {/* 공개 이미지가 없거나 조회에 실패하면 카테고리 일러스트를 유지한다. */}
       <section
         className="store-detail__hero"
         style={{ '--tile-from': tint.from, '--tile-to': tint.to } as CSSProperties}
       >
-        {art !== null && (
+        {canDisplayPrimaryImage ? (
+          <img
+            className="store-detail__hero-art"
+            src={primaryImageUrl}
+            alt="매장 대표 이미지"
+            width={320}
+            height={320}
+            decoding="async"
+            onError={() => setFailedPrimaryImageUrl(primaryImageUrl)}
+          />
+        ) : art !== null && (
           <img
             className="store-detail__hero-art"
             src={art}

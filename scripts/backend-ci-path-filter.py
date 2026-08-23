@@ -6,10 +6,15 @@ UNIT_TEST_PREFIXES = ("deploy/",)
 SAFE_SKIP_PREFIXES = ("docs/", "frontend/", "performance/k6/")
 SAFE_SKIP_PATHS = (
     ".github/workflows/backend-cd.yml",
+    ".github/workflows/staging-load-test-control.yml",
+    ".github/workflows/staging-valkey-control.yml",
     ".github/workflows/backend-production-ecs-cd.yml",
     ".github/workflows/document-routing.yml",
     ".github/workflows/frontend-ci.yml",
     ".github/workflows/k6-contract.yml",
+    "scripts/test-staging-load-test-control-workflow.py",
+    "scripts/staging-valkey-control.sh",
+    "scripts/test-staging-valkey-control.py",
 )
 FULL_TEST_PATHS = (
     ".github/workflows/backend-ci.yml",

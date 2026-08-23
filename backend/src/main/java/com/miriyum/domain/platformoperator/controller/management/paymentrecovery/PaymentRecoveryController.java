@@ -7,6 +7,7 @@ import com.miriyum.domain.platformoperator.paymentrecovery.dto.PaymentRecoveryRe
 import com.miriyum.domain.platformoperator.paymentrecovery.dto.PaymentRecoveryRequests.RequeryRequest;
 import com.miriyum.domain.platformoperator.paymentrecovery.dto.PaymentRecoveryResponses.CaseDetail;
 import com.miriyum.domain.platformoperator.paymentrecovery.dto.PaymentRecoveryResponses.CasePage;
+import com.miriyum.domain.platformoperator.paymentrecovery.dto.PaymentRecoveryResponses.PendingApprovalPage;
 import com.miriyum.domain.platformoperator.paymentrecovery.entity.PaymentRecoveryEnums.CaseStatus;
 import com.miriyum.domain.platformoperator.paymentrecovery.service.PaymentRecoveryCommandService;
 import com.miriyum.domain.platformoperator.paymentrecovery.service.PaymentRecoveryQueryService;
@@ -56,6 +57,15 @@ public class PaymentRecoveryController {
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         return ApiResponse.success("결제 복구 사건을 조회했습니다.",
                 queries.list(principal, status, page, size));
+    }
+
+    @GetMapping("/pending-additional-approvals")
+    public ApiResponse<PendingApprovalPage> pendingAdditionalApprovals(
+            @AuthenticationPrincipal PlatformOperatorPrincipal principal,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        return ApiResponse.success("추가 승인 대기 결제 복구 사건을 조회했습니다.",
+                queries.pendingAdditionalApprovals(principal, page, size));
     }
 
     @GetMapping("/{caseId}")

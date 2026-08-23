@@ -69,8 +69,9 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         cls.compose_config = cls.load_compose_config(ENV_EXAMPLE_PATH)
 
     @staticmethod
-    def load_compose_config(env_file):
-        environment = CloudWatchObservabilityConfigTest.compose_environment()
+    def load_compose_config(env_file, environment=None):
+        if environment is None:
+            environment = CloudWatchObservabilityConfigTest.compose_environment()
         result = subprocess.run(
             [
                 "docker",
@@ -88,6 +89,7 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             check=True,
             env=environment,
             text=True,
+            encoding="utf-8",
         )
         return json.loads(result.stdout)
 
@@ -160,6 +162,24 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
     def test_cd_reloads_cloudwatch_agent_after_copying_config(self):
         self.assertIn("amazon-cloudwatch-agent-ctl -a fetch-config", self.workflow)
         self.assertIn("file:/opt/miriyum/monitoring/cloudwatch-agent.json", self.workflow)
+
+    def test_staging_cd_rate_limit_exception_is_explicit_and_fail_closed(self):
+        self.assertIn("rate_limit_exception:", self.workflow)
+        self.assertIn("default: preserve", self.workflow)
+        self.assertIn("preserve|disable)", self.workflow)
+        self.assertIn("enable)", self.workflow)
+        self.assertIn(
+            "Non-preserve staging control inputs are allowed only from Staging Load-Test Control.",
+            self.workflow,
+        )
+        self.assertIn(
+            "secrets.MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP", self.workflow
+        )
+        self.assertIn("Invalid staging load-test source IP secret.", self.workflow)
+        self.assertIn("load_test_source_ip_base64", self.workflow)
+        self.assertIn("Staging load-test source IP enabled.", self.workflow)
+        self.assertIn("Staging load-test source IP disabled.", self.workflow)
+        self.assertNotIn('echo "$STAGING_LOAD_TEST_SOURCE_IP"', self.workflow)
 
     def test_compose_sends_each_service_log_to_a_dedicated_stream(self):
         expected_streams = ("frontend", "mysql", "backend", "nginx", "valkey")
@@ -238,6 +258,41 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         backend_environment = self.compose_config["services"]["backend"]["environment"]
 
         self.assertEqual("true", backend_environment["MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED"])
+
+    def test_staging_passes_payment_enablement_with_a_safe_default(self):
+        backend_environment = self.compose_config["services"]["backend"]["environment"]
+
+        self.assertEqual("false", backend_environment["MIRIYUM_PAYMENT_ENABLED"])
+        self.assertIn(
+            "MIRIYUM_PAYMENT_ENABLED: ${MIRIYUM_PAYMENT_ENABLED:-false}",
+            self.compose,
+        )
+
+    def test_staging_payment_enablement_forwards_all_backend_only_secrets(self):
+        environment = self.compose_environment()
+        expected_environment = {
+            "MIRIYUM_PAYMENT_ENABLED": "true",
+            "MIRIYUM_PORTONE_STORE_ID": "test-only-portone-store-id",
+            "MIRIYUM_PORTONE_API_SECRET": "test-only-portone-api-secret",
+            "MIRIYUM_PAYMENT_CURSOR_SECRET": "test-only-payment-cursor-secret",
+            "MIRIYUM_PORTONE_WEBHOOK_SECRET": "test-only-portone-webhook-secret",
+        }
+        environment.update(expected_environment)
+
+        backend_environment = self.load_compose_config(
+            ENV_EXAMPLE_PATH, environment
+        )["services"]["backend"]["environment"]
+
+        expected_source_mappings = {
+            "MIRIYUM_PAYMENT_ENABLED": "MIRIYUM_PAYMENT_ENABLED: ${MIRIYUM_PAYMENT_ENABLED:-false}",
+            "MIRIYUM_PORTONE_STORE_ID": "MIRIYUM_PORTONE_STORE_ID: ${MIRIYUM_PORTONE_STORE_ID:-}",
+            "MIRIYUM_PORTONE_API_SECRET": "MIRIYUM_PORTONE_API_SECRET: ${MIRIYUM_PORTONE_API_SECRET:-}",
+            "MIRIYUM_PAYMENT_CURSOR_SECRET": "MIRIYUM_PAYMENT_CURSOR_SECRET: ${MIRIYUM_PAYMENT_CURSOR_SECRET:-}",
+            "MIRIYUM_PORTONE_WEBHOOK_SECRET": "MIRIYUM_PORTONE_WEBHOOK_SECRET: ${MIRIYUM_PORTONE_WEBHOOK_SECRET:-}",
+        }
+        for name, value in expected_environment.items():
+            self.assertEqual(value, backend_environment[name])
+            self.assertIn(expected_source_mappings[name], self.compose)
 
     def test_pending_risk_event_count_is_observable_without_identifier_dimensions(self):
         self.assertIn(
@@ -680,7 +735,9 @@ main
         occurrence_counter_backfill = main_body.index(
             'backfill_risk_event_occurrence_counters'
         )
-        backend_start = main_body.index('up -d --remove-orphans')
+        backend_start = main_body.index(
+            'up -d --force-recreate --remove-orphans backend'
+        )
 
         self.assertLess(backend_stop, valkey_start)
         self.assertLess(valkey_start, pending_index_backfill)
@@ -688,6 +745,25 @@ main
         self.assertLess(mysql_wait, pending_index_backfill)
         self.assertLess(pending_index_backfill, occurrence_counter_backfill)
         self.assertLess(occurrence_counter_backfill, backend_start)
+
+    def test_same_image_redeployment_forces_backend_container_recreation(self):
+        self.assertIn(
+            'up -d --force-recreate --remove-orphans backend',
+            self.deploy_script,
+        )
+
+    def test_manual_redeployment_keeps_full_stack_reconciliation_after_backend_recreation(self):
+        main_body = self.deploy_script[self.deploy_script.index("\nmain() {") :]
+        backend_recreation = main_body.index(
+            'up -d --force-recreate --remove-orphans backend'
+        )
+        self.assertIn('up -d --remove-orphans', main_body)
+        full_stack_reconciliation = main_body.index(
+            'up -d --remove-orphans',
+            backend_recreation + 1,
+        )
+
+        self.assertLess(backend_recreation, full_stack_reconciliation)
 
     def test_deployment_backfills_db_occurrence_count_to_family_bound_counter(self):
         with tempfile.TemporaryDirectory() as directory:

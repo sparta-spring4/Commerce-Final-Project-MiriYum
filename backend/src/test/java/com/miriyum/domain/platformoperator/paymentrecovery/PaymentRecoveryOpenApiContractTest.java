@@ -17,6 +17,7 @@ class PaymentRecoveryOpenApiContractTest {
             "..", "docs", "specs", "payment-recovery", "openapi.yaml");
     private static final Set<String> PATHS = Set.of(
             "/api/v1/platform-operators/payment-recovery-cases",
+            "/api/v1/platform-operators/payment-recovery-cases/pending-additional-approvals",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}/assignments",
             "/api/v1/platform-operators/payment-recovery-cases/{caseId}/requeries",
@@ -35,6 +36,9 @@ class PaymentRecoveryOpenApiContractTest {
         assertThat(map(paths.get("/api/v1/platform-operators/payment-recovery-cases")))
                 .containsOnlyKeys("get");
         assertThat(map(paths.get("/api/v1/platform-operators/payment-recovery-cases/{caseId}")))
+                .containsOnlyKeys("get");
+        assertThat(map(paths.get(
+                "/api/v1/platform-operators/payment-recovery-cases/pending-additional-approvals")))
                 .containsOnlyKeys("get");
     }
 
@@ -70,9 +74,23 @@ class PaymentRecoveryOpenApiContractTest {
         Map<String, Object> summary = map(schemas.get("CaseSummary"));
 
         assertThat((List<String>) summary.get("required"))
-                .contains("caseVersion", "handoffVersion", "paymentVersion", "recoveryVersion");
+                .contains("caseVersion", "handoffVersion", "paymentVersion", "recoveryVersion",
+                        "assignedOperatorId", "assignedToCurrentOperator");
         assertThat(map(summary.get("properties")))
-                .containsKeys("caseVersion", "handoffVersion", "paymentVersion", "recoveryVersion");
+                .containsKeys("caseVersion", "handoffVersion", "paymentVersion", "recoveryVersion",
+                        "assignedOperatorId", "assignedToCurrentOperator");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void caseDetailPublishesCurrentOperatorAdditionalApprovalEligibility() throws Exception {
+        Map<String, Object> schemas = map(map(document().get("components")).get("schemas"));
+        Map<String, Object> detail = map(schemas.get("CaseDetail"));
+
+        assertThat((List<String>) detail.get("required"))
+                .contains("canApproveAdditionalProposal");
+        assertThat(map(detail.get("properties")))
+                .containsKey("canApproveAdditionalProposal");
     }
 
     @Test

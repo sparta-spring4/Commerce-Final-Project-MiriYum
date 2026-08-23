@@ -12,6 +12,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -28,6 +29,20 @@ import org.springframework.web.multipart.MultipartFile;
 public class MenuImageController {
 
     private final MenuImageService menuImageService;
+
+    @GetMapping
+    public ResponseEntity<ApiResponse<MenuPublicImageResponse>> get(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable @Positive long storeId,
+            @PathVariable @Positive long menuId
+    ) {
+        MenuPublicImageResponse image = menuImageService.getMenuImage(
+                principal.accountId(), storeId, menuId);
+        if (image == null) {
+            return ResponseEntity.noContent().build();
+        }
+        return ResponseEntity.ok(ApiResponse.success("메뉴 대표 이미지를 조회했습니다.", image));
+    }
 
     @PutMapping(consumes = "multipart/form-data")
     public ResponseEntity<ApiResponse<MenuPublicImageResponse>> put(

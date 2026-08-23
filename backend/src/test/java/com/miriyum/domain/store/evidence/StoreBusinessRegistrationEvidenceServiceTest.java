@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.lenient;
 
 import com.miriyum.domain.store.evidence.dto.BusinessRegistrationEvidenceCommand;
 import com.miriyum.domain.store.evidence.entity.BusinessRegistrationEvidence;
@@ -13,6 +14,8 @@ import com.miriyum.domain.store.evidence.repository.BusinessRegistrationEvidence
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.storage.FileStoragePurpose;
+import com.miriyum.global.storage.FileStorageObject;
+import com.miriyum.global.storage.FileStoragePort;
 import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.FileStorageVisibility;
 import com.miriyum.global.storage.entity.FileMetadata;
@@ -28,6 +31,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataIntegrityViolationException;
 
 @ExtendWith(MockitoExtension.class)
@@ -44,14 +48,22 @@ class StoreBusinessRegistrationEvidenceServiceTest {
     @Mock
     private StoreOnboardingApplicationOwnershipPort ownershipPort;
 
+    @Mock
+    private FileStoragePort fileStoragePort;
+
+    @Mock
+    private ObjectProvider<FileStoragePort> fileStoragePortProvider;
+
     private StoreBusinessRegistrationEvidenceService service;
 
     @BeforeEach
     void setUp() {
+        lenient().when(fileStoragePortProvider.getIfAvailable()).thenReturn(fileStoragePort);
         service = new StoreBusinessRegistrationEvidenceService(
                 evidenceRepository,
                 fileMetadataRepository,
                 ownershipPort,
+                fileStoragePortProvider,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -124,6 +136,40 @@ class StoreBusinessRegistrationEvidenceServiceTest {
                 .isInstanceOf(ServiceException.class);
         then(fileMetadataRepository).shouldHaveNoInteractions();
         then(evidenceRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void readsOnlyCurrentConfirmedPrivateEvidenceAfterIntegrityCheck() {
+        long applicationId = 10L;
+        long applicationVersion = 2L;
+        UUID evidenceId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+        byte[] bytes = "%PDF-1.7\n%%EOF".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String checksum = BusinessRegistrationEvidenceUploadValidator.sha256(bytes);
+        BusinessRegistrationEvidence evidence = BusinessRegistrationEvidence.createCurrent(
+                evidenceId, applicationId, applicationVersion, 7L, fileId, NOW);
+        FileMetadata metadata = FileMetadata.createPending(
+                fileId.toString(), "STORE_ONBOARDING_APPLICATION", applicationId,
+                FileStoragePurpose.BUSINESS_LICENSE,
+                "private/store-onboarding/10/versions/2/" + checksum,
+                "application/pdf", bytes.length, checksum,
+                FileStorageVisibility.PRIVATE, "STORE_ONBOARDING_PRIVATE", NOW);
+        metadata.confirm();
+        given(evidenceRepository.findByOnboardingApplicationIdAndApplicationVersionAndCurrentMarker(
+                applicationId, applicationVersion, 1)).willReturn(Optional.of(evidence));
+        given(fileMetadataRepository.findByFileIdAndStorageStatus(
+                fileId.toString(), FileStorageStatus.CONFIRMED)).willReturn(Optional.of(metadata));
+        given(fileStoragePort.read(metadata.getObjectKey())).willReturn(
+                new FileStorageObject(metadata.getObjectKey(), "application/pdf", bytes));
+
+        var content = service.readCurrentEvidence(
+                applicationId, applicationVersion, evidenceId);
+
+        assertThat(content.contentType()).isEqualTo("application/pdf");
+        assertThat(content.bytes()).containsExactly(bytes);
+        assertThat(content.getClass().getRecordComponents())
+                .extracting(java.lang.reflect.RecordComponent::getName)
+                .containsExactly("contentType", "bytes");
     }
 
     private static FileMetadata privateConfirmedLicense(UUID fileId, long applicationId) {

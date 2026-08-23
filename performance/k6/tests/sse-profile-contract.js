@@ -1,6 +1,6 @@
-import { check } from 'k6'
+import { check, sleep } from 'k6'
 
-import { openChangedStream } from '../sse/session.js'
+import { applySteadyMinimumLifetime, openChangedStream } from '../sse/session.js'
 
 export const options = {
   thresholds: {
@@ -16,7 +16,14 @@ function heartbeat(comment = 'keepalive') {
   return { name: '', data: '', id: '', comment }
 }
 
-function fakeTransport({ status = 200, events = [], fail = false } = {}) {
+function fakeTransport({
+  status = 200,
+  events = [],
+  fail = false,
+  errorDelaySeconds = 0,
+  open = true,
+  returnDelaySeconds = 0,
+} = {}) {
   const calls = []
   let closeCount = 0
   return {
@@ -38,14 +45,19 @@ function fakeTransport({ status = 200, events = [], fail = false } = {}) {
       }
       calls.push({ url, params })
       setup(client)
-      if (handlers.open !== undefined) handlers.open()
-      if (fail && handlers.error !== undefined) {
+      if (open && handlers.open !== undefined) handlers.open()
+      if (fail && errorDelaySeconds === 0 && handlers.error !== undefined) {
         handlers.error({ error: () => 'forbidden transport detail' })
       }
       for (const event of events) {
         if (closed) break
         if (handlers.event !== undefined) handlers.event(event)
       }
+      if (fail && errorDelaySeconds > 0 && handlers.error !== undefined) {
+        sleep(errorDelaySeconds)
+        handlers.error({ error: () => 'forbidden transport detail' })
+      }
+      if (returnDelaySeconds > 0) sleep(returnDelaySeconds)
       return {
         status,
         headers: { Authorization: 'forbidden-response-header' },
@@ -83,6 +95,22 @@ function openWith({
 
 export default function () {
   check(null, {
+    'wrapper applies the hold invariant only to steady': () => {
+      const steady = applySteadyMinimumLifetime({ mode: 'steady' }, 30, 'steady')
+      const smoke = applySteadyMinimumLifetime({ mode: 'smoke' }, 30, 'smoke')
+      const reconnect = applySteadyMinimumLifetime({ mode: 'reconnect' }, 30, 'reconnect')
+      const recovery = applySteadyMinimumLifetime({ mode: 'recovery' }, 30, 'recovery')
+      const slowClient = applySteadyMinimumLifetime({ mode: 'slow-client' }, 30, 'slow-client')
+      const companion = applySteadyMinimumLifetime({ mode: 'steady' }, 30, 'slow-client')
+      const capacity = applySteadyMinimumLifetime({ mode: 'steady' }, 30, 'capacity')
+      return steady.minimumLifetimeSeconds === 30
+        && smoke.minimumLifetimeSeconds === undefined
+        && reconnect.minimumLifetimeSeconds === undefined
+        && recovery.minimumLifetimeSeconds === undefined
+        && slowClient.minimumLifetimeSeconds === undefined
+        && companion.minimumLifetimeSeconds === undefined
+        && capacity.minimumLifetimeSeconds === undefined
+    },
     'smoke closes after exactly one validated frame': () => {
       const opened = openWith({
         transport: fakeTransport({ events: [validEvent(), validEvent()] }),
@@ -107,6 +135,24 @@ export default function () {
       const opened = openWith({ behavior: { mode: 'steady' } })
       return opened.result.classification === 'success'
         && opened.transport.closeCount === 0
+    },
+    'recovery closes only after the second validated changed frame': () => {
+      let firstCallbacks = 0
+      let recoveredCallbacks = 0
+      const opened = openWith({
+        transport: fakeTransport({ events: [validEvent(), validEvent('notifications.changed', 'opaque_cursor-2')] }),
+        behavior: {
+          mode: 'recovery',
+          minimumValidEvents: 2,
+          onFirstValidEvent: () => { firstCallbacks += 1 },
+          onRecoveryValidEvent: () => { recoveredCallbacks += 1 },
+        },
+      })
+      return opened.result.classification === 'success'
+        && opened.result.validEvents === 2
+        && opened.transport.closeCount === 1
+        && firstCallbacks === 1
+        && recoveredCallbacks === 1
     },
     'slow client accepts server cleanup after pausing on the initial changed frame': () => {
       const delays = []
@@ -180,6 +226,43 @@ export default function () {
       const serialized = JSON.stringify(opened.result)
       return opened.result.classification === 'transport_error'
         && !serialized.includes('forbidden transport detail')
+    },
+    'steady treats termination after the approved hold as normal completion': () => {
+      const opened = openWith({
+        transport: fakeTransport({
+          events: [validEvent()],
+          fail: true,
+          errorDelaySeconds: 1,
+        }),
+        behavior: { mode: 'steady', minimumLifetimeSeconds: 1 },
+      })
+      return opened.result.classification === 'success'
+        && opened.result.completed === true
+        && opened.result.validEvents === 1
+    },
+    'steady still rejects a transport error before the approved hold': () => {
+      const opened = openWith({
+        transport: fakeTransport({ events: [validEvent()], fail: true }),
+        behavior: { mode: 'steady', minimumLifetimeSeconds: 1 },
+      })
+      return opened.result.classification === 'transport_error'
+        && opened.result.completed === false
+    },
+    'steady rejects a valid event without an open callback': () => {
+      const opened = openWith({
+        transport: fakeTransport({ events: [validEvent()], open: false, returnDelaySeconds: 1 }),
+        behavior: { mode: 'steady', minimumLifetimeSeconds: 1 },
+      })
+      return opened.result.classification === 'not_opened'
+        && opened.result.completed === false
+    },
+    'steady rejects a normal return before the approved hold': () => {
+      const opened = openWith({
+        transport: fakeTransport({ events: [validEvent()] }),
+        behavior: { mode: 'steady', minimumLifetimeSeconds: 1 },
+      })
+      return opened.result.classification === 'lifetime_too_short'
+        && opened.result.completed === false
     },
     'request contains bearer but result and tags do not expose it': () => {
       const opened = openWith()

@@ -52,6 +52,25 @@ const RECOVERY_ENV = {
   K6_RECOVERY_PASSWORD: ' synthetic password ',
 }
 
+const STAGING_CAPACITY_ENV = {
+  ...LOCAL_SMOKE_ENV,
+  TARGET_ENV: 'staging',
+  BASE_URL: 'https://staging-api.miriyum.click',
+  ALLOWED_HOSTS: 'staging-api.miriyum.click',
+  PROFILE: 'staging-capacity',
+  STAGING_APPROVED: 'true',
+  STAGING_HARNESS_SOURCE_VERIFIED: 'true',
+  STAGING_SMOKE_RUN_ID: 'staging-smoke-approved',
+  SMOKE_PROOF_PATH: '/results/staging-smoke-approved.json',
+  CAPACITY_TEST_APPROVED: 'true',
+  CAPACITY_STAGE_NUMBER: '1',
+  CAPACITY_TARGET_RPS: '10',
+  SCENARIOS: 'notificationHistory',
+  MAX_VUS: '10',
+  DURATION_SECONDS: '60',
+  ARRIVAL_RATE: '10',
+}
+
 export default function () {
   check(null, {
     'production host is rejected before requests': () =>
@@ -311,5 +330,27 @@ export default function () {
         ARRIVAL_RATE: '1',
         LOCAL_SMOKE_RUN_ID: 'local-smoke-approved',
       })),
+    'staging capacity requires its dedicated approval': () => {
+      const env = { ...STAGING_CAPACITY_ENV }
+      delete env.CAPACITY_TEST_APPROVED
+      return errorMessage(() => loadConfig(env))
+        === 'staging-capacity requires CAPACITY_TEST_APPROVED=true'
+    },
+    'first capacity stage records approved target metadata without previous proof': () => {
+      const capacity = loadConfig(STAGING_CAPACITY_ENV)
+      return capacity.capacityStageNumber === 1
+        && capacity.capacityTargetRps === 10
+        && capacity.capacityPreviousProofPath === null
+    },
+    'capacity stage after the first requires the immediately previous proof path': () =>
+      errorMessage(() => loadConfig({
+        ...STAGING_CAPACITY_ENV,
+        CAPACITY_STAGE_NUMBER: '2',
+      })) === 'CAPACITY_PREVIOUS_PROOF_PATH is required',
+    'store search capacity requires an explicit LLM-disabled attestation': () =>
+      errorMessage(() => loadConfig({
+        ...STAGING_CAPACITY_ENV,
+        SCENARIOS: 'storeSearch',
+      })) === 'storeSearch capacity requires CAPACITY_LLM_DISABLED_CONFIRMED=true',
   })
 }

@@ -43,6 +43,9 @@ public interface PickupReservationRepository
 
     Page<PickupReservation> findAllByStoreId(long storeId, Pageable pageable);
 
+    Page<PickupReservation> findAllByConsumerAccountId(
+            long consumerAccountId, Pageable pageable);
+
     Page<PickupReservation> findAllByStoreIdAndPickupDate(
             long storeId, LocalDate pickupDate, Pageable pageable);
 

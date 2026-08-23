@@ -6,6 +6,7 @@ COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile --ignore-scripts
 
 COPY frontend/ ./
+# Public Vite variables are baked into the frontend image at build time.
 ARG VITE_KAKAO_MAP_APP_KEY
 ARG MIRIYUM_PORTONE_STORE_ID
 ARG MIRIYUM_PORTONE_CHANNEL_KEY

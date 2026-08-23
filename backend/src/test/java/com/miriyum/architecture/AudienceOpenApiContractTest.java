@@ -94,6 +94,10 @@ class AudienceOpenApiContractTest {
                             REPRESENTATIVE_MENUS_PATH,
                             STORE_DASHBOARD_ANALYTICS_PATH,
                             STORE_RESERVATION_PAYMENT_STATUS_PATH,
+                            "/api/v1/stores/{storeId}/images",
+                            "/api/v1/store-operators/onboarding-applications/{applicationId}",
+                            "/api/v1/store-operators/onboarding-applications/"
+                                    + "{applicationId}/versions",
                             "/api/v1/store-operators/stores/{storeId}/images",
                             "/api/v1/store-operators/stores/{storeId}/images/{imageId}",
                             "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images",
@@ -188,6 +192,13 @@ class AudienceOpenApiContractTest {
         audiencePaths.addAll(paths("platform-operator-openapi.yaml").keySet());
 
         assertThat(audiencePaths).isEqualTo(featurePaths);
+    }
+
+    @Test
+    void onboardingDecisionAndEvidencePathsAreInPlatformAudience() throws IOException {
+        assertThat(paths("platform-operator-openapi.yaml")).containsKeys(
+                "/api/v1/platform-operators/onboarding-review-cases/{caseId}/decisions",
+                "/api/v1/platform-operators/onboarding-review-cases/{caseId}/evidence");
     }
 
     @Test

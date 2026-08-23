@@ -34,6 +34,7 @@ function notificationItem(notificationId) {
     occurredAt: '2026-08-14T12:00:00+09:00',
     createdAt: '2026-08-14T12:00:00+09:00',
     deliveredAt: '2026-08-14T12:00:01+09:00',
+    readAt: null,
     action: null,
   }
 }
@@ -755,6 +756,23 @@ export default function () {
     },
     { items: [notificationItem('9')], hasNext: false, nextCursor: null },
   ]))
+  const nullNotificationReadAtAccepted = notificationContractAccepts({
+    ...notificationItem('11'),
+    readAt: null,
+  })
+  const offsetNotificationReadAtAccepted = notificationContractAccepts({
+    ...notificationItem('11'),
+    readAt: '2026-08-14T12:05:00+09:00',
+  })
+  const missingNotificationReadAt = notificationItem('11')
+  delete missingNotificationReadAt.readAt
+  const missingNotificationReadAtRejected = !notificationContractAccepts(
+    missingNotificationReadAt,
+  )
+  const invalidNotificationReadAtRejected = !notificationContractAccepts({
+    ...notificationItem('11'),
+    readAt: '2026-02-30T12:05:00+09:00',
+  })
   const nullDepositDispositionAccepted = !throws(() => runReservationCreate({
     client: responseClient(201, {
       ...validReservationData(),
@@ -1006,6 +1024,10 @@ export default function () {
       noShowReservationAccepted,
     'notification history accepts all current purpose and resource enum values': () =>
       allNotificationContractsAccepted,
+    'notification history accepts null and offset-date-time readAt values': () =>
+      nullNotificationReadAtAccepted && offsetNotificationReadAtAccepted,
+    'notification history rejects missing and invalid readAt values': () =>
+      missingNotificationReadAtRejected && invalidNotificationReadAtRejected,
     'reservation terminal notifications reject a non-null action': () =>
       terminalNotificationActionsRejected,
     'notification invariant conflict is an unexpected 4xx': () =>

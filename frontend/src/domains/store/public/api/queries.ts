@@ -43,6 +43,8 @@ export const storeSearchKeys = {
     [...storeSearchKeys.all, 'store', storeId, query] as const,
   menus: (storeId: string) =>
     [...storeSearchKeys.all, 'store', storeId, 'menus'] as const,
+  images: (storeId: string) =>
+    [...storeSearchKeys.all, 'store', storeId, 'images'] as const,
 }
 
 type CatalogName = 'store-categories' | 'store-tags' | 'menu-categories'
@@ -135,6 +137,20 @@ export function useStoreMenus(storeId: string) {
         signal,
       })
       return response.data.items
+    },
+  })
+}
+
+export function useStoreImages(storeId: string) {
+  return useQuery({
+    queryKey: storeSearchKeys.images(storeId),
+    queryFn: async ({ signal }) => {
+      const response = await publicApiClient('/api/v1/stores/{storeId}/images', {
+        method: 'get',
+        pathParams: { storeId },
+        signal,
+      })
+      return response.data
     },
   })
 }

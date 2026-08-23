@@ -21,6 +21,10 @@ apis:
     root: docs/specs/platform-operator-management-audit/openapi.yaml
   admin-store:
     root: docs/specs/admin-store/openapi.yaml
+  store-onboarding:
+    root: docs/specs/store-onboarding/openapi.yaml
+  platform-operator-onboarding-review:
+    root: docs/specs/platform-operator-onboarding-review/openapi.yaml
 extends:
   - recommended-strict
 telemetry: off
