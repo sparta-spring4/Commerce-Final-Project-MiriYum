@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / "deploy" / "monitoring" / "cloudwatch-agent-config.json"
 RESOURCE_SCRIPT_PATH = ROOT / "deploy" / "monitoring" / "create-cloudwatch-resources.sh"
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "backend-cd.yml"
+STAGING_LOAD_TEST_CONTROL_WORKFLOW_PATH = (
+    ROOT / ".github" / "workflows" / "staging-load-test-control.yml"
+)
 COMPOSE_PATH = ROOT / "deploy" / "docker-compose.prod.yml"
 ENV_EXAMPLE_PATH = ROOT / "deploy" / ".env.example"
 DEPLOY_SCRIPT_PATH = ROOT / "deploy" / "deploy.sh"
@@ -55,6 +58,9 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         cls.config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         cls.resource_script = RESOURCE_SCRIPT_PATH.read_text(encoding="utf-8")
         cls.workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        cls.staging_load_test_control_workflow = (
+            STAGING_LOAD_TEST_CONTROL_WORKFLOW_PATH.read_text(encoding="utf-8")
+        )
         cls.compose = COMPOSE_PATH.read_text(encoding="utf-8")
         cls.deploy_script = DEPLOY_SCRIPT_PATH.read_text(encoding="utf-8")
         cls.nginx_selector = NGINX_SELECTOR_PATH.read_text(encoding="utf-8")
@@ -180,6 +186,14 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn("Staging load-test source IP enabled.", self.workflow)
         self.assertIn("Staging load-test source IP disabled.", self.workflow)
         self.assertNotIn('echo "$STAGING_LOAD_TEST_SOURCE_IP"', self.workflow)
+
+    def test_staging_load_test_control_uses_environment_secret_without_source_ip_input(self):
+        workflow = self.staging_load_test_control_workflow
+
+        self.assertNotRegex(workflow, r"(?m)^      source_ip:")
+        self.assertNotIn("inputs.source_ip", workflow)
+        self.assertNotIn("SOURCE_IP:", workflow)
+        self.assertIn('load_test_source_ip: ""', workflow)
 
     def test_compose_sends_each_service_log_to_a_dedicated_stream(self):
         expected_streams = ("frontend", "mysql", "backend", "nginx", "valkey")
