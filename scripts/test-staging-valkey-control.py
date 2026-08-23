@@ -21,6 +21,8 @@ class StagingValkeyControlTest(unittest.TestCase):
         fail_sleep=False,
         signal_sleep=False,
         fail_docker_contains="",
+        backend_container_ids="staging-backend-container",
+        frontend_container_ids="staging-frontend-container",
     ):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)
@@ -37,7 +39,24 @@ if [[ -n \"${FAIL_DOCKER_CONTAINS:-}\" && \"$*\" == *\"$FAIL_DOCKER_CONTAINS\"* 
   printf 'raw-sensitive-docker-error\\n' >&2
   exit 23
 fi
-if [[ \"$1\" == \"inspect\" ]]; then
+if [[ \"$*\" == *\"label=com.docker.compose.service=backend\"* ]]; then
+  printf '%s' \"${BACKEND_CONTAINER_IDS:-}\"
+elif [[ \"$*\" == *\"label=com.docker.compose.service=frontend\"* ]]; then
+  printf '%s' \"${FRONTEND_CONTAINER_IDS:-}\"
+elif [[ \"$*\" == *\"{{.Config.Image}} staging-backend-container\"* ]]; then
+  printf 'registry.invalid/backend:private-runtime-image\\n'
+elif [[ \"$*\" == *\"{{.Config.Image}} staging-frontend-container\"* ]]; then
+  printf 'registry.invalid/frontend:private-runtime-image\\n'
+elif [[ \"$1\" == \"compose\" && \"${REQUIRE_RUNTIME_IMAGE_BINDINGS:-false}\" == \"true\" ]]; then
+  if [[ \"${BACKEND_IMAGE:-}\" != \"registry.invalid/backend:private-runtime-image\" || \\
+        \"${FRONTEND_IMAGE:-}\" != \"registry.invalid/frontend:private-runtime-image\" ]]; then
+    printf 'raw-sensitive-compose-image-binding-error\\n' >&2
+    exit 31
+  fi
+  if [[ \"$*\" == *\" ps -q valkey\" ]]; then
+    printf 'staging-valkey-container\\n'
+  fi
+elif [[ \"$1\" == \"inspect\" ]]; then
   printf 'healthy\\n'
 elif [[ \"$*\" == *\" ps -q valkey\" ]]; then
   printf 'staging-valkey-container\\n'
@@ -81,6 +100,9 @@ fi
                     "FAIL_SLEEP": "true" if fail_sleep else "false",
                     "SIGNAL_SLEEP": "true" if signal_sleep else "false",
                     "FAIL_DOCKER_CONTAINS": fail_docker_contains,
+                    "REQUIRE_RUNTIME_IMAGE_BINDINGS": "true",
+                    "BACKEND_CONTAINER_IDS": backend_container_ids,
+                    "FRONTEND_CONTAINER_IDS": frontend_container_ids,
                 }
             )
             result = subprocess.run(
@@ -158,15 +180,53 @@ fi
         self.assertNotEqual(0, result.returncode)
         self.assertEqual([], commands)
 
-    def assert_safe_failure(self, result, *, phase, reason):
+    def assert_safe_failure(self, result, *, phase, reason, exit_code=23):
         combined = result.stdout + result.stderr
         self.assertNotEqual(0, result.returncode)
         self.assertIn(
             "event=staging_valkey_control_failed "
-            f"action={result.args[-2]} phase={phase} reason={reason} exit_code=23",
+            f"action={result.args[-2]} phase={phase} reason={reason} "
+            f"exit_code={exit_code}",
             combined,
         )
         self.assertNotIn("raw-sensitive-docker-error", combined)
+        self.assertNotIn("raw-sensitive-compose-image-binding-error", combined)
+
+    def test_recover_binds_current_runtime_images_without_logging_them(self):
+        result, commands = self.run_control("recover")
+
+        combined = result.stdout + result.stderr
+        self.assertEqual(0, result.returncode, combined)
+        self.assertNotIn("private-runtime-image", combined)
+        self.assertNotIn("private-runtime-image", "\n".join(commands))
+
+    def test_recover_rejects_missing_runtime_image_before_valkey_start(self):
+        result, commands = self.run_control(
+            "recover",
+            backend_container_ids="",
+        )
+
+        self.assert_safe_failure(
+            result,
+            phase="preflight",
+            reason="runtime-image-binding-failed",
+            exit_code=1,
+        )
+        self.assertFalse(any("up -d --no-deps valkey" in command for command in commands))
+
+    def test_interrupt_rejects_ambiguous_runtime_image_before_valkey_stop(self):
+        result, commands = self.run_control(
+            "interrupt",
+            frontend_container_ids="staging-frontend-container\nold-frontend-container",
+        )
+
+        self.assert_safe_failure(
+            result,
+            phase="preflight",
+            reason="runtime-image-binding-failed",
+            exit_code=1,
+        )
+        self.assertFalse(any("stop valkey" in command for command in commands))
 
     def test_recover_reports_safe_start_failure_without_raw_docker_error(self):
         result, _ = self.run_control(

@@ -7,8 +7,13 @@ readonly INTERRUPTION_SECONDS=10
 readonly HEALTH_ATTEMPTS=30
 readonly HEALTH_INTERVAL_SECONDS=2
 
+RUNTIME_BACKEND_IMAGE=""
+RUNTIME_FRONTEND_IMAGE=""
+
 compose() {
-  docker compose --env-file "${COMPOSE_ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
+  BACKEND_IMAGE="${RUNTIME_BACKEND_IMAGE}" \
+    FRONTEND_IMAGE="${RUNTIME_FRONTEND_IMAGE}" \
+    docker compose --env-file "${COMPOSE_ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
 }
 
 emit_failure() {
@@ -26,6 +31,47 @@ run_compose() {
   else
     status=$?
     emit_failure "${phase}" "${reason}" "${status}"
+    return "${status}"
+  fi
+}
+
+resolve_runtime_image() {
+  local service="$1" target_variable="$2" container_id image status
+
+  if container_id="$(docker ps -aq \
+    --filter "label=com.docker.compose.project=miriyum" \
+    --filter "label=com.docker.compose.service=${service}" 2>/dev/null)"; then
+    :
+  else
+    status=$?
+    return "${status}"
+  fi
+  if [[ -z "${container_id}" || "${container_id}" == *$'\n'* ]]; then
+    return 1
+  fi
+
+  if image="$(docker inspect --format '{{.Config.Image}}' "${container_id}" 2>/dev/null)"; then
+    :
+  else
+    status=$?
+    return "${status}"
+  fi
+  if [[ -z "${image}" || "${image}" == *$'\n'* ]]; then
+    return 1
+  fi
+
+  printf -v "${target_variable}" '%s' "${image}"
+}
+
+bind_runtime_images() {
+  local status
+
+  if resolve_runtime_image backend RUNTIME_BACKEND_IMAGE \
+    && resolve_runtime_image frontend RUNTIME_FRONTEND_IMAGE; then
+    return 0
+  else
+    status=$?
+    emit_failure preflight runtime-image-binding-failed "${status}"
     return "${status}"
   fi
 }
@@ -87,6 +133,7 @@ recover_on_exit() {
 
 case "${VALKEY_CONTROL_ACTION:-}" in
   interrupt)
+    bind_runtime_images
     validate_compose_contract
     wait_for_valkey_health
     trap recover_on_exit EXIT
@@ -109,6 +156,7 @@ case "${VALKEY_CONTROL_ACTION:-}" in
     echo "event=staging_valkey_interruption_completed duration_seconds=${INTERRUPTION_SECONDS} health=healthy"
     ;;
   recover)
+    bind_runtime_images
     validate_compose_contract
     start_and_verify_valkey
     echo "event=staging_valkey_recovery_completed health=healthy"
