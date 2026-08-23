@@ -21,9 +21,14 @@ import {
   requireSlowCleanupResult,
   runOwnedHttpProbe,
   triggerWaitingChange,
+  verifyWaitingTriggerFixture,
   verifyWaitingChange,
 } from './probe.js'
-import { runSseRecovery } from './recovery.js'
+import {
+  awaitRecoveryArmedMarker,
+  awaitRecoveryMutationEpoch,
+  runSseRecovery,
+} from './recovery.js'
 import { applySteadyMinimumLifetime, openChangedStream, prepareSseSession } from './session.js'
 import {
   createFixtureFingerprint,
@@ -87,6 +92,10 @@ const companionLifetimeMilliseconds = new Trend('sse_companion_lifetime', true)
 const recoveryMilliseconds = new Trend('sse_recovery_duration', true)
 const recoveryHttpVerified = new Counter('sse_recovery_http_verified')
 const recoveryCleanupSuccessful = new Counter('sse_recovery_cleanup_successful')
+const recoveryTriggerListFailures = new Counter('sse_recovery_trigger_list_failures')
+const recoveryTriggerFixtureFailures = new Counter('sse_recovery_trigger_fixture_failures')
+const recoveryTriggerCallFailures = new Counter('sse_recovery_trigger_call_failures')
+const recoveryTriggerResponseFailures = new Counter('sse_recovery_trigger_response_failures')
 
 function thresholds() {
   const expectedCapacityRejections = config.profile === 'capacity'
@@ -112,6 +121,10 @@ function thresholds() {
     sse_unexpected_4xx: ['count==0'],
     sse_server_5xx: ['count==0'],
     sse_unexpected_status: ['count==0'],
+    sse_recovery_trigger_list_failures: ['count==0'],
+    sse_recovery_trigger_fixture_failures: ['count==0'],
+    sse_recovery_trigger_call_failures: ['count==0'],
+    sse_recovery_trigger_response_failures: ['count==0'],
   }
   Object.assign(result, buildSseThresholds(config))
   if (config.profile === 'reconnect') {
@@ -211,6 +224,16 @@ export function setup() {
   if (config.profile === 'slow-client') {
     sessions = assignSlowClientRoles(sessions, config.slowClientConnections)
   }
+  if (config.profile === 'recovery') {
+    const session = sessions[0]
+    verifyWaitingTriggerFixture({
+      client: http,
+      baseUrl: config.baseUrl,
+      session,
+      metrics: recoveryTriggerFailureMetrics(),
+      tags: tagsFor(session.target, 'trigger', 'preflight'),
+    })
+  }
   return sessions
 }
 
@@ -234,6 +257,16 @@ function tagsFor(target, traffic = 'sse-stream', phase = 'measured') {
     audience: target.audience,
     endpoint_kind: target.kind,
     traffic,
+  }
+}
+
+function recoveryTriggerFailureMetrics() {
+  const tags = { phase: 'measured', profile: config.profile, traffic: 'trigger' }
+  return {
+    listFailure: (value) => recoveryTriggerListFailures.add(value, tags),
+    fixtureFailure: (value) => recoveryTriggerFixtureFailures.add(value, tags),
+    callFailure: (value) => recoveryTriggerCallFailures.add(value, tags),
+    responseFailure: (value) => recoveryTriggerResponseFailures.add(value, tags),
   }
 }
 
@@ -328,13 +361,39 @@ export function sseRecovery(data) {
   const session = selectedSession(data)
   safelyExecute(() => {
     recoveryAttempts.add(1, tagsFor(session.target))
+    const rendezvous = config.recoveryRendezvous
+    const diagnostic = (phase, observedAtEpoch) =>
+      console.log(`event=sse_recovery_phase phase=${phase} observed_at_epoch=${observedAtEpoch}`)
     runSseRecovery({
-      armDelaySeconds: config.recoveryArmDelaySeconds,
+      armWindowSeconds: rendezvous === null
+        ? config.recoveryArmDelaySeconds
+        : rendezvous.armWindowSeconds,
       maxRecoverySeconds: config.recoveryMaxSeconds,
-      delay: sleep,
-      ready: () => console.log(
-        `SSE_RECOVERY_READY stop Valkey within ${config.recoveryArmDelaySeconds}s`,
-      ),
+      armBeforeStream: rendezvous !== null,
+      arm: rendezvous === null
+        ? () => sleep(config.recoveryArmDelaySeconds)
+        : () => awaitRecoveryArmedMarker({
+          client: http,
+          repository: rendezvous.repository,
+          issue: rendezvous.issue,
+          runId: rendezvous.runId,
+          rendezvousId: rendezvous.rendezvousId,
+          maxWaitSeconds: rendezvous.maxWaitSeconds,
+          delay: sleep,
+          diagnostic,
+          waitUntilMutation: false,
+          minimumLeadSeconds: 5,
+          maximumLeadSeconds: 30,
+        }),
+      waitAfterArm: rendezvous === null
+        ? undefined
+        : (armed) => awaitRecoveryMutationEpoch({
+          executeAtEpoch: armed.executeAtEpoch,
+          delay: sleep,
+        }),
+      ready: () => console.log(rendezvous === null
+        ? `SSE_RECOVERY_READY stop Valkey within ${config.recoveryArmDelaySeconds}s`
+        : 'SSE_RECOVERY_READY post the approved FIRE marker'),
       openStream: (behavior) => openSession(session, behavior),
       trigger: () => {
         let mutation = null
@@ -343,6 +402,7 @@ export function sseRecovery(data) {
           baseUrl: config.baseUrl,
           session,
           idempotencyKey: config.recoveryTriggerIdempotencyKey,
+          metrics: recoveryTriggerFailureMetrics(),
           tags: tagsFor(session.target, 'trigger'),
           onMutation: (value) => { mutation = value },
         })
@@ -364,6 +424,7 @@ export function sseRecovery(data) {
         idempotencyKey: config.recoveryCleanupIdempotencyKey,
         tags: tagsFor(session.target, 'cleanup', 'cleanup'),
       }),
+      diagnostic,
       metrics: {
         duration: (value) => recoveryMilliseconds.add(value, tagsFor(session.target)),
         httpVerified: (value) => recoveryHttpVerified.add(

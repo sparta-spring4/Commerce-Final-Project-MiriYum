@@ -12,7 +12,7 @@ The operator does not need AWS Console, EC2, SSM Session Manager, Secrets Manage
 - The workflow can perform only seven fixed actions: `enable-load-test`, `disable-load-test`, `enable-sse`, `disable-sse`, `safe-recovery`, `interrupt-valkey`, and `recover-valkey`.
 - It accepts an already-built immutable 40-character Git SHA image tag. It never builds a new image or deploys an arbitrary tag.
 - `safe-recovery` can only set the predefined staging flags to `false`: runtime JSON, payment, S3 storage, and store-search LLM. Re-enabling a feature still requires the normal deployment-owner process.
-- `interrupt-valkey` has no duration or command input. It stops only the staging Valkey container for 10 seconds, starts it in the same bounded SSM command, and waits for Docker health.
+- `interrupt-valkey` has no duration or command input. It requires an Issue number and one-time UUID, waits for the dispatch actor's exact FIRE comment after OIDC preparation, and schedules only the reviewed staging Valkey interruption. It stops Valkey for 10 seconds, starts it in the same bounded SSM command, and waits for Docker health.
 - `recover-valkey` only starts the staging Valkey container and waits for Docker health.
 
 ## Before Starting
@@ -42,14 +42,26 @@ The workflow does not print the IP in shell output. The GitHub workflow input is
 
 Use this procedure only for an approved SSE `recovery` profile. The selected `image_tag` must equal the latest successful `staging-backend` deployment SHA; the workflow rejects an older or different SHA.
 
-1. Start the recovery harness and wait until it prints `SSE_RECOVERY_READY`.
+1. Prepare a fresh synthetic `WAITING` team in the approved store. A successful earlier recovery ends its team as terminal `CANCELLED`, so never reuse that team for another attempt. The fixture fingerprint proves only the static fixture file and does not prove current database state.
 2. Confirm the approved synthetic store has no other Waiting writer during the recovery window.
-3. In `Staging Load-Test Control` on branch `dev`, choose `interrupt-valkey`.
-4. Enter the approved deployed SHA in `image_tag`, leave `source_ip` empty, and run the workflow.
-5. The fixed action stops Valkey for 10 seconds and then starts it automatically. Wait for the workflow to report success before interpreting the harness result.
-6. Confirm the harness records MySQL correction, the changed signal, the owner HTTP verification, cleanup, and all thresholds as specified by the SSE runbook.
+3. Generate one new UUID for this attempt. It is a coordination identifier, not a credential, but never reuse it.
+4. Before starting k6, open `Staging Load-Test Control` on branch `dev`, choose `interrupt-valkey`, enter the approved SHA, the owning Issue number, and the new rendezvous UUID, and leave `source_ip` empty. Record the resulting GitHub Actions run ID.
+5. Wait until the workflow has completed deployment-SHA validation, checkout and OIDC and is running `Wait for the exact recovery fire marker`. Do not post the marker before this step is active.
+6. Start the clean staging recovery harness with `SSE_RECOVERY_RENDEZVOUS_APPROVED=true`, repository `sparta-spring4/Commerce-Final-Project-MiriYum`, the same Issue number, Actions run ID and rendezvous UUID. Do not set `SSE_RECOVERY_ARM_DELAY_SECONDS` in staging rendezvous mode.
+7. The harness setup verifies the owner WAITING list before arming. If it exits without `SSE_RECOVERY_READY`, cancel the waiting workflow; no FIRE marker or Valkey interruption is allowed.
+8. After `SSE_RECOVERY_READY`, post exactly one Issue comment as the same actor who dispatched the workflow: `SSE_RECOVERY_FIRE run_id=<actions-run-id> rendezvous_id=<uuid>`. Do not include credentials, fixture values or resource IDs.
+9. The prepared workflow schedules the fixed interruption. After the remote script passes runtime image, Compose, health and remaining-lead preflight, it atomically publishes the exact epoch to a root-only readiness file. A separate fixed SSM probe must validate that file while the interruption command is still `InProgress` before the workflow posts `SSE_RECOVERY_ARMED run_id=... rendezvous_id=... execute_at_epoch=...` as `github-actions[bot]`. k6 accepts only that exact marker with 5–30 seconds of lead, then opens the finite-lived SSE stream. After its initial changed frame, k6 waits for the shared epoch and performs the approved mutation at the reviewed offset inside the ten-second interruption. An unsafe lead or an elapsed mutation epoch fails before opening the stream or consuming the fixture.
+10. Wait for both the workflow and harness. Confirm MySQL correction, the changed signal, owner HTTP verification, cleanup and all thresholds. If either side fails, the attempt is not recovery evidence; use only safe aggregate counters and do not copy comment responses, response bodies or identifiers into the Issue.
 
-The remote script attempts to start Valkey from its exit and signal traps. If the action fails, is cancelled, or times out, immediately run `recover-valkey` with the same latest deployed SHA and do not continue testing until that action succeeds and staging private health is `UP`. Do not run both actions concurrently; the workflow serializes them with other staging load-test controls and staging deployment commands.
+For recovery diagnosis, correlate only the allowlisted `staging_valkey_control_phase` and
+`sse_recovery_phase` UTC epochs. The former records preflight readiness, stop, start and
+healthy boundaries; the latter records initial event, ARMED observation, mutation, recovery
+event and stream completion. These markers contain no account, store, team, cursor, image or
+credential values. Raw SSM stdout and stderr remain excluded from workflow output.
+
+The workflow times out without SSM submission when a valid FIRE marker is not received. If the fixed readiness probe cannot run concurrently, cannot validate the exact epoch, or the main command leaves `InProgress`, the workflow does not post ARMED and k6 does not consume the Waiting fixture. Once SSM starts, the remote script attempts to start Valkey from its exit and signal traps. If the action fails, is cancelled, or times out, immediately run `recover-valkey` with the same latest deployed SHA and do not continue testing until that action succeeds and staging private health is `UP`. Do not manually run both control actions concurrently; the workflow serializes them with other staging load-test controls and staging deployment commands.
+
+Before Compose validation or any Valkey operation, the remote script resolves exactly one running, non-one-off backend container and one running, non-one-off frontend container from the fixed `miriyum` Compose project labels. It passes their image references only to the Compose process and never prints them. If either service is stopped, only a Compose one-off container exists, or either binding is missing or ambiguous, the action fails closed with `phase=preflight reason=runtime-image-binding-failed` before it starts or stops Valkey.
 
 On failure, the Actions log reports the SSM status, response code, and only bounded diagnostics in the form `event=staging_valkey_control_failed action=... phase=... reason=... exit_code=...`. It does not print the full remote stdout or stderr. If the remote command ends before it can emit a diagnostic event, the workflow reports `phase=remote-command reason=remote-command-failed` with the command ID. Use the phase and fixed reason for triage; do not copy environment values, Compose output, credentials, tokens, or Valkey data into the Issue.
 

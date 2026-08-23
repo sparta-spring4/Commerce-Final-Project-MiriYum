@@ -122,6 +122,28 @@ const RECOVERY_SUMMARY_INPUT = {
     'sse_recovery_cleanup_successful{phase:cleanup,profile:recovery,traffic:cleanup}': {
       type: 'counter', values: { count: 1, rate: 1 }, thresholds: { 'count==1': { ok: true } },
     },
+    'sse_recovery_trigger_list_failures{phase:measured,profile:recovery,traffic:trigger}': {
+      type: 'counter', values: { count: 1, rate: 1 },
+    },
+    'sse_recovery_trigger_fixture_failures{phase:measured,profile:recovery,traffic:trigger}': {
+      type: 'counter', values: { count: 2, rate: 2 },
+    },
+    'sse_recovery_trigger_call_failures{phase:measured,profile:recovery,traffic:trigger}': {
+      type: 'counter', values: { count: 3, rate: 3 },
+    },
+    'sse_recovery_trigger_response_failures{phase:measured,profile:recovery,traffic:trigger}': {
+      type: 'counter', values: { count: 4, rate: 4 },
+    },
+  },
+}
+
+const STAGING_RECOVERY_METADATA = {
+  ...RECOVERY_METADATA,
+  targetEnv: 'staging',
+  runId: 'safe-staging-recovery-run',
+  limits: {
+    ...RECOVERY_METADATA.limits,
+    recoveryArmDelaySeconds: null,
   },
 }
 
@@ -154,6 +176,26 @@ export default function () {
   })
   const recoveryRendered = renderSafeSseSummary(RECOVERY_SUMMARY_INPUT, RECOVERY_METADATA)
   const recoveryParsed = JSON.parse(recoveryRendered.json)
+  let stagingRecoveryParsed = null
+  const stagingRecoveryError = message(() => {
+    stagingRecoveryParsed = JSON.parse(
+      renderSafeSseSummary(RECOVERY_SUMMARY_INPUT, STAGING_RECOVERY_METADATA).json,
+    )
+  })
+  const stagingFixedDelayError = message(() => renderSafeSseSummary(
+    RECOVERY_SUMMARY_INPUT,
+    {
+      ...STAGING_RECOVERY_METADATA,
+      limits: { ...STAGING_RECOVERY_METADATA.limits, recoveryArmDelaySeconds: 15 },
+    },
+  ))
+  const localNullDelayError = message(() => renderSafeSseSummary(
+    RECOVERY_SUMMARY_INPUT,
+    {
+      ...RECOVERY_METADATA,
+      limits: { ...RECOVERY_METADATA.limits, recoveryArmDelaySeconds: null },
+    },
+  ))
 
   check(null, {
     'summary keeps only approved run evidence': () =>
@@ -192,6 +234,23 @@ export default function () {
       && recoveryRendered.stdout.includes('recovery max ms: 2100')
       && recoveryRendered.stdout.includes('HTTP verified: 1')
       && recoveryRendered.stdout.includes('cleanup successful: 1'),
+    'staging rendezvous recovery summary preserves a null fixed arm delay': () =>
+      stagingRecoveryError === null
+      && stagingRecoveryParsed.targetEnv === 'staging'
+      && stagingRecoveryParsed.limits.recoveryArmDelaySeconds === null
+      && stagingRecoveryParsed.limits.recoveryMaxSeconds === 6,
+    'recovery summary rejects arm delay metadata from the wrong environment contract': () =>
+      stagingFixedDelayError === 'recoveryArmDelaySeconds is invalid'
+      && localNullDelayError === 'recoveryArmDelaySeconds is invalid',
+    'recovery summary preserves only fixed trigger failure aggregates': () =>
+      recoveryParsed.runMetrics.recoveryTriggerListFailures.count === 1
+      && recoveryParsed.runMetrics.recoveryTriggerFixtureFailures.count === 2
+      && recoveryParsed.runMetrics.recoveryTriggerCallFailures.count === 3
+      && recoveryParsed.runMetrics.recoveryTriggerResponseFailures.count === 4
+      && recoveryRendered.stdout.includes('trigger list failures: 1')
+      && recoveryRendered.stdout.includes('trigger fixture failures: 2')
+      && recoveryRendered.stdout.includes('trigger call failures: 3')
+      && recoveryRendered.stdout.includes('trigger response failures: 4'),
     'summary omits unknown metadata metrics and identifier sentinels': () =>
       !combined.includes('forbidden-token')
       && !combined.includes('forbidden-cursor')
