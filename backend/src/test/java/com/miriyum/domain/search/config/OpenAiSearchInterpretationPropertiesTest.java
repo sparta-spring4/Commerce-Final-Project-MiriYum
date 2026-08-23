@@ -29,6 +29,22 @@ class OpenAiSearchInterpretationPropertiesTest {
                 .hasMessageContaining("maxConcepts");
     }
 
+    @Test
+    void rejectsSupplementCandidateLimitAboveTwoHundred() {
+        assertThatThrownBy(() -> new OpenAiSearchInterpretationProperties(
+                false,
+                "https://api.openai.com",
+                "",
+                "gpt-4o-mini",
+                1_000,
+                2_000,
+                100,
+                8,
+                201))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("supplementCandidateLimit");
+    }
+
     private static OpenAiSearchInterpretationProperties properties(
             boolean enabled,
             String apiKey,
