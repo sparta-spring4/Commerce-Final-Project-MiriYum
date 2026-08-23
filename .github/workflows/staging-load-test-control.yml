@@ -115,8 +115,6 @@ jobs:
     uses: ./.github/workflows/backend-cd.yml
     with:
       image_tag: ${{ inputs.image_tag }}
-      rendezvous_issue: ${{ inputs.rendezvous_issue }}
-      rendezvous_id: ${{ inputs.rendezvous_id }}
       rate_limit_exception: ${{ inputs.action == 'enable-load-test' && 'enable' || inputs.action == 'disable-load-test' && 'disable' || inputs.action == 'safe-recovery' && 'disable' || 'preserve' }}
       load_test_source_ip: ${{ inputs.source_ip }}
       runtime_recovery_mode: ${{ inputs.action == 'safe-recovery' && 'safe-disable' || 'preserve' }}
@@ -131,6 +129,8 @@ jobs:
     with:
       action: ${{ inputs.action == 'interrupt-valkey' && 'interrupt' || 'recover' }}
       image_tag: ${{ inputs.image_tag }}
+      rendezvous_issue: ${{ inputs.rendezvous_issue }}
+      rendezvous_id: ${{ inputs.rendezvous_id }}
     secrets: inherit
 
   disable-after-failed-enable:

@@ -84,6 +84,19 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("aws ssm send-command", self.control_workflow)
         self.assertNotIn("gh workflow run", self.control_workflow)
 
+    def test_rendezvous_inputs_are_delegated_only_to_valkey_control(self):
+        deploy = self.control_workflow.split("\n  deploy:\n", 1)[1].split(
+            "\n  valkey-control:\n", 1
+        )[0]
+        valkey = self.control_workflow.split("\n  valkey-control:\n", 1)[1].split(
+            "\n  disable-after-failed-enable:\n", 1
+        )[0]
+
+        self.assertNotIn("rendezvous_issue:", deploy)
+        self.assertNotIn("rendezvous_id:", deploy)
+        self.assertIn("rendezvous_issue: ${{ inputs.rendezvous_issue }}", valkey)
+        self.assertIn("rendezvous_id: ${{ inputs.rendezvous_id }}", valkey)
+
     def test_valkey_control_is_staging_only_and_accepts_no_arbitrary_command_or_duration(self):
         self.assertIn("name: Staging Valkey Control", self.valkey_control_workflow)
         self.assertIn("workflow_call:", self.valkey_control_workflow)
