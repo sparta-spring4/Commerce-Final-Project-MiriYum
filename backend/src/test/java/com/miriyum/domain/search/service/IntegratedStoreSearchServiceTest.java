@@ -215,6 +215,30 @@ class IntegratedStoreSearchServiceTest {
     }
 
     @Test
+    void exactAndForwardMatchesStayAheadOfReverseMatchesWithoutDuplicates() {
+        InterpretedSearchCondition condition = condition(null, null, null, "얼큰한 국물");
+        given(interpreter.interpret("얼큰한 국물")).willReturn(result(condition));
+        IntegratedStoreSearchCandidate exact = candidate(1L, "정확 후보", 3);
+        IntegratedStoreSearchCandidate forward = candidate(2L, "정방향 후보", 1);
+        IntegratedStoreSearchCandidate reverse = candidate(3L, "역방향 후보", 0);
+        IntegratedStoreSearchCandidate duplicateExact = candidate(1L, "정확 후보", 1);
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(exact), null));
+        given(expansionService.expand(any())).willReturn(new SearchConceptExpansion(
+                List.of("매운 제육볶음"), 130, 20));
+        given(repository.searchExpanded(any(), any(), org.mockito.ArgumentMatchers.eq(200)))
+                .willReturn(List.of(reverse, duplicateExact, forward));
+        given(repository.refreshCurrentlyPublic(any()))
+                .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
+
+        var data = service().search(
+                "얼큰한 국물", false, false, null, null, 3);
+
+        assertThat(data.items()).extracting(item -> item.storeId())
+                .containsExactly("1", "2", "3");
+    }
+
+    @Test
     void availableOnlyKeepsScanningExpandedPoolAfterEarlierCandidatesAreUnavailable() {
         InterpretedSearchCondition condition = condition(
                 LocalDate.of(2026, 8, 8), null, null, "얼큰한 국물");
@@ -425,6 +449,47 @@ class IntegratedStoreSearchServiceTest {
                 org.mockito.ArgumentMatchers.eq(clock.instant()));
     }
 
+    @Test
+    void recommendationKeepsForwardExpandedTierAheadOfReverseExpandedTier() {
+        InterpretedSearchCondition condition = condition(null, null, null, "얼큰한 국물");
+        given(interpreter.interpret("얼큰한 국물")).willReturn(result(condition));
+        IntegratedStoreSearchCandidate exact = candidate(1L, "정확 후보", 3);
+        IntegratedStoreSearchCandidate forward = candidate(2L, "정방향 후보", 1);
+        IntegratedStoreSearchCandidate reverse = candidate(3L, "역방향 후보", 0);
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(exact), null));
+        given(repository.refreshCurrentlyPublic(any()))
+                .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
+        given(expansionService.expand(any())).willReturn(new SearchConceptExpansion(
+                List.of("매운 제육볶음"), 130, 20));
+        given(repository.searchExpanded(any(), any(), org.mockito.ArgumentMatchers.eq(200)))
+                .willReturn(List.of(reverse, forward));
+        given(recommendationService.rank(
+                org.mockito.ArgumentMatchers.isNull(),
+                any(),
+                any(),
+                org.mockito.ArgumentMatchers.eq(clock.instant())))
+                .willAnswer(invocation -> {
+                    List<RecommendationSearchCandidate> candidates = invocation.getArgument(1);
+                    return candidates.stream()
+                            .sorted((left, right) -> Long.compare(
+                                    right.storeId(), left.storeId()))
+                            .map(candidate -> ranked(
+                                    candidate.storeId() == forward.storeId() ? forward
+                                            : candidate.storeId() == reverse.storeId()
+                                                    ? reverse : exact,
+                                    candidate.storeId() == reverse.storeId() ? 70 : 10))
+                            .toList();
+                });
+
+        var data = service().search(
+                null, "얼큰한 국물", false, false,
+                "recommendation,desc", null, 3);
+
+        assertThat(data.items()).extracting(item -> item.storeId())
+                .containsExactly("1", "2", "3");
+    }
+
     private IntegratedStoreSearchService service() {
         return new IntegratedStoreSearchService(
                 interpreter,
@@ -517,10 +582,18 @@ class IntegratedStoreSearchServiceTest {
     }
 
     private static IntegratedStoreSearchCandidate candidate(long id, String name) {
+        return candidate(id, name, 0);
+    }
+
+    private static IntegratedStoreSearchCandidate candidate(
+            long id,
+            String name,
+            int relevanceTier
+    ) {
         return new IntegratedStoreSearchCandidate(
                 id, name, Region.SEOUL, "서울 중구", "KOREAN",
                 OperationStatus.OPEN, true, true, false,
-                LocalDateTime.of(2026, 8, 6, 9, 0), 0,
+                LocalDateTime.of(2026, 8, 6, 9, 0), relevanceTier,
                 new BigDecimal("37.500000000000000"),
                 new BigDecimal("127.000000000000000"));
     }
