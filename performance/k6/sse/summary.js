@@ -125,9 +125,15 @@ function safeMetadata(metadata) {
     }
   }
   if (profile === 'recovery') {
-    recoveryArmDelaySeconds = requirePositiveInt(
-      'recoveryArmDelaySeconds', limits.recoveryArmDelaySeconds, 60,
-    )
+    if (targetEnv === 'staging') {
+      if (limits.recoveryArmDelaySeconds !== null) {
+        throw new Error('recoveryArmDelaySeconds is invalid')
+      }
+    } else {
+      recoveryArmDelaySeconds = requirePositiveInt(
+        'recoveryArmDelaySeconds', limits.recoveryArmDelaySeconds, 60,
+      )
+    }
     recoveryMaxSeconds = requirePositiveInt(
       'recoveryMaxSeconds', limits.recoveryMaxSeconds, 60,
     )

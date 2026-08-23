@@ -137,6 +137,16 @@ const RECOVERY_SUMMARY_INPUT = {
   },
 }
 
+const STAGING_RECOVERY_METADATA = {
+  ...RECOVERY_METADATA,
+  targetEnv: 'staging',
+  runId: 'safe-staging-recovery-run',
+  limits: {
+    ...RECOVERY_METADATA.limits,
+    recoveryArmDelaySeconds: null,
+  },
+}
+
 function message(action) {
   try {
     action()
@@ -166,6 +176,26 @@ export default function () {
   })
   const recoveryRendered = renderSafeSseSummary(RECOVERY_SUMMARY_INPUT, RECOVERY_METADATA)
   const recoveryParsed = JSON.parse(recoveryRendered.json)
+  let stagingRecoveryParsed = null
+  const stagingRecoveryError = message(() => {
+    stagingRecoveryParsed = JSON.parse(
+      renderSafeSseSummary(RECOVERY_SUMMARY_INPUT, STAGING_RECOVERY_METADATA).json,
+    )
+  })
+  const stagingFixedDelayError = message(() => renderSafeSseSummary(
+    RECOVERY_SUMMARY_INPUT,
+    {
+      ...STAGING_RECOVERY_METADATA,
+      limits: { ...STAGING_RECOVERY_METADATA.limits, recoveryArmDelaySeconds: 15 },
+    },
+  ))
+  const localNullDelayError = message(() => renderSafeSseSummary(
+    RECOVERY_SUMMARY_INPUT,
+    {
+      ...RECOVERY_METADATA,
+      limits: { ...RECOVERY_METADATA.limits, recoveryArmDelaySeconds: null },
+    },
+  ))
 
   check(null, {
     'summary keeps only approved run evidence': () =>
@@ -204,6 +234,14 @@ export default function () {
       && recoveryRendered.stdout.includes('recovery max ms: 2100')
       && recoveryRendered.stdout.includes('HTTP verified: 1')
       && recoveryRendered.stdout.includes('cleanup successful: 1'),
+    'staging rendezvous recovery summary preserves a null fixed arm delay': () =>
+      stagingRecoveryError === null
+      && stagingRecoveryParsed.targetEnv === 'staging'
+      && stagingRecoveryParsed.limits.recoveryArmDelaySeconds === null
+      && stagingRecoveryParsed.limits.recoveryMaxSeconds === 6,
+    'recovery summary rejects arm delay metadata from the wrong environment contract': () =>
+      stagingFixedDelayError === 'recoveryArmDelaySeconds is invalid'
+      && localNullDelayError === 'recoveryArmDelaySeconds is invalid',
     'recovery summary preserves only fixed trigger failure aggregates': () =>
       recoveryParsed.runMetrics.recoveryTriggerListFailures.count === 1
       && recoveryParsed.runMetrics.recoveryTriggerFixtureFailures.count === 2
