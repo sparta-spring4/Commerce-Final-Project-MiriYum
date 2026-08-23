@@ -9,17 +9,18 @@ import org.junit.jupiter.api.Test;
 class StoreBusinessTypeMigrationContractTest {
 
     private static final Path MIGRATION = Path.of(
-            "src/main/resources/db/migration/V70__remove_store_business_type.sql");
+            "src/main/resources/db/migration/V70__make_store_business_type_optional.sql");
 
     @Test
-    void removesBusinessTypeFromStoreAndOnboardingSnapshot() throws Exception {
+    void preservesBusinessTypeColumnsForMixedVersionRollingDeployment() throws Exception {
         assertThat(MIGRATION).exists();
 
         String sql = Files.readString(MIGRATION).replaceAll("\\s+", " ").trim();
         assertThat(sql)
                 .contains("ALTER TABLE stores")
-                .contains("DROP CHECK ck_stores_business_type")
-                .contains("DROP COLUMN business_type")
-                .contains("ALTER TABLE store_onboarding_application_versions");
+                .contains("MODIFY COLUMN business_type VARCHAR(20) NULL")
+                .contains("ALTER TABLE store_onboarding_application_versions")
+                .doesNotContain("DROP COLUMN business_type")
+                .doesNotContain("DROP CHECK ck_stores_business_type");
     }
 }

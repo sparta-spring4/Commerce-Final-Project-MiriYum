@@ -46,7 +46,8 @@
 
 ## Migration and Frontend Handoff
 
-- 순방향 Flyway migration은 `stores.business_type`의 check constraint와 column, `store_onboarding_application_versions.business_type` column을 제거한다. 기존 매장과 신청의 다른 상태·감사·증빙 데이터는 변경하지 않는다.
+- 이번 expand 단계의 순방향 Flyway migration은 `stores.business_type`과 `store_onboarding_application_versions.business_type`을 nullable로 완화하되 column과 기존 check constraint를 유지한다. 신규 코드는 두 값을 읽거나 쓰지 않고, 롤링 배포 중 구 코드는 기존 값을 계속 읽고 쓸 수 있어야 한다.
+- 실제 column·constraint 삭제는 모든 구 task가 제거되고 신규 코드의 null 쓰기·롤백 호환성과 기존 데이터 보존을 검증한 뒤 별도 contract migration에서 수행한다.
 - Store 생성·수정·멱등 fingerprint, onboarding snapshot·자동검사·finalizer와 공개 DTO에서 `BusinessType`을 제거한다. 검색 카테고리 또는 사업자등록증 업태·종목에서 호환 값을 파생하지 않는다.
 - `docs/specs/store-onboarding/openapi.yaml`이 신규 신청 POST와 신청 상태 GET을 소유한다. `docs/specs/store-search/openapi.yaml`은 같은 collection의 소유 매장 GET만 유지하고 과거 JSON POST를 제거한다.
 - 프런트 codegen은 onboarding OpenAPI를 별도 생성한다. 공통 typed client는 동일 URL의 Store Search GET과 Store Onboarding POST를 method 단위로 합성하며, 문서 간 중복 path를 교집합으로 조용히 병합하지 않는다.
@@ -55,7 +56,7 @@
 ## Acceptance Criteria
 
 - 두 switch 모드 모두 사업자등록증과 자동검사 없이는 Store가 생성되지 않는다.
-- 신규 신청은 `businessType` 없이 접수·snapshot·자동검사·최종 Store 생성까지 완료되며 기존 Store와 진행 중 신청의 해당 column은 순방향 migration으로 제거한다.
+- 신규 신청은 `businessType` 없이 접수·snapshot·자동검사·최종 Store 생성까지 완료된다. 호환 column은 expand 단계 동안 null을 허용한 채 유지되며, 구 task 0건과 혼합 버전·롤백 검증 전에는 제거하지 않는다.
 - 매장 운영자는 사업자등록증의 구조화 필수 정보, 비공개 증빙 한 개와 활성 검색 카테고리 한 개를 제출할 수 있고 `202` 이후 신청 상태를 다시 확인할 수 있다.
 - switch 변경은 이미 접수된 version의 `reviewRequired`에 영향을 주지 않는다.
 - 자동 모드는 검사 통과 뒤 Store 하나, 수동 모드는 운영자 승인 전 Store 0개다.
