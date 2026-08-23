@@ -24,7 +24,7 @@ import {
   verifyWaitingTriggerFixture,
   verifyWaitingChange,
 } from './probe.js'
-import { runSseRecovery } from './recovery.js'
+import { awaitRecoveryArmedMarker, runSseRecovery } from './recovery.js'
 import { applySteadyMinimumLifetime, openChangedStream, prepareSseSession } from './session.js'
 import {
   createFixtureFingerprint,
@@ -357,13 +357,26 @@ export function sseRecovery(data) {
   const session = selectedSession(data)
   safelyExecute(() => {
     recoveryAttempts.add(1, tagsFor(session.target))
+    const rendezvous = config.recoveryRendezvous
     runSseRecovery({
-      armDelaySeconds: config.recoveryArmDelaySeconds,
+      armWindowSeconds: rendezvous === null
+        ? config.recoveryArmDelaySeconds
+        : rendezvous.armWindowSeconds,
       maxRecoverySeconds: config.recoveryMaxSeconds,
-      delay: sleep,
-      ready: () => console.log(
-        `SSE_RECOVERY_READY stop Valkey within ${config.recoveryArmDelaySeconds}s`,
-      ),
+      arm: rendezvous === null
+        ? () => sleep(config.recoveryArmDelaySeconds)
+        : () => awaitRecoveryArmedMarker({
+          client: http,
+          repository: rendezvous.repository,
+          issue: rendezvous.issue,
+          runId: rendezvous.runId,
+          rendezvousId: rendezvous.rendezvousId,
+          maxWaitSeconds: rendezvous.maxWaitSeconds,
+          delay: sleep,
+        }),
+      ready: () => console.log(rendezvous === null
+        ? `SSE_RECOVERY_READY stop Valkey within ${config.recoveryArmDelaySeconds}s`
+        : 'SSE_RECOVERY_READY post the approved FIRE marker'),
       openStream: (behavior) => openSession(session, behavior),
       trigger: () => {
         let mutation = null
