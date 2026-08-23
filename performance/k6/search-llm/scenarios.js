@@ -35,7 +35,12 @@ export function runSearchLlmCase({ client, baseUrl, fixtureCase }) {
       tags: { ...tags, name: 'integrated-store-search' }, redirects: 0,
     })
     if (response.status !== 200) return { completed: false, status: response.status }
-    const result = validateIntegratedSearchResponse(response.json())
+    const result = validateIntegratedSearchResponse(response.json(), {
+      expectedStoreIds: fixtureCase.expectedStoreIds,
+      expectedOrderedStoreIds: fixtureCase.expectedOrderedStoreIds,
+      excludedStoreIds: fixtureCase.excludedStoreIds,
+      maximumItems: fixtureCase.maximumItems,
+    })
     if (result.itemCount < fixtureCase.minimumItems) throw new Error('search result is below fixture minimum')
     return { completed: true, status: 200 }
   }
