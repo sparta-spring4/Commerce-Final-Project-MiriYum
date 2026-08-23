@@ -125,8 +125,33 @@ jobs:
 
       - name: Wait for bounded Valkey control result
         env:
+          ACTION: ${{ inputs.action }}
           COMMAND_ID: ${{ steps.ssm.outputs.command_id }}
         run: |
+          report_failure() {
+            local status="$1" invocation response_code diagnostics
+            invocation=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query '{ResponseCode:ResponseCode,StandardOutputContent:StandardOutputContent,StandardErrorContent:StandardErrorContent}' \
+              --output json 2>/dev/null || true)
+            response_code=$(jq -r '.ResponseCode // -1' <<<"$invocation" 2>/dev/null || printf '%s' '-1')
+            diagnostics=$(jq -r '.StandardOutputContent // "", .StandardErrorContent // ""' \
+              <<<"$invocation" 2>/dev/null \
+              | tr '\r' '\n' \
+              | grep -E '^event=staging_valkey_control_failed action=(interrupt|recover) phase=[a-z0-9-]+ reason=[a-z0-9-]+ exit_code=[0-9]+$' \
+              | tail -n 10 || true)
+
+            echo "::error::Staging Valkey control failed status=$status response_code=$response_code. Run recover-valkey before continuing."
+            if [ -n "$diagnostics" ]; then
+              while IFS= read -r diagnostic; do
+                echo "::error::$diagnostic"
+              done <<<"$diagnostics"
+            else
+              echo "::error::event=staging_valkey_control_failed action=$ACTION phase=remote-command reason=remote-command-failed exit_code=$response_code command_id=$COMMAND_ID"
+            fi
+          }
+
           for ((attempt = 0; attempt < 40; attempt++)); do
             status=$(aws ssm get-command-invocation \
               --command-id "$COMMAND_ID" \
@@ -140,12 +165,12 @@ jobs:
                 exit 0
                 ;;
               Failed|Cancelled|TimedOut|Cancelling)
-                echo "::error::Staging Valkey control failed with status $status. Run recover-valkey before continuing."
+                report_failure "$status"
                 exit 1
                 ;;
             esac
             sleep 5
           done
 
-          echo "::error::Staging Valkey control did not finish within the fixed wait window. Run recover-valkey before continuing."
+          report_failure Timeout
           exit 1
