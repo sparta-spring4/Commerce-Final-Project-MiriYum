@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -27,6 +28,7 @@ class StagingValkeyControlTest(unittest.TestCase):
         frontend_running=True,
         backend_oneoff_ids="",
         frontend_oneoff_ids="",
+        execute_at_epoch=None,
     ):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)
@@ -96,7 +98,7 @@ fi
                 """#!/usr/bin/env bash
 set -Eeuo pipefail
 printf 'sleep %s\\n' \"$*\" >> \"$FAKE_COMMAND_LOG\"
-if [[ \"${FAIL_SLEEP:-false}\" == \"true\" ]]; then
+if [[ \"${FAIL_SLEEP:-false}\" == \"true\" && \"$1\" == \"10\" ]]; then
   exit 7
 fi
 if [[ \"${SIGNAL_SLEEP:-false}\" == \"true\" && \"$1\" == \"10\" ]]; then
@@ -109,13 +111,16 @@ fi
             )
             sleep.chmod(0o755)
 
+            if execute_at_epoch is None:
+                execute_at_epoch = str(int(time.time()) + 30) if action == "interrupt" else ""
+
             command = (
                 'fake_bin="$1"; '
                 'if command -v cygpath >/dev/null 2>&1; then '
                 'fake_bin=$(cygpath -u "$fake_bin"); '
                 'fi; '
                 'PATH="$fake_bin:$PATH" VALKEY_CONTROL_ACTION="$2" '
-                'bash "$3"'
+                'VALKEY_CONTROL_EXECUTE_AT_EPOCH="$3" bash "$4"'
             )
             environment = os.environ.copy()
             environment.update(
@@ -141,6 +146,7 @@ fi
                     "staging-valkey-test",
                     fake_bin.as_posix(),
                     action,
+                    execute_at_epoch,
                     SCRIPT_PATH.as_posix(),
                 ],
                 capture_output=True,
@@ -184,6 +190,36 @@ fi
         self.assertTrue(any(" up -d --no-deps valkey" in command for command in commands))
         self.assertTrue(any(command.startswith("docker inspect") for command in commands))
 
+    def test_interrupt_waits_for_a_bounded_future_epoch_before_stopping(self):
+        execute_at = int(time.time()) + 30
+        result, commands = self.run_control("interrupt", execute_at_epoch=str(execute_at))
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        scheduled_wait = next(
+            index for index, command in enumerate(commands)
+            if command.startswith("sleep ") and command != "sleep 10"
+        )
+        stop = next(index for index, command in enumerate(commands) if " stop valkey" in command)
+        self.assertLess(scheduled_wait, stop)
+
+    def test_interrupt_rejects_invalid_or_unbounded_epoch_before_docker_access(self):
+        for execute_at in ("not-an-epoch", str(int(time.time()) - 1), str(int(time.time()) + 120)):
+            with self.subTest(execute_at=execute_at):
+                result, commands = self.run_control("interrupt", execute_at_epoch=execute_at)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("reason=invalid-scheduled-epoch", result.stdout + result.stderr)
+                self.assertEqual([], commands)
+
+    def test_recover_rejects_a_scheduled_epoch_without_docker_access(self):
+        result, commands = self.run_control(
+            "recover",
+            execute_at_epoch=str(int(time.time()) + 30),
+        )
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("reason=unexpected-scheduled-epoch", result.stdout + result.stderr)
+        self.assertEqual([], commands)
+
     def test_interrupt_failure_still_recovers_and_preserves_failure(self):
         result, commands = self.run_control("interrupt", fail_sleep=True)
 
@@ -213,7 +249,7 @@ fi
         self.assertNotEqual(0, result.returncode)
         self.assertIn(
             "event=staging_valkey_control_failed "
-            f"action={result.args[-2]} phase={phase} reason={reason} "
+            f"action={result.args[-3]} phase={phase} reason={reason} "
             f"exit_code={exit_code}",
             combined,
         )

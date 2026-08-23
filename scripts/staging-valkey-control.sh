@@ -6,9 +6,12 @@ readonly COMPOSE_FILE="/opt/miriyum/docker-compose.prod.yml"
 readonly INTERRUPTION_SECONDS=10
 readonly HEALTH_ATTEMPTS=30
 readonly HEALTH_INTERVAL_SECONDS=2
+readonly MIN_SCHEDULE_LEAD_SECONDS=5
+readonly MAX_SCHEDULE_LEAD_SECONDS=60
 
 RUNTIME_BACKEND_IMAGE=""
 RUNTIME_FRONTEND_IMAGE=""
+SCHEDULE_WAIT_SECONDS=0
 
 compose() {
   BACKEND_IMAGE="${RUNTIME_BACKEND_IMAGE}" \
@@ -118,6 +121,29 @@ start_and_verify_valkey() {
   wait_for_valkey_health
 }
 
+validate_interrupt_schedule() {
+  local execute_at="${VALKEY_CONTROL_EXECUTE_AT_EPOCH:-}" now delta
+
+  if [[ ! "${execute_at}" =~ ^[0-9]{10}$ ]]; then
+    emit_failure preflight invalid-scheduled-epoch 2
+    return 2
+  fi
+  now="$(date +%s)"
+  delta=$((execute_at - now))
+  if ((delta < MIN_SCHEDULE_LEAD_SECONDS || delta > MAX_SCHEDULE_LEAD_SECONDS)); then
+    emit_failure preflight invalid-scheduled-epoch 2
+    return 2
+  fi
+  SCHEDULE_WAIT_SECONDS="${delta}"
+}
+
+reject_recovery_schedule() {
+  if [[ -n "${VALKEY_CONTROL_EXECUTE_AT_EPOCH:-}" ]]; then
+    emit_failure preflight unexpected-scheduled-epoch 2
+    return 2
+  fi
+}
+
 recover_on_exit() {
   local original_status=$? recovery_status=0
   trap - EXIT HUP INT TERM
@@ -134,6 +160,7 @@ recover_on_exit() {
 
 case "${VALKEY_CONTROL_ACTION:-}" in
   interrupt)
+    validate_interrupt_schedule
     bind_runtime_images
     validate_compose_contract
     wait_for_valkey_health
@@ -142,6 +169,13 @@ case "${VALKEY_CONTROL_ACTION:-}" in
     trap 'exit 130' INT
     trap 'exit 143' TERM
 
+    if sleep "${SCHEDULE_WAIT_SECONDS}"; then
+      :
+    else
+      status=$?
+      emit_failure preflight scheduled-wait-failed "${status}"
+      exit "${status}"
+    fi
     run_compose stop compose-stop-failed stop valkey
     echo "event=staging_valkey_interruption_started duration_seconds=${INTERRUPTION_SECONDS}"
     if sleep "${INTERRUPTION_SECONDS}"; then
@@ -157,6 +191,7 @@ case "${VALKEY_CONTROL_ACTION:-}" in
     echo "event=staging_valkey_interruption_completed duration_seconds=${INTERRUPTION_SECONDS} health=healthy"
     ;;
   recover)
+    reject_recovery_schedule
     bind_runtime_images
     validate_compose_contract
     start_and_verify_valkey

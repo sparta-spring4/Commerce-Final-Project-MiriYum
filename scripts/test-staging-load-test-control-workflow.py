@@ -95,6 +95,32 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("shell_command", self.valkey_control_workflow)
         self.assertNotIn("production", self.valkey_control_workflow.lower())
 
+    def test_interrupt_requires_a_scoped_issue_comment_rendezvous(self):
+        self.assertIn("rendezvous_issue:", self.control_workflow)
+        self.assertIn("rendezvous_id:", self.control_workflow)
+        self.assertIn("Rendezvous inputs are required only for interrupt-valkey", self.control_workflow)
+        self.assertIn("^[1-9][0-9]{0,9}$", self.control_workflow)
+        self.assertIn("standard UUID", self.control_workflow)
+        self.assertIn("issues: write", self.valkey_control_workflow)
+        self.assertIn("inputs.rendezvous_issue", self.valkey_control_workflow)
+        self.assertIn("inputs.rendezvous_id", self.valkey_control_workflow)
+
+    def test_valkey_rendezvous_is_actor_time_and_scope_bound_after_oidc(self):
+        self.assertIn("SSE_RECOVERY_FIRE run_id=", self.valkey_control_workflow)
+        self.assertIn("github.triggering_actor", self.valkey_control_workflow)
+        self.assertIn("created_at", self.valkey_control_workflow)
+        self.assertIn("wait_started_at", self.valkey_control_workflow)
+        self.assertIn("SSE_RECOVERY_ARMED run_id=", self.valkey_control_workflow)
+        self.assertIn("github-actions[bot]", self.valkey_control_workflow)
+        oidc = self.valkey_control_workflow.index("Configure AWS credentials through OIDC")
+        wait = self.valkey_control_workflow.index("Wait for the exact recovery fire marker")
+        submit = self.valkey_control_workflow.index("aws ssm send-command")
+        armed = self.valkey_control_workflow.index("SSE_RECOVERY_ARMED run_id=")
+        self.assertLess(oidc, wait)
+        self.assertLess(wait, submit)
+        self.assertLess(submit, armed)
+        self.assertIn('"InProgress"', self.valkey_control_workflow)
+
     def test_valkey_control_requires_the_reviewed_dev_caller_before_oidc(self):
         self.assertIn("Staging Valkey controls must run from refs/heads/dev", self.control_workflow)
         expected_caller = (
