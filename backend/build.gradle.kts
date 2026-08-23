@@ -73,6 +73,10 @@ tasks.withType<Test> {
     systemProperty("miriyum.reservation.time-policy.activation-enabled", "false")
     systemProperty("miriyum.store.schedule.activation-enabled", "false")
     systemProperty("miriyum.waiting.closure.enabled", "false")
+    // CI shard에서는 ApplicationContext 전환 중 DB polling scheduler가 커넥션을
+    // 점유하지 않게 한다. 각 job의 동작은 전용 runtime IT에서 개별 검증한다.
+    systemProperty("miriyum.reservation.hold-expiration.enabled", "false")
+    systemProperty("miriyum.waiting.compensation.enabled", "false")
     systemProperty("junit.jupiter.extensions.autodetection.enabled", "true")
 }
 

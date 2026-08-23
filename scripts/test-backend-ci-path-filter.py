@@ -81,6 +81,46 @@ class BackendCiPathFilterTest(unittest.TestCase):
         self.assertNotIn("integration-shard-d", command_registry)
         self.assertNotIn("integrationTestShardD", command_registry)
 
+    def test_integration_test_jvm_disables_default_enabled_database_schedulers(self):
+        build_script = (ROOT / "backend" / "build.gradle.kts").read_text(encoding="utf-8")
+        store_schedule_job = (
+            ROOT / "backend" / "src" / "main" / "java" / "com" / "miriyum"
+            / "domain" / "schedule" / "service" / "StoreScheduleActivationJob.java"
+        ).read_text(encoding="utf-8")
+        regular_closure_job = (
+            ROOT / "backend" / "src" / "main" / "java" / "com" / "miriyum"
+            / "domain" / "schedule" / "closure" / "service" / "RegularClosureActivationJob.java"
+        ).read_text(encoding="utf-8")
+        menu_schedule_worker = (
+            ROOT / "backend" / "src" / "main" / "java" / "com" / "miriyum"
+            / "domain" / "menu" / "service" / "MenuScheduleWorker.java"
+        ).read_text(encoding="utf-8")
+
+        scheduler_gate = (
+            '@ConditionalOnProperty(name = "miriyum.store.schedule.activation-enabled", '
+            'havingValue = "true", matchIfMissing = true)'
+        )
+        menu_scheduler_gate = (
+            '@ConditionalOnProperty(name = "miriyum.menu.schedule.enabled", '
+            'havingValue = "true", matchIfMissing = true)'
+        )
+
+        self.assertIn(
+            'systemProperty("miriyum.reservation.hold-expiration.enabled", "false")',
+            build_script,
+        )
+        self.assertIn(
+            'systemProperty("miriyum.waiting.compensation.enabled", "false")',
+            build_script,
+        )
+        self.assertIn(
+            'systemProperty("miriyum.store.schedule.activation-enabled", "false")',
+            build_script,
+        )
+        self.assertIn(scheduler_gate, store_schedule_job)
+        self.assertIn(scheduler_gate, regular_closure_job)
+        self.assertIn(menu_scheduler_gate, menu_schedule_worker)
+
     def test_merge_base_diff_ignores_backend_changes_added_only_to_base(self):
         with temporary_git_repository() as repository:
             write_file(repository, "frontend/src/App.tsx", "base")
