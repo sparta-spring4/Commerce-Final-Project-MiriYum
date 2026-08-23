@@ -11,11 +11,22 @@ on:
         description: "Approved deployed staging backend full SHA"
         required: true
         type: string
+      rendezvous_issue:
+        description: "Validated Issue number for interrupt rendezvous"
+        required: false
+        default: ""
+        type: string
+      rendezvous_id:
+        description: "Validated one-time UUID for interrupt rendezvous"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
   deployments: read
   id-token: write
+  issues: write
 
 concurrency:
   group: backend-cd-staging
@@ -36,6 +47,7 @@ jobs:
       contents: read
       deployments: read
       id-token: write
+      issues: write
     steps:
       - name: Validate fixed action and immutable deployed SHA
         env:
@@ -44,6 +56,8 @@ jobs:
           ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
           CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
           GH_TOKEN: ${{ github.token }}
+          RENDEZVOUS_ISSUE: ${{ inputs.rendezvous_issue }}
+          RENDEZVOUS_ID: ${{ inputs.rendezvous_id }}
         run: |
           expected_caller="$GITHUB_REPOSITORY/.github/workflows/staging-load-test-control.yml@refs/heads/dev"
           if [ "$GITHUB_REF" != "refs/heads/dev" ] || [ "$CALLER_WORKFLOW_REF" != "$expected_caller" ]; then
@@ -58,6 +72,16 @@ jobs:
 
           if ! [[ "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::Invalid immutable image tag. A lowercase 40-character Git SHA is required."
+            exit 1
+          fi
+          if [ "$ACTION" = "interrupt" ]; then
+            if ! [[ "$RENDEZVOUS_ISSUE" =~ ^[1-9][0-9]{0,9}$ ]] \
+              || ! [[ "$RENDEZVOUS_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]; then
+              echo "::error::Interrupt rendezvous scope is invalid."
+              exit 1
+            fi
+          elif [ -n "$RENDEZVOUS_ISSUE" ] || [ -n "$RENDEZVOUS_ID" ]; then
+            echo "::error::Recover does not accept rendezvous inputs."
             exit 1
           fi
 
@@ -102,14 +126,55 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           retry-max-attempts: 2
 
+      - name: Wait for the exact recovery fire marker
+        if: ${{ inputs.action == 'interrupt' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RENDEZVOUS_ISSUE: ${{ inputs.rendezvous_issue }}
+          RENDEZVOUS_ID: ${{ inputs.rendezvous_id }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          wait_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          expected_marker="SSE_RECOVERY_FIRE run_id=${GITHUB_RUN_ID} rendezvous_id=${RENDEZVOUS_ID}"
+          export wait_started_at expected_marker
+
+          for ((attempt = 0; attempt < 60; attempt++)); do
+            comments=$(gh api \
+              "repos/$GITHUB_REPOSITORY/issues/$RENDEZVOUS_ISSUE/comments?since=$wait_started_at&per_page=100" \
+              2>/dev/null || printf '%s' '[]')
+            if jq -e \
+              --arg actor "$TRIGGERING_ACTOR" \
+              --arg marker "$expected_marker" \
+              --arg wait_started_at "$wait_started_at" \
+              'any(.[]; .user.login == $actor and .created_at >= $wait_started_at and .body == $marker)' \
+              >/dev/null <<<"$comments"; then
+              echo "Validated the scoped recovery fire marker."
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "::error::The scoped recovery fire marker was not received within the bounded wait."
+          exit 1
+
       - name: Run fixed Valkey control through SSM
         id: ssm
         env:
           ACTION: ${{ inputs.action }}
         run: |
           script_base64=$(base64 --wrap=0 scripts/staging-valkey-control.sh)
+          execute_at_epoch=""
+          if [ "$ACTION" = "interrupt" ]; then
+            execute_at_epoch=$(( $(date +%s) + 30 ))
+          fi
           remote_script="/tmp/miriyum-staging-valkey-control-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
-          remote_command="set -Eeuo pipefail; trap 'rm -f ${remote_script}' EXIT; printf %s '${script_base64}' | base64 --decode > '${remote_script}'; chmod 700 '${remote_script}'; VALKEY_CONTROL_ACTION='${ACTION}' bash '${remote_script}'"
+          ready_file=""
+          cleanup_paths="'${remote_script}'"
+          if [ "$ACTION" = "interrupt" ]; then
+            ready_file="/tmp/miriyum-staging-valkey-ready-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            cleanup_paths="$cleanup_paths '${ready_file}' '${ready_file}.tmp'"
+          fi
+          remote_command="set -Eeuo pipefail; trap 'rm -f ${cleanup_paths}' EXIT; printf %s '${script_base64}' | base64 --decode > '${remote_script}'; chmod 700 '${remote_script}'; VALKEY_CONTROL_ACTION='${ACTION}' VALKEY_CONTROL_EXECUTE_AT_EPOCH='${execute_at_epoch}' VALKEY_CONTROL_READY_FILE='${ready_file}' bash '${remote_script}'"
 
           jq -n \
             --arg instance_id "$EC2_INSTANCE_ID" \
@@ -122,6 +187,65 @@ jobs:
             --query 'Command.CommandId' \
             --output text)
           echo "command_id=$command_id" >> "$GITHUB_OUTPUT"
+          echo "execute_at_epoch=$execute_at_epoch" >> "$GITHUB_OUTPUT"
+          echo "ready_file=$ready_file" >> "$GITHUB_OUTPUT"
+
+      - name: Acknowledge the armed recovery interruption
+        if: ${{ inputs.action == 'interrupt' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMAND_ID: ${{ steps.ssm.outputs.command_id }}
+          EXECUTE_AT_EPOCH: ${{ steps.ssm.outputs.execute_at_epoch }}
+          READY_FILE: ${{ steps.ssm.outputs.ready_file }}
+          RENDEZVOUS_ISSUE: ${{ inputs.rendezvous_issue }}
+          RENDEZVOUS_ID: ${{ inputs.rendezvous_id }}
+        run: |
+          readiness_probe_command="set -Eeuo pipefail; for attempt in \$(seq 1 30); do if [ -f '${READY_FILE}' ] && [ \"\$(cat '${READY_FILE}')\" = '${EXECUTE_AT_EPOCH}' ]; then exit 0; fi; sleep 1; done; exit 1"
+          jq -n \
+            --arg instance_id "$EC2_INSTANCE_ID" \
+            --arg command "$readiness_probe_command" \
+            '{DocumentName:"AWS-RunShellScript",InstanceIds:[$instance_id],TimeoutSeconds:45,Parameters:{commands:[$command]}}' \
+            > "$RUNNER_TEMP/staging-valkey-readiness-probe.json"
+          readiness_command_id=$(aws ssm send-command \
+            --cli-input-json "file://$RUNNER_TEMP/staging-valkey-readiness-probe.json" \
+            --query 'Command.CommandId' \
+            --output text)
+
+          for ((attempt = 0; attempt < 35; attempt++)); do
+            readiness_status=$(aws ssm get-command-invocation \
+              --command-id "$readiness_command_id" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query 'Status' \
+              --output text 2>/dev/null || true)
+            status=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query 'Status' \
+              --output text 2>/dev/null || true)
+            if [ "$readiness_status" = "Success" ] && [ "$status" = "InProgress" ]; then
+              marker="SSE_RECOVERY_ARMED run_id=${GITHUB_RUN_ID} rendezvous_id=${RENDEZVOUS_ID} execute_at_epoch=${EXECUTE_AT_EPOCH}"
+              gh api --method POST \
+                "repos/$GITHUB_REPOSITORY/issues/$RENDEZVOUS_ISSUE/comments" \
+                -f body="$marker" --silent
+              echo "Published the scoped armed recovery marker as github-actions[bot]."
+              exit 0
+            fi
+            case "$readiness_status" in
+              Failed|Cancelled|TimedOut|Cancelling)
+                echo "::error::The remote Valkey preflight did not publish readiness evidence."
+                exit 1
+                ;;
+            esac
+            case "$status" in
+              Failed|Cancelled|TimedOut|Cancelling|Success)
+                echo "::error::The Valkey interruption did not enter the armed state."
+                exit 1
+                ;;
+            esac
+            sleep 1
+          done
+          echo "::error::The Valkey interruption did not arm within the bounded wait."
+          exit 1
 
       - name: Wait for bounded Valkey control result
         env:
