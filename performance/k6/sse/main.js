@@ -24,7 +24,11 @@ import {
   verifyWaitingTriggerFixture,
   verifyWaitingChange,
 } from './probe.js'
-import { awaitRecoveryArmedMarker, runSseRecovery } from './recovery.js'
+import {
+  awaitRecoveryArmedMarker,
+  awaitRecoveryMutationEpoch,
+  runSseRecovery,
+} from './recovery.js'
 import { applySteadyMinimumLifetime, openChangedStream, prepareSseSession } from './session.js'
 import {
   createFixtureFingerprint,
@@ -365,6 +369,7 @@ export function sseRecovery(data) {
         ? config.recoveryArmDelaySeconds
         : rendezvous.armWindowSeconds,
       maxRecoverySeconds: config.recoveryMaxSeconds,
+      armBeforeStream: rendezvous !== null,
       arm: rendezvous === null
         ? () => sleep(config.recoveryArmDelaySeconds)
         : () => awaitRecoveryArmedMarker({
@@ -376,6 +381,15 @@ export function sseRecovery(data) {
           maxWaitSeconds: rendezvous.maxWaitSeconds,
           delay: sleep,
           diagnostic,
+          waitUntilMutation: false,
+          minimumLeadSeconds: 5,
+          maximumLeadSeconds: 30,
+        }),
+      waitAfterArm: rendezvous === null
+        ? undefined
+        : (armed) => awaitRecoveryMutationEpoch({
+          executeAtEpoch: armed.executeAtEpoch,
+          delay: sleep,
         }),
       ready: () => console.log(rendezvous === null
         ? `SSE_RECOVERY_READY stop Valkey within ${config.recoveryArmDelaySeconds}s`
