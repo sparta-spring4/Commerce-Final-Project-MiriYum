@@ -25,6 +25,8 @@ class StagingValkeyControlTest(unittest.TestCase):
         frontend_container_ids="staging-frontend-container",
         backend_running=True,
         frontend_running=True,
+        backend_oneoff_ids="",
+        frontend_oneoff_ids="",
     ):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)
@@ -42,16 +44,32 @@ if [[ -n \"${FAIL_DOCKER_CONTAINS:-}\" && \"$*\" == *\"$FAIL_DOCKER_CONTAINS\"* 
   exit 23
 fi
 if [[ \"$*\" == *\"label=com.docker.compose.service=backend\"* ]]; then
+  ids=''
   if [[ \"${BACKEND_RUNNING:-false}\" == \"true\" || \"$*\" == *\"ps -aq \"* ]]; then
-    printf '%s' \"${BACKEND_CONTAINER_IDS:-}\"
+    ids=\"${BACKEND_CONTAINER_IDS:-}\"
   fi
+  if [[ \"$*\" != *\"label=com.docker.compose.oneoff=False\"* && -n \"${BACKEND_ONEOFF_IDS:-}\" ]]; then
+    [[ -z \"$ids\" ]] || ids+=\"\\n\"
+    ids+=\"${BACKEND_ONEOFF_IDS}\"
+  fi
+  printf '%b' \"$ids\"
 elif [[ \"$*\" == *\"label=com.docker.compose.service=frontend\"* ]]; then
+  ids=''
   if [[ \"${FRONTEND_RUNNING:-false}\" == \"true\" || \"$*\" == *\"ps -aq \"* ]]; then
-    printf '%s' \"${FRONTEND_CONTAINER_IDS:-}\"
+    ids=\"${FRONTEND_CONTAINER_IDS:-}\"
   fi
+  if [[ \"$*\" != *\"label=com.docker.compose.oneoff=False\"* && -n \"${FRONTEND_ONEOFF_IDS:-}\" ]]; then
+    [[ -z \"$ids\" ]] || ids+=\"\\n\"
+    ids+=\"${FRONTEND_ONEOFF_IDS}\"
+  fi
+  printf '%b' \"$ids\"
 elif [[ \"$*\" == *\"{{.Config.Image}} staging-backend-container\"* ]]; then
   printf 'registry.invalid/backend:private-runtime-image\\n'
+elif [[ \"$*\" == *\"{{.Config.Image}} staging-backend-oneoff\"* ]]; then
+  printf 'registry.invalid/backend:private-runtime-image\\n'
 elif [[ \"$*\" == *\"{{.Config.Image}} staging-frontend-container\"* ]]; then
+  printf 'registry.invalid/frontend:private-runtime-image\\n'
+elif [[ \"$*\" == *\"{{.Config.Image}} staging-frontend-oneoff\"* ]]; then
   printf 'registry.invalid/frontend:private-runtime-image\\n'
 elif [[ \"$1\" == \"compose\" && \"${REQUIRE_RUNTIME_IMAGE_BINDINGS:-false}\" == \"true\" ]]; then
   if [[ \"${BACKEND_IMAGE:-}\" != \"registry.invalid/backend:private-runtime-image\" || \\
@@ -111,6 +129,8 @@ fi
                     "FRONTEND_CONTAINER_IDS": frontend_container_ids,
                     "BACKEND_RUNNING": "true" if backend_running else "false",
                     "FRONTEND_RUNNING": "true" if frontend_running else "false",
+                    "BACKEND_ONEOFF_IDS": backend_oneoff_ids,
+                    "FRONTEND_ONEOFF_IDS": frontend_oneoff_ids,
                 }
             )
             result = subprocess.run(
@@ -243,6 +263,31 @@ fi
                     "recover",
                     backend_running=service != "backend",
                     frontend_running=service != "frontend",
+                )
+
+                self.assert_safe_failure(
+                    result,
+                    phase="preflight",
+                    reason="runtime-image-binding-failed",
+                    exit_code=1,
+                )
+                self.assertFalse(
+                    any("up -d --no-deps valkey" in command for command in commands)
+                )
+
+    def test_recover_rejects_oneoff_without_running_service_before_valkey_start(self):
+        for service in ("backend", "frontend"):
+            with self.subTest(service=service):
+                result, commands = self.run_control(
+                    "recover",
+                    backend_running=service != "backend",
+                    frontend_running=service != "frontend",
+                    backend_oneoff_ids=(
+                        "staging-backend-oneoff" if service == "backend" else ""
+                    ),
+                    frontend_oneoff_ids=(
+                        "staging-frontend-oneoff" if service == "frontend" else ""
+                    ),
                 )
 
                 self.assert_safe_failure(

@@ -40,7 +40,8 @@ resolve_runtime_image() {
 
   if container_id="$(docker ps -q \
     --filter "label=com.docker.compose.project=miriyum" \
-    --filter "label=com.docker.compose.service=${service}" 2>/dev/null)"; then
+    --filter "label=com.docker.compose.service=${service}" \
+    --filter "label=com.docker.compose.oneoff=False" 2>/dev/null)"; then
     :
   else
     status=$?
