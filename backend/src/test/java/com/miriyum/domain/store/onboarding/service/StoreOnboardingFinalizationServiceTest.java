@@ -9,6 +9,7 @@ import static org.mockito.BDDMockito.given;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
 import com.miriyum.domain.store.entity.Store;
+import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.model.VerifiedStoreGeocoding;
 import com.miriyum.domain.store.onboarding.entity.StoreOnboardingApplication;
@@ -28,6 +29,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import tools.jackson.databind.ObjectMapper;
@@ -52,6 +54,7 @@ class StoreOnboardingFinalizationServiceTest {
                 41L, 1L, null, "f".repeat(64), java.util.UUID.randomUUID().toString(),
                 request(), geocoding(), false, "BUSINESS_REGISTRATION_AUTO_V1",
                 "PLATFORM_REVIEW_V1", NOW, new ObjectMapper());
+        assertThat(version.getBusinessType()).isEqualTo(BusinessType.OTHER);
         StoreOnboardingAutomaticCheckJob job = StoreOnboardingAutomaticCheckJob.pending(
                 41L, 1L, NOW, NOW);
         long token = job.claim("worker", NOW, NOW.plusSeconds(30));
@@ -74,6 +77,9 @@ class StoreOnboardingFinalizationServiceTest {
                 41L, 1L, StoreOnboardingFinalizationService.ApprovalMode.AUTO)).isEqualTo(77L);
         assertThat(application.getStatus()).isEqualTo(AUTO_APPROVED);
         assertThat(application.getResultingStoreId()).isEqualTo(77L);
+        ArgumentCaptor<Store> savedStore = ArgumentCaptor.forClass(Store.class);
+        org.mockito.BDDMockito.then(stores).should().saveAndFlush(savedStore.capture());
+        assertThat(savedStore.getValue().getBusinessType()).isEqualTo(BusinessType.OTHER);
     }
 
     private static StoreCreateRequest request() {

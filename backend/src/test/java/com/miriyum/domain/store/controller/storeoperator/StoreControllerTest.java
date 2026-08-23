@@ -1,5 +1,6 @@
 package com.miriyum.domain.store.controller.storeoperator;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -17,8 +18,10 @@ import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.store.config.StoreManagementSecurityConfig;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.dto.storeoperator.StoreGeocodingResponse;
+import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
 import com.miriyum.domain.store.enums.GeocodingStatus;
+import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.enums.VerificationStatus;
@@ -39,6 +42,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -130,6 +134,45 @@ class StoreControllerTest {
                 .andExpect(jsonPath("$.data.status").value("AUTO_CHECKING"))
                 .andExpect(jsonPath("$.data.nextAction").value("WAIT"))
                 .andExpect(jsonPath("$.data.storeId").doesNotExist());
+    }
+
+    @Test
+    void createAcceptsDeprecatedBusinessTypeFromLegacyClient() throws Exception {
+        authenticateStoreOperator(11L);
+        var data = new ObjectMapper().createObjectNode()
+                .put("applicationId", "41")
+                .put("applicationVersion", 1)
+                .put("status", "AUTO_CHECKING")
+                .put("reviewRequired", true)
+                .put("nextAction", "WAIT");
+        given(onboardingSubmissionService.submit(
+                eq(11L), any(IdempotencyKey.class), any(), any()))
+                .willReturn(new IdempotentOutcome(
+                        false, 202, "SUCCESS", "STORE_ONBOARDING_APPLICATION", "41", data));
+        String legacyJson = validCreateJson().replace(
+                "\"businessRegistrationNumber\": \"1234567890\",",
+                "\"businessRegistrationNumber\": \"1234567890\",\n"
+                        + "  \"businessType\": \"CAFE\",");
+        MockMultipartFile application = new MockMultipartFile(
+                "application", "", MediaType.APPLICATION_JSON_VALUE,
+                legacyJson.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        MockMultipartFile evidence = new MockMultipartFile(
+                "businessRegistrationEvidence", "license.pdf", "application/pdf",
+                "%PDF-1.7\n%%EOF".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        mockMvc.perform(multipart("/api/v1/store-operators/stores")
+                        .file(application)
+                        .file(evidence)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY))
+                .andExpect(status().isAccepted());
+
+        ArgumentCaptor<StoreCreateRequest> request =
+                ArgumentCaptor.forClass(StoreCreateRequest.class);
+        then(onboardingSubmissionService).should().submit(
+                eq(11L), any(IdempotencyKey.class), request.capture(), any());
+        assertThat(request.getValue().compatibilityBusinessType())
+                .isEqualTo(BusinessType.CAFE);
     }
 
     @Test

@@ -38,6 +38,12 @@ export interface components {
         pickupEnabled: boolean;
       };
       businessRegistrationNumber: string;
+      /**
+       * @deprecated
+       * @description Rolling 배포와 rollback 호환을 위해 contract 단계까지 선택적으로 수용한다. 구 backend task가 남은 동안 공식 화면은 고정 OTHER를 보내고, 전환 backend는 누락 요청에도 OTHER를 저장한다. 사용자가 선택하지 않으며 검색 카테고리나 픽업 가능 여부를 결정하는 값으로 사용하지 않는다.
+       * @enum {string}
+       */
+      businessType?: "CAFE" | "BAKERY" | "OTHER";
       legalBusinessName: string;
       representativeName: string;
       /** Format: date */

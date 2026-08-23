@@ -1,7 +1,7 @@
 import { STORE_OPERATOR_PATHS } from '../../../../app/routes/paths/storeOperatorPaths'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { errorResponse, successResponse } from '../../../../test/msw/envelope'
 import { server } from '../../../../test/msw/server'
 import {
@@ -112,6 +112,7 @@ describe('매장 등록 화면', () => {
   it('JSON과 사업자등록증을 multipart로 제출하고 신청 상태 화면으로 이동한다', async () => {
     let multipartBody: string | null = null
     let idempotencyKey: string | null = null
+    const stringify = vi.spyOn(JSON, 'stringify')
     server.use(
       authenticatedOperator(),
       ...catalogHandlers(),
@@ -133,6 +134,16 @@ describe('매장 등록 화면', () => {
     expect(multipartBody).toContain('application/json')
     expect(multipartBody).toContain('name="businessRegistrationEvidence"')
     expect(multipartBody).toContain('image/png')
+    const applicationBody = stringify.mock.calls
+      .map(([value]) => value)
+      .find(
+        (value) =>
+          typeof value === 'object' &&
+          value !== null &&
+          'businessRegistrationNumber' in value,
+      )
+    expect(applicationBody).toMatchObject({ businessType: 'OTHER' })
+    stringify.mockRestore()
     expect(idempotencyKey).toMatch(/^[0-9a-f-]{36}$/i)
     expect(screen.getByTestId('location')).toHaveTextContent(
       '/store-operator/onboarding-applications/41',

@@ -1,5 +1,6 @@
 package com.miriyum.domain.store.dto.storeoperator;
 
+import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
@@ -15,6 +16,8 @@ public record StoreCreateRequest(
         @NotBlank
         @Pattern(regexp = "^[0-9]{10}$")
         String businessRegistrationNumber,
+
+        BusinessType businessType,
 
         @NotBlank
         @Size(max = 100)
@@ -73,7 +76,33 @@ public record StoreCreateRequest(
         @AssertTrue
         Boolean requiredTermsAgreed
 ) {
-    /** 기존 내부 Store 생성 테스트·호출자를 위한 호환 생성자다. 신규 HTTP 신청에서는 확장 필드가 필수다. */
+    /** 신규 HTTP 신청처럼 확장 입점 필드는 보내되 전환용 businessType은 생략하는 생성자다. */
+    public StoreCreateRequest(
+            String businessRegistrationNumber,
+            String name,
+            String description,
+            Region region,
+            String address,
+            String timeZoneId,
+            String storeCategoryCode,
+            List<String> tagCodes,
+            StoreModesRequest modes,
+            String legalBusinessName,
+            String representativeName,
+            LocalDate openingDate,
+            String primaryBusinessCategory,
+            String primaryBusinessItem,
+            Boolean applicantSelfAttested,
+            Boolean requiredTermsAgreed
+    ) {
+        this(
+                businessRegistrationNumber, null, name, description, region, address,
+                timeZoneId, storeCategoryCode, tagCodes, modes, legalBusinessName,
+                representativeName, openingDate, primaryBusinessCategory, primaryBusinessItem,
+                applicantSelfAttested, requiredTermsAgreed);
+    }
+
+    /** 신규 클라이언트와 기존 내부 호출자를 위한 생성자다. 전환용 businessType은 생략한다. */
     public StoreCreateRequest(
             String businessRegistrationNumber,
             String name,
@@ -88,10 +117,37 @@ public record StoreCreateRequest(
             Boolean requiredTermsAgreed
     ) {
         this(
-                businessRegistrationNumber, name, description, region, address,
+                businessRegistrationNumber, null, name, description, region, address,
                 timeZoneId, storeCategoryCode, tagCodes, modes,
                 "LEGACY", "LEGACY", LocalDate.of(1970, 1, 1), "LEGACY", "LEGACY",
                 applicantSelfAttested, requiredTermsAgreed);
+    }
+
+    /** 구 task와 테스트가 사용하던 생성자이며 contract 단계까지 유지한다. */
+    public StoreCreateRequest(
+            String businessRegistrationNumber,
+            BusinessType businessType,
+            String name,
+            String description,
+            Region region,
+            String address,
+            String timeZoneId,
+            String storeCategoryCode,
+            List<String> tagCodes,
+            StoreModesRequest modes,
+            Boolean applicantSelfAttested,
+            Boolean requiredTermsAgreed
+    ) {
+        this(
+                businessRegistrationNumber, businessType, name, description, region, address,
+                timeZoneId, storeCategoryCode, tagCodes, modes,
+                "LEGACY", "LEGACY", LocalDate.of(1970, 1, 1), "LEGACY", "LEGACY",
+                applicantSelfAttested, requiredTermsAgreed);
+    }
+
+    /** 구 task가 읽을 수 있는 비-null 저장값을 반환한다. */
+    public BusinessType compatibilityBusinessType() {
+        return businessType == null ? BusinessType.OTHER : businessType;
     }
 
     @AssertTrue(message = "유효한 IANA 시간대여야 합니다.")

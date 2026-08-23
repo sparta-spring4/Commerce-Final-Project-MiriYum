@@ -92,6 +92,7 @@ public class StoreService {
                     Store store = Store.createVerified(
                             operatorAccountId,
                             request.businessRegistrationNumber(),
+                            request.compatibilityBusinessType(),
                             request.name(),
                             request.description(),
                             request.region(),

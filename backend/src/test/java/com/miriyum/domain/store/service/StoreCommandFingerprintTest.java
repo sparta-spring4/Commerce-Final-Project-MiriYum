@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreUpdateRequest;
+import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.global.idempotency.RequestFingerprint;
 import java.util.List;
@@ -58,6 +59,23 @@ class StoreCommandFingerprintTest {
 
         assertThat(StoreCommandFingerprint.forCreate(seoul))
                 .isNotEqualTo(StoreCommandFingerprint.forCreate(tokyo));
+    }
+
+    @Test
+    @DisplayName("생략된 호환 업종과 명시적인 OTHER는 같은 등록 요청이다")
+    void omittedAndExplicitOtherBusinessTypeHaveSameFingerprint() {
+        StoreCreateRequest omitted = request(List.of("DATE"), true, true);
+        StoreCreateRequest explicitOther = new StoreCreateRequest(
+                omitted.businessRegistrationNumber(), BusinessType.OTHER,
+                omitted.name(), omitted.description(), omitted.region(), omitted.address(),
+                omitted.timeZoneId(), omitted.storeCategoryCode(), omitted.tagCodes(),
+                omitted.modes(), omitted.legalBusinessName(), omitted.representativeName(),
+                omitted.openingDate(), omitted.primaryBusinessCategory(),
+                omitted.primaryBusinessItem(), omitted.applicantSelfAttested(),
+                omitted.requiredTermsAgreed());
+
+        assertThat(StoreCommandFingerprint.forCreate(omitted))
+                .isEqualTo(StoreCommandFingerprint.forCreate(explicitOther));
     }
 
     @Test

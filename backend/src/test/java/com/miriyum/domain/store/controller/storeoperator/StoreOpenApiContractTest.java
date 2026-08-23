@@ -72,6 +72,13 @@ class StoreOpenApiContractTest {
         assertThat(description)
                 .containsEntry("maxLength", 1000)
                 .doesNotContainKey("minLength");
+        assertThat(list(applicationRequest.get("required")))
+                .doesNotContain("businessType");
+        Map<String, Object> businessType =
+                map(map(applicationRequest.get("properties")).get("businessType"));
+        assertThat(businessType).containsEntry("deprecated", true);
+        assertThat(list(businessType.get("enum")))
+                .containsExactly("CAFE", "BAKERY", "OTHER");
 
         Map<String, Object> applicationData =
                 map(schemas.get("StoreOnboardingApplicationData"));

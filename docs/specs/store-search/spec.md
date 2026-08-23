@@ -154,7 +154,7 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
   포함하지 않으며, 이 collection 조회는 검색 조건·페이지네이션·운영자 ID 입력을
   받지 않는다.
 - `POST /api/v1/store-operators/stores`의 신규 신청 쓰기 계약은 `docs/specs/store-onboarding/spec.md`와 해당 OpenAPI가 소유한다. 이 검색·기본 관리 계약은 같은 경로의 과거 JSON 즉시등록 요청을 중복 정의하지 않는다.
-- 신규 신청은 사업자등록증과 자동검사를 필수로 사용하며 `businessType(CAFE/BAKERY/OTHER)`을 받지 않는다. 사업자등록증의 주업태명·주종목명과 검색용 `storeCategoryCode`는 서로 다른 목적의 값으로 유지한다.
+- 신규 화면은 사업자등록증과 자동검사를 필수로 사용하며 `businessType(CAFE/BAKERY/OTHER)`을 입력받지 않는다. 신청 API는 rolling 호환 기간에만 이 값을 deprecated 선택 필드로 수용하고 공식 화면은 구 task를 위해 고정 `OTHER`를 보낸다. 사업자등록증의 주업태명·주종목명과 검색용 `storeCategoryCode`는 서로 다른 목적의 값으로 유지한다.
 - 승인 전에는 Store가 존재하지 않는다. 승인 뒤 생성된 Store의 검색 분류는 활성 catalog의 주 카테고리 한 개가 소유하고 거래 기능은 `modes`가 결정한다.
 
 입점 검증과 운영 상태는 각각 다음 축으로 반환한다. 픽업 사용 여부는 별도 상태 축 없이 `modes.pickupEnabled`로 반환한다.

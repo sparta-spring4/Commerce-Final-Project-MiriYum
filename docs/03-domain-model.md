@@ -43,7 +43,7 @@ erDiagram
 ## 픽업 기능 자격
 
 - 모든 승인 매장은 업종과 무관하게 `pickupEnabled`로 픽업 예약 기능을 선택할 수 있다.
-- 과거 업종 기반 픽업 판정에 사용한 `businessType(CAFE/BAKERY/OTHER)`은 Store와 신청 모델에서 제거한다.
+- 과거 업종 기반 픽업 판정에 사용한 `businessType(CAFE/BAKERY/OTHER)`은 도메인 의미와 화면에서 제거한다. rolling 전환 동안에만 Store와 신청 snapshot에 비-null 호환값을 유지하고 후속 contract에서 제거한다.
 - `pickup`은 픽업 확정 시 Store 공개 계약으로 승인·영업·`pickupEnabled` 상태를 검증하고 사업자등록증 업태·종목, 검색 카테고리·태그를 판정에 사용하지 않는다.
 
 ## 예약 자원

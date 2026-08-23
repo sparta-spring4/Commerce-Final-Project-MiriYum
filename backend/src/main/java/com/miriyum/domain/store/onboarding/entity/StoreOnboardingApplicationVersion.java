@@ -1,5 +1,6 @@
 package com.miriyum.domain.store.onboarding.entity;
 
+import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -49,6 +50,10 @@ public class StoreOnboardingApplicationVersion {
 
     @Column(name = "business_registration_number", nullable = false, length = 10)
     private String businessRegistrationNumber;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "business_type", nullable = false, length = 20)
+    private BusinessType businessType;
 
     @Column(name = "name", nullable = false, length = 100)
     private String name;
@@ -151,6 +156,7 @@ public class StoreOnboardingApplicationVersion {
         snapshot.requestFingerprint = fingerprint;
         snapshot.businessRegistrationEvidenceId = evidenceId;
         snapshot.businessRegistrationNumber = request.businessRegistrationNumber();
+        snapshot.businessType = request.compatibilityBusinessType();
         snapshot.name = request.name();
         snapshot.description = request.description();
         snapshot.region = request.region();

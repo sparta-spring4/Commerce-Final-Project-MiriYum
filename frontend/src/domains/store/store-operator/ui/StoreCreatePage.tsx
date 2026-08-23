@@ -180,6 +180,9 @@ export function StoreCreatePage() {
       businessRegistrationNumber: normalizeBusinessNumber(
         businessRegistrationNumber,
       ),
+      // 구 backend task가 남아 있는 rolling 전환 동안만 보내는 저장 호환값이다.
+      // 화면 선택값이나 카테고리·픽업 의미로 사용하지 않는다.
+      businessType: 'OTHER' as const,
       legalBusinessName: legalBusinessName.trim(),
       representativeName: representativeName.trim(),
       openingDate,
