@@ -33,6 +33,7 @@ export function awaitRecoveryArmedMarker({
   maxWaitSeconds,
   delay,
   now = Date.now,
+  diagnostic = () => {},
 }) {
   if (client === null || typeof client?.get !== 'function') {
     throw new Error('SSE recovery rendezvous client is required')
@@ -55,6 +56,7 @@ export function awaitRecoveryArmedMarker({
   }
   const wait = requireFunction('SSE recovery rendezvous delay', delay)
   const clock = requireFunction('SSE recovery rendezvous clock', now)
+  const reportDiagnostic = requireFunction('SSE recovery diagnostic reporter', diagnostic)
   const startedAt = clock()
   const since = new Date(Math.floor(startedAt / 1000) * 1000).toISOString()
   const markerPrefix = `SSE_RECOVERY_ARMED run_id=${selectedRunId} rendezvous_id=${selectedRendezvousId} execute_at_epoch=`
@@ -81,6 +83,7 @@ export function awaitRecoveryArmedMarker({
       if (leadSeconds < MIN_ARMED_LEAD_SECONDS || leadSeconds > MAX_ARMED_LEAD_SECONDS) {
         throw new Error('SSE recovery armed epoch is outside the bounded window')
       }
+      reportDiagnostic('armed-marker-observed', Math.floor(observedAt / 1000))
       wait((executeAtEpoch * 1000 + MUTATION_OFFSET_SECONDS * 1000 - observedAt) / 1000)
       return Object.freeze({ executeAtEpoch })
     }
@@ -100,6 +103,7 @@ export function runSseRecovery({
   verify,
   cleanup,
   metrics = {},
+  diagnostic = () => {},
 }) {
   if (!Number.isInteger(armWindowSeconds) || armWindowSeconds < 1 || armWindowSeconds > 180) {
     throw new Error('recovery arm window is invalid')
@@ -114,24 +118,34 @@ export function runSseRecovery({
   const mutate = requireFunction('recovery trigger', trigger)
   const verifyHttp = requireFunction('recovery HTTP verifier', verify)
   const cleanupMutation = requireFunction('recovery cleanup', cleanup)
+  const reportDiagnostic = requireFunction('recovery diagnostic reporter', diagnostic)
 
   let mutation = null
   let triggeredAt = null
   let recoveredAt = null
   let result = null
   try {
-    result = open({
-      mode: 'recovery',
-      timeoutSeconds: armWindowSeconds + maxRecoverySeconds,
-      minimumValidEvents: 2,
-      onFirstValidEvent: () => {
-        announce()
-        awaitArm()
-        triggeredAt = clock()
-        mutation = mutate()
-      },
-      onRecoveryValidEvent: () => { recoveredAt = clock() },
-    })
+    try {
+      result = open({
+        mode: 'recovery',
+        timeoutSeconds: armWindowSeconds + maxRecoverySeconds,
+        minimumValidEvents: 2,
+        onFirstValidEvent: () => {
+          reportDiagnostic('initial-event-observed', Math.floor(clock() / 1000))
+          announce()
+          awaitArm()
+          triggeredAt = clock()
+          reportDiagnostic('mutation-started', Math.floor(triggeredAt / 1000))
+          mutation = mutate()
+        },
+        onRecoveryValidEvent: () => {
+          recoveredAt = clock()
+          reportDiagnostic('recovery-event-observed', Math.floor(recoveredAt / 1000))
+        },
+      })
+    } finally {
+      reportDiagnostic('stream-finished', Math.floor(clock() / 1000))
+    }
     if (result?.completed !== true
       || result?.validEvents !== 2
       || mutation === null

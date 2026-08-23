@@ -358,6 +358,8 @@ export function sseRecovery(data) {
   safelyExecute(() => {
     recoveryAttempts.add(1, tagsFor(session.target))
     const rendezvous = config.recoveryRendezvous
+    const diagnostic = (phase, observedAtEpoch) =>
+      console.log(`event=sse_recovery_phase phase=${phase} observed_at_epoch=${observedAtEpoch}`)
     runSseRecovery({
       armWindowSeconds: rendezvous === null
         ? config.recoveryArmDelaySeconds
@@ -373,6 +375,7 @@ export function sseRecovery(data) {
           rendezvousId: rendezvous.rendezvousId,
           maxWaitSeconds: rendezvous.maxWaitSeconds,
           delay: sleep,
+          diagnostic,
         }),
       ready: () => console.log(rendezvous === null
         ? `SSE_RECOVERY_READY stop Valkey within ${config.recoveryArmDelaySeconds}s`
@@ -407,6 +410,7 @@ export function sseRecovery(data) {
         idempotencyKey: config.recoveryCleanupIdempotencyKey,
         tags: tagsFor(session.target, 'cleanup', 'cleanup'),
       }),
+      diagnostic,
       metrics: {
         duration: (value) => recoveryMilliseconds.add(value, tagsFor(session.target)),
         httpVerified: (value) => recoveryHttpVerified.add(

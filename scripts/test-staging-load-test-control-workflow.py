@@ -193,6 +193,13 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertNotIn('echo "$invocation"', self.valkey_control_workflow)
         self.assertNotIn('printf \'%s\\n\' "$standard_error"', self.valkey_control_workflow)
 
+    def test_valkey_control_success_logs_only_bounded_phase_diagnostics(self):
+        self.assertIn("report_success", self.valkey_control_workflow)
+        self.assertIn("staging_valkey_control_phase", self.valkey_control_workflow)
+        self.assertIn("observed_at_epoch=[0-9]{10}", self.valkey_control_workflow)
+        self.assertNotIn('echo "$invocation"', self.valkey_control_workflow)
+        self.assertNotIn('printf \'%s\\n\' "$standard_output"', self.valkey_control_workflow)
+
     def test_backend_cd_accepts_only_fixed_safe_recovery_mode(self):
         self.assertIn("runtime_recovery_mode:", self.backend_cd)
         self.assertIn("safe-disable", self.backend_cd)

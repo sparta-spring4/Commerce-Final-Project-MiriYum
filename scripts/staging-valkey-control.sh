@@ -25,6 +25,12 @@ emit_failure() {
     "${VALKEY_CONTROL_ACTION:-unknown}" "${phase}" "${reason}" "${exit_code}" >&2
 }
 
+emit_phase() {
+  local phase="$1"
+  printf 'event=staging_valkey_control_phase action=%s phase=%s observed_at_epoch=%s\n' \
+    "${VALKEY_CONTROL_ACTION:-unknown}" "${phase}" "$(date +%s)"
+}
+
 run_compose() {
   local phase="$1" reason="$2" status
   shift 2
@@ -117,8 +123,22 @@ wait_for_valkey_health() {
 }
 
 start_and_verify_valkey() {
-  run_compose start compose-up-failed up -d --no-deps valkey
-  wait_for_valkey_health
+  local status
+
+  emit_phase start-requested
+  if run_compose start compose-up-failed up -d --no-deps valkey; then
+    :
+  else
+    status=$?
+    return "${status}"
+  fi
+  if wait_for_valkey_health; then
+    :
+  else
+    status=$?
+    return "${status}"
+  fi
+  emit_phase healthy
 }
 
 validate_interrupt_schedule() {
@@ -200,6 +220,7 @@ case "${VALKEY_CONTROL_ACTION:-}" in
     trap 'exit 143' TERM
 
     publish_interrupt_readiness
+    emit_phase preflight-ready
     if sleep "${SCHEDULE_WAIT_SECONDS}"; then
       :
     else
@@ -207,7 +228,9 @@ case "${VALKEY_CONTROL_ACTION:-}" in
       emit_failure preflight scheduled-wait-failed "${status}"
       exit "${status}"
     fi
+    emit_phase stop-requested
     run_compose stop compose-stop-failed stop valkey
+    emit_phase stopped
     echo "event=staging_valkey_interruption_started duration_seconds=${INTERRUPTION_SECONDS}"
     if sleep "${INTERRUPTION_SECONDS}"; then
       :

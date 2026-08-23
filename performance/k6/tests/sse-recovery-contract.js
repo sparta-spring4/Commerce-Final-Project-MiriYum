@@ -11,6 +11,7 @@ function errorMessage(action) {
 export default function () {
   const order = []
   const metrics = []
+  const diagnostics = []
   let now = 1000
   const result = runSseRecovery({
     armWindowSeconds: 15,
@@ -31,6 +32,7 @@ export default function () {
     trigger: () => { order.push('trigger'); return { waitingTeamId: '901', version: 5 } },
     verify: () => { order.push('verify'); return true },
     cleanup: () => { order.push('cleanup'); return true },
+    diagnostic: (phase, observedAtEpoch) => diagnostics.push([phase, observedAtEpoch]),
     metrics: {
       duration: (value) => metrics.push(['duration', value]),
       httpVerified: (value) => metrics.push(['http', value]),
@@ -57,6 +59,7 @@ export default function () {
   const rendezvousNow = 1787469000000
   const rendezvousDelays = []
   const rendezvousRequests = []
+  const rendezvousDiagnostics = []
   const rendezvousResult = awaitRecoveryArmedMarker({
     client: {
       get: (url, options) => {
@@ -78,6 +81,8 @@ export default function () {
     maxWaitSeconds: 60,
     delay: (seconds) => rendezvousDelays.push(seconds),
     now: () => rendezvousNow,
+    diagnostic: (phase, observedAtEpoch) =>
+      rendezvousDiagnostics.push([phase, observedAtEpoch]),
   })
 
   let timedOutTriggerCalled = false
@@ -141,6 +146,12 @@ export default function () {
       && result.recoveryMilliseconds === 2100
       && JSON.stringify(metrics) === JSON.stringify([
         ['duration', 2100], ['http', 1], ['cleanup', 1],
+      ])
+      && JSON.stringify(diagnostics) === JSON.stringify([
+        ['initial-event-observed', 1],
+        ['mutation-started', 1],
+        ['recovery-event-observed', 3],
+        ['stream-finished', 3],
       ]),
     'recovery cleans up a successful mutation even when the second frame is missing': () =>
       failure === 'SSE recovery did not observe the corrected event'
@@ -151,7 +162,10 @@ export default function () {
       && rendezvousDelays[0] === 33
       && rendezvousRequests.length === 1
       && rendezvousRequests[0][0].startsWith('https://api.github.com/repos/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357/comments?')
-      && rendezvousRequests[0][1].headers.Authorization === undefined,
+      && rendezvousRequests[0][1].headers.Authorization === undefined
+      && JSON.stringify(rendezvousDiagnostics) === JSON.stringify([
+        ['armed-marker-observed', 1787469000],
+      ]),
     'rendezvous timeout fails before fixture-consuming mutation': () =>
       timeoutFailure === 'SSE recovery armed marker timed out'
       && timedOutTriggerCalled === false,
