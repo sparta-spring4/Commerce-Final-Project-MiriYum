@@ -134,6 +134,28 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertLess(submit, armed)
         self.assertIn('"InProgress"', self.valkey_control_workflow)
 
+    def test_armed_marker_requires_a_successful_remote_readiness_probe(self):
+        submit = self.valkey_control_workflow.split(
+            "      - name: Run fixed Valkey control through SSM\n", 1
+        )[1].split("\n      - name: Acknowledge the armed recovery interruption", 1)[0]
+        acknowledge = self.valkey_control_workflow.split(
+            "      - name: Acknowledge the armed recovery interruption\n", 1
+        )[1].split("\n      - name: Wait for bounded Valkey control result", 1)[0]
+
+        self.assertIn("VALKEY_CONTROL_READY_FILE=", submit)
+        self.assertIn("ready_file=$ready_file", submit)
+        self.assertIn("READY_FILE: ${{ steps.ssm.outputs.ready_file }}", acknowledge)
+        self.assertIn("readiness_probe_command=", acknowledge)
+        self.assertIn("aws ssm send-command", acknowledge)
+        self.assertIn("readiness_command_id=", acknowledge)
+        self.assertIn('if [ "$readiness_status" = "Success" ]', acknowledge)
+        self.assertIn('[ "$status" = "InProgress" ]', acknowledge)
+        self.assertLess(
+            acknowledge.index('if [ "$readiness_status" = "Success" ]'),
+            acknowledge.index('marker="SSE_RECOVERY_ARMED'),
+        )
+        self.assertNotIn("StandardOutputContent", acknowledge)
+
     def test_valkey_control_requires_the_reviewed_dev_caller_before_oidc(self):
         self.assertIn("Staging Valkey controls must run from refs/heads/dev", self.control_workflow)
         expected_caller = (

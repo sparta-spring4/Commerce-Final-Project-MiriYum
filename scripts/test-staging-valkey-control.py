@@ -138,6 +138,7 @@ fi
 
             if execute_at_epoch is None:
                 execute_at_epoch = str(int(time.time()) + 30) if action == "interrupt" else ""
+            ready_file = temporary_path / "miriyum-staging-valkey-ready-123-1"
 
             command = (
                 'fake_bin="$1"; '
@@ -164,6 +165,9 @@ fi
                     "FAKE_NOW": "" if fake_now is None else str(fake_now),
                     "FAKE_DATE_COUNT_FILE": (temporary_path / "date-count").as_posix(),
                     "PREFLIGHT_ELAPSED_SECONDS": str(preflight_elapsed_seconds),
+                    "VALKEY_CONTROL_READY_FILE": (
+                        ready_file.as_posix() if action == "interrupt" else ""
+                    ),
                 }
             )
             result = subprocess.run(
@@ -187,12 +191,18 @@ fi
                 if command_log.exists()
                 else []
             )
+            result.ready_file_content = (
+                ready_file.read_text(encoding="utf-8").strip()
+                if ready_file.exists()
+                else None
+            )
             return result, commands
 
     def test_interrupt_stops_for_ten_seconds_then_recovers_to_healthy(self):
         result, commands = self.run_control("interrupt")
 
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(result.args[-2], result.ready_file_content)
         stop = commands.index(
             "docker compose --env-file /opt/miriyum/.env -f "
             "/opt/miriyum/docker-compose.prod.yml stop valkey"
@@ -244,6 +254,7 @@ fi
             "reason=scheduled-epoch-too-close-after-preflight",
             result.stdout + result.stderr,
         )
+        self.assertIsNone(result.ready_file_content)
         self.assertFalse(any(" stop valkey" in command for command in commands))
 
     def test_interrupt_rejects_invalid_or_unbounded_epoch_before_docker_access(self):

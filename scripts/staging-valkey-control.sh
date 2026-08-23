@@ -153,6 +153,19 @@ refresh_interrupt_schedule_after_preflight() {
   SCHEDULE_WAIT_SECONDS="${delta}"
 }
 
+publish_interrupt_readiness() {
+  local ready_file="${VALKEY_CONTROL_READY_FILE:-}"
+
+  if [[ ! "${ready_file}" =~ ^([A-Za-z]:)?/.*/miriyum-staging-valkey-ready-[0-9]+-[0-9]+$ ]]; then
+    emit_failure preflight invalid-readiness-file 2
+    return 2
+  fi
+  umask 077
+  printf '%s\n' "${VALKEY_CONTROL_EXECUTE_AT_EPOCH}" > "${ready_file}.tmp"
+  mv "${ready_file}.tmp" "${ready_file}"
+  echo "event=staging_valkey_interruption_armed execute_at_epoch=${VALKEY_CONTROL_EXECUTE_AT_EPOCH}"
+}
+
 reject_recovery_schedule() {
   if [[ -n "${VALKEY_CONTROL_EXECUTE_AT_EPOCH:-}" ]]; then
     emit_failure preflight unexpected-scheduled-epoch 2
@@ -186,6 +199,7 @@ case "${VALKEY_CONTROL_ACTION:-}" in
     trap 'exit 130' INT
     trap 'exit 143' TERM
 
+    publish_interrupt_readiness
     if sleep "${SCHEDULE_WAIT_SECONDS}"; then
       :
     else
