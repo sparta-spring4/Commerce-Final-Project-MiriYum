@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -219,6 +220,32 @@ fi
         self.assertLess(wait, start)
         self.assertLess(start, healthy)
 
+    def test_interrupt_emits_only_bounded_phase_timestamps_in_runtime_order(self):
+        result, _ = self.run_control("interrupt")
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        phase_lines = [
+            line for line in result.stdout.splitlines()
+            if line.startswith("event=staging_valkey_control_phase ")
+        ]
+        self.assertEqual(
+            [
+                "preflight-ready",
+                "stop-requested",
+                "stopped",
+                "start-requested",
+                "healthy",
+            ],
+            [re.search(r" phase=([a-z-]+) ", line).group(1) for line in phase_lines],
+        )
+        for line in phase_lines:
+            self.assertRegex(
+                line,
+                r"^event=staging_valkey_control_phase action=interrupt "
+                r"phase=[a-z-]+ observed_at_epoch=[0-9]{10}$",
+            )
+            self.assertNotIn("private-runtime-image", line)
+
     def test_recover_starts_and_checks_health_without_stopping(self):
         result, commands = self.run_control("recover")
 
@@ -398,6 +425,17 @@ fi
         )
 
         self.assert_safe_failure(result, phase="start", reason="compose-up-failed")
+
+    def test_automatic_recovery_never_reports_healthy_after_start_failure(self):
+        result, _ = self.run_control(
+            "interrupt",
+            fail_sleep=True,
+            fail_docker_contains="up -d --no-deps valkey",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Valkey automatic recovery failed.", result.stderr)
+        self.assertNotRegex(result.stdout, re.compile(r"phase=healthy(?:\s|$)"))
 
     def test_recover_reports_safe_health_failure_without_raw_docker_error(self):
         result, _ = self.run_control(
