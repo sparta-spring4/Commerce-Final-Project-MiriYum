@@ -18,7 +18,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Tag("integration")
-@Tag("integration-shard-d")
+@Tag("integration-shard-a")
 @Testcontainers
 class StoreGeocodingMigrationTest {
 

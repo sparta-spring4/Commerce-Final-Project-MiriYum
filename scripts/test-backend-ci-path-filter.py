@@ -69,6 +69,18 @@ class BackendCiPathFilterTest(unittest.TestCase):
         self.assertIn("backend/build/test-results/${{ matrix.report_directory }}", workflow)
         self.assertIn("backend/test-duration-${{ matrix.shard }}.md", workflow)
 
+    def test_integration_ci_contract_keeps_exactly_three_shards(self):
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        build_script = (ROOT / "backend" / "build.gradle.kts").read_text(encoding="utf-8")
+        command_registry = (ROOT / "backend" / "ai" / "command-registry.md").read_text(encoding="utf-8")
+
+        self.assertEqual(3, workflow.count("task: integrationTestShard"))
+        self.assertNotIn("integrationTestShardD", workflow)
+        self.assertNotIn("integration-shard-d", build_script)
+        self.assertNotIn("integrationTestShardD", build_script)
+        self.assertNotIn("integration-shard-d", command_registry)
+        self.assertNotIn("integrationTestShardD", command_registry)
+
     def test_merge_base_diff_ignores_backend_changes_added_only_to_base(self):
         with temporary_git_repository() as repository:
             write_file(repository, "frontend/src/App.tsx", "base")

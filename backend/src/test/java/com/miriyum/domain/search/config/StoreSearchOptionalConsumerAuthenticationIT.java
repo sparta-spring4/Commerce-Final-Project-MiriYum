@@ -33,7 +33,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @WebMvcTest(StoreSearchController.class)
 @Import({StoreSearchSecurityConfig.class, GlobalExceptionHandler.class})
 @Tag("integration")
-@Tag("integration-shard-d")
+@Tag("integration-shard-c")
 class StoreSearchOptionalConsumerAuthenticationIT {
 
     @Autowired MockMvc mockMvc;

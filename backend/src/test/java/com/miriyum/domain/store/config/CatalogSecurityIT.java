@@ -39,7 +39,7 @@ import org.testcontainers.utility.DockerImageName;
         })
 @AutoConfigureMockMvc
 @Tag("integration")
-@Tag("integration-shard-d")
+@Tag("integration-shard-c")
 @Testcontainers(disabledWithoutDocker = true)
 class CatalogSecurityIT {
 

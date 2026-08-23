@@ -20,7 +20,7 @@ import org.testcontainers.utility.DockerImageName;
             "miriyum.jwt.issuer=miriyum"
         })
 @Tag("integration")
-@Tag("integration-shard-d")
+@Tag("integration-shard-a")
 @Testcontainers(disabledWithoutDocker = true)
 class MiriyumApplicationTests {
 
