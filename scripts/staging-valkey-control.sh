@@ -6,9 +6,17 @@ readonly COMPOSE_FILE="/opt/miriyum/docker-compose.prod.yml"
 readonly INTERRUPTION_SECONDS=10
 readonly HEALTH_ATTEMPTS=30
 readonly HEALTH_INTERVAL_SECONDS=2
+readonly MIN_SCHEDULE_LEAD_SECONDS=5
+readonly MAX_SCHEDULE_LEAD_SECONDS=60
+
+RUNTIME_BACKEND_IMAGE=""
+RUNTIME_FRONTEND_IMAGE=""
+SCHEDULE_WAIT_SECONDS=0
 
 compose() {
-  docker compose --env-file "${COMPOSE_ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
+  BACKEND_IMAGE="${RUNTIME_BACKEND_IMAGE}" \
+    FRONTEND_IMAGE="${RUNTIME_FRONTEND_IMAGE}" \
+    docker compose --env-file "${COMPOSE_ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
 }
 
 emit_failure() {
@@ -26,6 +34,48 @@ run_compose() {
   else
     status=$?
     emit_failure "${phase}" "${reason}" "${status}"
+    return "${status}"
+  fi
+}
+
+resolve_runtime_image() {
+  local service="$1" target_variable="$2" container_id image status
+
+  if container_id="$(docker ps -q \
+    --filter "label=com.docker.compose.project=miriyum" \
+    --filter "label=com.docker.compose.service=${service}" \
+    --filter "label=com.docker.compose.oneoff=False" 2>/dev/null)"; then
+    :
+  else
+    status=$?
+    return "${status}"
+  fi
+  if [[ -z "${container_id}" || "${container_id}" == *$'\n'* ]]; then
+    return 1
+  fi
+
+  if image="$(docker inspect --format '{{.Config.Image}}' "${container_id}" 2>/dev/null)"; then
+    :
+  else
+    status=$?
+    return "${status}"
+  fi
+  if [[ -z "${image}" || "${image}" == *$'\n'* ]]; then
+    return 1
+  fi
+
+  printf -v "${target_variable}" '%s' "${image}"
+}
+
+bind_runtime_images() {
+  local status
+
+  if resolve_runtime_image backend RUNTIME_BACKEND_IMAGE \
+    && resolve_runtime_image frontend RUNTIME_FRONTEND_IMAGE; then
+    return 0
+  else
+    status=$?
+    emit_failure preflight runtime-image-binding-failed "${status}"
     return "${status}"
   fi
 }
@@ -71,6 +121,58 @@ start_and_verify_valkey() {
   wait_for_valkey_health
 }
 
+validate_interrupt_schedule() {
+  local execute_at="${VALKEY_CONTROL_EXECUTE_AT_EPOCH:-}" now delta
+
+  if [[ ! "${execute_at}" =~ ^[0-9]{10}$ ]]; then
+    emit_failure preflight invalid-scheduled-epoch 2
+    return 2
+  fi
+  now="$(date +%s)"
+  delta=$((execute_at - now))
+  if ((delta < MIN_SCHEDULE_LEAD_SECONDS || delta > MAX_SCHEDULE_LEAD_SECONDS)); then
+    emit_failure preflight invalid-scheduled-epoch 2
+    return 2
+  fi
+  SCHEDULE_WAIT_SECONDS="${delta}"
+}
+
+refresh_interrupt_schedule_after_preflight() {
+  local execute_at="${VALKEY_CONTROL_EXECUTE_AT_EPOCH}" now delta
+
+  now="$(date +%s)"
+  delta=$((execute_at - now))
+  if ((delta < MIN_SCHEDULE_LEAD_SECONDS)); then
+    emit_failure preflight scheduled-epoch-too-close-after-preflight 2
+    return 2
+  fi
+  if ((delta > MAX_SCHEDULE_LEAD_SECONDS)); then
+    emit_failure preflight invalid-scheduled-epoch 2
+    return 2
+  fi
+  SCHEDULE_WAIT_SECONDS="${delta}"
+}
+
+publish_interrupt_readiness() {
+  local ready_file="${VALKEY_CONTROL_READY_FILE:-}"
+
+  if [[ ! "${ready_file}" =~ ^([A-Za-z]:)?/.*/miriyum-staging-valkey-ready-[0-9]+-[0-9]+$ ]]; then
+    emit_failure preflight invalid-readiness-file 2
+    return 2
+  fi
+  umask 077
+  printf '%s\n' "${VALKEY_CONTROL_EXECUTE_AT_EPOCH}" > "${ready_file}.tmp"
+  mv "${ready_file}.tmp" "${ready_file}"
+  echo "event=staging_valkey_interruption_armed execute_at_epoch=${VALKEY_CONTROL_EXECUTE_AT_EPOCH}"
+}
+
+reject_recovery_schedule() {
+  if [[ -n "${VALKEY_CONTROL_EXECUTE_AT_EPOCH:-}" ]]; then
+    emit_failure preflight unexpected-scheduled-epoch 2
+    return 2
+  fi
+}
+
 recover_on_exit() {
   local original_status=$? recovery_status=0
   trap - EXIT HUP INT TERM
@@ -87,13 +189,24 @@ recover_on_exit() {
 
 case "${VALKEY_CONTROL_ACTION:-}" in
   interrupt)
+    validate_interrupt_schedule
+    bind_runtime_images
     validate_compose_contract
     wait_for_valkey_health
+    refresh_interrupt_schedule_after_preflight
     trap recover_on_exit EXIT
     trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
 
+    publish_interrupt_readiness
+    if sleep "${SCHEDULE_WAIT_SECONDS}"; then
+      :
+    else
+      status=$?
+      emit_failure preflight scheduled-wait-failed "${status}"
+      exit "${status}"
+    fi
     run_compose stop compose-stop-failed stop valkey
     echo "event=staging_valkey_interruption_started duration_seconds=${INTERRUPTION_SECONDS}"
     if sleep "${INTERRUPTION_SECONDS}"; then
@@ -109,6 +222,8 @@ case "${VALKEY_CONTROL_ACTION:-}" in
     echo "event=staging_valkey_interruption_completed duration_seconds=${INTERRUPTION_SECONDS} health=healthy"
     ;;
   recover)
+    reject_recovery_schedule
+    bind_runtime_images
     validate_compose_contract
     start_and_verify_valkey
     echo "event=staging_valkey_recovery_completed health=healthy"

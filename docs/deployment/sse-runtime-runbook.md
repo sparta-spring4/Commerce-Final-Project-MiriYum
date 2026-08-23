@@ -214,7 +214,7 @@ probe도 계속 성공해야 한다. burst 입력 복원 전에 다음 profile�
 
 장애 전 synthetic 계정의 세션과 승인된 public owner mutation을 준비한다. 해당 mutation이 없거나 owner 승인이 없으면 이 단계를 `BLOCKED`로 기록하고 임의 DB seed나 test-only endpoint를 만들지 않는다. `recovery` 프로필은 매장 운영자 scope 한 개만 사용하며, FIFO 선두 합성 팀을 `WAITING → CALLED`로 변경한 뒤 HTTP 상세에서 MySQL 상태를 확인하고 반드시 `CANCELLED`로 정리한다. SSE payload에는 변경 자원 식별자가 없으므로 recovery store는 실행 구간에 다른 Waiting writer가 없는 전용 합성 store여야 한다. fixture owner와 operator가 이 독점 조건을 확인하지 못하면 다른 변경의 frame을 correction 결과로 오인할 수 있으므로 실행하지 않는다.
 
-먼저 세 endpoint smoke를 통과한 동일 SHA·fixture를 사용한다. 아래 실행은 로그인과 refresh session cleanup을 끝내고 SSE 연결의 초기 `waiting.changed` frame까지 확인한 뒤 `SSE_RECOVERY_READY`를 출력하고 15초 동안 대기한다. 운영자는 이 문구를 확인한 뒤 Valkey를 중단하고, 하네스는 대기가 끝나면 기존 SSE 연결을 유지한 채 승인된 mutation을 실행한다. 중단 명령·완료 시각과 전용 store의 다른 writer 부재 승인은 별도 staging 실행 증거로 남긴다. 이 증거가 없으면 두 번째 신호를 해당 mutation의 MySQL correction 결과로 해석하지 않는다.
+먼저 세 endpoint smoke를 통과한 동일 SHA·fixture를 사용한다. 아래 local 실행은 로그인과 refresh session cleanup을 끝내고 SSE 연결의 초기 `waiting.changed` frame까지 확인한 뒤 `SSE_RECOVERY_READY`를 출력하고 15초 동안 대기한다. 운영자는 이 문구를 확인한 뒤 local Valkey를 중단하고, 하네스는 대기가 끝나면 기존 SSE 연결을 유지한 채 승인된 mutation을 실행한다. 중단 명령·완료 시각과 전용 store의 다른 writer 부재 승인은 별도 실행 증거로 남긴다. 이 증거가 없으면 두 번째 신호를 해당 mutation의 MySQL correction 결과로 해석하지 않는다.
 
 ```powershell
 $recoveryRunId = 'staging-sse-recovery-YYYYMMDD-NN'
@@ -248,9 +248,17 @@ docker compose --env-file deploy/local/.env `
   /scripts/sse/main.js
 ```
 
-staging에서는 위와 같은 입력을 승인된 staging host·SHA·clean harness gate로 바꾼다. summary의 `recoveryDuration.max`, `recoveryHttpVerified.count=1`, `recoveryCleanupSuccessful.count=1`과 threshold 전체 성공을 기록한다. 계정·매장·팀·cursor·Token·idempotency key 원문은 기록하지 않는다.
+staging에서는 위와 같은 입력을 승인된 staging host·SHA·clean harness gate로 바꾸되 `SSE_RECOVERY_ARM_DELAY_SECONDS`를 사용하지 않는다. 대신 아래 값을 모두 사용한다.
 
-staging 장애 주입은 EC2 shell에서 아래 로컬 Compose 명령을 직접 실행하지 않는다. 하네스가 `SSE_RECOVERY_READY`를 출력한 뒤 GitHub Actions의 `Staging Load-Test Control`을 `dev`에서 실행하고, `action=interrupt-valkey`, 실제 최신 성공 `staging-backend` 배포 full SHA, 빈 `source_ip`를 입력한다. 이 고정 action은 Valkey만 10초 중단하고 같은 SSM 명령에서 자동 재기동·health 확인까지 수행한다. 실패·취소·timeout이면 같은 SHA로 `recover-valkey`를 즉시 실행하고 성공 및 private health `UP` 전에는 테스트를 계속하지 않는다. 세부 권한과 실행 순서는 [Staging Load-Test Operator Runbook](staging-load-test-operator-runbook.md)을 따른다.
+- `SSE_RECOVERY_RENDEZVOUS_APPROVED=true`
+- `SSE_RECOVERY_RENDEZVOUS_REPOSITORY=sparta-spring4/Commerce-Final-Project-MiriYum`
+- `SSE_RECOVERY_RENDEZVOUS_ISSUE=<승인된 Issue 번호>`
+- `SSE_RECOVERY_RENDEZVOUS_RUN_ID=<미리 실행해 대기 중인 Staging Load-Test Control run ID>`
+- `SSE_RECOVERY_RENDEZVOUS_ID=<해당 실행 전용 UUID>`
+
+summary의 `recoveryDuration.max`, `recoveryHttpVerified.count=1`, `recoveryCleanupSuccessful.count=1`과 threshold 전체 성공을 기록한다. 계정·매장·팀·cursor·Token·idempotency key·rendezvous marker 원문은 기록하지 않는다.
+
+staging 장애 주입은 EC2 shell에서 아래 로컬 Compose 명령을 직접 실행하지 않는다. 먼저 GitHub Actions의 `Staging Load-Test Control`을 `dev`에서 `action=interrupt-valkey`, 최신 성공 `staging-backend` 배포 full SHA, 승인 Issue 번호와 일회성 UUID로 실행하고 FIRE marker 대기 단계까지 준비한다. 같은 run ID·UUID로 하네스를 시작한 뒤 `SSE_RECOVERY_READY`가 출력된 경우에만 dispatch actor가 `SSE_RECOVERY_FIRE run_id=<run-id> rendezvous_id=<uuid>` 코멘트를 남긴다. 원격 스크립트가 runtime image·Compose·health·남은 lead preflight를 통과하면 root-only readiness 파일에 정확한 epoch를 원자적으로 기록한다. workflow는 별도의 고정 SSM probe가 그 파일을 검증하고 주 interruption 명령도 여전히 `InProgress`인 경우에만 bot-authored ARMED epoch를 남긴다. probe 실패·직렬 실행·timeout 또는 주 명령 종료 시에는 ARMED와 Waiting mutation 없이 fail-closed한다. 하네스는 정확한 scope·author·bounded epoch를 확인한 뒤 고정 10초 중단 안에서 mutation을 실행한다. GitHub API 조회에는 Authorization header를 사용하지 않는다. 실패·취소·timeout이면 같은 SHA로 `recover-valkey`를 즉시 실행하고 성공 및 private health `UP` 전에는 테스트를 계속하지 않는다. 세부 권한과 실행 순서는 [Staging Load-Test Operator Runbook](staging-load-test-operator-runbook.md)을 따른다.
 
 아래 명령은 local 환경에서만 사용한다.
 

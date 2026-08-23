@@ -1,6 +1,6 @@
 import { check } from 'k6'
 
-import { runSseRecovery } from '../sse/recovery.js'
+import { awaitRecoveryArmedMarker, runSseRecovery } from '../sse/recovery.js'
 
 export const options = { thresholds: { checks: ['rate==1'] } }
 
@@ -13,9 +13,9 @@ export default function () {
   const metrics = []
   let now = 1000
   const result = runSseRecovery({
-    armDelaySeconds: 15,
+    armWindowSeconds: 15,
     maxRecoverySeconds: 6,
-    delay: (seconds) => order.push(`delay:${seconds}`),
+    arm: () => order.push('delay:15'),
     ready: () => order.push('ready'),
     now: () => now,
     openStream: (behavior) => {
@@ -40,9 +40,9 @@ export default function () {
 
   const failureOrder = []
   const failure = errorMessage(() => runSseRecovery({
-    armDelaySeconds: 15,
+    armWindowSeconds: 15,
     maxRecoverySeconds: 6,
-    delay: () => {},
+    arm: () => {},
     ready: () => {},
     now: () => 1000,
     openStream: (behavior) => {
@@ -52,6 +52,87 @@ export default function () {
     trigger: () => ({ waitingTeamId: '902', version: 2 }),
     verify: () => true,
     cleanup: () => { failureOrder.push('cleanup'); return true },
+  }))
+
+  const rendezvousNow = 1787469000000
+  const rendezvousDelays = []
+  const rendezvousRequests = []
+  const rendezvousResult = awaitRecoveryArmedMarker({
+    client: {
+      get: (url, options) => {
+        rendezvousRequests.push([url, options])
+        return {
+          status: 200,
+          json: () => [{
+            user: { login: 'github-actions[bot]' },
+            created_at: new Date(rendezvousNow).toISOString(),
+            body: 'SSE_RECOVERY_ARMED run_id=32623080912 rendezvous_id=323e4567-e89b-12d3-a456-426614174000 execute_at_epoch=1787469030',
+          }],
+        }
+      },
+    },
+    repository: 'sparta-spring4/Commerce-Final-Project-MiriYum',
+    issue: 357,
+    runId: '32623080912',
+    rendezvousId: '323e4567-e89b-12d3-a456-426614174000',
+    maxWaitSeconds: 60,
+    delay: (seconds) => rendezvousDelays.push(seconds),
+    now: () => rendezvousNow,
+  })
+
+  let timedOutTriggerCalled = false
+  const timeoutFailure = errorMessage(() => runSseRecovery({
+    armWindowSeconds: 60,
+    maxRecoverySeconds: 6,
+    arm: () => { throw new Error('SSE recovery armed marker timed out') },
+    ready: () => {},
+    now: () => rendezvousNow,
+    openStream: (behavior) => {
+      behavior.onFirstValidEvent()
+      return { completed: false, validEvents: 1 }
+    },
+    trigger: () => { timedOutTriggerCalled = true; return {} },
+    verify: () => true,
+    cleanup: () => true,
+  }))
+
+  const wrongAuthorFailure = errorMessage(() => awaitRecoveryArmedMarker({
+    client: {
+      get: () => ({
+        status: 200,
+        json: () => [{
+          user: { login: 'another-member' },
+          created_at: new Date(rendezvousNow).toISOString(),
+          body: 'SSE_RECOVERY_ARMED run_id=32623080912 rendezvous_id=323e4567-e89b-12d3-a456-426614174000 execute_at_epoch=1787469030',
+        }],
+      }),
+    },
+    repository: 'sparta-spring4/Commerce-Final-Project-MiriYum',
+    issue: 357,
+    runId: '32623080912',
+    rendezvousId: '323e4567-e89b-12d3-a456-426614174000',
+    maxWaitSeconds: 3,
+    delay: () => {},
+    now: () => rendezvousNow,
+  }))
+  const staleEpochFailure = errorMessage(() => awaitRecoveryArmedMarker({
+    client: {
+      get: () => ({
+        status: 200,
+        json: () => [{
+          user: { login: 'github-actions[bot]' },
+          created_at: new Date(rendezvousNow).toISOString(),
+          body: 'SSE_RECOVERY_ARMED run_id=32623080912 rendezvous_id=323e4567-e89b-12d3-a456-426614174000 execute_at_epoch=1787468999',
+        }],
+      }),
+    },
+    repository: 'sparta-spring4/Commerce-Final-Project-MiriYum',
+    issue: 357,
+    runId: '32623080912',
+    rendezvousId: '323e4567-e89b-12d3-a456-426614174000',
+    maxWaitSeconds: 3,
+    delay: () => {},
+    now: () => rendezvousNow,
   }))
 
   check(null, {
@@ -64,5 +145,19 @@ export default function () {
     'recovery cleans up a successful mutation even when the second frame is missing': () =>
       failure === 'SSE recovery did not observe the corrected event'
       && failureOrder.join(',') === 'cleanup',
+    'armed marker is exact, bot-authored, bounded, and unauthenticated': () =>
+      rendezvousResult.executeAtEpoch === 1787469030
+      && rendezvousDelays.length === 1
+      && rendezvousDelays[0] === 33
+      && rendezvousRequests.length === 1
+      && rendezvousRequests[0][0].startsWith('https://api.github.com/repos/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357/comments?')
+      && rendezvousRequests[0][1].headers.Authorization === undefined,
+    'rendezvous timeout fails before fixture-consuming mutation': () =>
+      timeoutFailure === 'SSE recovery armed marker timed out'
+      && timedOutTriggerCalled === false,
+    'non-bot marker cannot arm recovery': () =>
+      wrongAuthorFailure === 'SSE recovery armed marker timed out',
+    'stale armed epoch fails closed': () =>
+      staleEpochFailure === 'SSE recovery armed epoch is outside the bounded window',
   })
 }
