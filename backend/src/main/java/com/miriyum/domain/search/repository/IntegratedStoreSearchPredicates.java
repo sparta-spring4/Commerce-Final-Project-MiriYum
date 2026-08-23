@@ -13,14 +13,18 @@ import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
 import com.querydsl.core.BooleanBuilder;
 import com.querydsl.core.types.dsl.BooleanExpression;
 import com.querydsl.core.types.dsl.CaseBuilder;
+import com.querydsl.core.types.dsl.Expressions;
 import com.querydsl.core.types.dsl.StringExpression;
 import com.querydsl.jpa.JPAExpressions;
 import java.util.List;
+import java.util.Set;
 
 /** 공개 상태와 승인 검색 조건을 타입 안전한 QueryDSL predicate로 조립한다. */
 final class IntegratedStoreSearchPredicates {
 
     private static final char LIKE_ESCAPE = '!';
+    private static final Set<String> REVERSE_MATCH_EXCLUDED_MENU_NAMES = Set.of(
+            "면", "탕", "국", "밥", "메뉴", "음식", "요리", "식사", "세트", "정식", "음료");
 
     private IntegratedStoreSearchPredicates() {
     }
@@ -34,7 +38,7 @@ final class IntegratedStoreSearchPredicates {
         return predicate;
     }
 
-    static BooleanBuilder createExpanded(
+    static BooleanBuilder createExpandedForward(
             QStore store,
             IntegratedStoreSearchQuery query,
             List<String> concepts
@@ -43,17 +47,30 @@ final class IntegratedStoreSearchPredicates {
                 .and(store.verificationStatus.eq(VerificationStatus.APPROVED))
                 .and(store.operationStatus.ne(OperationStatus.CLOSED));
         addStoreConditions(predicate, store, query);
-        predicate.and(currentExpandedMenuExists(store, query, concepts));
+        predicate.and(currentExpandedForwardMenuExists(store, query, concepts));
         return predicate;
     }
 
-    private static BooleanExpression currentExpandedMenuExists(
+    static BooleanBuilder createExpandedReverse(
             QStore store,
             IntegratedStoreSearchQuery query,
             List<String> concepts
     ) {
-        QMenu menu = new QMenu("expandedMenu");
-        QMenuVersion version = new QMenuVersion("expandedMenuVersion");
+        BooleanBuilder predicate = new BooleanBuilder()
+                .and(store.verificationStatus.eq(VerificationStatus.APPROVED))
+                .and(store.operationStatus.ne(OperationStatus.CLOSED));
+        addStoreConditions(predicate, store, query);
+        predicate.and(currentExpandedReverseMenuExists(store, query, concepts));
+        return predicate;
+    }
+
+    private static BooleanExpression currentExpandedForwardMenuExists(
+            QStore store,
+            IntegratedStoreSearchQuery query,
+            List<String> concepts
+    ) {
+        QMenu menu = new QMenu("expandedForwardMenu");
+        QMenuVersion version = new QMenuVersion("expandedForwardMenuVersion");
         BooleanBuilder conceptMatches = new BooleanBuilder();
         for (String concept : concepts) {
             String pattern = literalContainsPattern(concept);
@@ -64,6 +81,33 @@ final class IntegratedStoreSearchPredicates {
                             .likeIgnoreCase(pattern, LIKE_ESCAPE))
                     .or(version.localTags.any().likeIgnoreCase(pattern, LIKE_ESCAPE)));
         }
+        return currentExpandedMenuExists(store, menu, version, query, conceptMatches);
+    }
+
+    private static BooleanExpression currentExpandedReverseMenuExists(
+            QStore store,
+            IntegratedStoreSearchQuery query,
+            List<String> concepts
+    ) {
+        QMenu menu = new QMenu("expandedReverseMenu");
+        QMenuVersion version = new QMenuVersion("expandedReverseMenuVersion");
+        BooleanBuilder conceptMatches = new BooleanBuilder();
+        for (String concept : concepts) {
+            conceptMatches.or(Expressions.booleanTemplate(
+                    "locate(lower({0}), lower({1})) > 0", version.name, concept));
+        }
+        conceptMatches.and(version.name.trim().length().goe(2))
+                .and(version.name.trim().notIn(REVERSE_MATCH_EXCLUDED_MENU_NAMES));
+        return currentExpandedMenuExists(store, menu, version, query, conceptMatches);
+    }
+
+    private static BooleanExpression currentExpandedMenuExists(
+            QStore store,
+            QMenu menu,
+            QMenuVersion version,
+            IntegratedStoreSearchQuery query,
+            BooleanBuilder conceptMatches
+    ) {
         BooleanBuilder expandedMenu = new BooleanBuilder()
                 .and(menu.storeId.eq(store.id))
                 .and(menu.retired.isFalse())

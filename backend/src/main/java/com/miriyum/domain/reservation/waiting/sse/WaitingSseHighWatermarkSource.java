@@ -12,6 +12,7 @@ import com.miriyum.global.sse.SseWakeUpTarget;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /** 소비자 teamsAhead와 매장 운영자 공개 원장에 영향을 주는 Waiting watermark를 제공한다. */
 @Component
@@ -38,6 +39,7 @@ public class WaitingSseHighWatermarkSource implements SseHighWatermarkSource {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public SseSignalState read(SseStreamScope scope) {
         return switch (scope.audience()) {
             case WAITING_CONSUMER -> readConsumer(scope.accountId());
