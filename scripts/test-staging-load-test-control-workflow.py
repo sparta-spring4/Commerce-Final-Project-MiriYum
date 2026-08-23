@@ -34,16 +34,19 @@ class StagingLoadTestControlWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("environment_value", self.control_workflow)
         self.assertNotIn("shell_command", self.control_workflow)
 
-    def test_control_workflow_validates_immutable_sha_and_public_ipv4(self):
+    def test_control_workflow_validates_immutable_sha_and_delegates_ip_secret(self):
         self.assertIn("^[0-9a-f]{40}$", self.control_workflow)
         self.assertIn("Invalid immutable image tag", self.control_workflow)
-        self.assertIn("Invalid staging load-test source IP", self.control_workflow)
-        self.assertIn("validate-staging-load-test-source-ip.js", self.control_workflow)
+        self.assertNotRegex(self.control_workflow, r"(?m)^      source_ip:")
+        self.assertNotIn("inputs.source_ip", self.control_workflow)
+        self.assertIn('load_test_source_ip: ""', self.control_workflow)
+        self.assertNotIn("Invalid staging load-test source IP", self.control_workflow)
         self.assertIn("validate-staging-load-test-source-ip.js", self.backend_cd)
+        self.assertIn("Invalid staging load-test source IP", self.backend_cd)
 
-    def test_control_validation_checks_out_the_validator_before_running_it(self):
+    def test_control_validation_checks_out_before_running_inline_validation(self):
         checkout = "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
-        validator = "validate-staging-load-test-source-ip.js"
+        validator = "node - <<'NODE'"
         self.assertIn(checkout, self.control_workflow)
         self.assertLess(self.control_workflow.index(checkout), self.control_workflow.index(validator))
 

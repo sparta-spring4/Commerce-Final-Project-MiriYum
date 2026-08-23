@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.waiting.sse;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 
@@ -19,8 +20,38 @@ import java.time.ZoneId;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 class WaitingSseHighWatermarkSourceTest {
+
+    @Test
+    void readsEveryConsumerWatermarkInsideOneReadOnlyTransaction() {
+        ConsumerAccountService accounts = mock(ConsumerAccountService.class);
+        WaitingStatusEventRepository events = mock(WaitingStatusEventRepository.class);
+        WaitingStoreAuthorityPort authority = mock(WaitingStoreAuthorityPort.class);
+        doAnswer(invocation -> {
+            assertReadOnlyTransaction();
+            return null;
+        }).when(accounts).requireActiveAccount(41L);
+        doAnswer(invocation -> {
+            assertReadOnlyTransaction();
+            return Optional.empty();
+        }).when(events).findActiveConsumerSseHighWatermark(41L);
+        doAnswer(invocation -> {
+            assertReadOnlyTransaction();
+            return 44L;
+        }).when(events).findLatestOwnedConsumerSseHighWatermark(41L);
+        WaitingSseHighWatermarkSource source = transactional(
+                new WaitingSseHighWatermarkSource(accounts, events, authority));
+
+        source.read(SseStreamScope.waitingConsumer(41L));
+    }
 
     @Test
     void activeConsumerTracksOwnAccountAndCurrentStoreBusinessDate() {
@@ -84,5 +115,43 @@ class WaitingSseHighWatermarkSourceTest {
         InOrder order = inOrder(authority, events);
         order.verify(authority).requireRead(90L, 103L);
         order.verify(events).findStoreSseHighWatermark(103L);
+    }
+
+    private static WaitingSseHighWatermarkSource transactional(
+            WaitingSseHighWatermarkSource target
+    ) {
+        TransactionInterceptor interceptor = new TransactionInterceptor();
+        interceptor.setTransactionManager(new TestTransactionManager());
+        interceptor.setTransactionAttributeSource(new AnnotationTransactionAttributeSource());
+        ProxyFactory factory = new ProxyFactory(target);
+        factory.setProxyTargetClass(true);
+        factory.addAdvice(interceptor);
+        return (WaitingSseHighWatermarkSource) factory.getProxy();
+    }
+
+    private static void assertReadOnlyTransaction() {
+        assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+        assertThat(TransactionSynchronizationManager.isCurrentTransactionReadOnly()).isTrue();
+    }
+
+    private static final class TestTransactionManager
+            extends AbstractPlatformTransactionManager {
+
+        @Override
+        protected Object doGetTransaction() {
+            return new Object();
+        }
+
+        @Override
+        protected void doBegin(Object transaction, TransactionDefinition definition) {
+        }
+
+        @Override
+        protected void doCommit(DefaultTransactionStatus status) {
+        }
+
+        @Override
+        protected void doRollback(DefaultTransactionStatus status) {
+        }
     }
 }
