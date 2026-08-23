@@ -38,7 +38,7 @@ run_compose() {
 resolve_runtime_image() {
   local service="$1" target_variable="$2" container_id image status
 
-  if container_id="$(docker ps -aq \
+  if container_id="$(docker ps -q \
     --filter "label=com.docker.compose.project=miriyum" \
     --filter "label=com.docker.compose.service=${service}" 2>/dev/null)"; then
     :
