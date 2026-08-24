@@ -35,6 +35,18 @@ const METADATA = {
 
 const SUMMARY_INPUT = {
   metrics: {
+    sse_unexpected_400: {
+      type: 'counter', values: { count: 1, rate: 1 },
+    },
+    sse_unexpected_401: {
+      type: 'counter', values: { count: 2, rate: 2 },
+    },
+    sse_unexpected_403: {
+      type: 'counter', values: { count: 3, rate: 3 },
+    },
+    sse_unexpected_other_4xx: {
+      type: 'counter', values: { count: 4, rate: 4 },
+    },
     owned_http_baseline: {
       type: 'trend',
       values: { avg: 12, min: 8, med: 11, max: 19, 'p(50)': 11, 'p(95)': 18, 'p(99)': 19 },
@@ -239,6 +251,12 @@ export default function () {
       parsed.limits.connections === 1
       && parsed.limits.holdDurationSeconds === 5
       && parsed.runMetrics.droppedIterations.count === 0,
+    'summary preserves only fixed unexpected 4xx status bucket totals': () =>
+      parsed.runMetrics.unexpected400.count === 1
+      && parsed.runMetrics.unexpected401.count === 2
+      && parsed.runMetrics.unexpected403.count === 3
+      && parsed.runMetrics.unexpectedOther4xx.count === 4
+      && rendered.stdout.includes('unexpected 4xx status buckets: 400=1, 401=2, 403=3, other=4'),
     'reconnect summary preserves the bounded registry settle window': () =>
       reconnectParsed.limits.reconnectSettleSeconds === 6,
     'summary keeps safe run-wide owned HTTP timing aggregates': () =>

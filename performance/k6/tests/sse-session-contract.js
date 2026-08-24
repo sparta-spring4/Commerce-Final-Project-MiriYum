@@ -1,6 +1,6 @@
 import { check } from 'k6'
 
-import { prepareSseSession } from '../sse/session.js'
+import { openChangedStream, prepareSseSession } from '../sse/session.js'
 
 export const options = {
   thresholds: {
@@ -65,9 +65,42 @@ function errorMessage(action) {
   }
 }
 
+function unexpectedResponse(status, connectionStage) {
+  const results = []
+  const transport = {
+    open(_url, _params, setup) {
+      setup({ on() {}, close() {} })
+      return { status, headers: { Authorization: 'forbidden-header' }, body: 'forbidden-body' }
+    },
+  }
+  openChangedStream({
+    transport,
+    url: 'https://loadtest-proxy:8443/api/v1/consumers/me/notification-events',
+    accessToken: 'access-token-memory-only',
+    endpointKind: 'notification-consumer',
+    connectionStage,
+    behavior: { mode: 'reconnect' },
+    metrics: {
+      connectionResult: (classification, tags, diagnostic) => {
+        results.push({ classification, tags, diagnostic })
+      },
+    },
+    tags: {
+      phase: 'measured',
+      profile: 'reconnect',
+      audience: 'consumer',
+      endpoint_kind: 'notification-consumer',
+      traffic: 'sse-stream',
+    },
+  })
+  return results[0]
+}
+
 export default function () {
   const consumer = prepare('consumer')
   const operator = prepare('store-operator')
+  const forbidden = unexpectedResponse(403, 'reconnect')
+  const rateLimited = unexpectedResponse(429, 'initial')
   const consumerBody = JSON.parse(consumer.client.calls[0].body)
   const operatorBody = JSON.parse(operator.client.calls[0].body)
 
@@ -107,5 +140,22 @@ export default function () {
         && !message.includes('access-token-memory-only')
         && !message.includes('csrf-memory-only')
     },
+    'unexpected 4xx exposes only a fixed status bucket stage endpoint and UTC time': () =>
+      forbidden.classification === 'unexpected_client_error'
+      && forbidden.diagnostic.statusBucket === '403'
+      && forbidden.diagnostic.connectionStage === 'reconnect'
+      && forbidden.diagnostic.endpointKind === 'notification-consumer'
+      && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(
+        forbidden.diagnostic.observedAtUtc,
+      )
+      && JSON.stringify(Object.keys(forbidden.diagnostic).sort()) === JSON.stringify([
+        'classification', 'connectionStage', 'endpointKind', 'observedAtUtc', 'statusBucket',
+      ])
+      && !JSON.stringify(forbidden).includes('forbidden-header')
+      && !JSON.stringify(forbidden).includes('forbidden-body')
+      && !JSON.stringify(forbidden).includes('access-token-memory-only'),
+    'capacity 429 remains separate and does not emit unexpected 4xx diagnostics': () =>
+      rateLimited.classification === 'capacity_rejected'
+      && rateLimited.diagnostic === null,
   })
 }

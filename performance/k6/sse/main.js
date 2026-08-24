@@ -83,6 +83,10 @@ const recoveryAttempts = new Counter('sse_recovery_attempts')
 const recoverySuccessful = new Counter('sse_recovery_successful')
 const expected4xx = new Counter('sse_expected_4xx')
 const unexpected4xx = new Counter('sse_unexpected_4xx')
+const unexpected400 = new Counter('sse_unexpected_400')
+const unexpected401 = new Counter('sse_unexpected_401')
+const unexpected403 = new Counter('sse_unexpected_403')
+const unexpectedOther4xx = new Counter('sse_unexpected_other_4xx')
 const server5xx = new Counter('sse_server_5xx')
 const unexpectedStatus = new Counter('sse_unexpected_status')
 const heartbeatFrames = new Counter('sse_heartbeat_frames')
@@ -124,6 +128,10 @@ function thresholds() {
     sse_contract_errors: ['count==0'],
     sse_transport_errors: ['count==0'],
     sse_unexpected_4xx: ['count==0'],
+    sse_unexpected_400: ['count==0'],
+    sse_unexpected_401: ['count==0'],
+    sse_unexpected_403: ['count==0'],
+    sse_unexpected_other_4xx: ['count==0'],
     sse_server_5xx: ['count==0'],
     sse_unexpected_status: ['count==0'],
     sse_recovery_trigger_list_failures: ['count==0'],
@@ -275,6 +283,15 @@ function recoveryTriggerFailureMetrics() {
   }
 }
 
+function recordUnexpected4xx(diagnostic, tags) {
+  unexpected4xx.add(1, tags)
+  if (diagnostic?.statusBucket === '400') unexpected400.add(1, tags)
+  else if (diagnostic?.statusBucket === '401') unexpected401.add(1, tags)
+  else if (diagnostic?.statusBucket === '403') unexpected403.add(1, tags)
+  else unexpectedOther4xx.add(1, tags)
+  console.warn(`sse_unexpected_4xx ${JSON.stringify(diagnostic)}`)
+}
+
 function metricAdapter() {
   return {
     opened: (value, tags) => openedConnections.add(value, tags),
@@ -283,14 +300,14 @@ function metricAdapter() {
     contractError: (value, tags) => contractErrors.add(value, tags),
     transportError: (value, tags) => transportErrors.add(value, tags),
     firstEventMilliseconds: (value, tags) => firstEventMilliseconds.add(value, tags),
-    connectionResult: (classification, tags) => {
+    connectionResult: (classification, tags, diagnostic) => {
       if (classification === 'success') successfulConnections.add(1, tags)
       else if (classification === 'capacity_rejected') {
         rejectedConnections.add(1, tags)
         expected4xx.add(1, tags)
       } else if (classification === 'unauthorized'
         || classification === 'unexpected_client_error') {
-        unexpected4xx.add(1, tags)
+        recordUnexpected4xx(diagnostic, tags)
       } else if (classification === 'unavailable' || classification === 'server_error') {
         server5xx.add(1, tags)
       } else if (classification === 'unexpected_status') {
@@ -300,7 +317,7 @@ function metricAdapter() {
   }
 }
 
-function openSession(session, behavior, lastEventId = null) {
+function openSession(session, behavior, lastEventId = null, connectionStage = 'single') {
   const target = session.target
   const startedAt = Date.now()
   const result = openChangedStream({
@@ -309,6 +326,7 @@ function openSession(session, behavior, lastEventId = null) {
     accessToken: session.accessToken,
     lastEventId,
     endpointKind: target.kind,
+    connectionStage,
     behavior: applySteadyMinimumLifetime({
       timeoutSeconds: config.holdDurationSeconds + 5,
       ...behavior,
@@ -347,13 +365,13 @@ export function sseReconnect(data) {
         const first = openSession(session, {
           mode: 'reconnect',
           onLastEventId: (value) => { lastEventId = value },
-        })
+        }, null, 'initial')
         return { ...first, lastEventId }
       },
       delay: sleep,
       beforeReconnect: () => recoveryAttempts.add(1, tagsFor(session.target)),
       openReconnect: (lastEventId) => openSession(
-        session, { mode: 'reconnect' }, lastEventId,
+        session, { mode: 'reconnect' }, lastEventId, 'reconnect',
       ),
       settleSeconds: config.reconnectSettleSeconds,
     })
