@@ -113,8 +113,14 @@ function safeMetadata(metadata) {
   )
   let slowClientMaxCleanupSeconds = null
   let companionMinLifetimeSeconds = null
+  let reconnectSettleSeconds = null
   let recoveryArmDelaySeconds = null
   let recoveryMaxSeconds = null
+  if (profile === 'reconnect') {
+    reconnectSettleSeconds = requirePositiveInt(
+      'reconnectSettleSeconds', limits.reconnectSettleSeconds, 60,
+    )
+  }
   if (profile === 'slow-client') {
     slowClientMaxCleanupSeconds = requirePositiveInt(
       'slowClientMaxCleanupSeconds', limits.slowClientMaxCleanupSeconds, 600,
@@ -169,6 +175,7 @@ function safeMetadata(metadata) {
         'connectionsPerAccount', limits.connectionsPerAccount, 7,
       ),
       holdDurationSeconds,
+      reconnectSettleSeconds,
       slowClientDelaySeconds,
       slowClientMaxCleanupSeconds,
       companionMinLifetimeSeconds,

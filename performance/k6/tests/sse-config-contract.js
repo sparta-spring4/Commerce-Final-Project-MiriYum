@@ -21,6 +21,7 @@ function validEnv(overrides = {}) {
     SSE_CONNECTIONS: '3',
     SSE_CONNECTIONS_PER_ACCOUNT: '2',
     SSE_HOLD_DURATION_SECONDS: '30',
+    SSE_RECONNECT_SETTLE_SECONDS: '6',
     SSE_SLOW_CLIENT_DELAY_SECONDS: '2',
     SSE_SLOW_CLIENT_MAX_CLEANUP_SECONDS: '60',
     SSE_COMPANION_MIN_LIFETIME_SECONDS: '85',
@@ -74,6 +75,32 @@ export default function () {
         SSE_SMOKE_PROOF_PATH: '',
       })))
       return message !== null && message.includes('SSE_SMOKE_PROOF_PATH')
+    },
+    'reconnect requires a bounded registry settle window': () => {
+      const config = loadSseConfig(validEnv({
+        SSE_PROFILE: 'reconnect',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+      }))
+      const missing = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'reconnect',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_RECONNECT_SETTLE_SECONDS: '',
+      })))
+      const excessive = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'reconnect',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_RECONNECT_SETTLE_SECONDS: '61',
+      })))
+      return config.reconnectSettleSeconds === 6
+        && missing !== null && missing.includes('SSE_RECONNECT_SETTLE_SECONDS')
+        && excessive !== null && excessive.includes('SSE_RECONNECT_SETTLE_SECONDS')
+    },
+    'reconnect settle input is isolated from other profiles': () => {
+      const config = loadSseConfig(validEnv({
+        SSE_PROFILE: 'smoke',
+        SSE_RECONNECT_SETTLE_SECONDS: '',
+      }))
+      return config.reconnectSettleSeconds === null
     },
     'all SSE profiles are accepted with their required evidence': () => {
       const profiles = ['smoke', 'reconnect', 'steady', 'slow-client', 'capacity', 'recovery']

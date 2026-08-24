@@ -121,6 +121,11 @@ export function loadSseConfig(env) {
     env.SSE_SLOW_CLIENT_DELAY_SECONDS,
     60,
   )
+  const reconnectSettleSeconds = profile === 'reconnect'
+    ? parsePositiveInt(
+      'SSE_RECONNECT_SETTLE_SECONDS', env.SSE_RECONNECT_SETTLE_SECONDS, 60,
+    )
+    : null
 
   let slowClientConnections = null
   let slowClientIdempotencyKey = null
@@ -259,6 +264,7 @@ export function loadSseConfig(env) {
     connections,
     connectionsPerAccount,
     holdDurationSeconds,
+    reconnectSettleSeconds,
     slowClientDelaySeconds,
     endpointKinds,
     httpProbeRate,

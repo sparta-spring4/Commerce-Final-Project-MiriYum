@@ -29,7 +29,12 @@ import {
   awaitRecoveryMutationEpoch,
   runSseRecovery,
 } from './recovery.js'
-import { applySteadyMinimumLifetime, openChangedStream, prepareSseSession } from './session.js'
+import {
+  applySteadyMinimumLifetime,
+  openChangedStream,
+  prepareSseSession,
+  runReconnectCycle,
+} from './session.js'
 import {
   createFixtureFingerprint,
   createTargetFingerprint,
@@ -336,19 +341,23 @@ export function sseSmoke(data) {
 export function sseReconnect(data) {
   const session = selectedSession(data)
   safelyExecute(() => {
-    let lastEventId = null
-    const first = openSession(session, {
-      mode: 'reconnect',
-      onLastEventId: (value) => { lastEventId = value },
+    runReconnectCycle({
+      openInitial: () => {
+        let lastEventId = null
+        const first = openSession(session, {
+          mode: 'reconnect',
+          onLastEventId: (value) => { lastEventId = value },
+        })
+        return { ...first, lastEventId }
+      },
+      delay: sleep,
+      beforeReconnect: () => recoveryAttempts.add(1, tagsFor(session.target)),
+      openReconnect: (lastEventId) => openSession(
+        session, { mode: 'reconnect' }, lastEventId,
+      ),
+      settleSeconds: config.reconnectSettleSeconds,
     })
-    if (!first.completed || lastEventId === null) {
-      throw new Error('SSE reconnect cursor was not captured')
-    }
-    recoveryAttempts.add(1, tagsFor(session.target))
-    const recovered = openSession(session, { mode: 'reconnect' }, lastEventId)
-    if (!recovered.completed) throw new Error('SSE reconnect did not recover')
     recoverySuccessful.add(1, tagsFor(session.target))
-    lastEventId = null
   }, session.target)
 }
 
@@ -530,6 +539,7 @@ export function handleSummary(data) {
       connections: config.connections,
       connectionsPerAccount: config.connectionsPerAccount,
       holdDurationSeconds: config.holdDurationSeconds,
+      reconnectSettleSeconds: config.reconnectSettleSeconds,
       slowClientDelaySeconds: config.slowClientDelaySeconds,
       slowClientMaxCleanupSeconds: config.slowClientMaxCleanupSeconds,
       companionMinLifetimeSeconds: config.companionMinLifetimeSeconds,
