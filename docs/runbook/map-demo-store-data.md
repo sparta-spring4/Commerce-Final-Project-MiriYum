@@ -6,6 +6,14 @@
 production 데이터에는 영향을 주지 않는다. `demo` 프로필과
 `MIRIYUM_DEMO_MAP_STORES_ENABLED=true`가 함께 있어야만 실행된다.
 
+## Staging 시연
+
+staging에서는 `MIRIYUM_STAGING_MAP_DEMO_STORES_ENABLED=true`를 `/opt/miriyum/.env`에 명시하고,
+같은 immutable backend SHA로 CD를 다시 실행할 때만 seed runner가 실행된다. 이 설정은
+`MIRIYUM_RUNTIME_ENVIRONMENT=staging`일 때만 등록되므로 production runtime에서는 실행되지 않는다.
+
+시연 후에는 해당 값을 `false`로 되돌리고 같은 SHA를 다시 배포한다. 생성 데이터는 사업자등록번호
+`9000000001`부터 `9000000004`까지이므로, 정리가 필요하면 staging DB에서 이 번호만 대상으로 삭제한다.
 ## 준비되는 데이터
 
 | 매장 | 지역 | 좌표 상태 | 좌표 |
