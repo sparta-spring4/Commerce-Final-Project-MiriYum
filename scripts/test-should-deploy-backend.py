@@ -110,6 +110,20 @@ class ShouldDeployBackendTest(unittest.TestCase):
         self.assertIn("IMAGE_TAG: ${{ steps.image.outputs.tag }}", WORKFLOW)
         self.assertIn('git fetch --no-tags origin "$IMAGE_TAG"', WORKFLOW)
 
+    def test_automatic_deployment_uses_ci_head_as_trusted_control_revision(self):
+        source = WORKFLOW.split(
+            "- name: Verify automatic deployment uses the current dev revision", 1
+        )[1].split("  deploy:", 1)[0]
+
+        self.assertIn('trusted_control_sha="$WORKFLOW_SHA"', source)
+        self.assertIn('trusted_control_sha="$GITHUB_SHA"', source)
+        self.assertIn('echo "trusted_control_sha=$trusted_control_sha" >> "$GITHUB_OUTPUT"', source)
+        self.assertIn("trusted_control_sha: ${{ steps.source.outputs.trusted_control_sha }}", WORKFLOW)
+        self.assertIn(
+            "ref: ${{ needs.verify-source.outputs.trusted_control_sha }}", WORKFLOW
+        )
+        self.assertNotIn("ref: ${{ github.workflow_sha }}", WORKFLOW)
+
     def test_backend_ci_verifies_production_task_definition_secret_contract(self):
         backend_ci = Path(".github/workflows/backend-ci.yml").read_text(encoding="utf-8")
         run = run_block(backend_ci, "Verify production task definition secret contract")
