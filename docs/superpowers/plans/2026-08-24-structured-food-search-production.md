@@ -524,13 +524,13 @@ git commit -m "docs(search): 구조화 음식 정렬 계약 반영"
 - Modify: `docs/performance/search-evaluation-v2.md`
 
 **Interfaces:**
-- Consumes: committed evaluation commits `fb4a514e`, `4ed515cc`, `50bb146a`, `1e636ace` from `feature/625-structured-search-eval`.
+- Consumes: A/B/C prerequisite commits `69a72bb0`, `3bef11f9`, `2456e9d4`, `a69d16f5` and D/E/F/G commits `fb4a514e`, `4ed515cc`, `50bb146a`, `1e636ace` from `feature/625-structured-search-eval`.
 - Produces: reproducible D/E/F/G baseline on the production branch before actual H is added.
 
-- [ ] **Step 1: Cherry-pick the four already verified evaluation commits in order**
+- [ ] **Step 1: Cherry-pick the eight already verified evaluation commits in order**
 
 ```powershell
-git cherry-pick fb4a514e 4ed515cc 50bb146a 1e636ace
+git cherry-pick 69a72bb0 3bef11f9 2456e9d4 a69d16f5 fb4a514e 4ed515cc 50bb146a 1e636ace
 ```
 
 Expected: only Issue #625 evaluation paths and `docs/performance/search-evaluation-v2.md` change.
