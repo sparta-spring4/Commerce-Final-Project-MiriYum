@@ -115,7 +115,7 @@ H acceptable @20의 Wilson 95% CI는 `72.65–76.46%`이며 목표 90%에 미달
 
 68건은 모두 곧바로 실제 사용자 오탐으로 단정할 수 없다. 예를 들어 gold는 특정 합성 family `family-084`의 private `곰탕`만 정답으로 묶어 negative로 만들었지만, 같은 지역의 current visible `집밥 직화 곰탕`, `칼칼한 곰탕`, `담백한 곰탕 한상`은 다른 합성 family ID라 acceptable gold에도 없었다. 반면 production 사전은 이들을 모두 `곰탕/소고기곰탕` 메뉴 계열로 정상 회수한다. 이는 actual vocabulary와 합성 gold taxonomy의 불일치다. 별도로 `고소한` 안에서 한 글자 ingredient alias `소`가 부분문자열로 잡히던 실제 과회수 결함은 production과 평가 사전 모두에서 alias를 제거하고 회귀 테스트를 추가했다. 제거 후에도 68건이 그대로여서, 이 집계의 주원인은 한 글자 alias가 아니라 production vocabulary와 합성 gold taxonomy의 불일치로 관측됐다. 다음 판단 전에는 production vocabulary 기준 acceptable gold를 독립적으로 보강해 실제 오탐과 gold 누락을 분리해야 한다.
 
-이 실행은 기존 10,000개 LLM 체크포인트와 frozen embedding만 재사용했으며 신규 provider/embedding 호출과 비용은 모두 0이다. production source는 HEAD와 일치해 `productionCommitSha=5de72fbf5a6b93357434602c4f97a14ce906f915`, `productionWorkingTreeDirty=false`로 기록했다. 분석 Python은 수정 중이어서 `analysisCommitSha=null`, `analysisWorkingTreeDirty=true`로 분리했다. 결과 파일은 ignored 로컬 artifact다. 현재 Python 구현에서 10,000회 H 재분석은 약 9분이 걸려, 다음 하네스 개선에서는 production vocabulary별 역색인을 고려할 수 있다. 갱신된 `hybrid-reanalysis/results.jsonl`과 `aggregate.json` SHA-256은 각각 `ca65155826d1e62c5fe81afc24a474f3702ef17e8e4a067164074b5197a42912`, `e20fd229971e960a8abd9a8a3ea14a2122969e0d5608edc5932314f8581da02d`다.
+이 실행은 기존 10,000개 LLM 체크포인트와 frozen embedding만 재사용했으며 신규 provider/embedding 호출과 비용은 모두 0이다. production source는 vocabulary·extractor·predicate·repository까지 HEAD와 일치해 `productionCommitSha=fe4b556349a70027b6db421bd3cb79d201b1dc03`, `productionWorkingTreeDirty=false`로 기록했다. 분석 Python은 수정 중이어서 `analysisCommitSha=null`, `analysisWorkingTreeDirty=true`로 분리했다. 결과 파일은 ignored 로컬 artifact다. 현재 Python 구현에서 10,000회 H 재분석은 약 9분이 걸려, 다음 하네스 개선에서는 production vocabulary별 역색인을 고려할 수 있다. 갱신된 `hybrid-reanalysis/results.jsonl`과 `aggregate.json` SHA-256은 각각 `ca65155826d1e62c5fe81afc24a474f3702ef17e8e4a067164074b5197a42912`, `e20fd229971e960a8abd9a8a3ea14a2122969e0d5608edc5932314f8581da02d`다.
 
 ## GPT-4o mini와 GPT-5.4 mini 100질의 짝비교
 
@@ -237,7 +237,7 @@ python -m miriyum_search_eval report --artifact-dir artifacts/eval-20260824-post
 
 ## 검증과 한계
 
-- Python 하네스 테스트: H actual predicate replay 경계 테스트를 포함해 110개 전체 통과
+- Python 하네스 테스트: H actual predicate replay 경계 테스트를 포함해 111개 전체 통과
 - 영향받은 Java 단위 테스트: search interpreter·expansion·query·service·controller·OpenAPI 계약 범위 186개 통과
 - `IntegratedStoreSearchRepositoryIT`: Docker/Testcontainers MySQL로 22개 통과. UCA expansion인 `ß ↔ ss`에서도 hidden current 긴 이름이 짧은 visible 이름으로 후퇴하지 않음을 포함한다.
 - representative MySQL `EXPLAIN`/timing은 아직 실행하지 않아 CI 또는 별도 성능 검증 대기다. 후보 행마다 실행되던 correlated `NOT EXISTS`와 후보 조회의 non-sargable `LOCATE`는 제거했다. V71의 `name` 선두 복합 index에 최대 4,950개 exact 후보를 조회하고, 같은 collation anti-join으로 가장 구체적인 이름을 계산한 후 최종 100개만 검색 query에 바인딩한다.

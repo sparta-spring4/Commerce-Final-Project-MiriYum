@@ -292,7 +292,7 @@ def _explicit_menu_names(query_text: str, catalog: HybridPreparedCatalog) -> tup
 
 def _legacy_relevance_tier(
     *, store: dict[str, Any], keyword: str, explicit_names: set[str],
-    catalog: HybridPreparedCatalog,
+    filters: dict[str, Any], catalog: HybridPreparedCatalog,
 ) -> int:
     if not keyword:
         return 0
@@ -303,6 +303,7 @@ def _legacy_relevance_tier(
         return 3
     if any(
         menu["id"] in catalog.actual_current_menu_ids
+        and _eligible(store, menu, filters)
         and (
             keyword in normalize(menu.get("name", ""))
             or normalize(menu.get("name", "")) in explicit_names
@@ -378,7 +379,7 @@ def _actual_food_evidence_ranking(
     legacy_tiers = {
         store_id: _legacy_relevance_tier(
             store=store, keyword=evidence_text,
-            explicit_names=explicit_names, catalog=catalog,
+            explicit_names=explicit_names, filters=query["filters"], catalog=catalog,
         )
         for store_id, store in catalog.stores_by_id.items()
     }

@@ -421,6 +421,37 @@ class HybridSearchTest(unittest.TestCase):
             ["store-target", "store-distractor"],
         )
 
+    def test_h_actual_legacy_menu_tier_ignores_menu_rejected_by_filter(self):
+        query = self._query("칼칼한 국물 음식 추천해줘")
+        query["filters"] = {"category": "SOUP"}
+        structured_call = self._structured_call(query, menu_family=False)
+        for cutoff in structured_call["variants"]["C"]["cutoffs"].values():
+            cutoff["rankedStoreIds"] = ["store-distractor", "store-target"]
+        wrong_category = menu(
+            "menu-wrong-category", "store-target", "family-target",
+            query["text"], "검색어 메뉴",
+        )
+        wrong_category["category"] = "DRINK"
+        menus = [
+            menu("menu-target", "store-target", "family-target", "오늘국", "칼칼한 국물"),
+            wrong_category,
+            menu("menu-distractor", "store-distractor", "family-target", "내일국", "칼칼한 국물"),
+        ]
+        catalog = prepare_hybrid_catalog(
+            families=FAMILIES, stores=self.stores, menus=menus,
+        )
+
+        result = evaluate_hybrid_variants(
+            dataset={"families": FAMILIES, "stores": self.stores, "menus": menus},
+            query=query, structured_call=structured_call,
+            embedding_menu_scores=(), prepared_catalog=catalog,
+        )
+
+        self.assertEqual(
+            result["variants"][ACTUAL_FOOD_EVIDENCE_VARIANT]["cutoffs"]["@20"]["rankedStoreIds"],
+            ["store-distractor", "store-target"],
+        )
+
     def test_h_actual_reports_every_cutoff_and_actual_gate(self):
         query = self._query("칼칼한 해물 음식 추천해줘")
         result = evaluate_hybrid_variants(

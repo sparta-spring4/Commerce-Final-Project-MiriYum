@@ -927,6 +927,7 @@ def hybrid_reanalyze(root: Path, source: Path) -> None:
         "productionFoodVocabulary": _repo_root() / "backend/src/main/java/com/miriyum/domain/search/interpreter/FoodEvidenceVocabulary.java",
         "productionFoodExtractor": _repo_root() / "backend/src/main/java/com/miriyum/domain/search/interpreter/DeterministicFoodEvidenceExtractor.java",
         "productionSearchPredicate": _repo_root() / "backend/src/main/java/com/miriyum/domain/search/repository/IntegratedStoreSearchPredicates.java",
+        "productionSearchRepository": _repo_root() / "backend/src/main/java/com/miriyum/domain/search/repository/IntegratedStoreSearchRepository.java",
     }
     runtime_git_sha = _commit_sha()
     working_tree_dirty = _git_paths_dirty()
