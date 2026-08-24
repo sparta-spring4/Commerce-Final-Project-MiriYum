@@ -215,6 +215,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
 
       - name: Preserve trusted notification read deployment controls
         run: |
@@ -224,11 +225,12 @@ jobs:
           cp scripts/validate-staging-load-test-source-ip.js \
             "$RUNNER_TEMP/validate-staging-load-test-source-ip.js"
 
-      - name: Checkout selected deployment revision
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ steps.image.outputs.tag }}
-          fetch-depth: 0
+      # Immutable image 태그는 검증용 Git 객체로만 가져온다. 수동 재배포에서도
+      # workflow를 실행한 dev의 최신 배포 파일을 사용해야 한다.
+      - name: Fetch selected image revision
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: git fetch --no-tags origin "$IMAGE_TAG"
 
       - name: Verify notification read minimum compatible writer revision
         env:

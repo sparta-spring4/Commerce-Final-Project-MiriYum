@@ -103,6 +103,13 @@ class ShouldDeployBackendTest(unittest.TestCase):
             WORKFLOW,
         )
 
+    def test_manual_deployment_keeps_trusted_deployment_files_when_reusing_image(self):
+        self.assertNotIn("Checkout selected deployment revision", WORKFLOW)
+        self.assertNotIn("ref: ${{ steps.image.outputs.tag }}", WORKFLOW)
+        self.assertIn("Fetch selected image revision", WORKFLOW)
+        self.assertIn("IMAGE_TAG: ${{ steps.image.outputs.tag }}", WORKFLOW)
+        self.assertIn('git fetch --no-tags origin "$IMAGE_TAG"', WORKFLOW)
+
     def test_backend_ci_verifies_production_task_definition_secret_contract(self):
         backend_ci = Path(".github/workflows/backend-ci.yml").read_text(encoding="utf-8")
         run = run_block(backend_ci, "Verify production task definition secret contract")
