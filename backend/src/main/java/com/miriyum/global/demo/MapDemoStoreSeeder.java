@@ -1,4 +1,4 @@
-package com.miriyum.domain.store.demo;
+package com.miriyum.global.demo;
 
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.Region;

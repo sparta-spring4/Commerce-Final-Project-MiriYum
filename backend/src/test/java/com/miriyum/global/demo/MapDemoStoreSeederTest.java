@@ -1,4 +1,4 @@
-package com.miriyum.domain.store.demo;
+package com.miriyum.global.demo;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;

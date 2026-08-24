@@ -1,4 +1,4 @@
-package com.miriyum.domain.store.demo;
+package com.miriyum.global.demo;
 
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
