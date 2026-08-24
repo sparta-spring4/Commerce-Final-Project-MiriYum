@@ -1,8 +1,8 @@
-# 지도 시연용 로컬 매장 데이터
+# 로컬 지도 매장 데이터
 
 ## 목적과 범위
 
-지도 시연에 필요한 매장을 로컬 `demo` 프로필에서만 만든다. 운영 migration과 staging,
+지도 확인에 필요한 매장을 로컬 `demo` 프로필에서만 만든다. 운영 migration과 staging,
 production 데이터에는 영향을 주지 않는다. `demo` 프로필과
 `MIRIYUM_DEMO_MAP_STORES_ENABLED=true`가 함께 있어야만 실행된다.
 
@@ -10,10 +10,10 @@ production 데이터에는 영향을 주지 않는다. `demo` 프로필과
 
 | 매장 | 지역 | 좌표 상태 | 좌표 |
 | --- | --- | --- | --- |
-| 시연 한강 한식당 | 서울 | VERIFIED | 37.500600, 127.036500 |
-| 시연 해운대 식당 | 부산 | VERIFIED | 35.158700, 129.160400 |
-| 시연 광주 식당 | 광주 | VERIFIED | 35.146200, 126.922600 |
-| 시연 좌표 미검증 매장 | 서울 | UNVERIFIED | 없음 |
+| 마루 한식당 | 서울 | VERIFIED | 37.500600, 127.036500 |
+| 해운대 바다식당 | 부산 | VERIFIED | 35.158700, 129.160400 |
+| 무등 한상 | 광주 | VERIFIED | 35.146200, 126.922600 |
+| 새봄 식당 | 서울 | UNVERIFIED | 없음 |
 
 모든 매장은 `APPROVED`와 `OPEN` 상태로 생성된다. VERIFIED 매장은 현재 주소 버전에
 결합된 `verifiedAddress`, `geocodingVerifiedAt`, `geocodingAddressVersion`을 함께 가진다.
@@ -51,7 +51,7 @@ $integrated.data.items |
   Format-Table -AutoSize
 ```
 
-두 응답에서 VERIFIED 매장 세 곳은 `coordinates`가 있고, `시연 좌표 미검증 매장`은
+두 응답에서 VERIFIED 매장 세 곳은 `coordinates`가 있고, `새봄 식당`은
 `coordinates`가 `null`이어야 한다.
 
 ## 제한

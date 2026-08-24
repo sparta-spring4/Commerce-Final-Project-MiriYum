@@ -15,7 +15,7 @@ import java.util.Set;
 
 final class MapDemoStoreSeeder {
 
-    static final String DEMO_OPERATOR_EMAIL = "demo-map-operator@miriyum.local";
+    static final String DEMO_OPERATOR_EMAIL = "local-map-seed-operator@miriyum.local";
     private static final String REQUIRED_TERMS_VERSION = "STORE_ONBOARDING_REQUIRED_TERMS_V1";
     private static final LocalDateTime ONBOARDING_ACCEPTED_AT = LocalDateTime.of(2026, 8, 24, 9, 0);
     private static final Instant GEOCODING_VERIFIED_AT = Instant.parse("2026-08-24T00:00:00Z");
@@ -48,22 +48,22 @@ final class MapDemoStoreSeeder {
                         StoreOperatorAccount.create(
                                 DEMO_OPERATOR_EMAIL,
                                 "DEMO_ACCOUNT_NOT_FOR_LOGIN",
-                                "지도 시연 운영자")));
+                                "로컬 지도 운영자")));
     }
 
     private List<DemoStore> demoStores() {
         return List.of(
                 DemoStore.verified(
-                        "9000000001", "시연 한강 한식당", Region.SEOUL,
+                        "9000000001", "마루 한식당", Region.SEOUL,
                         "서울특별시 강남구 테헤란로 152", "37.500600", "127.036500"),
                 DemoStore.verified(
-                        "9000000002", "시연 해운대 식당", Region.BUSAN,
+                        "9000000002", "해운대 바다식당", Region.BUSAN,
                         "부산광역시 해운대구 해운대해변로 264", "35.158700", "129.160400"),
                 DemoStore.verified(
-                        "9000000003", "시연 광주 식당", Region.GWANGJU,
+                        "9000000003", "무등 한상", Region.GWANGJU,
                         "광주광역시 동구 서석로 15", "35.146200", "126.922600"),
                 DemoStore.unverified(
-                        "9000000004", "시연 좌표 미검증 매장", Region.SEOUL,
+                        "9000000004", "새봄 식당", Region.SEOUL,
                         "서울특별시 마포구 양화로 160"));
     }
 
@@ -108,7 +108,7 @@ final class MapDemoStoreSeeder {
                         operatorId,
                         businessRegistrationNumber,
                         name,
-                        "지도 시연용 로컬 매장입니다.",
+                        "정성스러운 한식을 제공하는 지역 식당입니다.",
                         region,
                         address,
                         "KOREAN",
@@ -125,7 +125,7 @@ final class MapDemoStoreSeeder {
                     operatorId,
                     businessRegistrationNumber,
                     name,
-                    "지도 시연용 로컬 매장입니다.",
+                    "정성스러운 한식을 제공하는 지역 식당입니다.",
                     region,
                     address,
                     "KOREAN",
