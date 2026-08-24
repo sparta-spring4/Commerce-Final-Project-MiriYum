@@ -6,9 +6,8 @@ AWS_BIN="${AWS_BIN:-aws}"
 CURL_BIN="${CURL_BIN:-curl}"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 AWS_REGION="${AWS_REGION:?AWS_REGION must be set}"
-COMPOSE_FILE="${COMPOSE_FILE:-/opt/miriyum/docker-compose.prod.yml}"
-ENV_FILE="${ENV_FILE:-/opt/miriyum/.env}"
 NAMESPACE="${CLOUDWATCH_NAMESPACE:-MiriYum/Staging}"
+BACKEND_SERVICE_LABEL="${BACKEND_SERVICE_LABEL:-com.docker.compose.service=backend}"
 
 metadata_token="$($CURL_BIN --fail --silent --show-error --request PUT \
   --header 'X-aws-ec2-metadata-token-ttl-seconds: 21600' \
@@ -57,7 +56,8 @@ parse_bytes() {
   awk -v amount="$amount" -v multiplier="$multiplier" 'BEGIN { printf "%.0f\n", amount * multiplier }'
 }
 
-if ! container_output="$($DOCKER_BIN compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps -q backend)"; then
+# The monitor must not validate unrelated Compose services such as frontend.
+if ! container_output="$($DOCKER_BIN ps --filter "label=$BACKEND_SERVICE_LABEL" --format '{{.ID}}')"; then
   publish_failure
   exit 1
 fi
