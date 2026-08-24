@@ -323,6 +323,8 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             {
                 "MIRIYUM_STORAGE_S3_ENABLED": "true",
                 "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED": "true",
+                "MIRIYUM_STORAGE_S3_BUCKET": "miriyum-staging-files",
+                "MIRIYUM_STORAGE_S3_REGION": "ap-northeast-2",
             }
         )
 
@@ -333,6 +335,20 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertEqual("true", backend_environment["MIRIYUM_STORAGE_S3_ENABLED"])
         self.assertEqual(
             "true", backend_environment["MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"]
+        )
+        self.assertEqual(
+            "miriyum-staging-files", backend_environment["MIRIYUM_STORAGE_S3_BUCKET"]
+        )
+        self.assertEqual(
+            "ap-northeast-2", backend_environment["MIRIYUM_STORAGE_S3_REGION"]
+        )
+        self.assertIn(
+            "MIRIYUM_STORAGE_S3_BUCKET: ${MIRIYUM_STORAGE_S3_BUCKET:-}",
+            self.compose,
+        )
+        self.assertIn(
+            "MIRIYUM_STORAGE_S3_REGION: ${MIRIYUM_STORAGE_S3_REGION:-ap-northeast-2}",
+            self.compose,
         )
 
     def test_pending_risk_event_count_is_observable_without_identifier_dimensions(self):
