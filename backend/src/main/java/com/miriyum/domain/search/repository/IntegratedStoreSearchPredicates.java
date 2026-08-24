@@ -93,11 +93,9 @@ final class IntegratedStoreSearchPredicates {
         QMenuVersion version = new QMenuVersion("expandedReverseMenuVersion");
         BooleanBuilder conceptMatches = new BooleanBuilder();
         for (String concept : concepts) {
-            conceptMatches.or(Expressions.booleanTemplate(
-                    "locate(lower({0}), lower({1})) > 0", version.name, concept));
+            conceptMatches.or(menuNameContainedIn(version, concept));
         }
-        conceptMatches.and(version.name.trim().length().goe(2))
-                .and(version.name.trim().notIn(REVERSE_MATCH_EXCLUDED_MENU_NAMES));
+        conceptMatches.and(reverseMenuNameGuard(version));
         return currentExpandedMenuExists(store, menu, version, query, conceptMatches);
     }
 
@@ -190,8 +188,12 @@ final class IntegratedStoreSearchPredicates {
         }
         addPricePredicate(menuPredicate, version, query.priceRange());
         if (requireKeyword) {
-            menuPredicate.and(version.name.likeIgnoreCase(
-                    literalContainsPattern(query.remainingKeyword()), LIKE_ESCAPE));
+            BooleanExpression wholeKeywordInMenu = version.name.likeIgnoreCase(
+                    literalContainsPattern(query.remainingKeyword()), LIKE_ESCAPE);
+            BooleanExpression explicitMenuName = query.explicitMenuNames().isEmpty()
+                    ? Expressions.FALSE
+                    : version.name.trim().in(query.explicitMenuNames());
+            menuPredicate.and(wholeKeywordInMenu.or(explicitMenuName));
         }
 
         return JPAExpressions.selectOne()
@@ -228,6 +230,28 @@ final class IntegratedStoreSearchPredicates {
                 .replace("!", "!!")
                 .replace("%", "!%")
                 .replace("_", "!_") + "%";
+    }
+
+    private static BooleanExpression menuNameContainedIn(
+            QMenuVersion version,
+            String text
+    ) {
+        return Expressions.booleanTemplate(
+                "locate(lower({0}), lower({1})) > 0", version.name, text);
+    }
+
+    static BooleanExpression reverseMenuNameGuard(QMenuVersion version) {
+        return version.name.trim().length().goe(2)
+                .and(version.name.trim().notIn(REVERSE_MATCH_EXCLUDED_MENU_NAMES));
+    }
+
+    static boolean isEligibleReverseMenuName(String name) {
+        if (name == null) {
+            return false;
+        }
+        String trimmed = name.trim();
+        return trimmed.codePointCount(0, trimmed.length()) >= 2
+                && !REVERSE_MATCH_EXCLUDED_MENU_NAMES.contains(trimmed);
     }
 
     static StringExpression localizedRegionName(QStore store) {

@@ -1,5 +1,8 @@
 package com.miriyum.domain.search.repository;
 
+import com.miriyum.domain.menu.entity.QMenu;
+import com.miriyum.domain.menu.entity.QMenuVersion;
+import com.miriyum.domain.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.store.entity.QStore;
 import com.miriyum.domain.store.enums.GeocodingStatus;
 import com.miriyum.domain.search.query.IntegratedSearchCursor;
@@ -22,6 +25,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Repository;
@@ -31,6 +35,7 @@ import org.springframework.stereotype.Repository;
 public class IntegratedStoreSearchRepository {
 
     private static final int MAX_EXPANDED_CANDIDATES = 200;
+    private static final int MAX_EXPLICIT_MENU_NAMES = 100;
     private static final int FORWARD_EXPANDED_TIER = 1;
     private static final int REVERSE_EXPANDED_TIER = 0;
 
@@ -88,6 +93,65 @@ public class IntegratedStoreSearchRepository {
                 ? encodeCursor(query, content.getLast())
                 : null;
         return new IntegratedStoreSearchSlice(content, nextCursor);
+    }
+
+    /** 문장에 직접 포함된 current published 메뉴명을 한 번 조회해 겹치는 짧은 이름을 제거한다. */
+    public List<String> resolveMostSpecificPublishedMenuNames(String remainingKeyword) {
+        if (remainingKeyword == null || remainingKeyword.isBlank()) {
+            return List.of();
+        }
+        QMenu menu = new QMenu("explicitNameMenu");
+        QMenuVersion version = new QMenuVersion("explicitNameMenuVersion");
+        QMenuVersion longerVersion = new QMenuVersion("longerExplicitNameMenuVersion");
+        List<String> candidateNames = candidateMenuNames(remainingKeyword);
+        if (candidateNames.isEmpty()) {
+            return List.of();
+        }
+        NumberExpression<Integer> containedInLongerName = Expressions.numberTemplate(
+                Integer.class,
+                "locate(lower({0}), lower({1}))",
+                version.name,
+                longerVersion.name);
+        return queryFactory
+                .select(version.name)
+                .distinct()
+                .from(menu)
+                .join(menu.versions, version)
+                .leftJoin(longerVersion)
+                .on(
+                        longerVersion.menu.retired.isFalse(),
+                        longerVersion.menu.publishedVersionNumber
+                                .eq(longerVersion.versionNumber),
+                        longerVersion.status.eq(MenuVersionStatus.PUBLISHED),
+                        longerVersion.name.in(candidateNames),
+                        longerVersion.name.length().gt(version.name.length()),
+                        containedInLongerName.gt(0))
+                .where(
+                        menu.retired.isFalse(),
+                        menu.publishedVersionNumber.eq(version.versionNumber),
+                        version.status.eq(MenuVersionStatus.PUBLISHED),
+                        IntegratedStoreSearchPredicates.reverseMenuNameGuard(version),
+                        version.name.in(candidateNames),
+                        longerVersion.id.isNull())
+                .orderBy(version.name.length().desc(), version.name.asc())
+                .limit(MAX_EXPLICIT_MENU_NAMES)
+                .fetch();
+    }
+
+    static List<String> candidateMenuNames(String remainingKeyword) {
+        LinkedHashSet<String> candidates = new LinkedHashSet<>();
+        int[] codePoints = remainingKeyword.codePoints().toArray();
+        for (int start = 0; start < codePoints.length; start++) {
+            for (int end = start + 2; end <= codePoints.length; end++) {
+                String candidate = new String(codePoints, start, end - start);
+                if (candidate.equals(candidate.trim())
+                        && IntegratedStoreSearchPredicates
+                        .isEligibleReverseMenuName(candidate)) {
+                    candidates.add(candidate);
+                }
+            }
+        }
+        return candidates.stream().sorted().toList();
     }
 
     /** LLM 개념을 현재 공개 메뉴에 대조하고 원래 구조화 조건을 유지한다. */
