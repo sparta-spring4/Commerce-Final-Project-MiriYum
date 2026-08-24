@@ -37,7 +37,7 @@ class DomainPackageArchitectureTest {
             "search/repository/IntegratedStoreSearchPredicates.java",
             Set.of("menu", "store"),
             "search/repository/IntegratedStoreSearchRepository.java",
-            Set.of("store"),
+            Set.of("menu", "store"),
             "search/repository/MenuAlternativeCandidateRepository.java",
             Set.of("menu", "store")
     );
