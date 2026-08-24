@@ -115,9 +115,17 @@ def build_request(query_text: str, config: EvalConfig) -> dict[str, Any]:
     return body
 
 
-def deterministic_request_id(dataset_sha: str, query_id: str, repeat_index: int, config: EvalConfig) -> str:
-    value = f"{dataset_sha}\n{query_id}\n{repeat_index}\n{config.fingerprint()}".encode("utf-8")
+def deterministic_request_id_from_fingerprint(
+    dataset_sha: str, query_id: str, repeat_index: int, request_fingerprint: str,
+) -> str:
+    value = f"{dataset_sha}\n{query_id}\n{repeat_index}\n{request_fingerprint}".encode("utf-8")
     return "mse2-" + sha256(value).hexdigest()[:32]
+
+
+def deterministic_request_id(dataset_sha: str, query_id: str, repeat_index: int, config: EvalConfig) -> str:
+    return deterministic_request_id_from_fingerprint(
+        dataset_sha, query_id, repeat_index, config.fingerprint(),
+    )
 
 
 def cost_usd(input_tokens: int, output_tokens: int, config: EvalConfig) -> float:

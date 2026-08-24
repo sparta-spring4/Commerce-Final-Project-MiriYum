@@ -98,9 +98,9 @@ GPT-5.4 mini는 메뉴군 이름 이해는 3~4건 늘었지만, simulated strict
 
 ## Issue #616 deterministic 메뉴명 선회수 재분석
 
-기존 10,000회 LLM 체크포인트를 그대로 사용하고, 최대 100자 `remainingKeyword`의 2자 이상 부분문자열을 indexed exact `IN` 조회해 non-retired current published 메뉴명을 요청당 한 번 찾는다. 전체 결과에서 겹치는 이름 중 가장 구체적인 이름을 먼저 남긴 뒤 최종 100개만 바인딩하고, 후보 조회에서는 visible current published 메뉴만 허용한다. 따라서 hidden current 긴 이름은 짧은 메뉴명으로의 잘못된 후퇴를 막을 수 있지만 결과로 노출되지는 않는다. 아래 차이는 새 LLM 출력이 아니라 검색 predicate와 최종 병합 변화만 반영하며 추가 API 비용은 0원이다.
+기존 10,000회 LLM 체크포인트를 그대로 사용하고, 최대 100자 `remainingKeyword`의 2자 이상 부분문자열을 indexed exact `IN`과 같은 MySQL `utf8mb4_0900_ai_ci` collation의 anti-join으로 조회해 non-retired current published 메뉴명을 요청당 한 번 찾는다. 전체 결과에서 겹치는 이름 중 가장 구체적인 이름을 먼저 남긴 뒤 최종 100개만 바인딩하고, 후보 조회에서는 visible current published 메뉴만 허용한다. 따라서 hidden current 긴 이름은 짧은 메뉴명으로의 잘못된 후퇴를 막을 수 있지만 결과로 노출되지는 않는다. 아래 차이는 새 LLM 출력이 아니라 검색 predicate와 최종 병합 변화만 반영하며 추가 API 비용은 0원이다.
 
-재분석 구현 기준은 최신 `origin/dev`의 `f188bd701c26ed8f73efd17a163f2f832b84b300`이며, `run-metadata.json`에 predicate variant와 evaluator·query·predicate·repository·service·V71 migration SHA-256을 별도로 기록했다. 원래 10,000회 OpenAI 호출의 실행 커밋과 재분석 구현 커밋을 혼동하지 않는다.
+최초 재분석 구현 기준은 당시 `origin/dev`의 `f188bd701c26ed8f73efd17a163f2f832b84b300`이었다. 보강된 재분석 게이트는 재생성 dataset SHA-256, 메타데이터·레코드 request fingerprint, 모든 deterministic request ID를 먼저 검증하고 baseline/#616을 같은 10,000건으로 동시에 계산한다. 두 결과는 `reanalysis/pre-issue-616/`과 `reanalysis/issue-616-most-specific/`에 분리하며 true-no-answer 오탐이 증가하면 결과 파일을 쓰기 전에 실패한다. `run-metadata.json`에는 canonical checkpoint와 `cli.py`를 포함한 분석 소스 SHA-256을 기록한다. 원래 10,000회 OpenAI 호출의 실행 커밋과 재분석 구현 커밋을 혼동하지 않는다.
 
 | 지표 | Issue #616 전 | Issue #616 재분석 | 변화 |
 |---|---:|---:|---:|
@@ -170,10 +170,10 @@ python -m miriyum_search_eval report --artifact-dir artifacts/eval-20260824-post
 
 ## 검증과 한계
 
-- Python 하네스 테스트: 66개 전체 통과
-- 영향받은 Java 단위 테스트: `IntegratedStoreSearchQueryTest`, `IntegratedStoreSearchPredicatesTest`, `IntegratedStoreSearchServiceTest` 총 38개 통과
-- `IntegratedStoreSearchRepositoryIT`: Docker/Testcontainers MySQL로 18개 통과
-- representative MySQL `EXPLAIN`/timing은 아직 실행하지 않아 CI 또는 별도 성능 검증 대기다. 후보 행마다 실행되던 correlated `NOT EXISTS`와 non-sargable `LOCATE`는 제거했다. V71의 `name` 선두 복합 index에 최대 4,950개 exact 후보를 조회하고, 가장 구체적인 이름을 계산한 후 최종 100개만 검색 query에 바인딩한다.
+- Python 하네스 테스트: 69개 전체 통과
+- 영향받은 Java 단위 테스트: `IntegratedStoreSearchQueryTest`, `IntegratedStoreSearchPredicatesTest`, `IntegratedStoreSearchServiceTest` 총 36개 통과
+- `IntegratedStoreSearchRepositoryIT`: Docker/Testcontainers MySQL로 19개 통과. UCA expansion인 `ß ↔ ss`에서도 hidden current 긴 이름이 짧은 visible 이름으로 후퇴하지 않음을 포함한다.
+- representative MySQL `EXPLAIN`/timing은 아직 실행하지 않아 CI 또는 별도 성능 검증 대기다. 후보 행마다 실행되던 correlated `NOT EXISTS`와 후보 조회의 non-sargable `LOCATE`는 제거했다. V71의 `name` 선두 복합 index에 최대 4,950개 exact 후보를 조회하고, 같은 collation anti-join으로 가장 구체적인 이름을 계산한 후 최종 100개만 검색 query에 바인딩한다.
 - 실행 후 `origin/dev`가 `1acec13b`까지 전진했지만, 평가한 interpreter·predicate·repository·application 설정은 평가 커밋과 byte-level Git diff가 없음을 확인했다.
 - 실제 애플리케이션 수치는 병합된 SQL predicate를 합성 corpus에 오프라인으로 결정적 모사한 값이다. 운영 DB에 실제 SQL을 실행한 결과가 아니다.
 - 기본 검색 proxy는 합성 manifest에 주소가 없어 매장명·region·current published 메뉴명만 평가했다. 구조화 region·가격·분위기·category span은 고정 합성 vocabulary와 템플릿으로 결정적으로 제거해 `remainingKeyword`를 만들며, 운영 vocabulary 전체를 실제 MySQL에서 실행한 수치는 아니다.
@@ -182,4 +182,4 @@ python -m miriyum_search_eval report --artifact-dir artifacts/eval-20260824-post
 - mode별 메뉴 오탐 건수는 gold family 밖 반환 메뉴의 누적 건수이며 무정답 query-level false-positive rate와 다른 지표다.
 - 10,000개 반복 응답은 안정성 분석에 사용했고 Wilson 신뢰구간은 독립 표본처럼 부풀리지 않고 고유 질의 2,000개로 계산했다.
 
-현재 worktree에서 기존 baseline 상세 결과는 ignored 로컬 경로 `performance/search-eval-v2/artifacts/eval-20260824-post-merge/`, Issue #616 재분석 결과와 명시적 predicate variant·분석 소스 SHA-256은 `performance/search-eval-v2/artifacts/eval-20260824-deterministic-menu-full/`, v2.1 strict/acceptable 및 @8/@20/@50/전체 후보 결과는 `performance/search-eval-v2/artifacts/eval-20260824-gold-v2-1-cutoffs/`에 있다. 이 경로들은 Git에 포함된 영구 배포 위치가 아니다.
+현재 worktree에서 기존 baseline 상세 결과는 ignored 로컬 경로 `performance/search-eval-v2/artifacts/eval-20260824-post-merge/`, 초기 Issue #616 재분석 결과는 `performance/search-eval-v2/artifacts/eval-20260824-deterministic-menu-full/`, v2.1 strict/acceptable 및 @8/@20/@50/전체 후보와 검증된 10,000건 paired reanalysis는 `performance/search-eval-v2/artifacts/eval-20260824-gold-v2-1-cutoffs/`에 있다. v2.1 paired summary는 true-no-answer 오탐 `0→0`, 전체 gold-negative 오탐 `12→12`, canonical checkpoint SHA-256 `2f5f0274f739db079526d7d6d53b0f3fe0df2187317862b6cbd308f011294834`를 기록한다. 이 경로들은 Git에 포함된 영구 배포 위치가 아니다.

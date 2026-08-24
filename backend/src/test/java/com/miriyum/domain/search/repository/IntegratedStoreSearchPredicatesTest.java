@@ -10,7 +10,6 @@ import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
 import com.querydsl.core.BooleanBuilder;
 import com.querydsl.jpa.HQLTemplates;
 import com.querydsl.jpa.JPQLSerializer;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -158,19 +157,6 @@ class IntegratedStoreSearchPredicatesTest {
     }
 
     @Test
-    void mostSpecificNamesAreFilteredBeforeFinalBound() {
-        List<String> contained = new ArrayList<>();
-        for (int length = 2; length <= 100; length++) {
-            contained.add("가".repeat(length));
-        }
-        contained.add("나다");
-        contained.add("라마");
-
-        assertThat(IntegratedStoreSearchRepository.mostSpecificNames(contained, 100))
-                .containsExactly("가".repeat(100), "나다", "라마");
-    }
-
-    @Test
     void substringLookupCandidatesAreDeterministicAndInputBounded() {
         String keyword = "가".repeat(98) + "짬뽕";
 
@@ -181,17 +167,6 @@ class IntegratedStoreSearchPredicatesTest {
         assertThat(candidates).doesNotContain("면", "탕", "국", "밥");
         assertThat(candidates).hasSizeLessThanOrEqualTo(4_950);
         assertThat(candidates).isSorted();
-    }
-
-    @Test
-    void mostSpecificNamesFollowAccentInsensitiveUnicodeNormalization() {
-        assertThat(IntegratedStoreSearchRepository.mostSpecificNames(
-                List.of("Café", "Cafe\u0301 Latte"), 100))
-                .containsExactly("Cafe\u0301 Latte");
-
-        List<String> supplementary = IntegratedStoreSearchRepository
-                .candidateMenuNames("😀국 추천");
-        assertThat(supplementary).contains("😀국").doesNotContain("😀");
     }
 
     private static RenderedPredicate render(BooleanBuilder predicate) {

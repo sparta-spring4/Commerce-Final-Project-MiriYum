@@ -127,7 +127,7 @@
 - 예약 일괄 결과의 크기·순서·매장 ID가 요청과 다르거나 최신 Store 상태를 확인할 수 없으면 성공을 추측하지 않고 해당 후보를 제외한다.
 - 사용자 현재 위치·위치 권한·정밀 위치는 요청하지 않는다. `searchInput` 원문과 warning 원문 조각은 영속화·감사·애플리케이션 로그에 기록하지 않는다.
 - Service 단위 테스트는 해석 fallback, 관련도 tier, cursor, 일괄 결과 불일치와 최신 상태 제거를 검증한다. MockMvc와 OpenAPI 대조는 두 입력 모드·validation·응답 one-of를 검증한다. Testcontainers MySQL은 QueryDSL 후보, 메뉴 포함 검색, 상태 변경 재검증과 `availableOnly` chunk fill을 검증한다.
-- 남은 문장에 직접 포함된 메뉴명은 후보 행별 correlated subquery나 `LOCATE` 전체 스캔으로 찾지 않는다. 최대 100자 입력에서 2자 이상 부분문자열을 최대 4,950개 결정적으로 생성하고, `menu_versions.name` 선두 index에 exact `IN`으로 요청당 한 번 조회한다. 전체 조회 결과에서 포함 관계상 가장 구체적인 이름을 먼저 계산한 뒤 최종 100개만 Query 입력에 바인딩한다. 이 이름 해석 단계는 visibility-neutral이라 hidden current 긴 이름이 짧은 visible 이름으로의 후퇴를 막을 수 있으나, 최종 후보 predicate는 계속 visible·non-retired·current published만 반환한다.
+- 남은 문장에 직접 포함된 메뉴명은 후보 행별 correlated subquery나 후보 조회의 `LOCATE` 전체 스캔으로 찾지 않는다. 최대 100자 입력에서 2자 이상 부분문자열을 최대 4,950개 결정적으로 생성하고, `menu_versions.name` 선두 index의 exact `IN`과 같은 MySQL `utf8mb4_0900_ai_ci` collation을 사용하는 anti-join으로 요청당 한 번 조회한다. anti-join은 non-retired current published 이름 사이의 포함 관계에서 가장 구체적인 이름만 남긴 뒤 길이 내림차순·이름 오름차순의 최종 100개만 Query 입력에 바인딩한다. 이 이름 해석 단계는 visibility-neutral이라 hidden current 긴 이름이 짧은 visible 이름으로의 후퇴를 막을 수 있으나, 최종 후보 predicate는 계속 visible·non-retired·current published만 반환한다.
 
 ## 카테고리와 태그 catalog
 

@@ -22,6 +22,7 @@ from .runner import (
     JSON_SCHEMA,
     OpenAIChatTransport,
     deterministic_request_id,
+    deterministic_request_id_from_fingerprint,
     run_requests,
 )
 from .validation import validate_dataset
@@ -30,6 +31,7 @@ from .workflow import (
     evaluation_config_from_pilot,
     migrate_unchanged_calls,
     model_comparison_summary,
+    paired_reanalysis_summary,
     paid_execution_summary,
     pilot_gate,
     prompt_experiment_gate,
@@ -596,13 +598,68 @@ def reanalyze(root: Path, predicate_variant: str) -> None:
     dataset = _dataset()
     checkpoint = CheckpointStore(root / "calls.canonical.checkpoint.jsonl")
     records = checkpoint.records()
+    _validate_reanalysis_provenance(metadata, dataset, records)
     validate_checkpoint_matrix(
         queries=dataset["queries"], records=records, repeats=range(5),
     )
-    calls = _evaluate(dataset, records, predicate_variant)
-    write_jsonl(root / "results.jsonl", calls)
-    write_json(root / "aggregate.json", aggregate_evaluation(calls))
-    stamp_reanalysis(root, predicate_variant)
+    baseline_calls = _evaluate(dataset, records, PRE_ISSUE_616)
+    comparison_calls = _evaluate(dataset, records, ISSUE_616_MOST_SPECIFIC)
+    paired_summary = paired_reanalysis_summary(baseline_calls, comparison_calls)
+    _write_paired_reanalysis_outputs(
+        root=root,
+        baseline_calls=baseline_calls,
+        baseline_aggregate=aggregate_evaluation(baseline_calls),
+        comparison_calls=comparison_calls,
+        comparison_aggregate=aggregate_evaluation(comparison_calls),
+        summary=paired_summary,
+    )
+    stamp_reanalysis(
+        root,
+        predicate_variant,
+        paired_summary=paired_summary,
+        checkpoint_path=checkpoint.path,
+    )
+
+
+def _validate_reanalysis_provenance(
+    metadata: dict[str, Any], dataset: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> None:
+    dataset_sha = dataset["metadata"]["datasetSha256"]
+    if metadata.get("datasetSha256") != dataset_sha:
+        raise RuntimeError("reanalysis dataset provenance mismatch")
+    request_fingerprint = metadata.get("requestFingerprint")
+    if not isinstance(request_fingerprint, str) or not request_fingerprint:
+        raise RuntimeError("reanalysis request fingerprint is missing")
+    for record in records:
+        if record.get("requestFingerprint") != request_fingerprint:
+            raise RuntimeError("reanalysis request fingerprint mismatch")
+        query_id = record.get("queryId")
+        repeat_index = record.get("repeatIndex")
+        if not isinstance(query_id, str) or not isinstance(repeat_index, int):
+            raise RuntimeError("reanalysis request id inputs are invalid")
+        expected_request_id = deterministic_request_id_from_fingerprint(
+            dataset_sha, query_id, repeat_index, request_fingerprint,
+        )
+        if record.get("requestId") != expected_request_id:
+            raise RuntimeError("reanalysis deterministic request id mismatch")
+
+
+def _write_paired_reanalysis_outputs(
+    *, root: Path,
+    baseline_calls: list[dict[str, Any]], baseline_aggregate: dict[str, Any],
+    comparison_calls: list[dict[str, Any]], comparison_aggregate: dict[str, Any],
+    summary: dict[str, Any],
+) -> None:
+    paired_root = root / "reanalysis"
+    for variant, calls, aggregate in (
+        (PRE_ISSUE_616, baseline_calls, baseline_aggregate),
+        (ISSUE_616_MOST_SPECIFIC, comparison_calls, comparison_aggregate),
+    ):
+        variant_root = paired_root / variant
+        write_jsonl(variant_root / "results.jsonl", calls)
+        write_json(variant_root / "aggregate.json", aggregate)
+    write_json(paired_root / "paired-summary.json", summary)
 
 
 def _validate_reanalysis_variant(
@@ -629,12 +686,18 @@ def _validate_reanalysis_variant(
         )
 
 
-def stamp_reanalysis(root: Path, predicate_variant: str) -> None:
+def stamp_reanalysis(
+    root: Path,
+    predicate_variant: str,
+    *, paired_summary: dict[str, Any] | None = None,
+    checkpoint_path: Path | None = None,
+) -> None:
     metadata_path = root / "run-metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     _validate_reanalysis_variant(metadata, predicate_variant)
     from hashlib import sha256
     analysis_sources = {
+        "cli": Path(__file__),
         "matching": Path(__file__).with_name("matching.py"),
         "evaluation": Path(__file__).with_name("evaluation.py"),
         "query": _repo_root() / "backend/src/main/java/com/miriyum/domain/search/query/IntegratedStoreSearchQuery.java",
@@ -650,6 +713,7 @@ def stamp_reanalysis(root: Path, predicate_variant: str) -> None:
             ["git", "diff", "--quiet"], cwd=_repo_root(), check=False,
         ).returncode != 0,
         "analysisPredicateVariant": predicate_variant,
+        "analysisPredicateVariants": list(PREDICATE_VARIANTS),
         "analysisPredicate": (
             "whole-keyword-plus-most-specific-current-published-menu-name-then-llm-bidirectional"
             if predicate_variant == ISSUE_616_MOST_SPECIFIC
@@ -660,11 +724,28 @@ def stamp_reanalysis(root: Path, predicate_variant: str) -> None:
             for name, path in analysis_sources.items()
         },
     })
+    if checkpoint_path is not None:
+        metadata["sourceCheckpointSha256"] = sha256(
+            checkpoint_path.read_bytes()
+        ).hexdigest()
+    if paired_summary is not None:
+        metadata["pairedReanalysis"] = paired_summary
     write_json(metadata_path, metadata)
 
 
 def report(root: Path) -> None:
-    aggregate = json.loads((root / "aggregate.json").read_text(encoding="utf-8"))
+    comparison_root = root / "reanalysis" / ISSUE_616_MOST_SPECIFIC
+    aggregate_path = (
+        comparison_root / "aggregate.json"
+        if (comparison_root / "aggregate.json").exists()
+        else root / "aggregate.json"
+    )
+    results_path = (
+        comparison_root / "results.jsonl"
+        if (comparison_root / "results.jsonl").exists()
+        else root / "results.jsonl"
+    )
+    aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
     gate = json.loads((root / "pilot-gate.json").read_text(encoding="utf-8"))
     metadata = json.loads((root / "run-metadata.json").read_text(encoding="utf-8"))
     raw_records = CheckpointStore(root / "calls.checkpoint.jsonl").records()
@@ -681,7 +762,7 @@ def report(root: Path) -> None:
     embedding_path = root / "embedding-aggregate.json"
     embedding = json.loads(embedding_path.read_text(encoding="utf-8")) if embedding_path.exists() else None
     result_calls = [
-        json.loads(line) for line in (root / "results.jsonl").read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in results_path.read_text(encoding="utf-8").splitlines()
         if line
     ]
     diagnostics = derive_call_diagnostics(result_calls)

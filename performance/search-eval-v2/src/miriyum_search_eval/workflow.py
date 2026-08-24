@@ -328,6 +328,56 @@ def model_comparison_summary(
     }
 
 
+def paired_reanalysis_summary(
+    baseline_calls: list[dict[str, Any]], comparison_calls: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Compare two predicates on exactly the same provider checkpoint calls."""
+    baseline_by_key = {
+        (call.get("queryId"), call.get("repeatIndex")): call
+        for call in baseline_calls
+    }
+    comparison_by_key = {
+        (call.get("queryId"), call.get("repeatIndex")): call
+        for call in comparison_calls
+    }
+    if (
+        len(baseline_by_key) != len(baseline_calls)
+        or len(comparison_by_key) != len(comparison_calls)
+        or baseline_by_key.keys() != comparison_by_key.keys()
+    ):
+        raise ValueError("paired call keys do not match")
+
+    def false_positives(calls: dict[tuple[Any, Any], dict[str, Any]], *, true_no_answer: bool) -> int:
+        return sum(
+            bool(call.get("falsePositive"))
+            for call in calls.values()
+            if call.get("goldNegative") is True
+            and (not true_no_answer or call.get("querySubtype") == "true_no_answer")
+        )
+
+    baseline_true_no_answer = false_positives(baseline_by_key, true_no_answer=True)
+    comparison_true_no_answer = false_positives(comparison_by_key, true_no_answer=True)
+    true_no_answer_gain = comparison_true_no_answer - baseline_true_no_answer
+    if true_no_answer_gain > 0:
+        raise RuntimeError(
+            "true-no-answer false positives increased in paired reanalysis"
+        )
+    baseline_gold_negative = false_positives(baseline_by_key, true_no_answer=False)
+    comparison_gold_negative = false_positives(comparison_by_key, true_no_answer=False)
+    return {
+        "schemaVersion": "miriyum-search-paired-reanalysis-v1",
+        "pairedCalls": len(baseline_by_key),
+        "baselinePredicateVariant": "pre-issue-616",
+        "comparisonPredicateVariant": "issue-616-most-specific",
+        "baselineTrueNoAnswerFalsePositives": baseline_true_no_answer,
+        "comparisonTrueNoAnswerFalsePositives": comparison_true_no_answer,
+        "trueNoAnswerFalsePositiveGain": true_no_answer_gain,
+        "baselineGoldNegativeFalsePositives": baseline_gold_negative,
+        "comparisonGoldNegativeFalsePositives": comparison_gold_negative,
+        "goldNegativeFalsePositiveGain": comparison_gold_negative - baseline_gold_negative,
+    }
+
+
 def migrate_unchanged_calls(
     *, old_queries: list[dict[str, Any]], new_queries: list[dict[str, Any]],
     old_records: list[dict[str, Any]], new_dataset_sha: str,

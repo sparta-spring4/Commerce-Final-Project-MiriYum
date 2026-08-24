@@ -21,14 +21,12 @@ import com.querydsl.core.types.dsl.NumberExpression;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
-import java.text.Normalizer;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import org.springframework.stereotype.Repository;
 
@@ -104,23 +102,40 @@ public class IntegratedStoreSearchRepository {
         }
         QMenu menu = new QMenu("explicitNameMenu");
         QMenuVersion version = new QMenuVersion("explicitNameMenuVersion");
+        QMenuVersion longerVersion = new QMenuVersion("longerExplicitNameMenuVersion");
         List<String> candidateNames = candidateMenuNames(remainingKeyword);
         if (candidateNames.isEmpty()) {
             return List.of();
         }
-        List<String> containedNames = queryFactory
+        NumberExpression<Integer> containedInLongerName = Expressions.numberTemplate(
+                Integer.class,
+                "locate(lower({0}), lower({1}))",
+                version.name,
+                longerVersion.name);
+        return queryFactory
                 .select(version.name)
                 .distinct()
                 .from(menu)
                 .join(menu.versions, version)
+                .leftJoin(longerVersion)
+                .on(
+                        longerVersion.menu.retired.isFalse(),
+                        longerVersion.menu.publishedVersionNumber
+                                .eq(longerVersion.versionNumber),
+                        longerVersion.status.eq(MenuVersionStatus.PUBLISHED),
+                        longerVersion.name.in(candidateNames),
+                        longerVersion.name.length().gt(version.name.length()),
+                        containedInLongerName.gt(0))
                 .where(
                         menu.retired.isFalse(),
                         menu.publishedVersionNumber.eq(version.versionNumber),
                         version.status.eq(MenuVersionStatus.PUBLISHED),
                         IntegratedStoreSearchPredicates.reverseMenuNameGuard(version),
-                        version.name.in(candidateNames))
+                        version.name.in(candidateNames),
+                        longerVersion.id.isNull())
+                .orderBy(version.name.length().desc(), version.name.asc())
+                .limit(MAX_EXPLICIT_MENU_NAMES)
                 .fetch();
-        return mostSpecificNames(containedNames, MAX_EXPLICIT_MENU_NAMES);
     }
 
     static List<String> candidateMenuNames(String remainingKeyword) {
@@ -137,50 +152,6 @@ public class IntegratedStoreSearchRepository {
             }
         }
         return candidates.stream().sorted().toList();
-    }
-
-    static List<String> mostSpecificNames(List<String> containedNames, int limit) {
-        return containedNames.stream()
-                .filter(IntegratedStoreSearchPredicates::isEligibleReverseMenuName)
-                .filter(candidate -> isMostSpecific(candidate, containedNames))
-                .distinct()
-                .sorted((left, right) -> {
-                    int lengthOrder = Integer.compare(
-                            codePointLength(collationKey(right)),
-                            codePointLength(collationKey(left)));
-                    return lengthOrder != 0 ? lengthOrder : left.compareTo(right);
-                })
-                .limit(limit)
-                .toList();
-    }
-
-    private static boolean isMostSpecific(String candidate, List<String> containedNames) {
-        String normalized = collationKey(candidate);
-        return containedNames.stream().noneMatch(other -> {
-            String normalizedOther = collationKey(other);
-            return codePointLength(normalizedOther) > codePointLength(normalized)
-                    && normalizedOther.contains(normalized);
-        });
-    }
-
-    private static String collationKey(String value) {
-        String decomposed = Normalizer.normalize(
-                value.trim().toLowerCase(Locale.ROOT),
-                Normalizer.Form.NFKD);
-        StringBuilder folded = new StringBuilder(decomposed.length());
-        decomposed.codePoints()
-                .filter(codePoint -> {
-                    int type = Character.getType(codePoint);
-                    return type != Character.NON_SPACING_MARK
-                            && type != Character.COMBINING_SPACING_MARK
-                            && type != Character.ENCLOSING_MARK;
-                })
-                .forEach(folded::appendCodePoint);
-        return folded.toString();
-    }
-
-    private static int codePointLength(String value) {
-        return value.codePointCount(0, value.length());
     }
 
     /** LLM 개념을 현재 공개 메뉴에 대조하고 원래 구조화 조건을 유지한다. */

@@ -10,7 +10,9 @@ from miriyum_search_eval.cli import (
     PRE_ISSUE_616,
     _gpt54mini_comparison_config,
     _validate_prompt_full_provenance,
+    _validate_reanalysis_provenance,
     _validate_reanalysis_variant,
+    _write_paired_reanalysis_outputs,
     generate,
     hash_artifact,
     reanalyze,
@@ -21,6 +23,7 @@ from miriyum_search_eval.workflow import (
     evaluation_config_from_pilot,
     migrate_unchanged_calls,
     model_comparison_summary,
+    paired_reanalysis_summary,
     paid_execution_summary,
     pilot_gate,
     prompt_experiment_gate,
@@ -336,6 +339,92 @@ class WorkflowTest(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "predicate variant mismatch"):
             _validate_reanalysis_variant(metadata, ISSUE_616_MOST_SPECIFIC)
+
+    def test_reanalysis_provenance_binds_dataset_fingerprint_and_request_id(self):
+        config = EvalConfig()
+        dataset = {
+            "metadata": {"datasetSha256": "dataset-sha"},
+            "queries": [{"id": "q1"}],
+        }
+        record = {
+            "queryId": "q1",
+            "repeatIndex": 0,
+            "requestFingerprint": config.fingerprint(),
+            "requestId": deterministic_request_id("dataset-sha", "q1", 0, config),
+        }
+        metadata = {
+            "datasetSha256": "dataset-sha",
+            "requestFingerprint": config.fingerprint(),
+        }
+
+        _validate_reanalysis_provenance(metadata, dataset, [record])
+
+        for changed, message in (
+            ({**metadata, "datasetSha256": "other"}, "dataset"),
+            (metadata, "fingerprint"),
+            (metadata, "request id"),
+        ):
+            invalid_record = dict(record)
+            if message == "fingerprint":
+                invalid_record["requestFingerprint"] = "other"
+            if message == "request id":
+                invalid_record["requestId"] = "mse2-other"
+            with self.assertRaisesRegex(RuntimeError, message):
+                _validate_reanalysis_provenance(changed, dataset, [invalid_record])
+
+    def test_paired_reanalysis_requires_same_calls_and_no_true_no_answer_fp_gain(self):
+        baseline = [{
+            "queryId": "q1", "repeatIndex": 0,
+            "querySubtype": "true_no_answer", "goldNegative": True,
+            "falsePositive": False,
+        }]
+        improved = [{**baseline[0], "falsePositive": False}]
+
+        summary = paired_reanalysis_summary(baseline, improved)
+
+        self.assertEqual(summary["pairedCalls"], 1)
+        self.assertEqual(summary["trueNoAnswerFalsePositiveGain"], 0)
+        with self.assertRaisesRegex(RuntimeError, "true-no-answer"):
+            paired_reanalysis_summary(
+                baseline,
+                [{**baseline[0], "falsePositive": True}],
+            )
+        with self.assertRaisesRegex(ValueError, "paired call keys"):
+            paired_reanalysis_summary(
+                baseline,
+                [{**baseline[0], "queryId": "q2"}],
+            )
+
+    def test_paired_reanalysis_writes_separate_variant_outputs(self):
+        baseline = [{"queryId": "q1", "repeatIndex": 0, "value": "before"}]
+        comparison = [{"queryId": "q1", "repeatIndex": 0, "value": "after"}]
+        baseline_aggregate = {"variant": PRE_ISSUE_616}
+        comparison_aggregate = {"variant": ISSUE_616_MOST_SPECIFIC}
+        summary = {"pairedCalls": 1, "trueNoAnswerFalsePositiveGain": 0}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _write_paired_reanalysis_outputs(
+                root=root,
+                baseline_calls=baseline,
+                baseline_aggregate=baseline_aggregate,
+                comparison_calls=comparison,
+                comparison_aggregate=comparison_aggregate,
+                summary=summary,
+            )
+
+            self.assertFalse((root / "results.jsonl").exists())
+            self.assertEqual(
+                json.loads((root / "reanalysis" / PRE_ISSUE_616 / "aggregate.json").read_text(encoding="utf-8")),
+                baseline_aggregate,
+            )
+            self.assertEqual(
+                json.loads((root / "reanalysis" / ISSUE_616_MOST_SPECIFIC / "aggregate.json").read_text(encoding="utf-8")),
+                comparison_aggregate,
+            )
+            self.assertEqual(
+                json.loads((root / "reanalysis" / "paired-summary.json").read_text(encoding="utf-8")),
+                summary,
+            )
 
     def test_reanalysis_mismatch_leaves_existing_artifact_bytes_unchanged(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -654,6 +654,29 @@ class IntegratedStoreSearchRepositoryIT {
 
     @Test
     @Transactional
+    void explicitMenuSpecificityUsesMysqlCollationExpansionsWithoutShortFallback() {
+        storeWithMenu(
+                "짧은 이름 매장", "sse", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        storeWithMenu(
+                "숨긴 긴 이름 매장", "straße", MenuSellingStatus.SELLING,
+                MenuVisibility.HIDDEN, false);
+        flushAndClear();
+
+        String keyword = "straße 파는 매장";
+        List<String> resolvedNames = repository
+                .resolveMostSpecificPublishedMenuNames(keyword);
+        IntegratedStoreSearchSlice result = repository.search(query(
+                condition(List.of(), List.of(), List.of(), List.of(), null, keyword),
+                resolvedNames,
+                "relevance,desc", null, 20));
+
+        assertThat(resolvedNames).containsExactly("straße");
+        assertThat(result.content()).isEmpty();
+    }
+
+    @Test
+    @Transactional
     void refreshesCurrentModesAndRemovesStoresThatAreNoLongerPublic() {
         Store modeChanged = createStore(
                 "모드 변경", Region.SEOUL, "KOREAN", Set.of(), false);
