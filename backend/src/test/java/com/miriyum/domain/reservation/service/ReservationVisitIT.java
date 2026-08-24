@@ -22,7 +22,6 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -601,7 +600,6 @@ class ReservationVisitIT {
             Store store = storeRepository.saveAndFlush(Store.create(
                     operator.getId(),
                     Long.toString(8_000_000_000L + sequence),
-                    BusinessType.CAFE,
                     "Visit Store " + sequence,
                     "",
                     Region.SEOUL,

@@ -40,7 +40,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 @Tag("integration")
-@Tag("integration-shard-d")
+@Tag("integration-shard-a")
 @Testcontainers
 @SpringBootTest(classes = MiriyumApplication.class, properties = {
         "spring.jpa.hibernate.ddl-auto=validate",

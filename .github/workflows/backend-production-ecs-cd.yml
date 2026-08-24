@@ -822,9 +822,13 @@ jobs:
           refresh_replacement_evidence() {
             local running_task_arns
             local -a task_arns
+            local -a configured_target_group_arns
+            local -a primary_target_group_arns
+            local -a production_listener_rule_arns
             local target_group_index=0
             local target_group_arn
             local target_health_file
+            local traffic_target_group_arns_json
 
             aws ecs describe-services \
               --cluster "$ECS_CLUSTER" \
@@ -850,6 +854,26 @@ jobs:
 
             refresh_previous_task_evidence
 
+            mapfile -t configured_target_group_arns < <(
+              jq -r '
+                .loadBalancers[]?
+                | .targetGroupArn,
+                  (.advancedConfiguration.alternateTargetGroupArn? // empty)
+              ' "$evidence_directory/service.json" | sort -u
+            )
+            if [ "${#configured_target_group_arns[@]}" -lt 1 ]; then
+              echo "::error::ECS target group evidence is missing."
+              exit 1
+            fi
+
+            mapfile -t primary_target_group_arns < <(
+              jq -r '.loadBalancers[]?.targetGroupArn // empty' \
+                "$evidence_directory/service.json" | sort -u
+            )
+            if [ "${#primary_target_group_arns[@]}" -lt 1 ]; then
+              echo "::error::ECS primary target group evidence is missing."
+              exit 1
+            fi
             jq -n \
               --slurpfile service "$evidence_directory/service.json" \
               --slurpfile tasks "$evidence_directory/tasks.json" \
@@ -864,6 +888,7 @@ jobs:
                 previousTasks: $previous_tasks[0],
                 stoppedTaskArns: $stopped_task_arns[0],
                 stoppedTasks: $stopped_tasks[0],
+                trafficTargetGroupArns: [],
                 targetHealthByArn: {}
               }' \
               > "$evidence_directory/evidence.json"
@@ -881,7 +906,50 @@ jobs:
                 "$evidence_directory/evidence.json" \
                 > "$evidence_directory/evidence.next.json"
               mv "$evidence_directory/evidence.next.json" "$evidence_directory/evidence.json"
-            done < <(jq -r '.loadBalancers[]?.targetGroupArn // empty' "$evidence_directory/service.json")
+            done < <(printf '%s\n' "${configured_target_group_arns[@]}")
+
+            mapfile -t production_listener_rule_arns < <(
+              jq -r '
+                .loadBalancers[]?
+                | .advancedConfiguration.productionListenerRule? // empty
+              ' "$evidence_directory/service.json" | sort -u
+            )
+            if [ "${#production_listener_rule_arns[@]}" -eq 0 ]; then
+              traffic_target_group_arns_json=$(printf '%s\n' "${primary_target_group_arns[@]}" | jq -R . | jq -sc '.')
+            else
+              aws elbv2 describe-rules \
+                --rule-arns "${production_listener_rule_arns[@]}" \
+                --output json > "$evidence_directory/production-listener-rules.json"
+              traffic_target_group_arns_json=$(jq -c '
+                [
+                  .Rules[]?.Actions[]?
+                  | select(.Type == "forward")
+                  | if .ForwardConfig? then
+                      .ForwardConfig.TargetGroups[]?
+                      | select((.Weight // 1) > 0)
+                      | .TargetGroupArn
+                    else
+                      .TargetGroupArn
+                    end
+                ] | unique
+              ' "$evidence_directory/production-listener-rules.json")
+            fi
+
+            if ! jq -e 'length > 0' <<<"$traffic_target_group_arns_json" >/dev/null; then
+              echo "::error::Production listener has no active target group."
+              exit 1
+            fi
+            while IFS= read -r target_group_arn; do
+              if ! printf '%s\n' "${configured_target_group_arns[@]}" | grep -Fxq "$target_group_arn"; then
+                echo "::error::Production listener selected an unexpected target group."
+                exit 1
+              fi
+            done < <(jq -r '.[]' <<<"$traffic_target_group_arns_json")
+            jq --argjson traffic_target_group_arns "$traffic_target_group_arns_json" \
+              '.trafficTargetGroupArns = $traffic_target_group_arns' \
+              "$evidence_directory/evidence.json" \
+              > "$evidence_directory/evidence.next.json"
+            mv "$evidence_directory/evidence.next.json" "$evidence_directory/evidence.json"
           }
 
           refresh_replacement_evidence
@@ -913,7 +981,6 @@ jobs:
             sleep 5
             refresh_replacement_evidence
           done
-
       - name: Cleanup previous ECS task identity evidence
         if: always()
         run: |

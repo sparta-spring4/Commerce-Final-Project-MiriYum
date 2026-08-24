@@ -3,7 +3,6 @@ package com.miriyum.domain.store.dto.storeoperator;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.GeocodingStatus;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
@@ -33,7 +32,6 @@ class ManagedStoreResponseTest {
         Store store = Store.create(
                 11L,
                 "1234567890",
-                BusinessType.CAFE,
                 "미리윰",
                 "",
                 Region.SEOUL,
@@ -73,7 +71,6 @@ class ManagedStoreResponseTest {
         Store store = Store.createVerified(
                 11L,
                 "1234567890",
-                BusinessType.CAFE,
                 "미리윰",
                 "",
                 Region.SEOUL,

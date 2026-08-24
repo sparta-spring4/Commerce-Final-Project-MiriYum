@@ -9,7 +9,6 @@ import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
 import com.miriyum.domain.reservation.service.ReservationSearchAvailabilityService;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.menu.entity.Menu;
@@ -257,6 +256,189 @@ class IntegratedStoreSearchRepositoryIT {
 
         assertThat(result).extracting(IntegratedStoreSearchCandidate::storeId)
                 .containsExactly(seoulKimchi.getId());
+    }
+
+    @Test
+    @Transactional
+    void compoundConceptsMatchContainedCurrentMenuNames() {
+        Store jeyuk = storeWithMenu(
+                "제육 매장", "제육볶음", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        Store dakgalbi = storeWithMenu(
+                "닭갈비 매장", "닭갈비", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        Store jjambbong = storeWithMenu(
+                "짬뽕 매장", "짬뽕", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        Store pho = storeWithMenu(
+                "쌀국수 매장", "쌀국수", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        Store bulgogi = storeWithMenu(
+                "불고기 매장", "불고기", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        Store americano = storeWithMenu(
+                "커피 매장", "아메리카노", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        flushAndClear();
+
+        List<IntegratedStoreSearchCandidate> result = repository.searchExpanded(
+                query(condition(), null, null, 20),
+                List.of(
+                        "매운 제육볶음",
+                        "매운닭갈비",
+                        "불향 해물 짬뽕",
+                        "소고기 쌀국수",
+                        "소고기 불고기",
+                        "아이스 아메리카노"),
+                200);
+
+        assertThat(result).extracting(IntegratedStoreSearchCandidate::storeId)
+                .containsExactlyInAnyOrder(
+                        jeyuk.getId(),
+                        dakgalbi.getId(),
+                        jjambbong.getId(),
+                        pho.getId(),
+                        bulgogi.getId(),
+                        americano.getId());
+        assertThat(result).allMatch(candidate -> candidate.relevanceTier() == 0);
+    }
+
+    @Test
+    @Transactional
+    void reverseNameMatchingRejectsGenericUnrelatedWildcardAndNonNameFields() {
+        for (String genericName : List.of(
+                "면", "탕", "국", "밥", "메뉴", "음식", "요리", "식사", "세트", "정식", "음료")) {
+            storeWithMenu(
+                    genericName + " 매장", genericName, MenuSellingStatus.SELLING,
+                    MenuVisibility.VISIBLE, false);
+        }
+        storeWithMenu(
+                "무관 메뉴 매장", "초밥", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        storeWithMenu(
+                "와일드카드 유사 매장", "ABC특선", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        Store nonNameFields = createStore(
+                "비메뉴명 필드 매장", Region.SEOUL, "CAFE_BAKERY", Set.of(), false);
+        publishMenuWithSearchFields(
+                nonNameFields,
+                "완전히 다른 이름",
+                "짬뽕",
+                10_000,
+                "BEVERAGE",
+                List.of("DESSERT"),
+                List.of("매운맛"),
+                MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE,
+                false);
+        flushAndClear();
+
+        List<IntegratedStoreSearchCandidate> result = repository.searchExpanded(
+                query(condition(), null, null, 20),
+                List.of(
+                        "따뜻한 면", "얼큰한 탕", "맑은 국", "고기 밥",
+                        "추천 메뉴", "맛있는 음식", "한국 요리", "저녁 식사",
+                        "가족 세트", "점심 정식", "차가운 음료",
+                        "매운 제육볶음", "100%_특선!",
+                        "불향 해물 짬뽕", "따뜻한 BEVERAGE",
+                        "달콤한 DESSERT", "아주 매운맛"),
+                200);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @Transactional
+    void reverseNameMatchingPreservesCurrentStateAndStructuredFilters() {
+        Store target = createStore(
+                "대상 매장", Region.SEOUL, "KOREAN", Set.of("QUIET"), false);
+        publishMenu(target, "짬뽕", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+
+        Store hidden = createStore(
+                "숨김 매장", Region.SEOUL, "KOREAN", Set.of("QUIET"), false);
+        publishMenu(hidden, "짬뽕", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.HIDDEN, false);
+        Store retired = createStore(
+                "은퇴 매장", Region.SEOUL, "KOREAN", Set.of("QUIET"), false);
+        publishMenu(retired, "짬뽕", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, true);
+        Store closed = createStore(
+                "폐점 매장", Region.SEOUL, "KOREAN", Set.of("QUIET"), true);
+        publishMenu(closed, "짬뽕", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Store wrongRegion = createStore(
+                "부산 매장", Region.BUSAN, "KOREAN", Set.of("QUIET"), false);
+        publishMenu(wrongRegion, "짬뽕", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Store wrongStoreCategory = createStore(
+                "업종 불일치", Region.SEOUL, "CAFE_BAKERY", Set.of("QUIET"), false);
+        publishMenu(wrongStoreCategory, "짬뽕", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Store wrongTag = createStore(
+                "태그 불일치", Region.SEOUL, "KOREAN", Set.of(), false);
+        publishMenu(wrongTag, "짬뽕", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Store wrongMenuCategory = createStore(
+                "메뉴 분류 불일치", Region.SEOUL, "KOREAN", Set.of("QUIET"), false);
+        publishMenu(wrongMenuCategory, "짬뽕", 10_000, "DESSERT", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Store overPrice = createStore(
+                "가격 불일치", Region.SEOUL, "KOREAN", Set.of("QUIET"), false);
+        publishMenu(overPrice, "짬뽕", 20_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Store pastVersion = createStore(
+                "과거 버전 매장", Region.SEOUL, "KOREAN", Set.of("QUIET"), false);
+        Menu versioned = publishMenu(
+                pastVersion, "짬뽕", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        versioned.appendDraft(
+                menuContent("우동", "", 10_000, "BEVERAGE", List.of(), List.of()),
+                pastVersion.getStoreOperatorAccountId(), NOW.plusSeconds(2));
+        versioned.publish(NOW.plusSeconds(3));
+        menuRepository.saveAndFlush(versioned);
+        flushAndClear();
+
+        IntegratedStoreSearchQuery query = query(condition(
+                List.of("SEOUL"),
+                List.of("KOREAN"),
+                List.of("BEVERAGE"),
+                List.of("QUIET"),
+                new PriceRange(9_000L, 11_000L),
+                ""), null, null, 20);
+        List<IntegratedStoreSearchCandidate> result = repository.searchExpanded(
+                query, List.of("불향 해물 짬뽕"), 200);
+
+        assertThat(result).extracting(IntegratedStoreSearchCandidate::storeId)
+                .containsExactly(target.getId());
+    }
+
+    @Test
+    @Transactional
+    void forwardExpandedMatchesPrecedeReverseMatchesAndRemoveDuplicateStores() {
+        Store reverse = storeWithMenu(
+                "가 역방향", "제육볶음", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        Store forward = storeWithMenu(
+                "나 정방향", "매운 제육볶음 정식", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        Store duplicate = createStore(
+                "다 중복", Region.SEOUL, "CAFE_BAKERY", Set.of(), false);
+        publishMenu(duplicate, "매운 제육볶음", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        publishMenu(duplicate, "제육볶음", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        flushAndClear();
+
+        List<IntegratedStoreSearchCandidate> result = repository.searchExpanded(
+                query(condition(), null, null, 20), List.of("매운 제육볶음"), 200);
+
+        assertThat(result).extracting(IntegratedStoreSearchCandidate::storeId)
+                .containsExactly(forward.getId(), duplicate.getId(), reverse.getId());
+        assertThat(result).extracting(IntegratedStoreSearchCandidate::relevanceTier)
+                .containsExactly(1, 1, 0);
+        assertThat(result).extracting(IntegratedStoreSearchCandidate::storeId)
+                .doesNotHaveDuplicates();
     }
 
     @Test
@@ -510,7 +692,6 @@ class IntegratedStoreSearchRepositoryIT {
         Store store = Store.create(
                 fixtureOperatorId,
                 String.format("%010d", 8_000_000 + sequence),
-                BusinessType.CAFE,
                 name,
                 "QueryDSL 통합 테스트 매장",
                 region,
@@ -552,14 +733,59 @@ class IntegratedStoreSearchRepositoryIT {
             MenuVisibility visibility,
             boolean retired
     ) {
-        MenuContent content = new MenuContent(
+        return publishMenuWithSearchFields(
+                store,
                 name,
                 "",
+                price,
+                primaryCategory,
+                secondaryCategories,
+                List.of(),
+                sellingStatus,
+                visibility,
+                retired);
+    }
+
+    private Menu publishMenuWithSearchFields(
+            Store store,
+            String name,
+            String description,
+            int price,
+            String primaryCategory,
+            List<String> secondaryCategories,
+            List<String> localTags,
+            MenuSellingStatus sellingStatus,
+            MenuVisibility visibility,
+            boolean retired
+    ) {
+        MenuContent content = menuContent(
+                name, description, price, primaryCategory, secondaryCategories, localTags);
+        Menu menu = Menu.create(store.getId(), content, store.getStoreOperatorAccountId(), NOW);
+        menu.publish(NOW.plusSeconds(1));
+        menu.changeSellingStatus(sellingStatus);
+        menu.changeVisibility(visibility);
+        if (retired) {
+            menu.retire(NOW.plusSeconds(2));
+        }
+        return menuRepository.saveAndFlush(menu);
+    }
+
+    private MenuContent menuContent(
+            String name,
+            String description,
+            int price,
+            String primaryCategory,
+            List<String> secondaryCategories,
+            List<String> localTags
+    ) {
+        return new MenuContent(
+                name,
+                description,
                 price,
                 true,
                 primaryCategory,
                 secondaryCategories,
-                List.of(),
+                localTags,
                 true,
                 true,
                 DisclosureRegistrationStatus.REGISTERED,
@@ -569,14 +795,6 @@ class IntegratedStoreSearchRepositoryIT {
                 DisclosureRegistrationStatus.REGISTERED,
                 List.of(new OriginDisclosure("원재료", "대한민국")),
                 false);
-        Menu menu = Menu.create(store.getId(), content, store.getStoreOperatorAccountId(), NOW);
-        menu.publish(NOW.plusSeconds(1));
-        menu.changeSellingStatus(sellingStatus);
-        menu.changeVisibility(visibility);
-        if (retired) {
-            menu.retire(NOW.plusSeconds(2));
-        }
-        return menuRepository.saveAndFlush(menu);
     }
 
     private IntegratedStoreSearchQuery query(

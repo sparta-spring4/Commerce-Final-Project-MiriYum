@@ -253,6 +253,56 @@ function get(client, url, accessToken, tags) {
   })
 }
 
+function waitingTriggerFixture({ client, baseUrl, session, metrics, tags }) {
+  const selected = requireSession(session)
+  if (selected.target.kind !== 'waiting-store-operator'
+    || selected.target.audience !== 'store-operator') {
+    throw new Error('slow-client trigger target is invalid')
+  }
+  if (client === null || typeof client?.get !== 'function') {
+    throw new Error('slow-client trigger client is required')
+  }
+  const normalizedBaseUrl = requireText('baseUrl', baseUrl).replace(/\/+$/, '')
+  const selectedTags = safeTags(tags)
+  const listUrl = `${normalizedBaseUrl}/api/v1/store-operators/stores/${selected.target.storeId}/waiting-teams?status=WAITING&size=1`
+  let list
+  try {
+    list = parseSuccess(
+      get(client, listUrl, selected.accessToken, selectedTags),
+      'recovery trigger list request failed',
+    )
+  } catch (_) {
+    emit(metrics, 'listFailure', 1, selectedTags)
+    throw new Error(selectedTags.profile === 'recovery'
+      ? 'recovery trigger list request failed'
+      : 'slow-client trigger fixture is unavailable')
+  }
+  const item = Array.isArray(list?.items) ? list.items[0] : null
+  if (item === null || item === undefined
+    || typeof item.waitingTeamId !== 'string'
+    || !/^[1-9][0-9]*$/.test(item.waitingTeamId)
+    || item.status !== 'WAITING'
+    || !Number.isInteger(item.version)
+    || item.version < 0) {
+    emit(metrics, 'fixtureFailure', 1, selectedTags)
+    throw new Error(selectedTags.profile === 'recovery'
+      ? 'recovery trigger fixture is unavailable'
+      : 'slow-client trigger fixture is unavailable')
+  }
+  return Object.freeze({ item, selected, normalizedBaseUrl, selectedTags })
+}
+
+export function verifyWaitingTriggerFixture({
+  client,
+  baseUrl,
+  session,
+  metrics = {},
+  tags,
+}) {
+  waitingTriggerFixture({ client, baseUrl, session, metrics, tags })
+  return true
+}
+
 export function ownedHttpPath(target) {
   if (target?.kind === 'notification-consumer' && target.audience === 'consumer') {
     return '/api/v1/consumers/me/notifications?size=20'
@@ -301,6 +351,7 @@ export function runOwnedHttpProbe({
   maxP95Ratio,
   metrics = {},
   tags,
+  onThresholdExceeded,
 }) {
   const selected = requireSession(session)
   if (typeof selected.baselineMilliseconds !== 'number'
@@ -311,6 +362,9 @@ export function runOwnedHttpProbe({
   if (typeof maxP95Ratio !== 'number' || !Number.isFinite(maxP95Ratio)
     || maxP95Ratio < 1 || maxP95Ratio > 10) {
     throw new Error('owned HTTP p95 ratio is invalid')
+  }
+  if (onThresholdExceeded !== undefined && typeof onThresholdExceeded !== 'function') {
+    throw new Error('owned HTTP threshold diagnostic callback is invalid')
   }
   const normalizedBaseUrl = requireText('baseUrl', baseUrl).replace(/\/+$/, '')
   const selectedTags = safeTags(tags)
@@ -328,7 +382,21 @@ export function runOwnedHttpProbe({
     emit(metrics, 'degradationRatio', degradationRatio, selectedTags)
     const success = degradationRatio <= maxP95Ratio
     emit(metrics, success ? 'success' : 'error', 1, selectedTags)
-    return Object.freeze({ success, degradationRatio })
+    if (!success && onThresholdExceeded !== undefined) {
+      onThresholdExceeded(Object.freeze({
+        endpointKind: selectedTags.endpoint_kind,
+        baselineMilliseconds: selected.baselineMilliseconds,
+        measuredMilliseconds: duration,
+        degradationRatio,
+        occurredAt: new Date().toISOString(),
+      }))
+    }
+    return Object.freeze({
+      success,
+      degradationRatio,
+      baselineMilliseconds: selected.baselineMilliseconds,
+      measuredMilliseconds: duration,
+    })
   } catch (_) {
     emit(metrics, 'error', 1, selectedTags)
     throw new Error('owned HTTP measured request failed')
@@ -344,11 +412,6 @@ export function triggerWaitingChange({
   tags,
   onMutation,
 }) {
-  const selected = requireSession(session)
-  if (selected.target.kind !== 'waiting-store-operator'
-    || selected.target.audience !== 'store-operator') {
-    throw new Error('slow-client trigger target is invalid')
-  }
   const key = requireText('slow-client idempotency key', idempotencyKey)
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(key)) {
     throw new Error('slow-client idempotency key is invalid')
@@ -356,22 +419,9 @@ export function triggerWaitingChange({
   if (client === null || typeof client?.get !== 'function' || typeof client?.post !== 'function') {
     throw new Error('slow-client trigger client is required')
   }
-  const normalizedBaseUrl = requireText('baseUrl', baseUrl).replace(/\/+$/, '')
-  const selectedTags = safeTags(tags)
-  const listUrl = `${normalizedBaseUrl}/api/v1/store-operators/stores/${selected.target.storeId}/waiting-teams?status=WAITING&size=1`
-  const list = parseSuccess(
-    get(client, listUrl, selected.accessToken, selectedTags),
-    'slow-client trigger fixture is unavailable',
-  )
-  const item = Array.isArray(list?.items) ? list.items[0] : null
-  if (item === null || item === undefined
-    || typeof item.waitingTeamId !== 'string'
-    || !/^[1-9][0-9]*$/.test(item.waitingTeamId)
-    || item.status !== 'WAITING'
-    || !Number.isInteger(item.version)
-    || item.version < 0) {
-    throw new Error('slow-client trigger fixture is unavailable')
-  }
+  const { item, selected, normalizedBaseUrl, selectedTags } = waitingTriggerFixture({
+    client, baseUrl, session, metrics, tags,
+  })
   const response = client.post(
     `${normalizedBaseUrl}/api/v1/store-operators/stores/${selected.target.storeId}/waiting-teams/${item.waitingTeamId}/calls`,
     JSON.stringify({ expectedVersion: item.version }),
@@ -381,12 +431,23 @@ export function triggerWaitingChange({
       redirects: 0,
     },
   )
-  const changed = parseSuccess(response, 'slow-client trigger request failed')
+  let changed
+  try {
+    changed = parseSuccess(response, 'recovery trigger call request failed')
+  } catch (_) {
+    emit(metrics, 'callFailure', 1, selectedTags)
+    throw new Error(selectedTags.profile === 'recovery'
+      ? 'recovery trigger call request failed'
+      : 'slow-client trigger request failed')
+  }
   if (changed?.waitingTeamId !== item.waitingTeamId
     || changed?.status !== 'CALLED'
     || !Number.isInteger(changed?.version)
     || changed.version <= item.version) {
-    throw new Error('slow-client trigger request failed')
+    emit(metrics, 'responseFailure', 1, selectedTags)
+    throw new Error(selectedTags.profile === 'recovery'
+      ? 'recovery trigger call response is invalid'
+      : 'slow-client trigger request failed')
   }
   if (onMutation !== undefined) {
     if (typeof onMutation !== 'function') throw new Error('recovery mutation callback is invalid')

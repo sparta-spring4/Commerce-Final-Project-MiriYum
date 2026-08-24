@@ -1,7 +1,9 @@
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -14,7 +16,23 @@ if BASH is None or Path(BASH).name.lower() == "bash.exe" and "system32" in BASH.
 
 
 class StagingValkeyControlTest(unittest.TestCase):
-    def run_control(self, action, *, fail_sleep=False, signal_sleep=False):
+    def run_control(
+        self,
+        action,
+        *,
+        fail_sleep=False,
+        signal_sleep=False,
+        fail_docker_contains="",
+        backend_container_ids="staging-backend-container",
+        frontend_container_ids="staging-frontend-container",
+        backend_running=True,
+        frontend_running=True,
+        backend_oneoff_ids="",
+        frontend_oneoff_ids="",
+        execute_at_epoch=None,
+        fake_now=None,
+        preflight_elapsed_seconds=0,
+    ):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)
             command_log = temporary_path / "commands.log"
@@ -26,7 +44,48 @@ class StagingValkeyControlTest(unittest.TestCase):
                 """#!/usr/bin/env bash
 set -Eeuo pipefail
 printf 'docker %s\\n' \"$*\" >> \"$FAKE_COMMAND_LOG\"
-if [[ \"$1\" == \"inspect\" ]]; then
+if [[ -n \"${FAIL_DOCKER_CONTAINS:-}\" && \"$*\" == *\"$FAIL_DOCKER_CONTAINS\"* ]]; then
+  printf 'raw-sensitive-docker-error\\n' >&2
+  exit 23
+fi
+if [[ \"$*\" == *\"label=com.docker.compose.service=backend\"* ]]; then
+  ids=''
+  if [[ \"${BACKEND_RUNNING:-false}\" == \"true\" || \"$*\" == *\"ps -aq \"* ]]; then
+    ids=\"${BACKEND_CONTAINER_IDS:-}\"
+  fi
+  if [[ \"$*\" != *\"label=com.docker.compose.oneoff=False\"* && -n \"${BACKEND_ONEOFF_IDS:-}\" ]]; then
+    [[ -z \"$ids\" ]] || ids+=\"\\n\"
+    ids+=\"${BACKEND_ONEOFF_IDS}\"
+  fi
+  printf '%b' \"$ids\"
+elif [[ \"$*\" == *\"label=com.docker.compose.service=frontend\"* ]]; then
+  ids=''
+  if [[ \"${FRONTEND_RUNNING:-false}\" == \"true\" || \"$*\" == *\"ps -aq \"* ]]; then
+    ids=\"${FRONTEND_CONTAINER_IDS:-}\"
+  fi
+  if [[ \"$*\" != *\"label=com.docker.compose.oneoff=False\"* && -n \"${FRONTEND_ONEOFF_IDS:-}\" ]]; then
+    [[ -z \"$ids\" ]] || ids+=\"\\n\"
+    ids+=\"${FRONTEND_ONEOFF_IDS}\"
+  fi
+  printf '%b' \"$ids\"
+elif [[ \"$*\" == *\"{{.Config.Image}} staging-backend-container\"* ]]; then
+  printf 'registry.invalid/backend:private-runtime-image\\n'
+elif [[ \"$*\" == *\"{{.Config.Image}} staging-backend-oneoff\"* ]]; then
+  printf 'registry.invalid/backend:private-runtime-image\\n'
+elif [[ \"$*\" == *\"{{.Config.Image}} staging-frontend-container\"* ]]; then
+  printf 'registry.invalid/frontend:private-runtime-image\\n'
+elif [[ \"$*\" == *\"{{.Config.Image}} staging-frontend-oneoff\"* ]]; then
+  printf 'registry.invalid/frontend:private-runtime-image\\n'
+elif [[ \"$1\" == \"compose\" && \"${REQUIRE_RUNTIME_IMAGE_BINDINGS:-false}\" == \"true\" ]]; then
+  if [[ \"${BACKEND_IMAGE:-}\" != \"registry.invalid/backend:private-runtime-image\" || \\
+        \"${FRONTEND_IMAGE:-}\" != \"registry.invalid/frontend:private-runtime-image\" ]]; then
+    printf 'raw-sensitive-compose-image-binding-error\\n' >&2
+    exit 31
+  fi
+  if [[ \"$*\" == *\" ps -q valkey\" ]]; then
+    printf 'staging-valkey-container\\n'
+  fi
+elif [[ \"$1\" == \"inspect\" ]]; then
   printf 'healthy\\n'
 elif [[ \"$*\" == *\" ps -q valkey\" ]]; then
   printf 'staging-valkey-container\\n'
@@ -42,7 +101,7 @@ fi
                 """#!/usr/bin/env bash
 set -Eeuo pipefail
 printf 'sleep %s\\n' \"$*\" >> \"$FAKE_COMMAND_LOG\"
-if [[ \"${FAIL_SLEEP:-false}\" == \"true\" ]]; then
+if [[ \"${FAIL_SLEEP:-false}\" == \"true\" && \"$1\" == \"10\" ]]; then
   exit 7
 fi
 if [[ \"${SIGNAL_SLEEP:-false}\" == \"true\" && \"$1\" == \"10\" ]]; then
@@ -55,13 +114,40 @@ fi
             )
             sleep.chmod(0o755)
 
+            date = fake_bin / "date"
+            date.write_text(
+                """#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ -z "${FAKE_NOW:-}" ]]; then
+  exec /usr/bin/date "$@"
+fi
+count=0
+if [[ -f "$FAKE_DATE_COUNT_FILE" ]]; then
+  count=$(<"$FAKE_DATE_COUNT_FILE")
+fi
+printf '%s' "$((count + 1))" > "$FAKE_DATE_COUNT_FILE"
+if ((count == 0)); then
+  printf '%s\n' "$FAKE_NOW"
+else
+  printf '%s\n' "$((FAKE_NOW + PREFLIGHT_ELAPSED_SECONDS))"
+fi
+""",
+                encoding="utf-8",
+                newline="\n",
+            )
+            date.chmod(0o755)
+
+            if execute_at_epoch is None:
+                execute_at_epoch = str(int(time.time()) + 30) if action == "interrupt" else ""
+            ready_file = temporary_path / "miriyum-staging-valkey-ready-123-1"
+
             command = (
                 'fake_bin="$1"; '
                 'if command -v cygpath >/dev/null 2>&1; then '
                 'fake_bin=$(cygpath -u "$fake_bin"); '
                 'fi; '
                 'PATH="$fake_bin:$PATH" VALKEY_CONTROL_ACTION="$2" '
-                'bash "$3"'
+                'VALKEY_CONTROL_EXECUTE_AT_EPOCH="$3" bash "$4"'
             )
             environment = os.environ.copy()
             environment.update(
@@ -69,6 +155,20 @@ fi
                     "FAKE_COMMAND_LOG": command_log.as_posix(),
                     "FAIL_SLEEP": "true" if fail_sleep else "false",
                     "SIGNAL_SLEEP": "true" if signal_sleep else "false",
+                    "FAIL_DOCKER_CONTAINS": fail_docker_contains,
+                    "REQUIRE_RUNTIME_IMAGE_BINDINGS": "true",
+                    "BACKEND_CONTAINER_IDS": backend_container_ids,
+                    "FRONTEND_CONTAINER_IDS": frontend_container_ids,
+                    "BACKEND_RUNNING": "true" if backend_running else "false",
+                    "FRONTEND_RUNNING": "true" if frontend_running else "false",
+                    "BACKEND_ONEOFF_IDS": backend_oneoff_ids,
+                    "FRONTEND_ONEOFF_IDS": frontend_oneoff_ids,
+                    "FAKE_NOW": "" if fake_now is None else str(fake_now),
+                    "FAKE_DATE_COUNT_FILE": (temporary_path / "date-count").as_posix(),
+                    "PREFLIGHT_ELAPSED_SECONDS": str(preflight_elapsed_seconds),
+                    "VALKEY_CONTROL_READY_FILE": (
+                        ready_file.as_posix() if action == "interrupt" else ""
+                    ),
                 }
             )
             result = subprocess.run(
@@ -79,6 +179,7 @@ fi
                     "staging-valkey-test",
                     fake_bin.as_posix(),
                     action,
+                    execute_at_epoch,
                     SCRIPT_PATH.as_posix(),
                 ],
                 capture_output=True,
@@ -91,12 +192,18 @@ fi
                 if command_log.exists()
                 else []
             )
+            result.ready_file_content = (
+                ready_file.read_text(encoding="utf-8").strip()
+                if ready_file.exists()
+                else None
+            )
             return result, commands
 
     def test_interrupt_stops_for_ten_seconds_then_recovers_to_healthy(self):
         result, commands = self.run_control("interrupt")
 
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(result.args[-2], result.ready_file_content)
         stop = commands.index(
             "docker compose --env-file /opt/miriyum/.env -f "
             "/opt/miriyum/docker-compose.prod.yml stop valkey"
@@ -113,6 +220,32 @@ fi
         self.assertLess(wait, start)
         self.assertLess(start, healthy)
 
+    def test_interrupt_emits_only_bounded_phase_timestamps_in_runtime_order(self):
+        result, _ = self.run_control("interrupt")
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        phase_lines = [
+            line for line in result.stdout.splitlines()
+            if line.startswith("event=staging_valkey_control_phase ")
+        ]
+        self.assertEqual(
+            [
+                "preflight-ready",
+                "stop-requested",
+                "stopped",
+                "start-requested",
+                "healthy",
+            ],
+            [re.search(r" phase=([a-z-]+) ", line).group(1) for line in phase_lines],
+        )
+        for line in phase_lines:
+            self.assertRegex(
+                line,
+                r"^event=staging_valkey_control_phase action=interrupt "
+                r"phase=[a-z-]+ observed_at_epoch=[0-9]{10}$",
+            )
+            self.assertNotIn("private-runtime-image", line)
+
     def test_recover_starts_and_checks_health_without_stopping(self):
         result, commands = self.run_control("recover")
 
@@ -121,6 +254,53 @@ fi
         self.assertFalse(any(" stop valkey" in command for command in commands))
         self.assertTrue(any(" up -d --no-deps valkey" in command for command in commands))
         self.assertTrue(any(command.startswith("docker inspect") for command in commands))
+
+    def test_interrupt_waits_for_a_bounded_future_epoch_before_stopping(self):
+        execute_at = int(time.time()) + 30
+        result, commands = self.run_control("interrupt", execute_at_epoch=str(execute_at))
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        scheduled_wait = next(
+            index for index, command in enumerate(commands)
+            if command.startswith("sleep ") and command != "sleep 10"
+        )
+        stop = next(index for index, command in enumerate(commands) if " stop valkey" in command)
+        self.assertLess(scheduled_wait, stop)
+
+    def test_interrupt_rejects_schedule_when_preflight_consumes_minimum_lead(self):
+        fake_now = 1_700_000_000
+        result, commands = self.run_control(
+            "interrupt",
+            execute_at_epoch=str(fake_now + 5),
+            fake_now=fake_now,
+            preflight_elapsed_seconds=1,
+        )
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn(
+            "reason=scheduled-epoch-too-close-after-preflight",
+            result.stdout + result.stderr,
+        )
+        self.assertIsNone(result.ready_file_content)
+        self.assertFalse(any(" stop valkey" in command for command in commands))
+
+    def test_interrupt_rejects_invalid_or_unbounded_epoch_before_docker_access(self):
+        for execute_at in ("not-an-epoch", str(int(time.time()) - 1), str(int(time.time()) + 120)):
+            with self.subTest(execute_at=execute_at):
+                result, commands = self.run_control("interrupt", execute_at_epoch=execute_at)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("reason=invalid-scheduled-epoch", result.stdout + result.stderr)
+                self.assertEqual([], commands)
+
+    def test_recover_rejects_a_scheduled_epoch_without_docker_access(self):
+        result, commands = self.run_control(
+            "recover",
+            execute_at_epoch=str(int(time.time()) + 30),
+        )
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("reason=unexpected-scheduled-epoch", result.stdout + result.stderr)
+        self.assertEqual([], commands)
 
     def test_interrupt_failure_still_recovers_and_preserves_failure(self):
         result, commands = self.run_control("interrupt", fail_sleep=True)
@@ -145,6 +325,150 @@ fi
 
         self.assertNotEqual(0, result.returncode)
         self.assertEqual([], commands)
+
+    def assert_safe_failure(self, result, *, phase, reason, exit_code=23):
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn(
+            "event=staging_valkey_control_failed "
+            f"action={result.args[-3]} phase={phase} reason={reason} "
+            f"exit_code={exit_code}",
+            combined,
+        )
+        self.assertNotIn("raw-sensitive-docker-error", combined)
+        self.assertNotIn("raw-sensitive-compose-image-binding-error", combined)
+
+    def test_recover_binds_current_runtime_images_without_logging_them(self):
+        result, commands = self.run_control("recover")
+
+        combined = result.stdout + result.stderr
+        self.assertEqual(0, result.returncode, combined)
+        self.assertNotIn("private-runtime-image", combined)
+        self.assertNotIn("private-runtime-image", "\n".join(commands))
+
+    def test_recover_rejects_missing_runtime_image_before_valkey_start(self):
+        result, commands = self.run_control(
+            "recover",
+            backend_container_ids="",
+        )
+
+        self.assert_safe_failure(
+            result,
+            phase="preflight",
+            reason="runtime-image-binding-failed",
+            exit_code=1,
+        )
+        self.assertFalse(any("up -d --no-deps valkey" in command for command in commands))
+
+    def test_interrupt_rejects_ambiguous_runtime_image_before_valkey_stop(self):
+        result, commands = self.run_control(
+            "interrupt",
+            frontend_container_ids="staging-frontend-container\nold-frontend-container",
+        )
+
+        self.assert_safe_failure(
+            result,
+            phase="preflight",
+            reason="runtime-image-binding-failed",
+            exit_code=1,
+        )
+        self.assertFalse(any("stop valkey" in command for command in commands))
+
+    def test_recover_rejects_stopped_runtime_service_before_valkey_start(self):
+        for service in ("backend", "frontend"):
+            with self.subTest(service=service):
+                result, commands = self.run_control(
+                    "recover",
+                    backend_running=service != "backend",
+                    frontend_running=service != "frontend",
+                )
+
+                self.assert_safe_failure(
+                    result,
+                    phase="preflight",
+                    reason="runtime-image-binding-failed",
+                    exit_code=1,
+                )
+                self.assertFalse(
+                    any("up -d --no-deps valkey" in command for command in commands)
+                )
+
+    def test_recover_rejects_oneoff_without_running_service_before_valkey_start(self):
+        for service in ("backend", "frontend"):
+            with self.subTest(service=service):
+                result, commands = self.run_control(
+                    "recover",
+                    backend_running=service != "backend",
+                    frontend_running=service != "frontend",
+                    backend_oneoff_ids=(
+                        "staging-backend-oneoff" if service == "backend" else ""
+                    ),
+                    frontend_oneoff_ids=(
+                        "staging-frontend-oneoff" if service == "frontend" else ""
+                    ),
+                )
+
+                self.assert_safe_failure(
+                    result,
+                    phase="preflight",
+                    reason="runtime-image-binding-failed",
+                    exit_code=1,
+                )
+                self.assertFalse(
+                    any("up -d --no-deps valkey" in command for command in commands)
+                )
+
+    def test_recover_reports_safe_start_failure_without_raw_docker_error(self):
+        result, _ = self.run_control(
+            "recover",
+            fail_docker_contains="up -d --no-deps valkey",
+        )
+
+        self.assert_safe_failure(result, phase="start", reason="compose-up-failed")
+
+    def test_automatic_recovery_never_reports_healthy_after_start_failure(self):
+        result, _ = self.run_control(
+            "interrupt",
+            fail_sleep=True,
+            fail_docker_contains="up -d --no-deps valkey",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Valkey automatic recovery failed.", result.stderr)
+        self.assertNotRegex(result.stdout, re.compile(r"phase=healthy(?:\s|$)"))
+
+    def test_recover_reports_safe_health_failure_without_raw_docker_error(self):
+        result, _ = self.run_control(
+            "recover",
+            fail_docker_contains="ps -q valkey",
+        )
+
+        self.assert_safe_failure(
+            result,
+            phase="health-check",
+            reason="compose-ps-failed",
+        )
+
+    def test_interrupt_reports_safe_stop_failure_without_raw_docker_error(self):
+        result, _ = self.run_control(
+            "interrupt",
+            fail_docker_contains="stop valkey",
+        )
+
+        self.assert_safe_failure(result, phase="stop", reason="compose-stop-failed")
+
+    def test_recover_reports_safe_compose_preflight_failure(self):
+        result, commands = self.run_control(
+            "recover",
+            fail_docker_contains="config --quiet",
+        )
+
+        self.assert_safe_failure(
+            result,
+            phase="preflight",
+            reason="compose-config-invalid",
+        )
+        self.assertFalse(any("up -d --no-deps valkey" in command for command in commands))
 
 
 if __name__ == "__main__":

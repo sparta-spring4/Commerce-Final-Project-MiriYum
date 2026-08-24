@@ -23,7 +23,6 @@ import com.miriyum.domain.reservation.repository.ReservationCapacityBucketReposi
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
@@ -78,7 +77,7 @@ import org.testcontainers.utility.DockerImageName;
 
 @Testcontainers
 @Tag("integration")
-@Tag("integration-shard-d")
+@Tag("integration-shard-a")
 @Import(ReservationCapacityPublicationIT.LockOrderTestConfiguration.class)
 @SpringBootTest(
         classes = MiriyumApplication.class,
@@ -811,7 +810,6 @@ class ReservationCapacityPublicationIT {
         long storeId = storeRepository.saveAndFlush(Store.create(
                 operatorId,
                 registrationNumber,
-                BusinessType.CAFE,
                 "Reservation Capacity Store",
                 "",
                 Region.SEOUL,

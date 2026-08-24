@@ -9,7 +9,6 @@ import static org.mockito.BDDMockito.willThrow;
 import com.miriyum.domain.store.dto.contract.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.dto.contract.StoreReservationTransactionEligibility;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
@@ -248,18 +247,16 @@ class StoreTransactionEligibilityServiceTest {
     }
 
     private Store eligibleStore(boolean reservationEnabled, boolean pickupEnabled) {
-        return store(BusinessType.CAFE, reservationEnabled, pickupEnabled);
+        return store(reservationEnabled, pickupEnabled);
     }
 
     private Store store(
-            BusinessType businessType,
             boolean reservationEnabled,
             boolean pickupEnabled
     ) {
         Store store = Store.create(
                 11L,
                 "1234567890",
-                businessType,
                 "미리윰",
                 "",
                 Region.SEOUL,

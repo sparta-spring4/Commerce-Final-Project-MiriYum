@@ -156,7 +156,7 @@ public class StoreOnboardingApplicationVersion {
         snapshot.requestFingerprint = fingerprint;
         snapshot.businessRegistrationEvidenceId = evidenceId;
         snapshot.businessRegistrationNumber = request.businessRegistrationNumber();
-        snapshot.businessType = request.businessType();
+        snapshot.businessType = request.compatibilityBusinessType();
         snapshot.name = request.name();
         snapshot.description = request.description();
         snapshot.region = request.region();

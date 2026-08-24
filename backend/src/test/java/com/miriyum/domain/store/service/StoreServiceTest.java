@@ -19,7 +19,6 @@ import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreUpdateRequest;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.GeocodingStatus;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
@@ -701,7 +700,7 @@ class StoreServiceTest {
 
     @Test
     void transactionEligibilityCombinesStoreModes() {
-        Store store = storeOwnedBy(OPERATOR_ID, BusinessType.CAFE, false, false);
+        Store store = storeOwnedBy(OPERATOR_ID, false, false);
         ReflectionTestUtils.setField(store, "id", STORE_ID);
         stubTransactionStoreAndMenu(store, publishedMenu(true, true));
 
@@ -1160,7 +1159,6 @@ class StoreServiceTest {
     private StoreCreateRequest validCreateRequest() {
         return new StoreCreateRequest(
                 "1234567890",
-                BusinessType.CAFE,
                 "미리윰",
                 "",
                 Region.SEOUL,
@@ -1174,19 +1172,17 @@ class StoreServiceTest {
     }
 
     private Store storeOwnedBy(long operatorId) {
-        return storeOwnedBy(operatorId, BusinessType.CAFE, true, true);
+        return storeOwnedBy(operatorId, true, true);
     }
 
     private Store storeOwnedBy(
             long operatorId,
-            BusinessType businessType,
             boolean menuHoldEnabled,
             boolean pickupEnabled
     ) {
         return Store.create(
                 operatorId,
                 "1234567890",
-                businessType,
                 "미리윰",
                 "",
                 Region.SEOUL,

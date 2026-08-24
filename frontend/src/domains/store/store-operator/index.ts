@@ -4,6 +4,7 @@ export { storeErrorMessage } from './model/storeErrors'
 
 export { StoreOperatorHomePage } from './ui/StoreOperatorHomePage'
 export { StoreCreatePage } from './ui/StoreCreatePage'
+export { StoreOnboardingStatusPage } from './ui/StoreOnboardingStatusPage'
 export { StoreInfoPage } from './ui/StoreInfoPage'
 export { OperatingHoursPage } from './ui/OperatingHoursPage'
 export { ReservationTimeSlotsPage } from './ui/ReservationTimeSlotsPage'

@@ -29,6 +29,7 @@ class StoreOnboardingQueryServiceTest {
         StoreOnboardingQueryService service = new StoreOnboardingQueryService(applications);
 
         assertThat(service.getOwn(11L, 41L).applicationId()).isEqualTo("41");
+        assertThat(service.getOwn(11L, 41L).nextAction()).isEqualTo("WAIT");
         assertThatThrownBy(() -> service.getOwn(12L, 41L))
                 .isInstanceOf(ServiceException.class);
     }

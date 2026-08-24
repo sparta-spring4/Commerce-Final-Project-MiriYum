@@ -1,4 +1,5 @@
 import type { components } from '../../../../shared/api/generated/store-search'
+import type { components as OnboardingComponents } from '../../../../shared/api/generated/store-onboarding'
 
 /**
  * 매장 운영자 화면이 쓰는 계약 타입.
@@ -8,10 +9,16 @@ import type { components } from '../../../../shared/api/generated/store-search'
  */
 
 export type ManagedStore = components['schemas']['ManagedStore']
-export type StoreCreateRequest = components['schemas']['StoreCreateRequest']
+export type StoreOnboardingApplicationRequest =
+  OnboardingComponents['schemas']['StoreOnboardingApplicationRequest']
+export type StoreOnboardingApplication =
+  OnboardingComponents['schemas']['StoreOnboardingApplicationData']
+export type StoreOnboardingApplicationStatus =
+  OnboardingComponents['schemas']['StoreOnboardingApplicationStatus']
+export type StoreOnboardingNextAction =
+  OnboardingComponents['schemas']['StoreOnboardingNextAction']
 export type StoreUpdateRequest = components['schemas']['StoreUpdateRequest']
 export type StoreModes = components['schemas']['StoreModes']
-export type BusinessType = components['schemas']['BusinessType']
 export type Region = components['schemas']['Region']
 export type OperationStatus = components['schemas']['OperationStatus']
 export type EditableOperationStatus =
@@ -84,12 +91,6 @@ export const REGION_LABEL: Record<Region, string> = {
   DAEGU: '대구',
   DAEJEON: '대전',
   GWANGJU: '광주',
-}
-
-export const BUSINESS_TYPE_LABEL: Record<BusinessType, string> = {
-  CAFE: '카페',
-  BAKERY: '베이커리',
-  OTHER: '그 외',
 }
 
 export const OPERATION_STATUS_LABEL: Record<OperationStatus, string> = {

@@ -69,6 +69,61 @@ class BackendCiPathFilterTest(unittest.TestCase):
         self.assertIn("backend/build/test-results/${{ matrix.report_directory }}", workflow)
         self.assertIn("backend/test-duration-${{ matrix.shard }}.md", workflow)
 
+    def test_integration_ci_contract_keeps_exactly_three_shards(self):
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        build_script = (ROOT / "backend" / "build.gradle.kts").read_text(encoding="utf-8")
+        command_registry = (ROOT / "backend" / "ai" / "command-registry.md").read_text(encoding="utf-8")
+
+        self.assertEqual(3, workflow.count("task: integrationTestShard"))
+        self.assertNotIn("integrationTestShardD", workflow)
+        self.assertNotIn("integration-shard-d", build_script)
+        self.assertNotIn("integrationTestShardD", build_script)
+        self.assertNotIn("integration-shard-d", command_registry)
+        self.assertNotIn("integrationTestShardD", command_registry)
+
+    def test_integration_test_jvm_disables_default_enabled_database_schedulers(self):
+        build_script = (ROOT / "backend" / "build.gradle.kts").read_text(encoding="utf-8")
+        integration_shard_start = build_script.index("fun registerIntegrationTestShard")
+        integration_test_start = build_script.index("val integrationTest")
+        unit_test_configuration = build_script[:integration_test_start]
+        integration_test_configuration = build_script[integration_test_start:integration_shard_start]
+        integration_shard_configuration = build_script[integration_shard_start:]
+        store_schedule_job = (
+            ROOT / "backend" / "src" / "main" / "java" / "com" / "miriyum"
+            / "domain" / "schedule" / "service" / "StoreScheduleActivationJob.java"
+        ).read_text(encoding="utf-8")
+        regular_closure_job = (
+            ROOT / "backend" / "src" / "main" / "java" / "com" / "miriyum"
+            / "domain" / "schedule" / "closure" / "service" / "RegularClosureActivationJob.java"
+        ).read_text(encoding="utf-8")
+        menu_schedule_worker = (
+            ROOT / "backend" / "src" / "main" / "java" / "com" / "miriyum"
+            / "domain" / "menu" / "service" / "MenuScheduleWorker.java"
+        ).read_text(encoding="utf-8")
+
+        scheduler_gate = (
+            '@ConditionalOnProperty(name = "miriyum.store.schedule.activation-enabled", '
+            'havingValue = "true", matchIfMissing = true)'
+        )
+        menu_scheduler_gate = (
+            '@ConditionalOnProperty(name = "miriyum.menu.schedule.enabled", '
+            'havingValue = "true", matchIfMissing = true)'
+        )
+
+        for property_name in [
+            "miriyum.reservation.hold-expiration.enabled",
+            "miriyum.waiting.compensation.enabled",
+            "miriyum.menu.schedule.enabled",
+            "miriyum.store.schedule.activation-enabled",
+        ]:
+            property_setting = f'systemProperty("{property_name}", "false")'
+            self.assertNotIn(property_setting, unit_test_configuration)
+            self.assertIn(property_setting, integration_test_configuration)
+            self.assertIn(property_setting, integration_shard_configuration)
+        self.assertIn(scheduler_gate, store_schedule_job)
+        self.assertIn(scheduler_gate, regular_closure_job)
+        self.assertIn(menu_scheduler_gate, menu_schedule_worker)
+
     def test_merge_base_diff_ignores_backend_changes_added_only_to_base(self):
         with temporary_git_repository() as repository:
             write_file(repository, "frontend/src/App.tsx", "base")

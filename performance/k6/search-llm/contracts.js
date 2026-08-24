@@ -8,7 +8,33 @@ function success(response) {
   return object('data', value.data)
 }
 
-export function validateIntegratedSearchResponse(response) {
+function optionalStoreIds(name, value) {
+  if (value === undefined) return null
+  if (!Array.isArray(value) || value.length === 0
+    || value.some((storeId) => !Number.isInteger(storeId) || storeId < 1)
+    || new Set(value).size !== value.length) {
+    throw new Error(`${name} is invalid`)
+  }
+  return value
+}
+
+function validateSearchExpectation(expected, minimumItems) {
+  const included = optionalStoreIds('expectedStoreIds', expected.expectedStoreIds)
+  const ordered = optionalStoreIds('expectedOrderedStoreIds', expected.expectedOrderedStoreIds)
+  const excluded = optionalStoreIds('excludedStoreIds', expected.excludedStoreIds)
+  const maximum = expected.maximumItems
+  if (maximum !== undefined
+    && (!Number.isInteger(maximum) || maximum < 0 || maximum < minimumItems)) {
+    throw new Error('maximumItems is invalid')
+  }
+  const positive = new Set([...(included || []), ...(ordered || [])])
+  if (excluded?.some((storeId) => positive.has(storeId))) {
+    throw new Error('search store expectations conflict')
+  }
+  return included !== null || ordered !== null || excluded !== null || maximum !== undefined
+}
+
+export function validateIntegratedSearchResponse(response, expected = {}) {
   const data = success(response)
   if (!Array.isArray(data.items) || !Array.isArray(data.warnings)
     || object('normalizedCondition', data.normalizedCondition) === null
@@ -16,6 +42,32 @@ export function validateIntegratedSearchResponse(response) {
     || !(data.rankingRuleVersion === null || typeof data.rankingRuleVersion === 'string')
     || !(data.nextCursor === null || typeof data.nextCursor === 'string')) {
     throw new Error('integrated search response is invalid')
+  }
+  const storeIds = data.items.map((item) => {
+    object('integrated search item', item)
+    if (!Number.isInteger(item.storeId) || item.storeId < 1) {
+      throw new Error('integrated search item storeId is invalid')
+    }
+    return item.storeId
+  })
+  if (new Set(storeIds).size !== storeIds.length) throw new Error('integrated search stores are duplicated')
+  const included = expected.expectedStoreIds || []
+  if (included.some((storeId) => !storeIds.includes(storeId))) {
+    throw new Error('expected integrated search store is missing')
+  }
+  let previousIndex = -1
+  for (const storeId of expected.expectedOrderedStoreIds || []) {
+    const currentIndex = storeIds.indexOf(storeId)
+    if (currentIndex < 0 || currentIndex <= previousIndex) {
+      throw new Error('expected integrated search store order is invalid')
+    }
+    previousIndex = currentIndex
+  }
+  if ((expected.excludedStoreIds || []).some((storeId) => storeIds.includes(storeId))) {
+    throw new Error('excluded integrated search store is present')
+  }
+  if (expected.maximumItems !== undefined && data.items.length > expected.maximumItems) {
+    throw new Error('search result exceeds fixture maximum')
   }
   return Object.freeze({ itemCount: data.items.length })
 }
@@ -74,6 +126,10 @@ export function validateSearchLlmFixture(fixture) {
         || !Number.isInteger(entry.minimumItems) || entry.minimumItems < 0) {
         throw new Error('search fixture is invalid')
       }
+      const hasQualityExpectation = validateSearchExpectation(entry, entry.minimumItems)
+      if (entry.scenario === 'natural-language' && !hasQualityExpectation) {
+        throw new Error('natural-language quality expectation is required')
+      }
     }
     if (entry.scenario === 'fallback') {
       if (!['disabled', 'timeout'].includes(entry.fallbackMode)
@@ -85,6 +141,7 @@ export function validateSearchLlmFixture(fixture) {
           || !Number.isInteger(entry.minimumItems) || entry.minimumItems < 0)) {
         throw new Error('fallback search fixture is invalid')
       }
+      if (entry.fallbackTarget === 'search') validateSearchExpectation(entry, entry.minimumItems)
       if (entry.fallbackTarget === 'alternative' && (!Number.isInteger(entry.storeId)
         || !Number.isInteger(entry.menuId) || !Number.isInteger(entry.sourceUnitPrice)
         || entry.request === null || typeof entry.request !== 'object' || Array.isArray(entry.request))) {

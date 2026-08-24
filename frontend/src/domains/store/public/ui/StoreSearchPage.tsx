@@ -18,6 +18,7 @@ import {
 import { mapStoreOrdinal, toMapStores } from '../model/mapStores'
 import {
   SORT_OPTIONS,
+  PAGE_SIZE_OPTIONS,
   readFilters,
   reservationConditionState,
   toSearchQuery,
@@ -160,11 +161,12 @@ export function StoreSearchPage() {
                 : '매장을 찾는 중입니다.'}
             </p>
 
-            {/*
-              계약이 허용하는 정렬만 둔다. 시안의 "추천순·별점순·리뷰순"은
-              서버가 지원하지 않는 값이라 400이 되므로 만들지 않는다.
-            */}
-            <label className="store-search__sort">
+            <div className="store-search__view-controls">
+              {/*
+                계약이 허용하는 정렬만 둔다. 시안의 "추천순·별점순·리뷰순"은
+                서버가 지원하지 않는 값이라 400이 되므로 만들지 않는다.
+              */}
+              <label className="store-search__sort">
               <span className="visually-hidden">정렬</span>
               <select
                 value={filters.sort}
@@ -183,9 +185,31 @@ export function StoreSearchPage() {
                 ))}
               </select>
               <Icon name="chevronRight" className="mi-icon--sm" />
-            </label>
+              </label>
 
-            <MapToggle isOpen={isMapOpen} onToggle={setMapOpen} />
+              <label className="store-search__page-size">
+                <span className="visually-hidden">한 페이지 표시 개수</span>
+                <select
+                  value={filters.size}
+                  onChange={(event) =>
+                    applyFilters({
+                      ...filters,
+                      page: 0,
+                      cursor: '',
+                      size: Number(event.target.value) as StoreSearchFilters['size'],
+                    })
+                  }
+                >
+                  {PAGE_SIZE_OPTIONS.map((size) => (
+                    <option key={size} value={size}>
+                      {size}개
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <MapToggle isOpen={isMapOpen} onToggle={setMapOpen} />
+            </div>
           </div>
 
           {/*

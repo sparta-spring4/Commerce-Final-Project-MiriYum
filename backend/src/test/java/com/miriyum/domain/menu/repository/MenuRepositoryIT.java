@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
@@ -84,7 +83,7 @@ class MenuRepositoryIT {
                 StoreOperatorAccount.create("menu-owner@example.com", "hashed", "owner"))
                 .getId();
         Store store = storeRepository.saveAndFlush(Store.create(
-                operatorId, "9876543210", BusinessType.CAFE, "store", "",
+                operatorId, "9876543210", "store", "",
                 Region.SEOUL, "address", "CAFE_BAKERY", Set.of(),
                 true, true, true, "Asia/Seoul",
                 LocalDateTime.of(2026, 7, 31, 9, 0),
@@ -236,7 +235,7 @@ class MenuRepositoryIT {
             boolean menuHoldEnabled
     ) {
         return storeRepository.saveAndFlush(Store.create(
-                operatorId, registrationNumber, BusinessType.CAFE, "store", "",
+                operatorId, registrationNumber, "store", "",
                 Region.SEOUL, "address", "CAFE_BAKERY", Set.of(),
                 reservationEnabled, menuHoldEnabled, true, "Asia/Seoul",
                 LocalDateTime.of(2026, 8, 6, 9, 0),

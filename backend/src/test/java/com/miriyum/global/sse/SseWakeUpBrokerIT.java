@@ -38,7 +38,7 @@ import org.testcontainers.utility.DockerImageName;
 
 @Testcontainers
 @Tag("integration")
-@Tag("integration-shard-d")
+@Tag("integration-shard-a")
 class SseWakeUpBrokerIT {
 
     private static final String PASSWORD = "test-valkey-password";

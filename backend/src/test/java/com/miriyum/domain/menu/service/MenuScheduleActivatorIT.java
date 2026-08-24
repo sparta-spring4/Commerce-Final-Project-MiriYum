@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.store.service.StoreService;
@@ -206,7 +205,7 @@ class MenuScheduleActivatorIT {
         long operatorId = operatorRepository.saveAndFlush(
                 StoreOperatorAccount.create(email, "hashed", "owner")).getId();
         long storeId = storeRepository.saveAndFlush(Store.create(
-                operatorId, businessNumber, BusinessType.CAFE, "store", "",
+                operatorId, businessNumber, "store", "",
                 Region.SEOUL, "address", "CAFE_BAKERY", Set.of(),
                 true, true, true, "Asia/Seoul",
                 LocalDateTime.of(2026, 8, 1, 9, 0),

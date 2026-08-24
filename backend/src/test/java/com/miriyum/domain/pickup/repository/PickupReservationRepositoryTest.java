@@ -207,12 +207,12 @@ class PickupReservationRepositoryTest {
         jdbcTemplate.update("""
                 INSERT INTO stores (
                     store_id, store_operator_account_id, business_registration_number,
-                    business_type, name, description, region, address, store_category_code,
+                    name, description, region, address, store_category_code,
                     verification_status, operation_status, reservation_enabled,
                     menu_hold_enabled, pickup_enabled, time_zone_id,
                     applicant_self_attested_at, required_terms_agreed_at,
                     required_terms_version, created_at, updated_at
-                ) VALUES (?, ?, ?, 'OTHER', ?, '설명', 'SEOUL', '서울', 'ETC',
+                ) VALUES (?, ?, ?, ?, '설명', 'SEOUL', '서울', 'ETC',
                     'APPROVED', 'OPEN', TRUE, TRUE, TRUE, 'Asia/Seoul',
                     NOW(6), NOW(6), 'STORE_ONBOARDING_REQUIRED_TERMS_V1', NOW(6), NOW(6))
                 """, storeId, OPERATOR_ID, businessNumber, name);

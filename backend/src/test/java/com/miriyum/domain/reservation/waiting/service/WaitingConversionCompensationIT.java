@@ -7,7 +7,6 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -202,8 +201,7 @@ class WaitingConversionCompensationIT {
                 StoreOperatorAccount.create("compensation@example.com", "hashed", "owner"))
                 .getId();
         long storeId = stores.saveAndFlush(Store.create(
-                operatorId, "1234567899", BusinessType.CAFE,
-                "Compensation Store", "", Region.SEOUL, "Seoul", "CAFE_BAKERY", Set.of(),
+                operatorId, "1234567899", "Compensation Store", "", Region.SEOUL, "Seoul", "CAFE_BAKERY", Set.of(),
                 true, true, true, "Asia/Seoul", LocalDateTime.of(2026, 8, 1, 9, 0),
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();
         jdbc.update("""

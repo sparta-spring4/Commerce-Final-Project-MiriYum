@@ -264,12 +264,24 @@ Pop-Location
 
 ### Staging
 
-| scenario | 입력 | p50 | p95 | p99 | RPS | expected 4xx | unexpected 4xx | 5xx |
-|---|---|---:|---:|---:|---:|---:|---:|---:|
-| authRefresh | NOT RUN — #357 실행 승인 대기 | — | — | — | — | — | — | — |
-| storeSearch | NOT RUN — #357 실행 승인 대기 | — | — | — | — | — | — | — |
-| reservationCreate | NOT RUN — #357 fixture·실행 승인 대기 | — | — | — | — | — | — | — |
-| notificationHistory | NOT RUN — #357 실행 승인 대기 | — | — | — | — | — | — | — |
+2026-08-22에 [#357](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357)의 승인된 저부하 범위에서 실행했다. backend SHA는 `08fec4392e635b560a3626a9277859c9a38b9bbf`, clean harness SHA는 `eaeff034dc338c1763edf52aeb4ddbca2571c908`, fixture SHA-256은 `4244398fb5962fa97e69f045c6ec0e738c1cff9a8b37b4e3d377988f916beec4`다. 선행 `staging-smoke-20260822-02`는 네 시나리오를 모두 통과했고 unexpected 4xx·5xx·dropped iteration은 0이었다.
+
+각 baseline은 `MAX_VUS=1`, `ARRIVAL_RATE=1 iteration/s`, `DURATION_SECONDS=30`으로 시나리오를 분리해 실행했다. actual RPS는 iteration 입력이 아니라 artifact의 측정 HTTP request rate다.
+
+| run ID | scenario | p50 ms | p95 ms | p99 ms | actual RPS | requests | expected 4xx | unexpected 4xx | 5xx | dropped |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `staging-auth-refresh-baseline-20260822-01` | authRefresh | 83.112 | 141.128 | 143.143 | 2.054962 | 62 | 0 | 0 | 0 | 0 |
+| `staging-auth-refresh-baseline-20260822-02` | authRefresh | 75.113 | 139.177 | 147.435 | 2.055192 | 62 | 0 | 0 | 0 | 0 |
+| `staging-store-search-baseline-20260822-01` | storeSearch | 38.787 | 92.686 | 311.026 | 1.032038 | 31 | 0 | 0 | 0 | 0 |
+| `staging-store-search-baseline-20260822-03` | storeSearch | 28.331 | 31.093 | 31.590 | 1.032359 | 31 | 0 | 0 | 0 | 0 |
+| `staging-reservation-create-baseline-20260822-01` | reservationCreate | 70.580 | 97.345 | 238.719 | 0.993787 | 30 | 0 | 0 | 0 | 0 |
+| `staging-reservation-create-baseline-20260822-02` | reservationCreate | 58.112 | 67.905 | 102.065 | 1.023821 | 31 | 0 | 0 | 0 | 0 |
+| `staging-notification-history-baseline-20260822-01` | notificationHistory | 17.417 | 21.359 | 38.936 | 2.040278 | 62 | 0 | 0 | 0 | 0 |
+| `staging-notification-history-baseline-20260822-02` | notificationHistory | 16.697 | 35.937 | 56.901 | 1.979083 | 60 | 0 | 0 | 0 | 0 |
+
+위 8개 artifact는 모두 threshold를 통과했다. `staging-store-search-baseline-20260822-02`는 직전 실행과 public search 60초 제한 창을 공유해 expected 429 1건이 발생했으므로 기준선에서 제외하고, 새 제한 창의 `-03`으로 대체했다. 이 제외 결과를 성능 수치나 실패 기준선으로 사용하지 않는다.
+
+같은 backend SHA에서 rate-limit 예외 제거 CD와 private health가 성공한 뒤 `staging-rate-limit-recovery-20260822-02`가 새 600초 창의 로그인 5회 성공·session cleanup·6번째 정확한 429와 전체 threshold 성공을 확인했다. recovery artifact SHA-256은 `7556c46334e52543ec449fa58026beae813f371c12af0f6d733008fa3bb077ff`다. 실행 결과와 복구 근거는 [HTTP smoke·429 결과](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357#issuecomment-5378109076), [baseline 결과](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357#issuecomment-5378172247), [예외 제거 결과](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357#issuecomment-5378180537)에 연결한다.
 
 ### #357 실행 하네스 보강
 
@@ -308,7 +320,7 @@ staging 요청을 보내지 않은 상태에서 #429 병합 SHA `b468ccb34a367db
 - setup bearer의 15분 수명보다 짧게 끝내기 위해 duration을 최대 600초로 제한했다. 더 긴 시험은 token 회전 계약을 별도 설계한 뒤 수행한다.
 - raw HTTP output, Token, cookie, cursor, 알림 제목과 자원 ID는 증거로 보관하지 않는다.
 
-다음 local 실행은 `performance/k6/README.md`의 smoke 순서를 따르며, 성공한 `LOCAL_SMOKE_RUN_ID`와 그 run이 생성한 검증 가능한 JSON artifact 없이는 baseline 구성이 거부된다. staging 실행은 [#357](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357)에서 배포 full SHA, clean checkout으로 검증한 harness full SHA, 합성 fixture, 공지 시간, 부하 상한, operator·observer, 저장소에서 리뷰한 trusted hostname, 외부 HTTP→HTTPS·API 도달·Actuator 차단 증거와 private backend health `UP` 증거, `STAGING_APPROVED=true`, `STAGING_HARNESS_SOURCE_VERIFIED=true`, 필요한 split-SHA 승인, #377 예외의 주입·제거 담당자, 성공한 `STAGING_SMOKE_RUN_ID`와 동일 실행 artifact가 모두 있을 때만 수행한다. `reservationCreate`는 별도 fixture 승인 전까지 제외한다. 실행 종료 뒤에는 같은 backend SHA의 복구 배포와 비식별 recovery summary까지 있어야 완료로 기록한다.
+다음 local 실행은 `performance/k6/README.md`의 smoke 순서를 따르며, 성공한 `LOCAL_SMOKE_RUN_ID`와 그 run이 생성한 검증 가능한 JSON artifact 없이는 baseline 구성이 거부된다. 후속 staging 실행도 [#357](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357)에서 검증한 것과 같은 gate를 새 실행의 Issue에서 다시 충족해야 한다. 배포 full SHA, clean checkout으로 검증한 harness full SHA, 합성 fixture, 공지 시간, 부하 상한, operator·observer, 저장소에서 리뷰한 trusted hostname, 외부 HTTP→HTTPS·API 도달·Actuator 차단 증거와 private backend health `UP`, `STAGING_APPROVED=true`, `STAGING_HARNESS_SOURCE_VERIFIED=true`, 필요한 split-SHA 승인, #377 예외의 주입·제거 담당자와 같은 실행의 smoke artifact를 확인한다. `reservationCreate`는 해당 실행의 별도 fixture 승인 없이는 제외하고, 종료 뒤 같은 backend SHA의 복구 배포와 비식별 recovery summary를 기록한다.
 
 ## 후속 이슈 연결
 

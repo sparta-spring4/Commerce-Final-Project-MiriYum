@@ -164,7 +164,7 @@ public class Store extends BaseEntity {
     ) {
         this.storeOperatorAccountId = storeOperatorAccountId;
         this.businessRegistrationNumber = businessRegistrationNumber;
-        this.businessType = businessType;
+        this.businessType = Objects.requireNonNull(businessType, "compatibility business type is required");
         this.name = name;
         this.description = description;
         this.region = region;
@@ -225,6 +225,29 @@ public class Store extends BaseEntity {
         return store;
     }
 
+    public static Store create(
+            long storeOperatorAccountId,
+            String businessRegistrationNumber,
+            String name,
+            String description,
+            Region region,
+            String address,
+            String storeCategoryCode,
+            Set<String> tagCodes,
+            boolean reservationEnabled,
+            boolean menuHoldEnabled,
+            boolean pickupEnabled,
+            String timeZoneId,
+            LocalDateTime onboardingAcceptedAt,
+            String requiredTermsVersion
+    ) {
+        return create(
+                storeOperatorAccountId, businessRegistrationNumber, BusinessType.OTHER,
+                name, description, region, address, storeCategoryCode, tagCodes,
+                reservationEnabled, menuHoldEnabled, pickupEnabled, timeZoneId,
+                onboardingAcceptedAt, requiredTermsVersion);
+    }
+
     /**
      * 주소 검증을 마친 신규 매장을 현재 주소 버전에 결합된 좌표와 함께 생성한다.
      *
@@ -268,6 +291,30 @@ public class Store extends BaseEntity {
                 requiredTermsVersion);
         store.applyVerifiedGeocoding(geocoding);
         return store;
+    }
+
+    public static Store createVerified(
+            long storeOperatorAccountId,
+            String businessRegistrationNumber,
+            String name,
+            String description,
+            Region region,
+            String address,
+            String storeCategoryCode,
+            Set<String> tagCodes,
+            boolean reservationEnabled,
+            boolean menuHoldEnabled,
+            boolean pickupEnabled,
+            String timeZoneId,
+            LocalDateTime onboardingAcceptedAt,
+            String requiredTermsVersion,
+            VerifiedStoreGeocoding geocoding
+    ) {
+        return createVerified(
+                storeOperatorAccountId, businessRegistrationNumber, BusinessType.OTHER,
+                name, description, region, address, storeCategoryCode, tagCodes,
+                reservationEnabled, menuHoldEnabled, pickupEnabled, timeZoneId,
+                onboardingAcceptedAt, requiredTermsVersion, geocoding);
     }
 
     public void update(

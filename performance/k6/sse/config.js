@@ -8,6 +8,9 @@ export const SSE_ENDPOINT_KINDS = Object.freeze([
   'waiting-store-operator',
 ])
 const ENDPOINT_KINDS = new Set(SSE_ENDPOINT_KINDS)
+const RECOVERY_RENDEZVOUS_REPOSITORY = 'sparta-spring4/Commerce-Final-Project-MiriYum'
+const RECOVERY_RENDEZVOUS_MAX_WAIT_SECONDS = 60
+const RECOVERY_RENDEZVOUS_ARM_WINDOW_SECONDS = 125
 
 export function requiredSmokeEndpointKinds(profile, endpointKinds) {
   return profile === 'recovery' ? SSE_ENDPOINT_KINDS : endpointKinds
@@ -68,6 +71,14 @@ function requireUuid(name, rawValue) {
   return value
 }
 
+function requirePositiveDecimal(name, rawValue, maximumDigits) {
+  const value = requireText(name, rawValue)
+  if (!new RegExp(`^[1-9][0-9]{0,${maximumDigits - 1}}$`).test(value)) {
+    throw new Error(`${name} must be a positive decimal identifier`)
+  }
+  return value
+}
+
 export function loadSseConfig(env) {
   const targetEnv = requireText('TARGET_ENV', env.TARGET_ENV)
   const baseUrl = requireText('BASE_URL', env.BASE_URL).replace(/\/+$/, '')
@@ -110,6 +121,11 @@ export function loadSseConfig(env) {
     env.SSE_SLOW_CLIENT_DELAY_SECONDS,
     60,
   )
+  const reconnectSettleSeconds = profile === 'reconnect'
+    ? parsePositiveInt(
+      'SSE_RECONNECT_SETTLE_SECONDS', env.SSE_RECONNECT_SETTLE_SECONDS, 60,
+    )
+    : null
 
   let slowClientConnections = null
   let slowClientIdempotencyKey = null
@@ -119,6 +135,7 @@ export function loadSseConfig(env) {
   let recoveryMaxSeconds = null
   let recoveryTriggerIdempotencyKey = null
   let recoveryCleanupIdempotencyKey = null
+  let recoveryRendezvous = null
   if (profile === 'slow-client') {
     if (endpointKinds.length !== 1 || endpointKinds[0] !== 'waiting-store-operator') {
       throw new Error('slow-client requires only waiting-store-operator')
@@ -170,9 +187,42 @@ export function loadSseConfig(env) {
     if (env.SSE_RECOVERY_EXCLUSIVE_STORE_APPROVED !== 'true') {
       throw new Error('recovery requires SSE_RECOVERY_EXCLUSIVE_STORE_APPROVED=true')
     }
-    recoveryArmDelaySeconds = parsePositiveInt(
-      'SSE_RECOVERY_ARM_DELAY_SECONDS', env.SSE_RECOVERY_ARM_DELAY_SECONDS, 60,
-    )
+    const rendezvousApproved = env.SSE_RECOVERY_RENDEZVOUS_APPROVED === 'true'
+    if (targetEnv === 'staging') {
+      if (!rendezvousApproved) {
+        throw new Error('staging recovery requires Issue rendezvous approval')
+      }
+      if (typeof env.SSE_RECOVERY_ARM_DELAY_SECONDS === 'string'
+        && env.SSE_RECOVERY_ARM_DELAY_SECONDS.trim() !== '') {
+        throw new Error('recovery Issue rendezvous and fixed delay are mutually exclusive')
+      }
+      const repository = requireText(
+        'SSE_RECOVERY_RENDEZVOUS_REPOSITORY',
+        env.SSE_RECOVERY_RENDEZVOUS_REPOSITORY,
+      )
+      if (repository !== RECOVERY_RENDEZVOUS_REPOSITORY) {
+        throw new Error('SSE recovery rendezvous repository is not approved')
+      }
+      recoveryRendezvous = Object.freeze({
+        repository,
+        issue: Number(requirePositiveDecimal(
+          'SSE_RECOVERY_RENDEZVOUS_ISSUE', env.SSE_RECOVERY_RENDEZVOUS_ISSUE, 10,
+        )),
+        runId: requirePositiveDecimal(
+          'SSE_RECOVERY_RENDEZVOUS_RUN_ID', env.SSE_RECOVERY_RENDEZVOUS_RUN_ID, 20,
+        ),
+        rendezvousId: requireUuid(
+          'SSE_RECOVERY_RENDEZVOUS_ID', env.SSE_RECOVERY_RENDEZVOUS_ID,
+        ),
+        maxWaitSeconds: RECOVERY_RENDEZVOUS_MAX_WAIT_SECONDS,
+        armWindowSeconds: RECOVERY_RENDEZVOUS_ARM_WINDOW_SECONDS,
+      })
+    } else {
+      if (rendezvousApproved) throw new Error('recovery Issue rendezvous is staging-only')
+      recoveryArmDelaySeconds = parsePositiveInt(
+        'SSE_RECOVERY_ARM_DELAY_SECONDS', env.SSE_RECOVERY_ARM_DELAY_SECONDS, 60,
+      )
+    }
     recoveryMaxSeconds = parsePositiveInt(
       'SSE_RECOVERY_MAX_SECONDS', env.SSE_RECOVERY_MAX_SECONDS, 60,
     )
@@ -214,6 +264,7 @@ export function loadSseConfig(env) {
     connections,
     connectionsPerAccount,
     holdDurationSeconds,
+    reconnectSettleSeconds,
     slowClientDelaySeconds,
     endpointKinds,
     httpProbeRate,
@@ -226,6 +277,7 @@ export function loadSseConfig(env) {
     recoveryMaxSeconds,
     recoveryTriggerIdempotencyKey,
     recoveryCleanupIdempotencyKey,
+    recoveryRendezvous,
     ...shaEvidence,
   })
 }

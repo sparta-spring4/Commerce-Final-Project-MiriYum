@@ -62,6 +62,23 @@ class StoreCommandFingerprintTest {
     }
 
     @Test
+    @DisplayName("생략된 호환 업종과 명시적인 OTHER는 같은 등록 요청이다")
+    void omittedAndExplicitOtherBusinessTypeHaveSameFingerprint() {
+        StoreCreateRequest omitted = request(List.of("DATE"), true, true);
+        StoreCreateRequest explicitOther = new StoreCreateRequest(
+                omitted.businessRegistrationNumber(), BusinessType.OTHER,
+                omitted.name(), omitted.description(), omitted.region(), omitted.address(),
+                omitted.timeZoneId(), omitted.storeCategoryCode(), omitted.tagCodes(),
+                omitted.modes(), omitted.legalBusinessName(), omitted.representativeName(),
+                omitted.openingDate(), omitted.primaryBusinessCategory(),
+                omitted.primaryBusinessItem(), omitted.applicantSelfAttested(),
+                omitted.requiredTermsAgreed());
+
+        assertThat(StoreCommandFingerprint.forCreate(omitted))
+                .isEqualTo(StoreCommandFingerprint.forCreate(explicitOther));
+    }
+
+    @Test
     @DisplayName("대상 매장 ID가 다르면 수정 fingerprint가 달라진다")
     void targetStoreIdChangesUpdateFingerprint() {
         StoreUpdateRequest request = updateName("새 이름");
@@ -101,7 +118,6 @@ class StoreCommandFingerprintTest {
     ) {
         return new StoreCreateRequest(
                 "1234567890",
-                BusinessType.CAFE,
                 "미리윰",
                 "",
                 Region.SEOUL,

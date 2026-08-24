@@ -33,7 +33,6 @@ import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
@@ -142,8 +141,7 @@ class MenuHoldRuntimeIT {
             long operatorId = operatorRepository.saveAndFlush(StoreOperatorAccount.create(
                     "hold-owner-" + sequence + "@example.com", "hashed", "owner")).getId();
             Store store = storeRepository.saveAndFlush(Store.create(
-                    operatorId, String.format("%010d", 500000 + sequence), BusinessType.CAFE,
-                    "store", "", Region.SEOUL, "address", "CAFE_BAKERY", Set.of(),
+                    operatorId, String.format("%010d", 500000 + sequence), "store", "", Region.SEOUL, "address", "CAFE_BAKERY", Set.of(),
                     true, true, true, "Asia/Seoul", LocalDateTime.of(2026, 8, 1, 9, 0),
                     "STORE_ONBOARDING_REQUIRED_TERMS_V1"));
             storeId = store.getId();

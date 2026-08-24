@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.menu.dto.storeoperator.AllergenDisclosureRequest;
@@ -123,7 +122,7 @@ class MenuCommandServiceIT {
                 StoreOperatorAccount.create("command-owner@example.com", "hashed", "owner"))
                 .getId();
         long storeId = storeRepository.saveAndFlush(Store.create(
-                operatorId, "8765432109", BusinessType.CAFE, "store", "",
+                operatorId, "8765432109", "store", "",
                 Region.SEOUL, "address", "CAFE_BAKERY", Set.of(),
                 true, true, true, "Asia/Seoul",
                 LocalDateTime.of(2026, 7, 31, 9, 0),
@@ -180,7 +179,7 @@ class MenuCommandServiceIT {
                 StoreOperatorAccount.create("replay-owner@example.com", "hashed", "owner"))
                 .getId();
         long storeId = storeRepository.saveAndFlush(Store.create(
-                operatorId, "1122334455", BusinessType.CAFE, "store", "",
+                operatorId, "1122334455", "store", "",
                 Region.SEOUL, "address", "CAFE_BAKERY", Set.of(),
                 true, true, true, "Asia/Seoul",
                 LocalDateTime.of(2026, 8, 1, 9, 0),
@@ -210,7 +209,7 @@ class MenuCommandServiceIT {
                 StoreOperatorAccount.create("audit-owner@example.com", "hashed", "owner"))
                 .getId();
         long storeId = storeRepository.saveAndFlush(Store.create(
-                operatorId, "9988776655", BusinessType.CAFE, "store", "",
+                operatorId, "9988776655", "store", "",
                 Region.SEOUL, "address", "CAFE_BAKERY", Set.of(),
                 true, true, true, "Asia/Seoul",
                 LocalDateTime.of(2026, 8, 1, 9, 0),
@@ -277,7 +276,7 @@ class MenuCommandServiceIT {
                 StoreOperatorAccount.create("auto-remove@example.com", "hashed", "owner"))
                 .getId();
         long storeId = storeRepository.saveAndFlush(Store.create(
-                operatorId, "4455667788", BusinessType.CAFE, "store", "",
+                operatorId, "4455667788", "store", "",
                 Region.SEOUL, "address", "CAFE_BAKERY", Set.of(),
                 true, true, true, "Asia/Seoul",
                 LocalDateTime.of(2026, 8, 13, 9, 0),

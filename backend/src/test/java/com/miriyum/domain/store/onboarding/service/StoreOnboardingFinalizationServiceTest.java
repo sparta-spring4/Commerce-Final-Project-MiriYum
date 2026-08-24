@@ -29,6 +29,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import tools.jackson.databind.ObjectMapper;
@@ -53,6 +54,7 @@ class StoreOnboardingFinalizationServiceTest {
                 41L, 1L, null, "f".repeat(64), java.util.UUID.randomUUID().toString(),
                 request(), geocoding(), false, "BUSINESS_REGISTRATION_AUTO_V1",
                 "PLATFORM_REVIEW_V1", NOW, new ObjectMapper());
+        assertThat(version.getBusinessType()).isEqualTo(BusinessType.OTHER);
         StoreOnboardingAutomaticCheckJob job = StoreOnboardingAutomaticCheckJob.pending(
                 41L, 1L, NOW, NOW);
         long token = job.claim("worker", NOW, NOW.plusSeconds(30));
@@ -75,11 +77,14 @@ class StoreOnboardingFinalizationServiceTest {
                 41L, 1L, StoreOnboardingFinalizationService.ApprovalMode.AUTO)).isEqualTo(77L);
         assertThat(application.getStatus()).isEqualTo(AUTO_APPROVED);
         assertThat(application.getResultingStoreId()).isEqualTo(77L);
+        ArgumentCaptor<Store> savedStore = ArgumentCaptor.forClass(Store.class);
+        org.mockito.BDDMockito.then(stores).should().saveAndFlush(savedStore.capture());
+        assertThat(savedStore.getValue().getBusinessType()).isEqualTo(BusinessType.OTHER);
     }
 
     private static StoreCreateRequest request() {
         return new StoreCreateRequest(
-                "1234567890", BusinessType.CAFE, "미리윰", "", Region.SEOUL,
+                "1234567890", "미리윰", "", Region.SEOUL,
                 "서울 중구 세종대로 110", "Asia/Seoul", "CAFE_BAKERY", List.of("DATE"),
                 new StoreModesRequest(true, true, true), "미리윰 주식회사", "김대표",
                 LocalDate.of(2020, 1, 1), "음식점업", "카페", true, true);

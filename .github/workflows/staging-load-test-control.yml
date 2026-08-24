@@ -19,8 +19,13 @@ on:
         description: "Existing immutable 40-character Git SHA image tag to redeploy"
         required: true
         type: string
-      source_ip:
-        description: "Current public IPv4 for enable-load-test only"
+      rendezvous_issue:
+        description: "Issue number for interrupt-valkey rendezvous only"
+        required: false
+        default: ""
+        type: string
+      rendezvous_id:
+        description: "One-time UUID for interrupt-valkey rendezvous only"
         required: false
         default: ""
         type: string
@@ -30,6 +35,7 @@ permissions:
   contents: read
   deployments: write
   id-token: write
+  issues: write
 
 concurrency:
   group: staging-load-test-control
@@ -43,16 +49,18 @@ jobs:
     steps:
       - name: Checkout trusted validation revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Validate fixed action, immutable SHA, and public IPv4
+      - name: Validate fixed action and immutable SHA
         env:
           ACTION: ${{ inputs.action }}
           IMAGE_TAG: ${{ inputs.image_tag }}
-          SOURCE_IP: ${{ inputs.source_ip }}
+          RENDEZVOUS_ISSUE: ${{ inputs.rendezvous_issue }}
+          RENDEZVOUS_ID: ${{ inputs.rendezvous_id }}
         run: |
           node - <<'NODE'
           const action = process.env.ACTION || '';
           const imageTag = process.env.IMAGE_TAG || '';
-          const sourceIp = process.env.SOURCE_IP || '';
+          const rendezvousIssue = process.env.RENDEZVOUS_ISSUE || '';
+          const rendezvousId = (process.env.RENDEZVOUS_ID || '').toLowerCase();
           const supportedActions = new Set([
             'enable-load-test',
             'disable-load-test',
@@ -72,16 +80,13 @@ jobs:
           if (!/^[0-9a-f]{40}$/.test(imageTag)) {
             throw new Error('Invalid immutable image tag. A lowercase 40-character Git SHA is required.');
           }
-          if (action !== 'enable-load-test') {
-            if (sourceIp !== '') {
-              throw new Error('source_ip is accepted only for enable-load-test.');
+          if (action === 'interrupt-valkey') {
+            if (!/^[1-9][0-9]{0,9}$/.test(rendezvousIssue)
+                || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(rendezvousId)) {
+              throw new Error('interrupt-valkey requires a positive rendezvous Issue and standard UUID.');
             }
-            process.exit(0);
-          }
-
-          const { spawnSync } = require('node:child_process');
-          if (spawnSync('node', ['scripts/validate-staging-load-test-source-ip.js', sourceIp]).status !== 0) {
-            throw new Error('Invalid staging load-test source IP. Use one public IPv4 address.');
+          } else if (rendezvousIssue !== '' || rendezvousId !== '') {
+            throw new Error('Rendezvous inputs are required only for interrupt-valkey.');
           }
           NODE
 
@@ -93,7 +98,7 @@ jobs:
     with:
       image_tag: ${{ inputs.image_tag }}
       rate_limit_exception: ${{ inputs.action == 'enable-load-test' && 'enable' || inputs.action == 'disable-load-test' && 'disable' || inputs.action == 'safe-recovery' && 'disable' || 'preserve' }}
-      load_test_source_ip: ${{ inputs.source_ip }}
+      load_test_source_ip: ""
       runtime_recovery_mode: ${{ inputs.action == 'safe-recovery' && 'safe-disable' || 'preserve' }}
       runtime_config_mode: ${{ inputs.action == 'enable-sse' && 'enable' || inputs.action == 'disable-sse' && 'disable' || 'preserve' }}
     secrets: inherit
@@ -106,6 +111,8 @@ jobs:
     with:
       action: ${{ inputs.action == 'interrupt-valkey' && 'interrupt' || 'recover' }}
       image_tag: ${{ inputs.image_tag }}
+      rendezvous_issue: ${{ inputs.rendezvous_issue }}
+      rendezvous_id: ${{ inputs.rendezvous_id }}
     secrets: inherit
 
   disable-after-failed-enable:

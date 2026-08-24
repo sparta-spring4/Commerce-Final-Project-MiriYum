@@ -35,6 +35,14 @@ const METADATA = {
 
 const SUMMARY_INPUT = {
   metrics: {
+    owned_http_baseline: {
+      type: 'trend',
+      values: { avg: 12, min: 8, med: 11, max: 19, 'p(50)': 11, 'p(95)': 18, 'p(99)': 19 },
+    },
+    owned_http_duration: {
+      type: 'trend',
+      values: { avg: 14, min: 9, med: 12, max: 102.23, 'p(50)': 12, 'p(95)': 20, 'p(99)': 80 },
+    },
     'sse_first_event{phase:measured,profile:smoke,audience:consumer,endpoint_kind:notification-consumer}': {
       type: 'trend',
       values: { avg: 12.5, min: 10, med: 12, max: 15, 'p(50)': 12, 'p(95)': 14, 'p(99)': 15 },
@@ -76,6 +84,16 @@ const SLOW_METADATA = {
     slowClientDelaySeconds: 40,
     slowClientMaxCleanupSeconds: 60,
     companionMinLifetimeSeconds: 85,
+  },
+}
+
+const RECONNECT_METADATA = {
+  ...METADATA,
+  profile: 'reconnect',
+  runId: 'safe-reconnect-run',
+  limits: {
+    ...METADATA.limits,
+    reconnectSettleSeconds: 6,
   },
 }
 
@@ -122,6 +140,28 @@ const RECOVERY_SUMMARY_INPUT = {
     'sse_recovery_cleanup_successful{phase:cleanup,profile:recovery,traffic:cleanup}': {
       type: 'counter', values: { count: 1, rate: 1 }, thresholds: { 'count==1': { ok: true } },
     },
+    'sse_recovery_trigger_list_failures{phase:measured,profile:recovery,traffic:trigger}': {
+      type: 'counter', values: { count: 1, rate: 1 },
+    },
+    'sse_recovery_trigger_fixture_failures{phase:measured,profile:recovery,traffic:trigger}': {
+      type: 'counter', values: { count: 2, rate: 2 },
+    },
+    'sse_recovery_trigger_call_failures{phase:measured,profile:recovery,traffic:trigger}': {
+      type: 'counter', values: { count: 3, rate: 3 },
+    },
+    'sse_recovery_trigger_response_failures{phase:measured,profile:recovery,traffic:trigger}': {
+      type: 'counter', values: { count: 4, rate: 4 },
+    },
+  },
+}
+
+const STAGING_RECOVERY_METADATA = {
+  ...RECOVERY_METADATA,
+  targetEnv: 'staging',
+  runId: 'safe-staging-recovery-run',
+  limits: {
+    ...RECOVERY_METADATA.limits,
+    recoveryArmDelaySeconds: null,
   },
 }
 
@@ -138,6 +178,9 @@ export default function () {
   const rendered = renderSafeSseSummary(SUMMARY_INPUT, METADATA)
   const parsed = JSON.parse(rendered.json)
   const combined = `${rendered.stdout}\n${rendered.json}\n${rendered.markdown}`
+  const reconnectParsed = JSON.parse(
+    renderSafeSseSummary(SUMMARY_INPUT, RECONNECT_METADATA).json,
+  )
 
   const proof = JSON.parse(rendered.json)
   const validated = validateSseSmokeProof(proof, {
@@ -154,6 +197,26 @@ export default function () {
   })
   const recoveryRendered = renderSafeSseSummary(RECOVERY_SUMMARY_INPUT, RECOVERY_METADATA)
   const recoveryParsed = JSON.parse(recoveryRendered.json)
+  let stagingRecoveryParsed = null
+  const stagingRecoveryError = message(() => {
+    stagingRecoveryParsed = JSON.parse(
+      renderSafeSseSummary(RECOVERY_SUMMARY_INPUT, STAGING_RECOVERY_METADATA).json,
+    )
+  })
+  const stagingFixedDelayError = message(() => renderSafeSseSummary(
+    RECOVERY_SUMMARY_INPUT,
+    {
+      ...STAGING_RECOVERY_METADATA,
+      limits: { ...STAGING_RECOVERY_METADATA.limits, recoveryArmDelaySeconds: 15 },
+    },
+  ))
+  const localNullDelayError = message(() => renderSafeSseSummary(
+    RECOVERY_SUMMARY_INPUT,
+    {
+      ...RECOVERY_METADATA,
+      limits: { ...RECOVERY_METADATA.limits, recoveryArmDelaySeconds: null },
+    },
+  ))
 
   check(null, {
     'summary keeps only approved run evidence': () =>
@@ -176,6 +239,15 @@ export default function () {
       parsed.limits.connections === 1
       && parsed.limits.holdDurationSeconds === 5
       && parsed.runMetrics.droppedIterations.count === 0,
+    'reconnect summary preserves the bounded registry settle window': () =>
+      reconnectParsed.limits.reconnectSettleSeconds === 6,
+    'summary keeps safe run-wide owned HTTP timing aggregates': () =>
+      parsed.runMetrics.ownedHttpBaseline.max === 19
+      && parsed.runMetrics.ownedHttpBaseline.p95 === 18
+      && parsed.runMetrics.ownedHttpDuration.max === 102.23
+      && parsed.runMetrics.ownedHttpDuration.p95 === 20
+      && rendered.stdout.includes('owned HTTP baseline p95/max ms: 18 / 19')
+      && rendered.stdout.includes('owned HTTP measured p95/max ms: 20 / 102.23'),
     'slow summary preserves only bounded cleanup and companion evidence': () =>
       slowError === null
       && slowParsed.limits.slowClientDelaySeconds === 40
@@ -192,6 +264,23 @@ export default function () {
       && recoveryRendered.stdout.includes('recovery max ms: 2100')
       && recoveryRendered.stdout.includes('HTTP verified: 1')
       && recoveryRendered.stdout.includes('cleanup successful: 1'),
+    'staging rendezvous recovery summary preserves a null fixed arm delay': () =>
+      stagingRecoveryError === null
+      && stagingRecoveryParsed.targetEnv === 'staging'
+      && stagingRecoveryParsed.limits.recoveryArmDelaySeconds === null
+      && stagingRecoveryParsed.limits.recoveryMaxSeconds === 6,
+    'recovery summary rejects arm delay metadata from the wrong environment contract': () =>
+      stagingFixedDelayError === 'recoveryArmDelaySeconds is invalid'
+      && localNullDelayError === 'recoveryArmDelaySeconds is invalid',
+    'recovery summary preserves only fixed trigger failure aggregates': () =>
+      recoveryParsed.runMetrics.recoveryTriggerListFailures.count === 1
+      && recoveryParsed.runMetrics.recoveryTriggerFixtureFailures.count === 2
+      && recoveryParsed.runMetrics.recoveryTriggerCallFailures.count === 3
+      && recoveryParsed.runMetrics.recoveryTriggerResponseFailures.count === 4
+      && recoveryRendered.stdout.includes('trigger list failures: 1')
+      && recoveryRendered.stdout.includes('trigger fixture failures: 2')
+      && recoveryRendered.stdout.includes('trigger call failures: 3')
+      && recoveryRendered.stdout.includes('trigger response failures: 4'),
     'summary omits unknown metadata metrics and identifier sentinels': () =>
       !combined.includes('forbidden-token')
       && !combined.includes('forbidden-cursor')

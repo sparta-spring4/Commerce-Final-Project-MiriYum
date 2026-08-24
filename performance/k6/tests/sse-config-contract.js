@@ -21,6 +21,7 @@ function validEnv(overrides = {}) {
     SSE_CONNECTIONS: '3',
     SSE_CONNECTIONS_PER_ACCOUNT: '2',
     SSE_HOLD_DURATION_SECONDS: '30',
+    SSE_RECONNECT_SETTLE_SECONDS: '6',
     SSE_SLOW_CLIENT_DELAY_SECONDS: '2',
     SSE_SLOW_CLIENT_MAX_CLEANUP_SECONDS: '60',
     SSE_COMPANION_MIN_LIFETIME_SECONDS: '85',
@@ -75,6 +76,32 @@ export default function () {
       })))
       return message !== null && message.includes('SSE_SMOKE_PROOF_PATH')
     },
+    'reconnect requires a bounded registry settle window': () => {
+      const config = loadSseConfig(validEnv({
+        SSE_PROFILE: 'reconnect',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+      }))
+      const missing = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'reconnect',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_RECONNECT_SETTLE_SECONDS: '',
+      })))
+      const excessive = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'reconnect',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_RECONNECT_SETTLE_SECONDS: '61',
+      })))
+      return config.reconnectSettleSeconds === 6
+        && missing !== null && missing.includes('SSE_RECONNECT_SETTLE_SECONDS')
+        && excessive !== null && excessive.includes('SSE_RECONNECT_SETTLE_SECONDS')
+    },
+    'reconnect settle input is isolated from other profiles': () => {
+      const config = loadSseConfig(validEnv({
+        SSE_PROFILE: 'smoke',
+        SSE_RECONNECT_SETTLE_SECONDS: '',
+      }))
+      return config.reconnectSettleSeconds === null
+    },
     'all SSE profiles are accepted with their required evidence': () => {
       const profiles = ['smoke', 'reconnect', 'steady', 'slow-client', 'capacity', 'recovery']
       return profiles.every((profile) => {
@@ -123,6 +150,74 @@ export default function () {
         && config.recoveryArmDelaySeconds === 15
         && config.recoveryMaxSeconds === 6
         && config.recoveryTriggerIdempotencyKey !== config.recoveryCleanupIdempotencyKey
+    },
+    'staging recovery requires an explicitly scoped Issue rendezvous': () => {
+      const config = loadSseConfig(validEnv({
+        TARGET_ENV: 'staging',
+        BASE_URL: 'https://staging-api.miriyum.click',
+        ALLOWED_HOSTS: 'staging-api.miriyum.click',
+        STAGING_APPROVED: 'true',
+        STAGING_HARNESS_SOURCE_VERIFIED: 'true',
+        SSE_PROFILE: 'recovery',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_CONNECTIONS: '1',
+        SSE_ENDPOINT_KINDS: 'waiting-store-operator',
+        SSE_RECOVERY_ARM_DELAY_SECONDS: '',
+        SSE_RECOVERY_MAX_SECONDS: '6',
+        SSE_RECOVERY_TRIGGER_APPROVED: 'true',
+        SSE_RECOVERY_EXCLUSIVE_STORE_APPROVED: 'true',
+        SSE_RECOVERY_TRIGGER_IDEMPOTENCY_KEY: '123e4567-e89b-12d3-a456-426614174000',
+        SSE_RECOVERY_CLEANUP_IDEMPOTENCY_KEY: '223e4567-e89b-12d3-a456-426614174000',
+        SSE_RECOVERY_RENDEZVOUS_APPROVED: 'true',
+        SSE_RECOVERY_RENDEZVOUS_REPOSITORY: 'sparta-spring4/Commerce-Final-Project-MiriYum',
+        SSE_RECOVERY_RENDEZVOUS_ISSUE: '357',
+        SSE_RECOVERY_RENDEZVOUS_RUN_ID: '32623080912',
+        SSE_RECOVERY_RENDEZVOUS_ID: '323e4567-e89b-12d3-a456-426614174000',
+      }))
+      return config.recoveryArmDelaySeconds === null
+        && config.recoveryRendezvous.repository === 'sparta-spring4/Commerce-Final-Project-MiriYum'
+        && config.recoveryRendezvous.issue === 357
+        && config.recoveryRendezvous.runId === '32623080912'
+        && config.recoveryRendezvous.maxWaitSeconds === 60
+        && !JSON.stringify(config).includes('Authorization')
+    },
+    'recovery rendezvous is staging-only and fixed-delay exclusive': () => {
+      const localRendezvous = errorMessage(() => loadSseConfig(validEnv({
+        SSE_PROFILE: 'recovery',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_CONNECTIONS: '1',
+        SSE_ENDPOINT_KINDS: 'waiting-store-operator',
+        SSE_RECOVERY_ARM_DELAY_SECONDS: '',
+        SSE_RECOVERY_MAX_SECONDS: '6',
+        SSE_RECOVERY_TRIGGER_APPROVED: 'true',
+        SSE_RECOVERY_EXCLUSIVE_STORE_APPROVED: 'true',
+        SSE_RECOVERY_TRIGGER_IDEMPOTENCY_KEY: '123e4567-e89b-12d3-a456-426614174000',
+        SSE_RECOVERY_CLEANUP_IDEMPOTENCY_KEY: '223e4567-e89b-12d3-a456-426614174000',
+        SSE_RECOVERY_RENDEZVOUS_APPROVED: 'true',
+        SSE_RECOVERY_RENDEZVOUS_REPOSITORY: 'sparta-spring4/Commerce-Final-Project-MiriYum',
+        SSE_RECOVERY_RENDEZVOUS_ISSUE: '357',
+        SSE_RECOVERY_RENDEZVOUS_RUN_ID: '32623080912',
+        SSE_RECOVERY_RENDEZVOUS_ID: '323e4567-e89b-12d3-a456-426614174000',
+      })))
+      const stagingWithoutRendezvous = errorMessage(() => loadSseConfig(validEnv({
+        TARGET_ENV: 'staging',
+        BASE_URL: 'https://staging-api.miriyum.click',
+        ALLOWED_HOSTS: 'staging-api.miriyum.click',
+        STAGING_APPROVED: 'true',
+        STAGING_HARNESS_SOURCE_VERIFIED: 'true',
+        SSE_PROFILE: 'recovery',
+        SSE_SMOKE_PROOF_PATH: '/results/sse-smoke.json',
+        SSE_CONNECTIONS: '1',
+        SSE_ENDPOINT_KINDS: 'waiting-store-operator',
+        SSE_RECOVERY_ARM_DELAY_SECONDS: '15',
+        SSE_RECOVERY_MAX_SECONDS: '6',
+        SSE_RECOVERY_TRIGGER_APPROVED: 'true',
+        SSE_RECOVERY_EXCLUSIVE_STORE_APPROVED: 'true',
+        SSE_RECOVERY_TRIGGER_IDEMPOTENCY_KEY: '123e4567-e89b-12d3-a456-426614174000',
+        SSE_RECOVERY_CLEANUP_IDEMPOTENCY_KEY: '223e4567-e89b-12d3-a456-426614174000',
+      })))
+      return localRendezvous === 'recovery Issue rendezvous is staging-only'
+        && stagingWithoutRendezvous === 'staging recovery requires Issue rendezvous approval'
     },
     'recovery rejects a store scope with another possible Waiting writer': () => {
       const message = errorMessage(() => loadSseConfig(validEnv({

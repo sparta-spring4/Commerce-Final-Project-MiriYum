@@ -115,8 +115,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.test_scope == 'full'
     runs-on: ubuntu-24.04
-    # 4-shard 구조는 유지한다. Testcontainers 기동 시간과 runner 편차를 고려해
-    # 모든 shard에 동일한 40분 상한을 적용한다.
+    # GitHub-hosted runner 세 개에서 대기 없이 동시에 시작하도록 통합 테스트를
+    # 실측 duration 기준의 세 shard로 재분배한다.
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -131,9 +131,6 @@ jobs:
           - shard: c
             task: integrationTestShardC
             report_directory: integrationTestShardC
-          - shard: d
-            task: integrationTestShardD
-            report_directory: integrationTestShardD
     defaults:
       run:
         working-directory: backend

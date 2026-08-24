@@ -39,6 +39,15 @@ const RUN_METRICS = Object.freeze({
   dropped_iterations: ['droppedIterations', ['count', 'rate']],
   sse_recovery_http_verified: ['recoveryHttpVerified', ['count', 'rate']],
   sse_recovery_cleanup_successful: ['recoveryCleanupSuccessful', ['count', 'rate']],
+  sse_recovery_trigger_list_failures: ['recoveryTriggerListFailures', ['count', 'rate']],
+  sse_recovery_trigger_fixture_failures: ['recoveryTriggerFixtureFailures', ['count', 'rate']],
+  sse_recovery_trigger_call_failures: ['recoveryTriggerCallFailures', ['count', 'rate']],
+  sse_recovery_trigger_response_failures: ['recoveryTriggerResponseFailures', ['count', 'rate']],
+})
+
+const RUN_AGGREGATE_METRICS = Object.freeze({
+  owned_http_baseline: ['ownedHttpBaseline', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
+  owned_http_duration: ['ownedHttpDuration', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
 })
 
 const VALUE_NAMES = Object.freeze({
@@ -104,8 +113,14 @@ function safeMetadata(metadata) {
   )
   let slowClientMaxCleanupSeconds = null
   let companionMinLifetimeSeconds = null
+  let reconnectSettleSeconds = null
   let recoveryArmDelaySeconds = null
   let recoveryMaxSeconds = null
+  if (profile === 'reconnect') {
+    reconnectSettleSeconds = requirePositiveInt(
+      'reconnectSettleSeconds', limits.reconnectSettleSeconds, 60,
+    )
+  }
   if (profile === 'slow-client') {
     slowClientMaxCleanupSeconds = requirePositiveInt(
       'slowClientMaxCleanupSeconds', limits.slowClientMaxCleanupSeconds, 600,
@@ -121,9 +136,15 @@ function safeMetadata(metadata) {
     }
   }
   if (profile === 'recovery') {
-    recoveryArmDelaySeconds = requirePositiveInt(
-      'recoveryArmDelaySeconds', limits.recoveryArmDelaySeconds, 60,
-    )
+    if (targetEnv === 'staging') {
+      if (limits.recoveryArmDelaySeconds !== null) {
+        throw new Error('recoveryArmDelaySeconds is invalid')
+      }
+    } else {
+      recoveryArmDelaySeconds = requirePositiveInt(
+        'recoveryArmDelaySeconds', limits.recoveryArmDelaySeconds, 60,
+      )
+    }
     recoveryMaxSeconds = requirePositiveInt(
       'recoveryMaxSeconds', limits.recoveryMaxSeconds, 60,
     )
@@ -154,6 +175,7 @@ function safeMetadata(metadata) {
         'connectionsPerAccount', limits.connectionsPerAccount, 7,
       ),
       holdDurationSeconds,
+      reconnectSettleSeconds,
       slowClientDelaySeconds,
       slowClientMaxCleanupSeconds,
       companionMinLifetimeSeconds,
@@ -180,6 +202,14 @@ function collectMetrics(data, metadata) {
   const runMetrics = {}
   const metrics = data && data.metrics ? data.metrics : {}
   for (const [name, metric] of Object.entries(metrics)) {
+    const runAggregateContract = RUN_AGGREGATE_METRICS[name]
+    if (runAggregateContract !== undefined && metric !== null && typeof metric === 'object') {
+      runMetrics[runAggregateContract[0]] = copyMetricValues(
+        metric.values,
+        runAggregateContract[1],
+      )
+      continue
+    }
     const parsed = parseMetricName(name)
     if (parsed === null
       || !['measured', 'cleanup'].includes(parsed.tags.phase)
@@ -224,6 +254,15 @@ function renderMarkdown(summary) {
     const metrics = summary.metrics[endpointKind] || {}
     lines.push(`| ${endpointKind} | ${metrics.firstEvent?.p95 ?? '-'} | ${metrics.connectionDuration?.p95 ?? '-'} | ${metrics.slowCleanupDuration?.max ?? '-'} | ${metrics.companionLifetime?.min ?? '-'} | ${metrics.successfulConnections?.count ?? 0} | ${metrics.rejectedConnections?.count ?? 0} | ${metrics.recoverySuccessful?.count ?? 0} | ${metrics.unexpected4xx?.count ?? 0} | ${metrics.server5xx?.count ?? 0} |`)
   }
+  const baseline = summary.runMetrics.ownedHttpBaseline
+  const measured = summary.runMetrics.ownedHttpDuration
+  if (baseline !== undefined || measured !== undefined) {
+    lines.push(
+      '',
+      `- owned HTTP baseline p95/max ms: ${baseline?.p95 ?? '-'} / ${baseline?.max ?? '-'}`,
+      `- owned HTTP measured p95/max ms: ${measured?.p95 ?? '-'} / ${measured?.max ?? '-'}`,
+    )
+  }
   if (summary.profile === 'recovery') {
     const recovery = summary.metrics['waiting-store-operator']?.recoveryDuration
     lines.push(
@@ -231,6 +270,10 @@ function renderMarkdown(summary) {
       `- recovery max ms: ${recovery?.max ?? '-'}`,
       `- HTTP verified: ${summary.runMetrics.recoveryHttpVerified?.count ?? 0}`,
       `- cleanup successful: ${summary.runMetrics.recoveryCleanupSuccessful?.count ?? 0}`,
+      `- trigger list failures: ${summary.runMetrics.recoveryTriggerListFailures?.count ?? 0}`,
+      `- trigger fixture failures: ${summary.runMetrics.recoveryTriggerFixtureFailures?.count ?? 0}`,
+      `- trigger call failures: ${summary.runMetrics.recoveryTriggerCallFailures?.count ?? 0}`,
+      `- trigger response failures: ${summary.runMetrics.recoveryTriggerResponseFailures?.count ?? 0}`,
     )
   }
   return `${lines.join('\n')}\n`
