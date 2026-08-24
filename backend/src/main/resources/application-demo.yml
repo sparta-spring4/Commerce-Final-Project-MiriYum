@@ -1,0 +1,4 @@
+miriyum:
+  demo:
+    map-stores:
+      enabled: false
