@@ -134,9 +134,9 @@ export function prepareSseSession({
   return accessToken
 }
 
-function emitMetric(metrics, name, value, tags) {
+function emitMetric(metrics, name, value, tags, diagnostic = null) {
   const recorder = metrics[name]
-  if (typeof recorder === 'function') recorder(value, tags)
+  if (typeof recorder === 'function') recorder(value, tags, diagnostic)
 }
 
 function streamTags(tags) {
@@ -255,6 +255,20 @@ function statusClassification(status) {
   return null
 }
 
+function unexpected4xxDiagnostic(status, classification, tags, connectionStage) {
+  if (classification !== 'unauthorized' && classification !== 'unexpected_client_error') {
+    return null
+  }
+  const statusBucket = [400, 401, 403].includes(status) ? `${status}` : 'other-4xx'
+  return Object.freeze({
+    classification,
+    statusBucket,
+    connectionStage,
+    endpointKind: tags.endpoint_kind,
+    observedAtUtc: new Date().toISOString(),
+  })
+}
+
 export function openChangedStream({
   transport,
   url,
@@ -264,6 +278,7 @@ export function openChangedStream({
   behavior,
   metrics = {},
   tags = {},
+  connectionStage = 'single',
 }) {
   if (transport === null || typeof transport?.open !== 'function') {
     throw new Error('SSE transport.open is required')
@@ -271,6 +286,9 @@ export function openChangedStream({
   const streamUrl = requireText('SSE url', url)
   const token = requireText('SSE accessToken', accessToken)
   const selectedBehavior = validateBehavior(behavior)
+  if (!['single', 'initial', 'reconnect'].includes(connectionStage)) {
+    throw new Error('SSE connection stage is invalid')
+  }
   if (lastEventId !== null
     && (typeof lastEventId !== 'string'
       || !/^[A-Za-z0-9_-]{1,512}$/.test(lastEventId))) {
@@ -401,7 +419,15 @@ export function openChangedStream({
               ? 'success'
               : 'missing_event')
   }
-  emitMetric(metrics, 'connectionResult', classification, selectedTags)
+  emitMetric(
+    metrics,
+    'connectionResult',
+    classification,
+    selectedTags,
+    unexpected4xxDiagnostic(
+      response?.status, classification, selectedTags, connectionStage,
+    ),
+  )
 
   return Object.freeze({
     classification,
