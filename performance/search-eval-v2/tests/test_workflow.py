@@ -12,6 +12,7 @@ from miriyum_search_eval.cli import (
     ISSUE_616_MOST_SPECIFIC,
     PRE_ISSUE_616,
     _gpt54mini_comparison_config,
+    _hybrid_actual_metadata,
     _load_validated_structured_baseline,
     _validate_hybrid_source_files,
     _pin_source_checkpoint_sha256,
@@ -498,6 +499,17 @@ class WorkflowTest(unittest.TestCase):
 
         self.assertEqual(len(HYBRID_STRUCTURED_RESULTS_SHA), 64)
         self.assertEqual(len(HYBRID_EMBEDDING_CHECKPOINT_SHA), 64)
+
+    def test_hybrid_reanalysis_records_actual_h_without_new_paid_calls(self):
+        metadata = _hybrid_actual_metadata("abc123")
+
+        self.assertEqual(metadata["variant"], "H_ACTUAL_FOOD_EVIDENCE_V1")
+        self.assertEqual(metadata["label"], "actual-application-predicate-food-evidence-v1")
+        self.assertTrue(metadata["actualApplication"])
+        self.assertEqual(metadata["productionCommitSha"], "abc123")
+        self.assertEqual(metadata["runtimeGitSha"], "abc123")
+        self.assertEqual(metadata["newProviderCalls"], 0)
+        self.assertEqual(metadata["newEmbeddingCalls"], 0)
 
     def test_canonical_checkpoint_sha_is_pinned_once(self):
         with tempfile.TemporaryDirectory() as directory:

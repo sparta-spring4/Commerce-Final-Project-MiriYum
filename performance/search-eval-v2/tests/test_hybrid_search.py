@@ -2,6 +2,7 @@ import unittest
 
 from miriyum_search_eval.structured_search import extract_structured_food_evidence
 from miriyum_search_eval.hybrid_search import (
+    ACTUAL_FOOD_EVIDENCE_VARIANT,
     aggregate_hybrid_comparison,
     evaluate_hybrid_variants,
     informative_query_tokens,
@@ -210,7 +211,7 @@ class HybridSearchTest(unittest.TestCase):
         aggregate = aggregate_hybrid_comparison([result])
 
         self.assertEqual(aggregate["statisticalUnit"]["uniqueQueries"], 1)
-        self.assertEqual(tuple(aggregate["variants"]), ("D", "E", "F", "G"))
+        self.assertEqual(tuple(aggregate["variants"]), ("D", "E", "F", "G", "H"))
         self.assertEqual(aggregate["pairedDeltas"]["FtoG"]["strict@1"], 1)
         self.assertEqual(aggregate["targets"]["acceptable@20"], {
             "targetRate": 0.9, "actualRate": 1.0, "achieved": True,
@@ -235,6 +236,135 @@ class HybridSearchTest(unittest.TestCase):
 
         self.assertFalse(aggregate["gate"]["passed"])
         self.assertIn("G_all_negative_false_positive_regression", aggregate["gate"]["fatalReasons"])
+
+    def test_h_actual_requires_two_dimensions_on_the_same_menu(self):
+        query = self._query("칼칼한 해물 음식 추천해줘")
+        structured_call = self._structured_call(query, menu_family=False)
+        for cutoff in structured_call["variants"]["C"]["cutoffs"].values():
+            cutoff["rankedStoreIds"] = []
+        split_menus = [
+            menu("menu-taste", "store-target", "family-target", "오늘국", "칼칼한"),
+            menu("menu-ingredient", "store-target", "family-target", "내일국", "해물"),
+        ]
+        catalog = prepare_hybrid_catalog(
+            families=FAMILIES, stores=self.stores, menus=split_menus,
+        )
+
+        result = evaluate_hybrid_variants(
+            dataset={"families": FAMILIES, "stores": self.stores, "menus": split_menus},
+            query=query, structured_call=structured_call,
+            embedding_menu_scores=(), prepared_catalog=catalog,
+        )
+
+        self.assertEqual(
+            result["variants"][ACTUAL_FOOD_EVIDENCE_VARIANT]["cutoffs"]["all"]["rankedStoreIds"],
+            [],
+        )
+
+    def test_h_actual_orders_explicit_alias_family_and_dimension_scores(self):
+        stores = [store(f"store-{index}", recommendation=100) for index in range(4)]
+        menus = [
+            menu("menu-explicit", "store-0", "family-target", "불향 해물 짬뽕", "칼칼한 해물 국물"),
+            menu("menu-alias", "store-1", "family-target", "옛날 짬뽕", "칼칼한 해물"),
+            menu("menu-dim3", "store-2", "family-target", "오늘의 요리", "칼칼한 해물 국물"),
+            menu("menu-dim2", "store-3", "family-target", "오늘의 별미", "칼칼한 해물"),
+        ]
+        query = self._query("불향 해물 짬뽕처럼 칼칼한 해물 국물")
+        query["gold"]["storeIds"] = [store["id"] for store in stores]
+        query["acceptableGold"] = dict(query["gold"])
+        structured_call = self._structured_call(query, menu_family=False)
+        for cutoff in structured_call["variants"]["C"]["cutoffs"].values():
+            cutoff["rankedStoreIds"] = []
+        catalog = prepare_hybrid_catalog(families=FAMILIES, stores=stores, menus=menus)
+
+        result = evaluate_hybrid_variants(
+            dataset={"families": FAMILIES, "stores": stores, "menus": menus},
+            query=query, structured_call=structured_call,
+            embedding_menu_scores=(), prepared_catalog=catalog,
+        )
+
+        self.assertEqual(
+            result["variants"][ACTUAL_FOOD_EVIDENCE_VARIANT]["cutoffs"]["all"]["rankedStoreIds"],
+            ["store-0", "store-1", "store-2", "store-3"],
+        )
+
+    def test_h_actual_excludes_store_menu_state_and_filter_violations(self):
+        unapproved = store("store-unapproved")
+        unapproved["verificationStatus"] = "PENDING"
+        stores = self.stores + [unapproved, store("store-other-region")]
+        stores[-1]["region"] = "BUSAN"
+        menus = self.menus + [
+            menu("menu-public", "store-target", "family-target", "짬뽕", "칼칼한 해물"),
+            menu("menu-unapproved", "store-unapproved", "family-target", "짬뽕", "칼칼한 해물"),
+            menu("menu-private", "store-target", "family-target", "짬뽕", "칼칼한 해물", visibility="PRIVATE"),
+            {**menu("menu-retired", "store-target", "family-target", "짬뽕", "칼칼한 해물"), "retired": True},
+            {**menu("menu-past", "store-target", "family-target", "짬뽕", "칼칼한 해물"),
+             "publishedVersion": 2, "versions": [{"version": 2, "status": "SUPERSEDED", "name": "짬뽕"}]},
+            menu("menu-other-region", "store-other-region", "family-target", "짬뽕", "칼칼한 해물"),
+        ]
+        query = self._query("짬뽕")
+        query["filters"] = {"region": "SEOUL"}
+        structured_call = self._structured_call(query, menu_family=True)
+        catalog = prepare_hybrid_catalog(families=FAMILIES, stores=stores, menus=menus)
+
+        result = evaluate_hybrid_variants(
+            dataset={"families": FAMILIES, "stores": stores, "menus": menus},
+            query=query, structured_call=structured_call,
+            embedding_menu_scores=(), prepared_catalog=catalog,
+        )
+
+        variant = result["variants"][ACTUAL_FOOD_EVIDENCE_VARIANT]
+        self.assertEqual(variant["cutoffs"]["all"]["rankedStoreIds"], ["store-target"])
+        self.assertFalse(any(variant["safety"].values()))
+
+    def test_h_actual_generic_form_token_alone_never_creates_candidates(self):
+        query = self._query("면 추천해줘")
+        structured_call = self._structured_call(query, menu_family=False)
+        for cutoff in structured_call["variants"]["C"]["cutoffs"].values():
+            cutoff["rankedStoreIds"] = []
+        result = evaluate_hybrid_variants(
+            dataset=self._dataset(), query=query,
+            structured_call=structured_call,
+            embedding_menu_scores=(), prepared_catalog=self.catalog,
+        )
+
+        self.assertEqual(
+            result["variants"][ACTUAL_FOOD_EVIDENCE_VARIANT]["cutoffs"]["all"]["rankedStoreIds"],
+            [],
+        )
+
+    def test_h_actual_preserves_validated_baseline_candidates(self):
+        query = self._query("검색어와 무관한 기존 후보")
+        structured_call = self._structured_call(query, menu_family=False)
+
+        result = evaluate_hybrid_variants(
+            dataset=self._dataset(), query=query, structured_call=structured_call,
+            embedding_menu_scores=(), prepared_catalog=self.catalog,
+        )
+
+        self.assertEqual(
+            result["variants"][ACTUAL_FOOD_EVIDENCE_VARIANT]["cutoffs"]["all"]["rankedStoreIds"],
+            ["store-distractor"],
+        )
+
+    def test_h_actual_reports_every_cutoff_and_actual_gate(self):
+        query = self._query("칼칼한 해물 음식 추천해줘")
+        result = evaluate_hybrid_variants(
+            dataset=self._dataset(), query=query,
+            structured_call=self._structured_call(query, menu_family=False),
+            embedding_menu_scores=(), prepared_catalog=self.catalog,
+        )
+        aggregate = aggregate_hybrid_comparison([result])
+
+        self.assertEqual(
+            tuple(result["variants"][ACTUAL_FOOD_EVIDENCE_VARIANT]["cutoffs"]),
+            ("@1", "@3", "@5", "@8", "@20", "@50", "all"),
+        )
+        self.assertEqual(tuple(aggregate["variants"]), ("D", "E", "F", "G", "H"))
+        self.assertTrue(aggregate["gate"]["actualApplication"])
+        self.assertEqual(
+            aggregate["gate"]["variant"], "actual-application-predicate-food-evidence-v1",
+        )
 
     def _dataset(self):
         return {"families": FAMILIES, "stores": self.stores, "menus": self.menus}

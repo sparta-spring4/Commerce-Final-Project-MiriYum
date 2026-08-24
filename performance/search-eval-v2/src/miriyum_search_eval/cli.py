@@ -808,8 +808,22 @@ def _load_validated_hybrid_structured_calls(
     ]
 
 
+def _hybrid_actual_metadata(runtime_git_sha: str) -> dict[str, Any]:
+    return {
+        "status": "actual-H-with-simulated-D-through-G",
+        "variant": "H_ACTUAL_FOOD_EVIDENCE_V1",
+        "label": "actual-application-predicate-food-evidence-v1",
+        "actualApplication": True,
+        "productionCommitSha": runtime_git_sha,
+        "runtimeGitSha": runtime_git_sha,
+        "analysisCommitSha": runtime_git_sha,
+        "newProviderCalls": 0,
+        "newEmbeddingCalls": 0,
+    }
+
+
 def hybrid_reanalyze(root: Path, source: Path) -> None:
-    """Compare D/E/F/G without new provider calls or production changes."""
+    """Compare simulated D/E/F/G and actual-application H without paid calls."""
     from hashlib import sha256
     from .embeddings import embed_texts, topk_cosine
 
@@ -888,15 +902,17 @@ def hybrid_reanalyze(root: Path, source: Path) -> None:
         "structuredSearch": Path(__file__).with_name("structured_search.py"),
         "embeddings": Path(__file__).with_name("embeddings.py"),
         "matching": Path(__file__).with_name("matching.py"),
+        "productionFoodVocabulary": _repo_root() / "backend/src/main/java/com/miriyum/domain/search/interpreter/FoodEvidenceVocabulary.java",
+        "productionFoodExtractor": _repo_root() / "backend/src/main/java/com/miriyum/domain/search/interpreter/DeterministicFoodEvidenceExtractor.java",
+        "productionSearchPredicate": _repo_root() / "backend/src/main/java/com/miriyum/domain/search/repository/IntegratedStoreSearchPredicates.java",
     }
+    runtime_git_sha = _commit_sha()
     metadata["hybridReanalysis"] = {
         "schemaVersion": "miriyum-hybrid-search-reanalysis-v1",
-        "status": "simulated-evidence-not-actual-application",
-        "analysisCommitSha": _commit_sha(),
+        **_hybrid_actual_metadata(runtime_git_sha),
         "analysisWorkingTreeDirty": subprocess.run(
             ["git", "diff", "--quiet"], cwd=_repo_root(), check=False,
         ).returncode != 0,
-        "newProviderCalls": 0,
         "incrementalCostUsd": 0.0,
         **source_hashes,
         "embeddingSourceArtifact": str(source.resolve()),

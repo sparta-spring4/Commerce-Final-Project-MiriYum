@@ -95,6 +95,25 @@ Issue #625의 평가 전용 확장으로 구조화 C를 D 기준선으로 고정
 
 이는 production backend나 actual application predicate를 변경한 결과가 아니라 합성 corpus의 `simulated-evidence-not-actual-application` 반사실 평가다. 운영 활성화는 승인하지 않는다. 최종 분석 커밋은 `50bb146aa3f469061e3737fc95ec7e8b488673a5`, 실행 시 tracked worktree는 clean, 신규 provider 호출과 추가 비용은 0회와 `$0`이다. frozen structured 결과 SHA-256은 `9df2560af0cd46ab012c69f298a776126db0bbbbfcb1ab052ecb820249b57ba0`, embedding checkpoint SHA-256은 `f9cabb92c0613e84730bd3aec343f41be1b2444e21c2ac541a0f17aa0db59d58`다. 최종 `hybrid-reanalysis/results.jsonl`과 `aggregate.json` SHA-256은 각각 `c36877da4333902b869c8051f8ed958d7f36581a6a3b9e22c9192cee8dd805c8`, `7ac93b2c67a9dfc3acab4ab182bf5c0421640eb6582ea7dc8768dc346c786190`이다.
 
+### H: 병합된 운영 food-evidence predicate 무과금 재평가
+
+H는 G의 `91.20%` 구조를 운영 수치로 오인하지 않기 위해 추가했다. 고정 ID `H_ACTUAL_FOOD_EVIDENCE_V1`, label `actual-application-predicate-food-evidence-v1`은 production `food-evidence-v1`의 고정 별칭, current published·visible 메뉴, approved·non-closed 매장, 동일 메뉴 안의 속성 차원 수, `menuRank*10+dimensionCount` 정렬을 그대로 모사한다. 후보 판정에는 합성 `familyId`, 합성 family attributes, gold label을 사용하지 않았다. D/E/F/G는 계속 simulated이고 H만 `actualApplication=true`다.
+
+| 고유 질의 지표 | D 기준선 | G simulated | H actual predicate |
+|---|---:|---:|---:|
+| strict @8 | 67.70% | 84.10% | 1,250/2,000 = 62.50% |
+| strict @20 | 75.15% | 89.25% | 1,406/2,000 = 70.30% |
+| acceptable @20 | 79.80% | 91.20% | 1,505/2,000 = 75.25% |
+| acceptable 전체 후보 | 87.35% | 95.50% | 1,847/2,000 = 92.35% |
+| sensory acceptable @20 | 61.25% | 89.63% | 447/800 = 55.88% |
+| alias acceptable @20 | 91.33% | 91.33% | 294/300 = 98.00% |
+
+H acceptable @20의 Wilson 95% CI는 `73.31–77.09%`이며 목표 90%에 미달했다. top-1 안정률은 `95.81%`, 평균 pairwise Jaccard는 `0.9204`다. true-no-answer 오탐, 폐점·미승인 매장 누출, 비공개·과거 메뉴 누출, 필터 위반은 모두 0이지만 전체 gold-negative 오탐은 D/G의 3건에서 H 68건으로 증가해 안전 게이트도 실패했다. 따라서 G의 91.20% 구조가 현재 운영 predicate에 반영됐다고 결론 내릴 수 없다.
+
+68건은 모두 곧바로 실제 사용자 오탐으로 단정할 수 없다. 예를 들어 gold는 특정 합성 family `family-084`의 private `곰탕`만 정답으로 묶어 negative로 만들었지만, 같은 지역의 current visible `집밥 직화 곰탕`, `칼칼한 곰탕`, `담백한 곰탕 한상`은 다른 합성 family ID라 acceptable gold에도 없었다. 반면 production 사전은 이들을 모두 `곰탕/소고기곰탕` 메뉴 계열로 정상 회수한다. 이는 actual vocabulary와 합성 gold taxonomy의 불일치다. 동시에 `고소한` 안의 한 글자 ingredient alias `소`가 production의 부분문자열 추출에 잡혀 다른 taste와 2차원 조건을 만들 수 있는 실제 과회수 위험도 관측됐다. 다음 판단 전에는 production vocabulary 기준 acceptable gold 보강과 한 글자 alias 경계 규칙을 각각 분리해 재평가해야 한다.
+
+이 실행은 기존 10,000개 LLM 체크포인트와 frozen embedding만 재사용했으며 신규 provider/embedding 호출과 비용은 모두 0이다. 실행 중 작업 트리의 runtime Git SHA는 `69239715349b0a26f6c2f8cec5c161b5099e6e5c`였고 결과 파일은 ignored 로컬 artifact다. 현재 Python 구현에서 10,000회 H 재분석은 약 9분이 걸려, 다음 하네스 개선에서는 production vocabulary별 역색인을 고려할 수 있다. 갱신된 `hybrid-reanalysis/results.jsonl`과 `aggregate.json` SHA-256은 각각 `0c320856e121bb24649d536a23539ea4470ccba8ef4f53f90941f25cdf8b74e4`, `7702bc342d01e10b3050668bed80ffe396b28a3553f6c21c738ac21b80752780`다.
+
 ## GPT-4o mini와 GPT-5.4 mini 100질의 짝비교
 
 속성 보존 프롬프트, JSON schema, 동일 층화 질의 100개, `reasoning_effort=none`을 고정하고 모델만 `gpt-4o-mini`에서 `gpt-5.4-mini-2026-03-17`로 바꿨다. 기존 100건을 기준선으로 재사용하고 GPT-5.4 mini 100건만 새로 호출했다. 이는 모델 선택 파일럿이며 production 모델 교체 결과가 아니다.
@@ -215,7 +234,7 @@ python -m miriyum_search_eval report --artifact-dir artifacts/eval-20260824-post
 
 ## 검증과 한계
 
-- Python 하네스 테스트: 98개 전체 통과
+- Python 하네스 테스트: H actual predicate 경계 테스트를 포함해 105개 전체 통과
 - 영향받은 Java 단위 테스트: `IntegratedStoreSearchQueryTest`, `IntegratedStoreSearchPredicatesTest`, `IntegratedStoreSearchServiceTest` 총 36개 통과
 - `IntegratedStoreSearchRepositoryIT`: Docker/Testcontainers MySQL로 19개 통과. UCA expansion인 `ß ↔ ss`에서도 hidden current 긴 이름이 짧은 visible 이름으로 후퇴하지 않음을 포함한다.
 - representative MySQL `EXPLAIN`/timing은 아직 실행하지 않아 CI 또는 별도 성능 검증 대기다. 후보 행마다 실행되던 correlated `NOT EXISTS`와 후보 조회의 non-sargable `LOCATE`는 제거했다. V71의 `name` 선두 복합 index에 최대 4,950개 exact 후보를 조회하고, 같은 collation anti-join으로 가장 구체적인 이름을 계산한 후 최종 100개만 검색 query에 바인딩한다.
