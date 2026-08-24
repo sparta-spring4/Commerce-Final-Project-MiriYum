@@ -2,6 +2,7 @@ package com.miriyum.domain.search.query;
 
 import com.miriyum.domain.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.search.interpreter.PriceRange;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidence;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
@@ -28,6 +29,7 @@ public final class IntegratedStoreSearchQuery {
     private final LocalTime reservationTime;
     private final String remainingKeyword;
     private final List<String> explicitMenuNames;
+    private final StructuredFoodEvidence foodEvidence;
     private final IntegratedStoreSearchSort sort;
     private final int size;
     private final String fingerprint;
@@ -36,6 +38,7 @@ public final class IntegratedStoreSearchQuery {
     private IntegratedStoreSearchQuery(
             InterpretedSearchCondition condition,
             List<String> explicitMenuNames,
+            StructuredFoodEvidence foodEvidence,
             boolean includesInfants,
             boolean availableOnly,
             String principalScope,
@@ -54,6 +57,8 @@ public final class IntegratedStoreSearchQuery {
         this.reservationTime = condition.reservationTime();
         this.remainingKeyword = condition.remainingKeyword();
         this.explicitMenuNames = canonicalMenuNames(explicitMenuNames);
+        this.foodEvidence = Objects.requireNonNull(
+                foodEvidence, "foodEvidence must not be null");
         this.sort = sort;
         this.size = size;
         Objects.requireNonNull(principalScope, "principalScope must not be null");
@@ -82,6 +87,7 @@ public final class IntegratedStoreSearchQuery {
     public static IntegratedStoreSearchQuery from(
             InterpretedSearchCondition condition,
             List<String> explicitMenuNames,
+            StructuredFoodEvidence foodEvidence,
             boolean includesInfants,
             boolean availableOnly,
             String principalScope,
@@ -99,12 +105,37 @@ public final class IntegratedStoreSearchQuery {
         return new IntegratedStoreSearchQuery(
                 condition,
                 explicitMenuNames,
+                foodEvidence,
                 includesInfants,
                 availableOnly,
                 principalScope,
                 IntegratedStoreSearchSort.parse(sort),
                 cursor,
                 resolvedSize,
+                cursorCodec);
+    }
+
+    public static IntegratedStoreSearchQuery from(
+            InterpretedSearchCondition condition,
+            List<String> explicitMenuNames,
+            boolean includesInfants,
+            boolean availableOnly,
+            String principalScope,
+            String sort,
+            String cursor,
+            Integer size,
+            IntegratedSearchCursorCodec cursorCodec
+    ) {
+        return from(
+                condition,
+                explicitMenuNames,
+                StructuredFoodEvidence.empty(),
+                includesInfants,
+                availableOnly,
+                principalScope,
+                sort,
+                cursor,
+                size,
                 cursorCodec);
     }
 
@@ -121,6 +152,7 @@ public final class IntegratedStoreSearchQuery {
         return from(
                 condition,
                 List.of(),
+                StructuredFoodEvidence.empty(),
                 includesInfants,
                 availableOnly,
                 principalScope,
@@ -244,6 +276,10 @@ public final class IntegratedStoreSearchQuery {
 
     public List<String> explicitMenuNames() {
         return explicitMenuNames;
+    }
+
+    public StructuredFoodEvidence foodEvidence() {
+        return foodEvidence;
     }
 
     public IntegratedStoreSearchSort sort() {
