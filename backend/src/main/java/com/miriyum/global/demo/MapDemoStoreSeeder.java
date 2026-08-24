@@ -55,15 +55,21 @@ final class MapDemoStoreSeeder {
         return List.of(
                 DemoStore.verified(
                         "9000000001", "마루 한식당", Region.SEOUL,
-                        "서울특별시 강남구 테헤란로 152", "37.500600", "127.036500"),
+                        "서울특별시 중구 세종대로 110", "37.566300", "126.977900"),
                 DemoStore.verified(
                         "9000000002", "해운대 바다식당", Region.BUSAN,
                         "부산광역시 해운대구 해운대해변로 264", "35.158700", "129.160400"),
                 DemoStore.verified(
-                        "9000000003", "무등 한상", Region.GWANGJU,
+                        "9000000003", "동성로 한상", Region.DAEGU,
+                        "대구광역시 중구 동성로 2", "35.869400", "128.594000"),
+                DemoStore.verified(
+                        "9000000004", "중앙로 식탁", Region.DAEJEON,
+                        "대전광역시 중구 중앙로 101", "36.328700", "127.428000"),
+                DemoStore.verified(
+                        "9000000005", "무등 한상", Region.GWANGJU,
                         "광주광역시 동구 서석로 15", "35.146200", "126.922600"),
                 DemoStore.unverified(
-                        "9000000004", "새봄 식당", Region.SEOUL,
+                        "9000000006", "새봄 식당", Region.SEOUL,
                         "서울특별시 마포구 양화로 160"));
     }
 
