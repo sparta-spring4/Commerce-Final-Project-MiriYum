@@ -75,6 +75,26 @@ A→B의 strict @8 순증은 117개, `+5.85%p`로 후보 보강 효과다. B→C
 
 최종 분석 커밋은 `2456e9d40aa8ab95a8687ef57f2ef3097815abe9`, 작업 트리는 clean, 신규 provider 호출과 추가 비용은 각각 0회와 `$0`이다. ignored 산출물 `structured-reanalysis/results.jsonl`과 `aggregate.json`의 SHA-256은 각각 `9df2560af0cd46ab012c69f298a776126db0bbbbfcb1ab052ecb820249b57ba0`, `06a72a6e85cc8677f1894a3d8f393d2bf9c60921b7efcd796d3dd49359ee46bb`다.
 
+## 단일 하이브리드 D/E/F/G 재분석
+
+Issue #625의 평가 전용 확장으로 구조화 C를 D 기준선으로 고정하고, 같은 10,000회 결과에 새 provider 호출 없이 세 조건을 더 비교했다. E는 메뉴 설명·태그와 고정 메뉴 사전의 재료·맛·국물·조리법·향·식감 중 서로 다른 두 근거 이상이 있는 후보를 D 뒤에 보충한다. F는 E에 기존 `text-embedding-3-large`의 메뉴별 상위 200개 후보를 합친다. G는 F의 후보 집합을 바꾸지 않고 구조화 속성, 어휘 근거, embedding similarity와 기존 순위 보존 보너스를 하나의 고정 점수로 합쳐 `RECOMMENDED` 결과만 다시 정렬한다. 사용자 원문에서 결정적으로 확인한 메뉴명·별칭과 명시 필터 정렬은 D를 그대로 보존하며, LLM이 추론한 메뉴 계열은 사용자 명시 메뉴로 오인하지 않는다.
+
+| 고유 질의 지표 | D: structured C | E: 사전·설명 후보 | F: E + large embedding | G: 단일 hybrid ranking |
+|---|---:|---:|---:|---:|
+| strict @1 | 55.80% | 55.80% | 55.85% | 78.60% |
+| strict @8 | 67.70% | 67.70% | 67.75% | 84.10% |
+| strict @20 | 75.15% | 75.15% | 75.20% | 89.25% |
+| strict 전체 후보 | 83.95% | 94.20% | 94.25% | 94.25% |
+| acceptable @8 | 71.75% | 71.75% | 71.80% | 85.75% |
+| acceptable @20 | 1,596/2,000 = 79.80% | 79.80% | 1,597/2,000 = 79.85% | 1,824/2,000 = 91.20% |
+| acceptable 전체 후보 | 87.35% | 95.45% | 95.50% | 95.50% |
+
+주 목표 acceptable @20 `90%`와 후보 상한 목표 acceptable 전체 `95%`를 각각 `91.20%`, `95.50%`로 충족했다. G acceptable @20의 Wilson 95% CI는 `89.88–92.36%`다. strict @20은 `89.25%`이므로 90% 달성 주장은 acceptable 기준에만 적용한다. sensory 800개 acceptable @20은 `61.25% → 89.63%`, 전체 후보는 `78.88% → 99.13%`였다. E가 전체 후보를 크게 늘렸지만 기존 결과 뒤에 붙이기만 해 @20은 변하지 않았고, F의 embedding 단독 순증은 고유 질의 1개였다. 최종 개선의 핵심은 embedding 모델 교체가 아니라 고정 사전 속성 후보를 상위 20개로 올린 G 정렬이었다.
+
+안전 게이트는 통과했다. D/E/F/G의 true-no-answer 오탐은 모두 0건, 전체 gold-negative 오탐은 모두 3건이며 폐점·미승인 매장, 비공개·과거 메뉴, 지역·가격·분위기·category 위반은 모두 0건이다. 명시 메뉴·별칭 유형 acceptable @20은 네 조건 모두 `91.33%`로 유지됐다. @20 top-1 안정률은 `95.24% → 96.05%`, 평균 pairwise Jaccard는 `0.8902 → 0.9299`로 개선됐다.
+
+이는 production backend나 actual application predicate를 변경한 결과가 아니라 합성 corpus의 `simulated-evidence-not-actual-application` 반사실 평가다. 운영 활성화는 승인하지 않는다. 최종 분석 커밋은 `50bb146aa3f469061e3737fc95ec7e8b488673a5`, 실행 시 tracked worktree는 clean, 신규 provider 호출과 추가 비용은 0회와 `$0`이다. frozen structured 결과 SHA-256은 `9df2560af0cd46ab012c69f298a776126db0bbbbfcb1ab052ecb820249b57ba0`, embedding checkpoint SHA-256은 `f9cabb92c0613e84730bd3aec343f41be1b2444e21c2ac541a0f17aa0db59d58`다. 최종 `hybrid-reanalysis/results.jsonl`과 `aggregate.json` SHA-256은 각각 `c36877da4333902b869c8051f8ed958d7f36581a6a3b9e22c9192cee8dd805c8`, `7ac93b2c67a9dfc3acab4ab182bf5c0421640eb6582ea7dc8768dc346c786190`이다.
+
 ## GPT-4o mini와 GPT-5.4 mini 100질의 짝비교
 
 속성 보존 프롬프트, JSON schema, 동일 층화 질의 100개, `reasoning_effort=none`을 고정하고 모델만 `gpt-4o-mini`에서 `gpt-5.4-mini-2026-03-17`로 바꿨다. 기존 100건을 기준선으로 재사용하고 GPT-5.4 mini 100건만 새로 호출했다. 이는 모델 선택 파일럿이며 production 모델 교체 결과가 아니다.
@@ -183,6 +203,7 @@ python -m miriyum_search_eval reanalyze --artifact-dir artifacts/eval-20260824-d
 python -m miriyum_search_eval migrate-checkpoint --artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs --source-artifact-dir artifacts/eval-20260824-deterministic-menu-full
 python -m miriyum_search_eval reanalyze --artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs --predicate-variant issue-616-most-specific
 python -m miriyum_search_eval structured-reanalyze --artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs
+python -m miriyum_search_eval hybrid-reanalyze --artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs --source-artifact-dir artifacts/eval-20260824-post-merge
 python -m miriyum_search_eval report --artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs
 python -m miriyum_search_eval prompt-pilot --artifact-dir artifacts/eval-20260824-attribute-prompt-pilot --source-artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs
 python -m miriyum_search_eval prompt-run --artifact-dir artifacts/eval-20260824-attribute-prompt-pilot
@@ -194,7 +215,7 @@ python -m miriyum_search_eval report --artifact-dir artifacts/eval-20260824-post
 
 ## 검증과 한계
 
-- Python 하네스 테스트: 88개 전체 통과
+- Python 하네스 테스트: 98개 전체 통과
 - 영향받은 Java 단위 테스트: `IntegratedStoreSearchQueryTest`, `IntegratedStoreSearchPredicatesTest`, `IntegratedStoreSearchServiceTest` 총 36개 통과
 - `IntegratedStoreSearchRepositoryIT`: Docker/Testcontainers MySQL로 19개 통과. UCA expansion인 `ß ↔ ss`에서도 hidden current 긴 이름이 짧은 visible 이름으로 후퇴하지 않음을 포함한다.
 - representative MySQL `EXPLAIN`/timing은 아직 실행하지 않아 CI 또는 별도 성능 검증 대기다. 후보 행마다 실행되던 correlated `NOT EXISTS`와 후보 조회의 non-sargable `LOCATE`는 제거했다. V71의 `name` 선두 복합 index에 최대 4,950개 exact 후보를 조회하고, 같은 collation anti-join으로 가장 구체적인 이름을 계산한 후 최종 100개만 검색 query에 바인딩한다.
