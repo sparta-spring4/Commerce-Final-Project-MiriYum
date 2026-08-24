@@ -92,6 +92,7 @@ class NotificationEventControllerTest {
                 .willThrow(new ServiceException(CommonErrorCode.TOO_MANY_REQUESTS));
 
         mockMvc.perform(get("/api/v1/consumers/me/notification-events")
+                        .accept(MediaType.TEXT_EVENT_STREAM)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
