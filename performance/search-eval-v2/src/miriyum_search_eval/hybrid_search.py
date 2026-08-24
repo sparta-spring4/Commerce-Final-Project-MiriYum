@@ -206,7 +206,10 @@ def evaluate_hybrid_variants(
     evidence = structured_call["evidence"]
     d_variant = structured_call["variants"]["C"]
     d_ranking = tuple(d_variant["cutoffs"]["all"]["rankedStoreIds"])
-    explicit_menu = bool(evidence.get("menuFamilies"))
+    explicit_menu = (
+        bool(evidence.get("menuFamilies"))
+        and evidence.get("sources", {}).get("menuFamilies") == "DETERMINISTIC"
+    )
     lexical = LexicalCandidateResult((), (), {})
     embedding_menu_ids: tuple[str, ...] = ()
     embedding_store_ids: tuple[str, ...] = ()

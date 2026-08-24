@@ -119,6 +119,31 @@ class HybridSearchTest(unittest.TestCase):
                 ["store-target"],
             )
 
+    def test_llm_inferred_menu_family_does_not_block_sensory_expansion(self):
+        query = self._query("칼칼한 바다향 국물 음식 추천해줘")
+        structured_call = self._structured_call(query, menu_family=False)
+        structured_call["evidence"] = {
+            **structured_call["evidence"],
+            "menuFamilies": ["채소국"],
+            "familyIds": ["family-distractor"],
+            "sources": {
+                **structured_call["evidence"]["sources"],
+                "menuFamilies": "LLM",
+            },
+        }
+
+        result = evaluate_hybrid_variants(
+            dataset=self._dataset(), query=query, structured_call=structured_call,
+            embedding_menu_scores=(("menu-target", 0.99),),
+            prepared_catalog=self.catalog,
+        )
+
+        self.assertIn("menu-target", result["embeddingCandidateMenuIds"])
+        self.assertEqual(
+            result["variants"]["G"]["cutoffs"]["@1"]["rankedStoreIds"],
+            ["store-target"],
+        )
+
     def test_hybrid_does_not_expand_without_two_structured_food_dimensions(self):
         query = self._query("칼칼한 바다향 분위기 좋은 곳 추천해줘")
         structured_call = self._structured_call(query, menu_family=False)
