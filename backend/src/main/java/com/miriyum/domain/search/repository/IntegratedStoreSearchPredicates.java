@@ -200,19 +200,24 @@ final class IntegratedStoreSearchPredicates {
             IntegratedStoreSearchQuery query,
             StructuredFoodEvidence evidence
     ) {
-        if (evidence == null || !evidence.hasCandidateEvidence()) {
-            return new CaseBuilder()
-                    .when(store.id.isNotNull())
-                    .then(0)
-                    .otherwise(0);
+        if (evidence == null
+                || !evidence.hasCandidateEvidence()
+                || !query.explicitMenuNames().isEmpty()) {
+            return zeroScore(store);
         }
         QMenu menu = new QMenu("structuredEvidenceMenu");
         QMenuVersion version = new QMenuVersion("structuredEvidenceMenuVersion");
         NumberExpression<Integer> menuRank = menuRank(version, query, evidence);
         NumberExpression<Integer> dimensionCount = dimensionCount(version, evidence);
-        NumberExpression<Integer> rowScore = menuRank.multiply(10).add(dimensionCount);
+        NumberExpression<Integer> lexicalCount = lexicalMatchCount(
+                version, query, evidence);
+        NumberExpression<Integer> rowScore = lexicalCount.multiply(10)
+                .add(dimensionCount.multiply(3))
+                .add(menuRank.multiply(2));
         BooleanBuilder currentMenu = currentMenuPredicate(store, menu, version, query)
-                .and(menuRank.gt(0).or(dimensionCount.goe(2)));
+                .and(menuRank.gt(0)
+                        .or(dimensionCount.goe(2))
+                        .or(lexicalCount.goe(2)));
         return Expressions.numberTemplate(
                 Integer.class,
                 "coalesce(({0}), 0)",
@@ -220,6 +225,13 @@ final class IntegratedStoreSearchPredicates {
                         .from(menu)
                         .join(menu.versions, version)
                         .where(currentMenu));
+    }
+
+    private static NumberExpression<Integer> zeroScore(QStore store) {
+        return new CaseBuilder()
+                .when(store.id.isNotNull())
+                .then(0)
+                .otherwise(0);
     }
 
     private static NumberExpression<Integer> menuRank(
@@ -265,6 +277,25 @@ final class IntegratedStoreSearchPredicates {
                 : evidence.coreDimensionTerms().entrySet()) {
             BooleanExpression matches = matchesAnyMenuField(version, entry.getValue());
             count = count.add(new CaseBuilder().when(matches).then(1).otherwise(0));
+        }
+        return count;
+    }
+
+    private static NumberExpression<Integer> lexicalMatchCount(
+            QMenuVersion version,
+            IntegratedStoreSearchQuery query,
+            StructuredFoodEvidence evidence
+    ) {
+        if (evidence.coreDimensionTerms().size() < 2
+                || query.lexicalFoodTerms().size() < 2) {
+            return Expressions.asNumber(0);
+        }
+        NumberExpression<Integer> count = Expressions.asNumber(0);
+        for (String term : query.lexicalFoodTerms()) {
+            count = count.add(new CaseBuilder()
+                    .when(matchesAnyMenuField(version, List.of(term)))
+                    .then(1)
+                    .otherwise(0));
         }
         return count;
     }

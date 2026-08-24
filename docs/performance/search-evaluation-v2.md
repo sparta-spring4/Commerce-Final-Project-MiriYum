@@ -95,27 +95,27 @@ Issue #625의 평가 전용 확장으로 구조화 C를 D 기준선으로 고정
 
 이는 production backend나 actual application predicate를 변경한 결과가 아니라 합성 corpus의 `simulated-evidence-not-actual-application` 반사실 평가다. 운영 활성화는 승인하지 않는다. 최종 분석 커밋은 `50bb146aa3f469061e3737fc95ec7e8b488673a5`, 실행 시 tracked worktree는 clean, 신규 provider 호출과 추가 비용은 0회와 `$0`이다. frozen structured 결과 SHA-256은 `9df2560af0cd46ab012c69f298a776126db0bbbbfcb1ab052ecb820249b57ba0`, embedding checkpoint SHA-256은 `f9cabb92c0613e84730bd3aec343f41be1b2444e21c2ac541a0f17aa0db59d58`다. 최종 `hybrid-reanalysis/results.jsonl`과 `aggregate.json` SHA-256은 각각 `c36877da4333902b869c8051f8ed958d7f36581a6a3b9e22c9192cee8dd805c8`, `7ac93b2c67a9dfc3acab4ab182bf5c0421640eb6582ea7dc8768dc346c786190`이다.
 
-### H: 병합된 운영 food-evidence predicate의 구형 체크포인트 재생
+### H: 수정된 운영 food-evidence predicate의 구형 체크포인트 재생
 
-H는 G의 `91.20%` simulated 구조를 운영 수치로 오인하지 않기 위해 추가했다. 고정 ID `H_ACTUAL_FOOD_EVIDENCE_V1`, label `actual-application-predicate-food-evidence-v1`은 production `food-evidence-v1`의 고정 별칭, current published·visible 메뉴, approved·non-closed 매장, 동일 메뉴 안의 속성 차원 수와 `menuRank*10+dimensionCount` predicate를 재현한다. 후보 판정에는 합성 `familyId`, 합성 family attributes, gold label을 사용하지 않았다. 구조화 점수 다음에는 운영 코드의 legacy relevance tier인 매장명 exact/포함, 현재 공개 메뉴, 지역·주소 순서를 직접 계산하고, 같은 구조화·legacy 그룹 안에서만 D 순서를 최종 tie-break로 사용한다. 지역 등 결정적 필터 span을 제거한 `remainingKeyword`에서 음식 근거와 legacy tier를 계산한다.
+H는 G의 `91.20%` simulated 구조를 운영 수치로 오인하지 않기 위해 추가했다. 초기 H는 명시 메뉴 질의에도 속성 후보를 덧붙이고 `menuRank*10+dimensionCount`로 LLM 메뉴 계열 하나를 여러 감각 차원보다 앞세워 acceptable @20 `74.60%`, 전체 음성 오탐 68건, filter-defense `54.67%`로 회귀했다. 수정 H는 명시 메뉴가 결정적으로 해소되면 D 후보·순서를 그대로 유지하고, 메뉴가 없는 질의에서만 현재 공개 메뉴의 이름·설명·카테고리·태그에 일치한 정보성 원문 토큰을 보충한다. 같은 메뉴에서 서로 다른 원문 토큰 2개 이상 또는 구조화 차원 2개 이상이 맞아야 하며, 점수는 원문 토큰·구조화 차원·메뉴 계열의 고정 가중 순서로 계산한다. 후보 판정에는 합성 `familyId`, 합성 family attributes, gold label을 사용하지 않았다.
 
 단, 기존 10,000회 체크포인트는 현재 provider schema에 새로 추가된 `aromas`, `textures`를 포함하지 않는다. 따라서 H는 `actualApplication=false`, `actualApplicationPredicate=true`, `queryEvidenceProvenance=legacy-structured-checkpoint-replay`, `queryEvidenceSchemaComplete=false`인 무과금 predicate 재생이다. 현재 production 앱의 새 schema를 end-to-end로 실행한 actual application 결과가 아니며, D/E/F/G도 계속 simulated다.
 
 | 고유 질의 지표 | D 기준선 | G simulated | H actual predicate replay |
 |---|---:|---:|---:|
-| strict @8 | 67.70% | 84.10% | 1,278/2,000 = 63.90% |
-| strict @20 | 75.15% | 89.25% | 1,403/2,000 = 70.15% |
-| acceptable @20 | 79.80% | 91.20% | 1,492/2,000 = 74.60% |
-| acceptable 전체 후보 | 87.35% | 95.50% | 1,837/2,000 = 91.85% |
-| sensory acceptable @20 | 61.25% | 89.63% | 433/800 = 54.13% |
-| alias acceptable @20 | 91.33% | 91.33% | 292/300 = 97.33% |
-| filter-defense acceptable @20 | 147/150 = 98.00% | 147/150 = 98.00% | 82/150 = 54.67% |
+| strict @8 | 67.70% | 84.10% | 1,465/2,000 = 73.25% |
+| strict @20 | 75.15% | 89.25% | 1,631/2,000 = 81.55% |
+| acceptable @20 | 79.80% | 91.20% | 1,712/2,000 = 85.60% |
+| acceptable 전체 후보 | 87.35% | 95.50% | 1,889/2,000 = 94.45% |
+| sensory acceptable @20 | 61.25% | 89.63% | 603/800 = 75.38% |
+| alias acceptable @20 | 91.33% | 91.33% | 277/300 = 92.33% |
+| filter-defense acceptable @20 | 147/150 = 98.00% | 147/150 = 98.00% | 147/150 = 98.00% |
 
-H acceptable @20의 Wilson 95% CI는 `72.65–76.46%`이며 목표 90%에 미달했다. strict @8의 Wilson 95% CI는 `61.77–65.98%`다. top-1 안정률은 `95.46%`, 평균 pairwise Jaccard는 `0.9096`이다. true-no-answer 오탐, 폐점·미승인 매장 누출, 비공개·과거 메뉴 누출, 필터 위반은 모두 0이지만 전체 gold-negative 오탐은 D/G의 3건에서 H 68건으로 증가했다. filter-defense acceptable @20도 `147/150`에서 `82/150`으로 감소했다. 안전 게이트는 all-negative 오탐과 filter-defense strict/acceptable @8/@20 회귀를 각각 fatal reason으로 기록하고 실패했다. 따라서 G의 91.20% 구조가 현재 운영 predicate에 반영됐거나 production 활성화가 승인됐다고 결론 내릴 수 없다.
+수정 H acceptable @20의 Wilson 95% CI는 `83.99–87.07%`로 목표 90%에는 아직 미달한다. top-1 안정률은 `95.56%`, 평균 pairwise Jaccard는 `0.9088`이다. true-no-answer 오탐은 0건, 전체 gold-negative 오탐은 D/G와 같은 3건이며 폐점·미승인 매장, 비공개·과거 메뉴, 필터 위반은 모두 0이다. filter-defense도 D/G와 같은 `147/150`으로 복구되어 안전 게이트는 통과했다. 초기 H와 비교하면 acceptable @20은 `74.60% → 85.60%`, 전체 음성 오탐은 `68 → 3`, filter-defense는 `54.67% → 98.00%`다.
 
-68건은 모두 곧바로 실제 사용자 오탐으로 단정할 수 없다. 예를 들어 gold는 특정 합성 family `family-084`의 private `곰탕`만 정답으로 묶어 negative로 만들었지만, 같은 지역의 current visible `집밥 직화 곰탕`, `칼칼한 곰탕`, `담백한 곰탕 한상`은 다른 합성 family ID라 acceptable gold에도 없었다. 반면 production 사전은 이들을 모두 `곰탕/소고기곰탕` 메뉴 계열로 정상 회수한다. 이는 actual vocabulary와 합성 gold taxonomy의 불일치다. 별도로 `고소한` 안에서 한 글자 ingredient alias `소`가 부분문자열로 잡히던 실제 과회수 결함은 production과 평가 사전 모두에서 alias를 제거하고 회귀 테스트를 추가했다. 제거 후에도 68건이 그대로여서, 이 집계의 주원인은 한 글자 alias가 아니라 production vocabulary와 합성 gold taxonomy의 불일치로 관측됐다. 다음 판단 전에는 production vocabulary 기준 acceptable gold를 독립적으로 보강해 실제 오탐과 gold 누락을 분리해야 한다.
+G의 남은 우위는 합성 family에만 있는 향·식감·국물 속성을 정렬에 직접 사용한 효과를 포함한다. 현재 운영 메뉴의 이름·설명·카테고리·태그에는 이 속성이 항상 존재하지 않으므로 G `91.20%`를 그대로 actual 수치로 재현할 수 없다. 별도 메뉴 속성 저장·색인 계약 없이 이 정보를 production 코드에 복사하면 gold leakage가 된다. 따라서 수정 H는 안전 게이트 통과를 확인했지만 `actualApplication=false`, `productionActivationApproved=false`를 유지한다.
 
-이 실행은 기존 10,000개 LLM 체크포인트와 frozen embedding만 재사용했으며 신규 provider/embedding 호출과 비용은 모두 0이다. production source는 vocabulary·extractor·predicate·repository까지 HEAD와 일치해 `productionCommitSha=fe4b556349a70027b6db421bd3cb79d201b1dc03`, `productionWorkingTreeDirty=false`로 기록했다. 분석 Python은 수정 중이어서 `analysisCommitSha=null`, `analysisWorkingTreeDirty=true`로 분리했다. 결과 파일은 ignored 로컬 artifact다. 현재 Python 구현에서 10,000회 H 재분석은 약 9분이 걸려, 다음 하네스 개선에서는 production vocabulary별 역색인을 고려할 수 있다. 갱신된 `hybrid-reanalysis/results.jsonl`과 `aggregate.json` SHA-256은 각각 `ca65155826d1e62c5fe81afc24a474f3702ef17e8e4a067164074b5197a42912`, `e20fd229971e960a8abd9a8a3ea14a2122969e0d5608edc5932314f8581da02d`다.
+이 실행은 기존 10,000개 LLM 체크포인트와 frozen embedding만 재사용했으며 신규 provider/embedding 호출과 비용은 모두 0이다. 결과 파일은 ignored 로컬 artifact이고, `hybrid-reanalysis/results.jsonl`과 `aggregate.json` SHA-256은 각각 `c68cb6bfddfbc3a8562546f18d22ec875228e28e40c9a259626ed136501ac669`, `057f77f6ee7e2e04e2e27096d723a9cf288ec6d71d4f1f6ede0c3c6596738447`다.
 
 ## GPT-4o mini와 GPT-5.4 mini 100질의 짝비교
 
@@ -237,7 +237,7 @@ python -m miriyum_search_eval report --artifact-dir artifacts/eval-20260824-post
 
 ## 검증과 한계
 
-- Python 하네스 테스트: H actual predicate replay 경계 테스트를 포함해 111개 전체 통과
+- Python 하네스 테스트: H actual predicate replay 경계 테스트를 포함해 113개 전체 통과
 - 영향받은 Java 단위 테스트: search interpreter·expansion·query·service·controller·OpenAPI 계약 범위 186개 통과
 - `IntegratedStoreSearchRepositoryIT`: Docker/Testcontainers MySQL로 22개 통과. UCA expansion인 `ß ↔ ss`에서도 hidden current 긴 이름이 짧은 visible 이름으로 후퇴하지 않음을 포함한다.
 - representative MySQL `EXPLAIN`/timing은 아직 실행하지 않아 CI 또는 별도 성능 검증 대기다. 후보 행마다 실행되던 correlated `NOT EXISTS`와 후보 조회의 non-sargable `LOCATE`는 제거했다. V71의 `name` 선두 복합 index에 최대 4,950개 exact 후보를 조회하고, 같은 collation anti-join으로 가장 구체적인 이름을 계산한 후 최종 100개만 검색 query에 바인딩한다.

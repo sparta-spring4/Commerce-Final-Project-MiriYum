@@ -260,6 +260,18 @@ class IntegratedStoreSearchQueryTest {
         assertThat(first.fingerprint()).isEqualTo(second.fingerprint());
     }
 
+    @Test
+    void extractsDistinctInformativeFoodTermsFromRemainingKeyword() {
+        IntegratedStoreSearchQuery query = query(
+                condition("칼칼한 해물 국물 바질 토마토 음식 추천해줘 1234 바질"),
+                null, null, 20);
+
+        assertThat(query.lexicalFoodTerms())
+                .contains("칼칼한", "해물", "바질", "토마토")
+                .doesNotContain("국물", "음식", "추천해줘", "1234")
+                .doesNotHaveDuplicates();
+    }
+
     private static IntegratedStoreSearchQuery query(
             InterpretedSearchCondition condition,
             String sort,

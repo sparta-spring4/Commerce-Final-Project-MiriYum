@@ -338,6 +338,13 @@ def _actual_food_evidence_ranking(
         menu_ids, store_ids, frozen_scores = cached
         return menu_ids, store_ids, dict(frozen_scores), evidence
     explicit_names = set(_explicit_menu_names(evidence_text, catalog))
+    if explicit_names:
+        return (), baseline_store_ids, {}, evidence
+    lexical_terms = (
+        informative_query_tokens(evidence_text, filters=query["filters"])[:20]
+        if sum(bool(evidence[field]) for field in _ACTUAL_CORE_FIELDS) >= 2
+        else ()
+    )
     rows: list[tuple[dict[str, Any], dict[str, Any], int]] = []
     menu_scores: dict[str, int] = {}
     for menu in catalog.menus_by_id.values():
@@ -368,9 +375,13 @@ def _actual_food_evidence_ranking(
         dimension_count = sum(
             _contains_any(fields, evidence[field]) for field in _ACTUAL_CORE_FIELDS
         )
-        if menu_rank == 0 and dimension_count < 2:
+        lexical_count = sum(
+            any(normalize(term) in field for field in fields)
+            for term in lexical_terms
+        )
+        if menu_rank == 0 and dimension_count < 2 and lexical_count < 2:
             continue
-        score = menu_rank * 10 + dimension_count
+        score = lexical_count * 10 + dimension_count * 3 + menu_rank * 2
         menu_scores[menu["id"]] = score
         rows.append((menu, store, score))
     baseline_rank = {
