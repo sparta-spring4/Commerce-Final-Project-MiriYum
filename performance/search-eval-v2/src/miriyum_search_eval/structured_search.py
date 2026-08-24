@@ -76,12 +76,27 @@ def _family_terms(family: dict[str, Any]) -> tuple[str, ...]:
     ))
 
 
-def _matching_families(text: str, families: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _family_term_score(text: str, family: dict[str, Any]) -> tuple[int, int]:
     value = compact(text)
-    return [
-        family for family in families
-        if any(compact(term) in value for term in _family_terms(family) if compact(term))
+    canonical = family.get("canonical", "")
+    scored_terms = (
+        (canonical, 3),
+        *((term, 3) for term in family.get("variants", [])),
+        *((term, 2) for term in family.get("aliases", [])),
+        (family.get("baseName", ""), 1),
+    )
+    scores = [
+        (len(compact(term)), tier)
+        for term, tier in scored_terms
+        if compact(term) and compact(term) in value
     ]
+    return max(scores, default=(0, 0))
+
+
+def _matching_families(text: str, families: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    scored = [(family, _family_term_score(text, family)) for family in families]
+    best_length = max((score[0] for _, score in scored), default=0)
+    return [family for family, score in scored if score[0] == best_length and best_length]
 
 
 def _matching_attribute_values(
@@ -93,6 +108,32 @@ def _matching_attribute_values(
         for family in families
     )
     return tuple(candidate for candidate in candidates if compact(candidate) in value)
+
+
+def _refine_families_by_attributes(
+    families: list[dict[str, Any]], dimensions: dict[str, tuple[str, ...]],
+    *, text: str,
+) -> list[dict[str, Any]]:
+    if len(families) < 2:
+        return families
+    scored = [
+        (family, sum(
+            compact(str(family.get("attributes", {}).get(attribute, "")))
+            in {compact(value) for value in dimensions[field]}
+            for field, attribute in _DIMENSION_FIELDS.items()
+            if dimensions[field]
+        ))
+        for family in families
+    ]
+    best = max(score for _, score in scored)
+    refined = [family for family, score in scored if score == best] if best else families
+    if len(refined) < 2:
+        return refined
+    best_term = max(_family_term_score(text, family) for family in refined)
+    return [
+        family for family in refined
+        if _family_term_score(text, family) == best_term
+    ]
 
 
 def _matching_forms(text: str) -> tuple[str, ...]:
@@ -132,6 +173,9 @@ def extract_structured_food_evidence(
         field: _matching_attribute_values(query_text, families, attribute)
         for field, attribute in _DIMENSION_FIELDS.items()
     }
+    matched_families = _refine_families_by_attributes(
+        matched_families, dimensions, text=query_text,
+    )
     forms = _matching_forms(query_text)
     sources: dict[str, EvidenceSource] = {}
     menu_families = _deduplicate(
@@ -260,11 +304,12 @@ def retrieve_structured_candidates(
     evidence_family_names = {compact(value) for value in evidence.menu_families}
     evidence_family_ids = set(evidence.family_ids)
     raw_spans = {compact(value) for value in evidence.raw_food_spans}
-    if evidence_family_names:
+    if evidence_family_ids:
+        candidate_family_ids = evidence_family_ids & set(family_by_id)
+    elif evidence_family_names:
         candidate_family_ids = {
             family_id for family_id, family in family_by_id.items()
-            if family_id in evidence_family_ids
-            or compact(str(family.get("baseName", ""))) in evidence_family_names
+            if compact(str(family.get("baseName", ""))) in evidence_family_names
         }
     else:
         candidate_family_ids = {
@@ -291,7 +336,10 @@ def retrieve_structured_candidates(
         raw_exact = compact(menu.get("name", "")) in raw_spans
         family_match = (
             menu.get("familyId") in evidence_family_ids
-            or compact(str(family.get("baseName", ""))) in evidence_family_names
+            or (
+                not evidence_family_ids
+                and compact(str(family.get("baseName", ""))) in evidence_family_names
+            )
         )
         evidence_count = _attribute_evidence_count(evidence, family)
         attribute_candidate = not evidence_family_names and evidence_count >= 2

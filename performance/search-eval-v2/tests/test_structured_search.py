@@ -88,6 +88,45 @@ class StructuredFoodEvidenceTest(unittest.TestCase):
         self.assertEqual(evidence.menu_families, ())
         self.assertEqual(evidence.ingredients, ())
 
+    def test_specific_styled_family_wins_over_shared_base_name(self):
+        families = [
+            {
+                **FAMILIES[0],
+                "id": "family-plain",
+                "canonical": "마라탕",
+                "baseName": "마라탕",
+                "variants": ["마라탕"],
+                "attributes": {**FAMILIES[0]["attributes"], "taste": "얼얼한"},
+            },
+            {
+                **FAMILIES[0],
+                "id": "family-spicy",
+                "canonical": "칼칼한 마라탕",
+                "baseName": "마라탕",
+                "variants": ["칼칼한 마라탕"],
+                "attributes": {**FAMILIES[0]["attributes"], "taste": "칼칼한"},
+            },
+        ]
+
+        evidence = extract_structured_food_evidence(
+            "칼칼한 해물 마라탕 찾아줘",
+            families=families,
+            interpretation="MATCHABLE",
+            llm_concepts=[],
+        )
+
+        self.assertEqual(evidence.menu_families, ("마라탕",))
+        self.assertEqual(evidence.family_ids, ("family-spicy",))
+        self.assertEqual(evidence.tastes, ("칼칼한",))
+
+        plain = extract_structured_food_evidence(
+            "마라탕 찾아줘",
+            families=families,
+            interpretation="MATCHABLE",
+            llm_concepts=[],
+        )
+        self.assertEqual(plain.family_ids, ("family-plain",))
+
 
 class StructuredCandidateTest(unittest.TestCase):
     def setUp(self):
@@ -165,6 +204,38 @@ class StructuredCandidateTest(unittest.TestCase):
 
         self.assertEqual(result.menu_ids, ("menu-exact",))
         self.assertEqual(result.evidence_counts, {"menu-exact": 2})
+
+    def test_specific_family_id_is_not_reexpanded_by_shared_base_name(self):
+        sibling = {
+            **FAMILIES[0],
+            "id": "family-sibling",
+            "canonical": "직화 마라탕",
+            "baseName": "마라탕",
+            "variants": ["직화 마라탕"],
+        }
+        menus = [
+            self._menu("menu-exact", "store-exact", "family-maratang", "마라탕"),
+            self._menu("menu-broad", "store-broad", "family-sibling", "직화 마라탕"),
+        ]
+        evidence = extract_structured_food_evidence(
+            "마라탕 찾아줘",
+            families=[FAMILIES[0], sibling],
+            interpretation="MATCHABLE",
+            llm_concepts=[],
+        )
+
+        result = retrieve_structured_candidates(
+            evidence=evidence,
+            families=[FAMILIES[0], sibling],
+            stores=self.stores,
+            menus=menus,
+            filters={},
+            sort="RECOMMENDED",
+            ranking="current",
+        )
+
+        self.assertEqual(evidence.family_ids, ("family-maratang",))
+        self.assertEqual(result.menu_ids, ("menu-exact",))
 
     def test_generic_form_alone_never_creates_a_candidate(self):
         evidence = extract_structured_food_evidence(
