@@ -351,6 +351,33 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             self.compose,
         )
 
+    def test_staging_forwards_private_onboarding_evidence_s3_flag(self):
+        default_backend_environment = self.compose_config["services"]["backend"][
+            "environment"
+        ]
+        environment = self.compose_environment()
+        environment["MIRIYUM_STORE_ONBOARDING_EVIDENCE_S3_ENABLED"] = "true"
+
+        backend_environment = self.load_compose_config(
+            ENV_EXAMPLE_PATH, environment
+        )["services"]["backend"]["environment"]
+
+        self.assertEqual(
+            "true",
+            backend_environment["MIRIYUM_STORE_ONBOARDING_EVIDENCE_S3_ENABLED"],
+        )
+        self.assertEqual(
+            "false",
+            default_backend_environment[
+                "MIRIYUM_STORE_ONBOARDING_EVIDENCE_S3_ENABLED"
+            ],
+        )
+        self.assertIn(
+            "MIRIYUM_STORE_ONBOARDING_EVIDENCE_S3_ENABLED: "
+            "${MIRIYUM_STORE_ONBOARDING_EVIDENCE_S3_ENABLED:-false}",
+            self.compose,
+        )
+
     def test_pending_risk_event_count_is_observable_without_identifier_dimensions(self):
         self.assertIn(
             "miriyum-staging-refresh-risk-event-pending-count", self.resource_script
