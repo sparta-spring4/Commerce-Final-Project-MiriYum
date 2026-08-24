@@ -308,6 +308,24 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             self.assertEqual(value, backend_environment[name])
             self.assertIn(expected_source_mappings[name], self.compose)
 
+    def test_staging_forwards_s3_runtime_and_reconciliation_flags_together(self):
+        environment = self.compose_environment()
+        environment.update(
+            {
+                "MIRIYUM_STORAGE_S3_ENABLED": "true",
+                "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED": "true",
+            }
+        )
+
+        backend_environment = self.load_compose_config(
+            ENV_EXAMPLE_PATH, environment
+        )["services"]["backend"]["environment"]
+
+        self.assertEqual("true", backend_environment["MIRIYUM_STORAGE_S3_ENABLED"])
+        self.assertEqual(
+            "true", backend_environment["MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"]
+        )
+
     def test_pending_risk_event_count_is_observable_without_identifier_dimensions(self):
         self.assertIn(
             "miriyum-staging-refresh-risk-event-pending-count", self.resource_script
