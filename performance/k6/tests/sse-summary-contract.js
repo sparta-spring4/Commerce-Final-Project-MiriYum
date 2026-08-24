@@ -35,6 +35,14 @@ const METADATA = {
 
 const SUMMARY_INPUT = {
   metrics: {
+    owned_http_baseline: {
+      type: 'trend',
+      values: { avg: 12, min: 8, med: 11, max: 19, 'p(50)': 11, 'p(95)': 18, 'p(99)': 19 },
+    },
+    owned_http_duration: {
+      type: 'trend',
+      values: { avg: 14, min: 9, med: 12, max: 102.23, 'p(50)': 12, 'p(95)': 20, 'p(99)': 80 },
+    },
     'sse_first_event{phase:measured,profile:smoke,audience:consumer,endpoint_kind:notification-consumer}': {
       type: 'trend',
       values: { avg: 12.5, min: 10, med: 12, max: 15, 'p(50)': 12, 'p(95)': 14, 'p(99)': 15 },
@@ -218,6 +226,13 @@ export default function () {
       parsed.limits.connections === 1
       && parsed.limits.holdDurationSeconds === 5
       && parsed.runMetrics.droppedIterations.count === 0,
+    'summary keeps safe run-wide owned HTTP timing aggregates': () =>
+      parsed.runMetrics.ownedHttpBaseline.max === 19
+      && parsed.runMetrics.ownedHttpBaseline.p95 === 18
+      && parsed.runMetrics.ownedHttpDuration.max === 102.23
+      && parsed.runMetrics.ownedHttpDuration.p95 === 20
+      && rendered.stdout.includes('owned HTTP baseline p95/max ms: 18 / 19')
+      && rendered.stdout.includes('owned HTTP measured p95/max ms: 20 / 102.23'),
     'slow summary preserves only bounded cleanup and companion evidence': () =>
       slowError === null
       && slowParsed.limits.slowClientDelaySeconds === 40

@@ -45,6 +45,11 @@ const RUN_METRICS = Object.freeze({
   sse_recovery_trigger_response_failures: ['recoveryTriggerResponseFailures', ['count', 'rate']],
 })
 
+const RUN_AGGREGATE_METRICS = Object.freeze({
+  owned_http_baseline: ['ownedHttpBaseline', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
+  owned_http_duration: ['ownedHttpDuration', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
+})
+
 const VALUE_NAMES = Object.freeze({
   'p(50)': 'p50',
   'p(95)': 'p95',
@@ -190,6 +195,14 @@ function collectMetrics(data, metadata) {
   const runMetrics = {}
   const metrics = data && data.metrics ? data.metrics : {}
   for (const [name, metric] of Object.entries(metrics)) {
+    const runAggregateContract = RUN_AGGREGATE_METRICS[name]
+    if (runAggregateContract !== undefined && metric !== null && typeof metric === 'object') {
+      runMetrics[runAggregateContract[0]] = copyMetricValues(
+        metric.values,
+        runAggregateContract[1],
+      )
+      continue
+    }
     const parsed = parseMetricName(name)
     if (parsed === null
       || !['measured', 'cleanup'].includes(parsed.tags.phase)
@@ -233,6 +246,15 @@ function renderMarkdown(summary) {
   for (const endpointKind of summary.endpointKinds) {
     const metrics = summary.metrics[endpointKind] || {}
     lines.push(`| ${endpointKind} | ${metrics.firstEvent?.p95 ?? '-'} | ${metrics.connectionDuration?.p95 ?? '-'} | ${metrics.slowCleanupDuration?.max ?? '-'} | ${metrics.companionLifetime?.min ?? '-'} | ${metrics.successfulConnections?.count ?? 0} | ${metrics.rejectedConnections?.count ?? 0} | ${metrics.recoverySuccessful?.count ?? 0} | ${metrics.unexpected4xx?.count ?? 0} | ${metrics.server5xx?.count ?? 0} |`)
+  }
+  const baseline = summary.runMetrics.ownedHttpBaseline
+  const measured = summary.runMetrics.ownedHttpDuration
+  if (baseline !== undefined || measured !== undefined) {
+    lines.push(
+      '',
+      `- owned HTTP baseline p95/max ms: ${baseline?.p95 ?? '-'} / ${baseline?.max ?? '-'}`,
+      `- owned HTTP measured p95/max ms: ${measured?.p95 ?? '-'} / ${measured?.max ?? '-'}`,
+    )
   }
   if (summary.profile === 'recovery') {
     const recovery = summary.metrics['waiting-store-operator']?.recoveryDuration
