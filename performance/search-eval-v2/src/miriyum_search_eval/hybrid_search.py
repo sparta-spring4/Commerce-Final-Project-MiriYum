@@ -6,7 +6,10 @@ import re
 from statistics import mean
 from typing import Any, Iterable
 
-from .matching import _eligible, compact, merge_application_candidates, normalize
+from .matching import (
+    _eligible, compact, deterministic_remaining_keyword,
+    merge_application_candidates, normalize,
+)
 from .metrics import stability_metrics, wilson_interval
 from .structured_search import STRUCTURED_CUTOFFS, _candidate_safety, _variant_cutoffs
 
@@ -56,7 +59,7 @@ _FOOD_VOCABULARY: dict[str, tuple[tuple[str, ...], ...]] = {
     ),
     "ingredients": (
         ("해물", "해산물"), ("돼지뼈", "뼈다귀"), ("멸치",),
-        ("돼지고기", "돼지"), ("닭고기", "닭"), ("소고기", "소"), ("원두",),
+        ("돼지고기", "돼지"), ("닭고기", "닭"), ("소고기",), ("원두",),
         ("김치",), ("된장",), ("두부", "순두부"), ("햄",), ("소갈비", "갈비"),
         ("쌀떡", "떡"), ("쌀",), ("나물", "채소", "야채"), ("카레",),
         ("밀", "밀가루"), ("치즈",), ("생선",), ("메밀",), ("콩",),
@@ -289,11 +292,13 @@ def _explicit_menu_names(query_text: str, catalog: HybridPreparedCatalog) -> tup
 
 def _actual_food_evidence_ranking(
     *, query: dict[str, Any], supplied_evidence: dict[str, Any],
-    catalog: HybridPreparedCatalog,
+    baseline_store_ids: tuple[str, ...], catalog: HybridPreparedCatalog,
 ) -> tuple[tuple[str, ...], tuple[str, ...], dict[str, int], dict[str, Any]]:
-    evidence = _actual_evidence(query["text"], supplied_evidence)
+    evidence_text = deterministic_remaining_keyword(query)
+    evidence = _actual_evidence(evidence_text, supplied_evidence)
     cache_key = (
-        query["text"], query["sort"],
+        evidence_text, query["sort"],
+        baseline_store_ids,
         tuple(sorted((str(key), repr(value)) for key, value in query["filters"].items())),
         tuple(
             (field, evidence["sources"].get(field), evidence[field])
@@ -304,7 +309,7 @@ def _actual_food_evidence_ranking(
     if cached is not None:
         menu_ids, store_ids, frozen_scores = cached
         return menu_ids, store_ids, dict(frozen_scores), evidence
-    explicit_names = set(_explicit_menu_names(query["text"], catalog))
+    explicit_names = set(_explicit_menu_names(evidence_text, catalog))
     rows: list[tuple[dict[str, Any], dict[str, Any], int]] = []
     menu_scores: dict[str, int] = {}
     for menu in catalog.menus_by_id.values():
@@ -340,8 +345,14 @@ def _actual_food_evidence_ranking(
         score = menu_rank * 10 + dimension_count
         menu_scores[menu["id"]] = score
         rows.append((menu, store, score))
+    baseline_rank = {
+        store_id: index for index, store_id in enumerate(baseline_store_ids)
+    }
     rows.sort(key=lambda row: (
-        -row[2], *_business_sort_key(row[0], row[1], query["sort"]), row[1]["id"],
+        -row[2],
+        baseline_rank.get(row[1]["id"], len(baseline_rank)),
+        *_business_sort_key(row[0], row[1], query["sort"]),
+        row[1]["id"],
     ))
     menu_ids = tuple(row[0]["id"] for row in rows)
     store_ids = tuple(dict.fromkeys(row[1]["id"] for row in rows))
@@ -503,7 +514,8 @@ def evaluate_hybrid_variants(
     else:
         g_ranking = f_ranking
     h_menu_ids, h_structured_ranking, h_menu_scores, h_evidence = _actual_food_evidence_ranking(
-        query=query, supplied_evidence=evidence, catalog=catalog,
+        query=query, supplied_evidence=evidence,
+        baseline_store_ids=d_ranking, catalog=catalog,
     )
     h_ranking = merge_application_candidates(
         original_store_ids=h_structured_ranking,
@@ -565,7 +577,11 @@ def evaluate_hybrid_variants(
         "embeddingCandidateMenuIds": list(embedding_menu_ids),
         "actualFoodEvidence": {
             "variant": ACTUAL_FOOD_EVIDENCE_LABEL,
-            "actualApplication": True,
+            "actualApplication": False,
+            "actualApplicationPredicate": True,
+            "queryEvidenceProvenance": "legacy-structured-checkpoint-replay",
+            "queryEvidenceSchemaComplete": False,
+            "missingReplayFields": ["aromas", "textures"],
             "vocabularyVersion": "food-evidence-v1",
             "evidence": {
                 field: [list(aliases) for aliases in values]
@@ -806,8 +822,9 @@ def aggregate_hybrid_comparison(calls: list[dict[str, Any]]) -> dict[str, Any]:
             "passed": not fatal_reasons,
             "fatalReasons": fatal_reasons,
             "variant": ACTUAL_FOOD_EVIDENCE_LABEL,
-            "actualApplication": True,
+            "actualApplication": False,
+            "actualApplicationPredicate": True,
             "productionActivationApproved": False,
-            "status": "actual-application-predicate-offline-reanalysis",
+            "status": "actual-predicate-legacy-checkpoint-replay",
         },
     }

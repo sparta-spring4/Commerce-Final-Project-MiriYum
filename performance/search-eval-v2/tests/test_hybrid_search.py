@@ -333,6 +333,28 @@ class HybridSearchTest(unittest.TestCase):
             [],
         )
 
+    def test_h_actual_does_not_extract_beef_from_nutty_taste_word(self):
+        query = self._query("고소한 뼈해장국")
+        result = evaluate_hybrid_variants(
+            dataset=self._dataset(), query=query,
+            structured_call=self._structured_call(query, menu_family=False),
+            embedding_menu_scores=(), prepared_catalog=self.catalog,
+        )
+
+        self.assertEqual(result["actualFoodEvidence"]["evidence"]["ingredients"], [])
+
+    def test_h_actual_extracts_from_remaining_keyword_without_filter_span(self):
+        query = self._query("SEOUL의 짬뽕 찾아줘")
+        query["filters"] = {"region": "SEOUL"}
+        result = evaluate_hybrid_variants(
+            dataset=self._dataset(), query=query,
+            structured_call=self._structured_call(query, menu_family=True),
+            embedding_menu_scores=(), prepared_catalog=self.catalog,
+        )
+
+        raw = result["actualFoodEvidence"]["evidence"]["rawFoodSpans"][0][0]
+        self.assertNotIn("seoul", raw)
+
     def test_h_actual_preserves_validated_baseline_candidates(self):
         query = self._query("검색어와 무관한 기존 후보")
         structured_call = self._structured_call(query, menu_family=False)
@@ -345,6 +367,30 @@ class HybridSearchTest(unittest.TestCase):
         self.assertEqual(
             result["variants"][ACTUAL_FOOD_EVIDENCE_VARIANT]["cutoffs"]["all"]["rankedStoreIds"],
             ["store-distractor"],
+        )
+
+    def test_h_actual_uses_legacy_order_to_break_equal_structured_scores(self):
+        query = self._query("칼칼한 국물 음식 추천해줘")
+        structured_call = self._structured_call(query, menu_family=False)
+        for cutoff in structured_call["variants"]["C"]["cutoffs"].values():
+            cutoff["rankedStoreIds"] = ["store-target", "store-distractor"]
+        menus = [
+            menu("menu-target", "store-target", "family-target", "오늘국", "칼칼한 국물"),
+            menu("menu-distractor", "store-distractor", "family-target", "내일국", "칼칼한 국물"),
+        ]
+        catalog = prepare_hybrid_catalog(
+            families=FAMILIES, stores=self.stores, menus=menus,
+        )
+
+        result = evaluate_hybrid_variants(
+            dataset={"families": FAMILIES, "stores": self.stores, "menus": menus},
+            query=query, structured_call=structured_call,
+            embedding_menu_scores=(), prepared_catalog=catalog,
+        )
+
+        self.assertEqual(
+            result["variants"][ACTUAL_FOOD_EVIDENCE_VARIANT]["cutoffs"]["@20"]["rankedStoreIds"],
+            ["store-target", "store-distractor"],
         )
 
     def test_h_actual_reports_every_cutoff_and_actual_gate(self):
@@ -361,7 +407,8 @@ class HybridSearchTest(unittest.TestCase):
             ("@1", "@3", "@5", "@8", "@20", "@50", "all"),
         )
         self.assertEqual(tuple(aggregate["variants"]), ("D", "E", "F", "G", "H"))
-        self.assertTrue(aggregate["gate"]["actualApplication"])
+        self.assertFalse(aggregate["gate"]["actualApplication"])
+        self.assertTrue(aggregate["gate"]["actualApplicationPredicate"])
         self.assertEqual(
             aggregate["gate"]["variant"], "actual-application-predicate-food-evidence-v1",
         )

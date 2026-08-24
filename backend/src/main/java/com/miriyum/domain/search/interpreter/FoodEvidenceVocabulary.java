@@ -108,7 +108,7 @@ public final class FoodEvidenceVocabulary {
                 term("ANCHOVY", "멸치"),
                 term("PORK", "돼지고기", "돼지"),
                 term("CHICKEN", "닭고기", "닭"),
-                term("BEEF", "소고기", "소"),
+                term("BEEF", "소고기"),
                 term("COFFEE_BEAN", "원두"),
                 term("KIMCHI", "김치"),
                 term("SOYBEAN_PASTE", "된장"),

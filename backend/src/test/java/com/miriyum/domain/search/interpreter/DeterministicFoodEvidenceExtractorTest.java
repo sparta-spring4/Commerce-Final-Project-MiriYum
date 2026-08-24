@@ -61,4 +61,12 @@ class DeterministicFoodEvidenceExtractorTest {
                 .extracting(EvidenceTerm::id)
                 .containsExactly("FIRE_AROMA");
     }
+
+    @Test
+    void doesNotExtractBeefFromNuttyTasteWord() {
+        StructuredFoodEvidence result = extractor.extract("고소한 뼈해장국");
+
+        assertThat(result.tastes()).extracting(EvidenceTerm::id).containsExactly("NUTTY");
+        assertThat(result.ingredients()).isEmpty();
+    }
 }

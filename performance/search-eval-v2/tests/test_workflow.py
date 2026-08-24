@@ -505,11 +505,17 @@ class WorkflowTest(unittest.TestCase):
 
         self.assertEqual(metadata["variant"], "H_ACTUAL_FOOD_EVIDENCE_V1")
         self.assertEqual(metadata["label"], "actual-application-predicate-food-evidence-v1")
-        self.assertTrue(metadata["actualApplication"])
+        self.assertFalse(metadata["actualApplication"])
+        self.assertTrue(metadata["actualApplicationPredicate"])
+        self.assertEqual(metadata["queryEvidenceProvenance"], "legacy-structured-checkpoint-replay")
         self.assertEqual(metadata["productionCommitSha"], "abc123")
         self.assertEqual(metadata["runtimeGitSha"], "abc123")
         self.assertEqual(metadata["newProviderCalls"], 0)
         self.assertEqual(metadata["newEmbeddingCalls"], 0)
+
+        dirty = _hybrid_actual_metadata("abc123", working_tree_dirty=True)
+        self.assertIsNone(dirty["analysisCommitSha"])
+        self.assertTrue(dirty["analysisWorkingTreeDirty"])
 
     def test_canonical_checkpoint_sha_is_pinned_once(self):
         with tempfile.TemporaryDirectory() as directory:

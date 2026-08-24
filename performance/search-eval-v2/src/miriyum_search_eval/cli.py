@@ -808,15 +808,22 @@ def _load_validated_hybrid_structured_calls(
     ]
 
 
-def _hybrid_actual_metadata(runtime_git_sha: str) -> dict[str, Any]:
+def _hybrid_actual_metadata(
+    runtime_git_sha: str, *, working_tree_dirty: bool = False,
+) -> dict[str, Any]:
     return {
-        "status": "actual-H-with-simulated-D-through-G",
+        "status": "actual-predicate-H-with-legacy-evidence-replay",
         "variant": "H_ACTUAL_FOOD_EVIDENCE_V1",
         "label": "actual-application-predicate-food-evidence-v1",
-        "actualApplication": True,
+        "actualApplication": False,
+        "actualApplicationPredicate": True,
+        "queryEvidenceProvenance": "legacy-structured-checkpoint-replay",
+        "queryEvidenceSchemaComplete": False,
+        "missingReplayFields": ["aromas", "textures"],
         "productionCommitSha": runtime_git_sha,
         "runtimeGitSha": runtime_git_sha,
-        "analysisCommitSha": runtime_git_sha,
+        "analysisCommitSha": None if working_tree_dirty else runtime_git_sha,
+        "analysisWorkingTreeDirty": working_tree_dirty,
         "newProviderCalls": 0,
         "newEmbeddingCalls": 0,
     }
@@ -907,12 +914,14 @@ def hybrid_reanalyze(root: Path, source: Path) -> None:
         "productionSearchPredicate": _repo_root() / "backend/src/main/java/com/miriyum/domain/search/repository/IntegratedStoreSearchPredicates.java",
     }
     runtime_git_sha = _commit_sha()
+    working_tree_dirty = subprocess.run(
+        ["git", "diff", "--quiet"], cwd=_repo_root(), check=False,
+    ).returncode != 0
     metadata["hybridReanalysis"] = {
         "schemaVersion": "miriyum-hybrid-search-reanalysis-v1",
-        **_hybrid_actual_metadata(runtime_git_sha),
-        "analysisWorkingTreeDirty": subprocess.run(
-            ["git", "diff", "--quiet"], cwd=_repo_root(), check=False,
-        ).returncode != 0,
+        **_hybrid_actual_metadata(
+            runtime_git_sha, working_tree_dirty=working_tree_dirty,
+        ),
         "incrementalCostUsd": 0.0,
         **source_hashes,
         "embeddingSourceArtifact": str(source.resolve()),
