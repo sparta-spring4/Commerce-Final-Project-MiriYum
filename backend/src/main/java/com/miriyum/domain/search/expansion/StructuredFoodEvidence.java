@@ -67,7 +67,8 @@ public record StructuredFoodEvidence(
     }
 
     public boolean hasCandidateEvidence() {
-        return !rawFoodSpans.isEmpty()
+        return rawFoodSpans.stream().anyMatch(
+                        term -> term.source() == StructuredFoodEvidenceSource.DETERMINISTIC)
                 || !menuFamilies.isEmpty()
                 || coreDimensionTerms().size() >= 2;
     }
