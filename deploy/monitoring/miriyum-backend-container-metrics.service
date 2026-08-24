@@ -1,0 +1,10 @@
+[Unit]
+Description=MiriYum staging backend container resource metrics publisher
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/miriyum
+EnvironmentFile=/opt/miriyum/.env
+ExecStart=/opt/miriyum/monitoring/publish-backend-container-metrics.sh

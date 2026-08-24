@@ -132,6 +132,18 @@ public class IntegratedStoreSearchService {
                 cursor,
                 requestedSize,
                 cursorCodec);
+        List<String> explicitMenuNames = repository
+                .resolveMostSpecificPublishedMenuNames(condition.remainingKeyword());
+        requestQuery = IntegratedStoreSearchQuery.from(
+                condition,
+                explicitMenuNames,
+                includesInfants,
+                availableOnly,
+                principalScope,
+                sort,
+                cursor,
+                requestedSize,
+                cursorCodec);
         if (requestQuery.sort() == IntegratedStoreSearchSort.RECOMMENDATION_DESC) {
             return searchRecommendations(
                     consumerAccountId,
@@ -153,6 +165,7 @@ public class IntegratedStoreSearchService {
                 && scannedCandidates < scanLimit) {
             IntegratedStoreSearchQuery query = IntegratedStoreSearchQuery.from(
                     condition,
+                    explicitMenuNames,
                     includesInfants,
                     availableOnly,
                     principalScope,
@@ -273,6 +286,7 @@ public class IntegratedStoreSearchService {
         while (scannedCandidates < scanLimit) {
             IntegratedStoreSearchQuery scanQuery = IntegratedStoreSearchQuery.from(
                     condition,
+                    requestQuery.explicitMenuNames(),
                     includesInfants,
                     availableOnly,
                     cursorCodec.principalScope(consumerAccountId),

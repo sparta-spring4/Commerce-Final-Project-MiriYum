@@ -32,6 +32,15 @@ VALKEY_MEMORY_SERVICE_PATH = (
 VALKEY_MEMORY_TIMER_PATH = (
     ROOT / "deploy" / "monitoring" / "miriyum-valkey-memory-metrics.timer"
 )
+BACKEND_CONTAINER_METRICS_SCRIPT_PATH = (
+    ROOT / "deploy" / "monitoring" / "publish-backend-container-metrics.sh"
+)
+BACKEND_CONTAINER_METRICS_SERVICE_PATH = (
+    ROOT / "deploy" / "monitoring" / "miriyum-backend-container-metrics.service"
+)
+BACKEND_CONTAINER_METRICS_TIMER_PATH = (
+    ROOT / "deploy" / "monitoring" / "miriyum-backend-container-metrics.timer"
+)
 RISK_EVENT_DELIVERY_PATH = (
     ROOT
     / "backend"
@@ -307,6 +316,67 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         for name, value in expected_environment.items():
             self.assertEqual(value, backend_environment[name])
             self.assertIn(expected_source_mappings[name], self.compose)
+
+    def test_staging_forwards_s3_runtime_and_reconciliation_flags_together(self):
+        environment = self.compose_environment()
+        environment.update(
+            {
+                "MIRIYUM_STORAGE_S3_ENABLED": "true",
+                "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED": "true",
+                "MIRIYUM_STORAGE_S3_BUCKET": "miriyum-staging-files",
+                "MIRIYUM_STORAGE_S3_REGION": "ap-northeast-2",
+            }
+        )
+
+        backend_environment = self.load_compose_config(
+            ENV_EXAMPLE_PATH, environment
+        )["services"]["backend"]["environment"]
+
+        self.assertEqual("true", backend_environment["MIRIYUM_STORAGE_S3_ENABLED"])
+        self.assertEqual(
+            "true", backend_environment["MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"]
+        )
+        self.assertEqual(
+            "miriyum-staging-files", backend_environment["MIRIYUM_STORAGE_S3_BUCKET"]
+        )
+        self.assertEqual(
+            "ap-northeast-2", backend_environment["MIRIYUM_STORAGE_S3_REGION"]
+        )
+        self.assertIn(
+            "MIRIYUM_STORAGE_S3_BUCKET: ${MIRIYUM_STORAGE_S3_BUCKET:-}",
+            self.compose,
+        )
+        self.assertIn(
+            "MIRIYUM_STORAGE_S3_REGION: ${MIRIYUM_STORAGE_S3_REGION:-ap-northeast-2}",
+            self.compose,
+        )
+
+    def test_staging_forwards_private_onboarding_evidence_s3_flag(self):
+        default_backend_environment = self.compose_config["services"]["backend"][
+            "environment"
+        ]
+        environment = self.compose_environment()
+        environment["MIRIYUM_STORE_ONBOARDING_EVIDENCE_S3_ENABLED"] = "true"
+
+        backend_environment = self.load_compose_config(
+            ENV_EXAMPLE_PATH, environment
+        )["services"]["backend"]["environment"]
+
+        self.assertEqual(
+            "true",
+            backend_environment["MIRIYUM_STORE_ONBOARDING_EVIDENCE_S3_ENABLED"],
+        )
+        self.assertEqual(
+            "false",
+            default_backend_environment[
+                "MIRIYUM_STORE_ONBOARDING_EVIDENCE_S3_ENABLED"
+            ],
+        )
+        self.assertIn(
+            "MIRIYUM_STORE_ONBOARDING_EVIDENCE_S3_ENABLED: "
+            "${MIRIYUM_STORE_ONBOARDING_EVIDENCE_S3_ENABLED:-false}",
+            self.compose,
+        )
 
     def test_pending_risk_event_count_is_observable_without_identifier_dimensions(self):
         self.assertIn(
@@ -1538,6 +1608,296 @@ main
         self.assertIn("AuthValkeyMaxMemoryBytes", self.resource_script)
         self.assertIn("AuthValkeyMemoryUtilizationPercent", self.resource_script)
         self.assertIn("AuthValkeyMemoryCollectionHeartbeat", self.resource_script)
+
+    def test_backend_container_metrics_timer_is_host_scoped_and_runs_every_minute(self):
+        self.assertTrue(BACKEND_CONTAINER_METRICS_SCRIPT_PATH.is_file())
+        service = BACKEND_CONTAINER_METRICS_SERVICE_PATH.read_text(encoding="utf-8")
+        timer = BACKEND_CONTAINER_METRICS_TIMER_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("EnvironmentFile=/opt/miriyum/.env", service)
+        self.assertIn(
+            "ExecStart=/opt/miriyum/monitoring/publish-backend-container-metrics.sh",
+            service,
+        )
+        self.assertIn("OnUnitActiveSec=60s", timer)
+        self.assertIn(
+            "Unit=miriyum-backend-container-metrics.service",
+            timer,
+        )
+        self.assertIn(
+            "systemctl enable --now miriyum-backend-container-metrics.timer",
+            self.workflow,
+        )
+        self.assertIn(
+            "systemd-analyze verify /etc/systemd/system/miriyum-backend-container-metrics.service /etc/systemd/system/miriyum-backend-container-metrics.timer",
+            self.workflow,
+        )
+
+    def test_backend_container_metrics_success_publishes_cpu_memory_and_heartbeat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            aws_arguments = temporary_path / "aws-arguments"
+            fake_aws = temporary_path / "aws"
+            fake_curl = temporary_path / "curl"
+            fake_docker = temporary_path / "docker"
+            fake_aws.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$TEST_AWS_ARGUMENTS"\n',
+                encoding="utf-8",
+            )
+            fake_curl.write_text(
+                '#!/usr/bin/env bash\nif [[ " $* " == *" --request PUT "* ]]; then echo token; else echo i-test; fi\n',
+                encoding="utf-8",
+            )
+            fake_docker.write_text(
+                '#!/usr/bin/env bash\nif [[ "$*" == *"ps"*"label=com.docker.compose.service=backend"* ]]; then echo backend-container; else echo "12.50%|64.00MiB / 7.76GiB|0.81%"; fi\n',
+                encoding="utf-8",
+            )
+            for executable in (fake_aws, fake_curl, fake_docker):
+                executable.chmod(0o755)
+
+            result = subprocess.run(
+                [BASH_EXECUTABLE, str(BACKEND_CONTAINER_METRICS_SCRIPT_PATH)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={
+                    **os.environ,
+                    "AWS_BIN": str(fake_aws),
+                    "CURL_BIN": str(fake_curl),
+                    "DOCKER_BIN": str(fake_docker),
+                    "AWS_REGION": "ap-northeast-2",
+                    "TEST_AWS_ARGUMENTS": str(aws_arguments),
+                },
+            )
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("event=backend_container_metrics_collected", result.stdout)
+            published = aws_arguments.read_text(encoding="utf-8")
+            self.assertIn(
+                "MetricName=BackendContainerCpuUtilizationPercent,Value=12.50",
+                published,
+            )
+            self.assertIn(
+                "MetricName=BackendContainerMemoryUsageBytes,Value=67108864",
+                published,
+            )
+            self.assertIn(
+                "MetricName=BackendContainerMemoryUtilizationPercent,Value=0.81",
+                published,
+            )
+            self.assertIn(
+                "MetricName=BackendContainerMetricsHeartbeat,Value=1",
+                published,
+            )
+            self.assertNotIn("backend-container", result.stdout + result.stderr + published)
+
+    def test_backend_container_metrics_finds_backend_without_validating_unrelated_frontend_service(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            aws_arguments = temporary_path / "aws-arguments"
+            fake_aws = temporary_path / "aws"
+            fake_curl = temporary_path / "curl"
+            fake_docker = temporary_path / "docker"
+            fake_aws.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$TEST_AWS_ARGUMENTS"\n',
+                encoding="utf-8",
+            )
+            fake_curl.write_text(
+                '#!/usr/bin/env bash\nif [[ " $* " == *" --request PUT "* ]]; then echo token; else echo i-test; fi\n',
+                encoding="utf-8",
+            )
+            fake_docker.write_text(
+                '#!/usr/bin/env bash\n'
+                'if [[ "$1" == "compose" ]]; then echo "compose must not be evaluated" >&2; exit 70; '
+                'elif [[ "$*" == *"ps"*"label=com.docker.compose.service=backend"* ]]; then echo backend-container; '
+                'else echo "12.50%|64.00MiB / 7.76GiB|0.81%"; fi\n',
+                encoding="utf-8",
+            )
+            for executable in (fake_aws, fake_curl, fake_docker):
+                executable.chmod(0o755)
+
+            result = subprocess.run(
+                [BASH_EXECUTABLE, str(BACKEND_CONTAINER_METRICS_SCRIPT_PATH)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={
+                    **os.environ,
+                    "AWS_BIN": str(fake_aws),
+                    "CURL_BIN": str(fake_curl),
+                    "DOCKER_BIN": str(fake_docker),
+                    "AWS_REGION": "ap-northeast-2",
+                    "TEST_AWS_ARGUMENTS": str(aws_arguments),
+                },
+            )
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("event=backend_container_metrics_collected", result.stdout)
+            self.assertNotIn("compose must not be evaluated", result.stdout + result.stderr)
+
+    def test_backend_container_metrics_multiple_containers_publish_failure_not_heartbeat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            aws_arguments = temporary_path / "aws-arguments"
+            fake_aws = temporary_path / "aws"
+            fake_curl = temporary_path / "curl"
+            fake_docker = temporary_path / "docker"
+            fake_aws.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$TEST_AWS_ARGUMENTS"\n',
+                encoding="utf-8",
+            )
+            fake_curl.write_text(
+                '#!/usr/bin/env bash\nif [[ " $* " == *" --request PUT "* ]]; then echo token; else echo i-test; fi\n',
+                encoding="utf-8",
+            )
+            fake_docker.write_text(
+                '#!/usr/bin/env bash\nif [[ "$*" == *"ps"*"label=com.docker.compose.service=backend"* ]]; then printf "backend-a\\nbackend-b\\n"; else echo "12.50%|64.00MiB / 7.76GiB|0.81%"; fi\n',
+                encoding="utf-8",
+            )
+            for executable in (fake_aws, fake_curl, fake_docker):
+                executable.chmod(0o755)
+
+            result = subprocess.run(
+                [BASH_EXECUTABLE, str(BACKEND_CONTAINER_METRICS_SCRIPT_PATH)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={
+                    **os.environ,
+                    "AWS_BIN": str(fake_aws),
+                    "CURL_BIN": str(fake_curl),
+                    "DOCKER_BIN": str(fake_docker),
+                    "AWS_REGION": "ap-northeast-2",
+                    "TEST_AWS_ARGUMENTS": str(aws_arguments),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("event=backend_container_metrics_collection_failed", result.stderr)
+            published = aws_arguments.read_text(encoding="utf-8")
+            self.assertIn(
+                "MetricName=BackendContainerMetricsCollectionFailure,Value=1",
+                published,
+            )
+            self.assertNotIn("BackendContainerCpuUtilizationPercent", published)
+            self.assertNotIn("BackendContainerMetricsHeartbeat", published)
+
+    def test_backend_container_metrics_invalid_stats_publishes_failure_not_zero(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            aws_arguments = temporary_path / "aws-arguments"
+            fake_aws = temporary_path / "aws"
+            fake_curl = temporary_path / "curl"
+            fake_docker = temporary_path / "docker"
+            fake_aws.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$TEST_AWS_ARGUMENTS"\n',
+                encoding="utf-8",
+            )
+            fake_curl.write_text(
+                '#!/usr/bin/env bash\nif [[ " $* " == *" --request PUT "* ]]; then echo token; else echo i-test; fi\n',
+                encoding="utf-8",
+            )
+            fake_docker.write_text(
+                '#!/usr/bin/env bash\nif [[ "$*" == *"ps"*"label=com.docker.compose.service=backend"* ]]; then echo backend-container; else echo "not-a-percent|64.00MiB / 7.76GiB|0.81%"; fi\n',
+                encoding="utf-8",
+            )
+            for executable in (fake_aws, fake_curl, fake_docker):
+                executable.chmod(0o755)
+
+            result = subprocess.run(
+                [BASH_EXECUTABLE, str(BACKEND_CONTAINER_METRICS_SCRIPT_PATH)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={
+                    **os.environ,
+                    "AWS_BIN": str(fake_aws),
+                    "CURL_BIN": str(fake_curl),
+                    "DOCKER_BIN": str(fake_docker),
+                    "AWS_REGION": "ap-northeast-2",
+                    "TEST_AWS_ARGUMENTS": str(aws_arguments),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("event=backend_container_metrics_collection_failed", result.stderr)
+            published = aws_arguments.read_text(encoding="utf-8")
+            self.assertIn(
+                "MetricName=BackendContainerMetricsCollectionFailure,Value=1",
+                published,
+            )
+            self.assertNotIn("BackendContainerCpuUtilizationPercent", published)
+            self.assertNotIn("BackendContainerMetricsHeartbeat", published)
+
+    def test_backend_container_metrics_docker_stats_failure_publishes_failure_not_zero(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            aws_arguments = temporary_path / "aws-arguments"
+            fake_aws = temporary_path / "aws"
+            fake_curl = temporary_path / "curl"
+            fake_docker = temporary_path / "docker"
+            fake_aws.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$TEST_AWS_ARGUMENTS"\n',
+                encoding="utf-8",
+            )
+            fake_curl.write_text(
+                '#!/usr/bin/env bash\nif [[ " $* " == *" --request PUT "* ]]; then echo token; else echo i-test; fi\n',
+                encoding="utf-8",
+            )
+            fake_docker.write_text(
+                '#!/usr/bin/env bash\nif [[ "$*" == *"ps"*"label=com.docker.compose.service=backend"* ]]; then echo backend-container; else exit 1; fi\n',
+                encoding="utf-8",
+            )
+            for executable in (fake_aws, fake_curl, fake_docker):
+                executable.chmod(0o755)
+
+            result = subprocess.run(
+                [BASH_EXECUTABLE, str(BACKEND_CONTAINER_METRICS_SCRIPT_PATH)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={
+                    **os.environ,
+                    "AWS_BIN": str(fake_aws),
+                    "CURL_BIN": str(fake_curl),
+                    "DOCKER_BIN": str(fake_docker),
+                    "AWS_REGION": "ap-northeast-2",
+                    "TEST_AWS_ARGUMENTS": str(aws_arguments),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("event=backend_container_metrics_collection_failed", result.stderr)
+            published = aws_arguments.read_text(encoding="utf-8")
+            self.assertIn(
+                "MetricName=BackendContainerMetricsCollectionFailure,Value=1",
+                published,
+            )
+            self.assertNotIn("BackendContainerMetricsHeartbeat", published)
+
+    def test_backend_container_metrics_failure_alarm_and_dashboard_are_configured(self):
+        self.assertIn(
+            'put_alarm "miriyum-staging-backend-container-metrics-collection-failed"',
+            self.resource_script,
+        )
+        self.assertIn(
+            'put_missing_data_alarm "miriyum-staging-backend-container-metrics-collection-missing"',
+            self.resource_script,
+        )
+        self.assertIn("BackendContainerMetricsCollectionFailure", self.resource_script)
+        self.assertIn("BackendContainerMetricsHeartbeat", self.resource_script)
+        self.assertIn("BackendContainerCpuUtilizationPercent", self.resource_script)
+        self.assertIn("BackendContainerMemoryUsageBytes", self.resource_script)
 
 class ReservationHoldReconciliationAlarmTest(unittest.TestCase):
     @classmethod

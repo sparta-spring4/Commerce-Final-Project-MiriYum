@@ -601,6 +601,82 @@ class IntegratedStoreSearchRepositoryIT {
 
     @Test
     @Transactional
+    void originalSearchFindsExplicitMenuInsideNaturalLanguageAndRejectsGenericMenuName() {
+        Store jjambbong = storeWithMenu(
+                "짬뽕 매장", "짬뽕", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        storeWithMenu(
+                "일반 탕 매장", "탕", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        storeWithMenu(
+                "비공개 칼칼한 짬뽕", "칼칼한 짬뽕", MenuSellingStatus.SELLING,
+                MenuVisibility.HIDDEN, false);
+        storeWithMenu(
+                "retired 옛날 짬뽕", "옛날 짬뽕", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, true);
+        flushAndClear();
+
+        String explicitKeyword = "짬뽕 파는 매장 중 추천순으로 보여줘";
+        IntegratedStoreSearchSlice explicit = repository.search(query(
+                condition(List.of(), List.of(), List.of(), List.of(), null,
+                        explicitKeyword),
+                repository.resolveMostSpecificPublishedMenuNames(explicitKeyword),
+                "relevance,desc", null, 20));
+        String genericKeyword = "얼큰한 탕 파는 매장";
+        IntegratedStoreSearchSlice generic = repository.search(query(
+                condition(List.of(), List.of(), List.of(), List.of(), null,
+                        genericKeyword),
+                repository.resolveMostSpecificPublishedMenuNames(genericKeyword),
+                "relevance,desc", null, 20));
+        String specificKeyword = "칼칼한 짬뽕 파는 매장";
+        IntegratedStoreSearchSlice specificUnavailable = repository.search(query(
+                condition(List.of(), List.of(), List.of(), List.of(), null,
+                        specificKeyword),
+                repository.resolveMostSpecificPublishedMenuNames(specificKeyword),
+                "relevance,desc", null, 20));
+        String retiredKeyword = "옛날 짬뽕 파는 매장";
+        IntegratedStoreSearchSlice retiredLongerDoesNotSuppressCurrentShorter =
+                repository.search(query(
+                        condition(List.of(), List.of(), List.of(), List.of(), null,
+                                retiredKeyword),
+                        repository.resolveMostSpecificPublishedMenuNames(retiredKeyword),
+                        "relevance,desc", null, 20));
+
+        assertThat(explicit.content())
+                .extracting(IntegratedStoreSearchCandidate::storeId)
+                .containsExactly(jjambbong.getId());
+        assertThat(generic.content()).isEmpty();
+        assertThat(specificUnavailable.content()).isEmpty();
+        assertThat(retiredLongerDoesNotSuppressCurrentShorter.content())
+                .extracting(IntegratedStoreSearchCandidate::storeId)
+                .containsExactly(jjambbong.getId());
+    }
+
+    @Test
+    @Transactional
+    void explicitMenuSpecificityUsesMysqlCollationExpansionsWithoutShortFallback() {
+        storeWithMenu(
+                "짧은 이름 매장", "sse", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        storeWithMenu(
+                "숨긴 긴 이름 매장", "straße", MenuSellingStatus.SELLING,
+                MenuVisibility.HIDDEN, false);
+        flushAndClear();
+
+        String keyword = "straße 파는 매장";
+        List<String> resolvedNames = repository
+                .resolveMostSpecificPublishedMenuNames(keyword);
+        IntegratedStoreSearchSlice result = repository.search(query(
+                condition(List.of(), List.of(), List.of(), List.of(), null, keyword),
+                resolvedNames,
+                "relevance,desc", null, 20));
+
+        assertThat(resolvedNames).containsExactly("straße");
+        assertThat(result.content()).isEmpty();
+    }
+
+    @Test
+    @Transactional
     void refreshesCurrentModesAndRemovesStoresThatAreNoLongerPublic() {
         Store modeChanged = createStore(
                 "모드 변경", Region.SEOUL, "KOREAN", Set.of(), false);
@@ -805,6 +881,17 @@ class IntegratedStoreSearchRepositoryIT {
     ) {
         return IntegratedStoreSearchQuery.from(
                 condition, sort, cursor, size, cursorCodec);
+    }
+
+    private IntegratedStoreSearchQuery query(
+            InterpretedSearchCondition condition,
+            List<String> explicitMenuNames,
+            String sort,
+            String cursor,
+            Integer size
+    ) {
+        return IntegratedStoreSearchQuery.from(
+                condition, explicitMenuNames, sort, cursor, size, cursorCodec);
     }
 
     private InterpretedSearchCondition condition() {

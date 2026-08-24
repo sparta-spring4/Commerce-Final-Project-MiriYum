@@ -48,6 +48,19 @@ const RUN_METRICS = Object.freeze({
 const RUN_AGGREGATE_METRICS = Object.freeze({
   owned_http_baseline: ['ownedHttpBaseline', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
   owned_http_duration: ['ownedHttpDuration', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
+  sse_unexpected_400: ['unexpected400', ['count', 'rate']],
+  sse_unexpected_401: ['unexpected401', ['count', 'rate']],
+  sse_unexpected_403: ['unexpected403', ['count', 'rate']],
+  sse_unexpected_other_4xx: ['unexpectedOther4xx', ['count', 'rate']],
+  sse_unexpected_403_code_common_010: ['unexpected403CodeCommon010', ['count', 'rate']],
+  sse_unexpected_403_code_auth_006: ['unexpected403CodeAuth006', ['count', 'rate']],
+  sse_unexpected_403_code_auth_009: ['unexpected403CodeAuth009', ['count', 'rate']],
+  sse_unexpected_403_code_auth_010: ['unexpected403CodeAuth010', ['count', 'rate']],
+  sse_unexpected_403_code_auth_011: ['unexpected403CodeAuth011', ['count', 'rate']],
+  sse_unexpected_403_code_auth_012: ['unexpected403CodeAuth012', ['count', 'rate']],
+  sse_unexpected_403_code_other_or_missing: [
+    'unexpected403CodeOtherOrMissing', ['count', 'rate'],
+  ],
 })
 
 const VALUE_NAMES = Object.freeze({
@@ -263,6 +276,11 @@ function renderMarkdown(summary) {
       `- owned HTTP measured p95/max ms: ${measured?.p95 ?? '-'} / ${measured?.max ?? '-'}`,
     )
   }
+  lines.push(
+    '',
+    `- unexpected 4xx status buckets: 400=${summary.runMetrics.unexpected400?.count ?? 0}, 401=${summary.runMetrics.unexpected401?.count ?? 0}, 403=${summary.runMetrics.unexpected403?.count ?? 0}, other=${summary.runMetrics.unexpectedOther4xx?.count ?? 0}`,
+    `- unexpected 403 error code buckets: COMMON_010=${summary.runMetrics.unexpected403CodeCommon010?.count ?? 0}, AUTH_006=${summary.runMetrics.unexpected403CodeAuth006?.count ?? 0}, AUTH_009=${summary.runMetrics.unexpected403CodeAuth009?.count ?? 0}, AUTH_010=${summary.runMetrics.unexpected403CodeAuth010?.count ?? 0}, AUTH_011=${summary.runMetrics.unexpected403CodeAuth011?.count ?? 0}, AUTH_012=${summary.runMetrics.unexpected403CodeAuth012?.count ?? 0}, other-or-missing=${summary.runMetrics.unexpected403CodeOtherOrMissing?.count ?? 0}`,
+  )
   if (summary.profile === 'recovery') {
     const recovery = summary.metrics['waiting-store-operator']?.recoveryDuration
     lines.push(

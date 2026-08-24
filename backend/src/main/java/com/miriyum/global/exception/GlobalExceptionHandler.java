@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.Errors;
@@ -224,6 +225,7 @@ public class GlobalExceptionHandler {
 
     private ResponseEntity<ErrorResponse> response(ErrorCode errorCode) {
         return ResponseEntity.status(errorCode.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ErrorResponse.from(errorCode));
     }
 

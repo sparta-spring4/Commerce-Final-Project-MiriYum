@@ -13,13 +13,12 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.util.UUID;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
-@RequiredArgsConstructor
 public class BusinessRegistrationEvidenceUploadService {
 
     private static final String OWNER_TYPE = "STORE_ONBOARDING_APPLICATION";
@@ -28,6 +27,20 @@ public class BusinessRegistrationEvidenceUploadService {
     private final BusinessRegistrationEvidenceUploadValidator validator;
     private final ObjectProvider<FileStorageFacade> fileStorageFacadeProvider;
     private final Clock clock;
+    private final boolean privateEvidenceS3Enabled;
+
+    public BusinessRegistrationEvidenceUploadService(
+            BusinessRegistrationEvidenceUploadValidator validator,
+            ObjectProvider<FileStorageFacade> fileStorageFacadeProvider,
+            Clock clock,
+            @Value("${miriyum.store-onboarding.evidence.s3-enabled:false}")
+            boolean privateEvidenceS3Enabled
+    ) {
+        this.validator = validator;
+        this.fileStorageFacadeProvider = fileStorageFacadeProvider;
+        this.clock = clock;
+        this.privateEvidenceS3Enabled = privateEvidenceS3Enabled;
+    }
 
     public PendingEvidence storePending(
             long applicationId,
@@ -51,6 +64,9 @@ public class BusinessRegistrationEvidenceUploadService {
     ) {
         if (applicationId <= 0 || applicationVersion <= 0 || validated == null) {
             throw new IllegalArgumentException("application id, version, and evidence are required");
+        }
+        if (!privateEvidenceS3Enabled) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
         byte[] bytes = validated.bytes();
         String objectKey = "private/store-onboarding/" + applicationId + "/versions/"

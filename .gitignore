@@ -11,5 +11,8 @@ deploy/local/.env
 performance/k6/fixtures/test-data.local.json
 performance/k6/fixtures/sse-test-data.local.json
 performance/k6/results/
+# 대규모 합성 검색 평가의 manifest, checkpoint, 결과와 embedding 벡터는 로컬에서만 유지한다.
+performance/search-eval-v2/artifacts/
+__pycache__/
 # IntelliJ 로컬 프로젝트 설정은 개발자마다 달라 저장소에 포함하지 않는다.
 .idea/

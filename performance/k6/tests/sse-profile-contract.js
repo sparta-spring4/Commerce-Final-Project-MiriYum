@@ -129,7 +129,7 @@ export default function () {
         && sessionContract.waitForReconnectSettle((seconds) => delays.push(seconds), 6) === true
         && JSON.stringify(delays) === JSON.stringify([6])
     },
-    'wrapper applies the hold invariant only to steady': () => {
+    'wrapper applies the hold invariant only to steady and capacity': () => {
       const steady = applySteadyMinimumLifetime({ mode: 'steady' }, 30, 'steady')
       const smoke = applySteadyMinimumLifetime({ mode: 'smoke' }, 30, 'smoke')
       const reconnect = applySteadyMinimumLifetime({ mode: 'reconnect' }, 30, 'reconnect')
@@ -143,7 +143,7 @@ export default function () {
         && recovery.minimumLifetimeSeconds === undefined
         && slowClient.minimumLifetimeSeconds === undefined
         && companion.minimumLifetimeSeconds === undefined
-        && capacity.minimumLifetimeSeconds === undefined
+        && capacity.minimumLifetimeSeconds === 30
     },
     'smoke closes after exactly one validated frame': () => {
       const opened = openWith({
