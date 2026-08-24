@@ -47,26 +47,29 @@ const SUMMARY_INPUT = {
     sse_unexpected_other_4xx: {
       type: 'counter', values: { count: 4, rate: 4 },
     },
-    sse_unexpected_code_common_010: {
+    sse_unexpected_403_code_common_010: {
       type: 'counter', values: { count: 5, rate: 5 },
     },
-    sse_unexpected_code_auth_006: {
+    sse_unexpected_403_code_auth_006: {
       type: 'counter', values: { count: 6, rate: 6 },
     },
-    sse_unexpected_code_auth_009: {
+    sse_unexpected_403_code_auth_009: {
       type: 'counter', values: { count: 7, rate: 7 },
     },
-    sse_unexpected_code_auth_010: {
+    sse_unexpected_403_code_auth_010: {
       type: 'counter', values: { count: 8, rate: 8 },
     },
-    sse_unexpected_code_auth_011: {
+    sse_unexpected_403_code_auth_011: {
       type: 'counter', values: { count: 9, rate: 9 },
     },
-    sse_unexpected_code_auth_012: {
+    sse_unexpected_403_code_auth_012: {
       type: 'counter', values: { count: 10, rate: 10 },
     },
-    sse_unexpected_code_other_or_missing: {
+    sse_unexpected_403_code_other_or_missing: {
       type: 'counter', values: { count: 11, rate: 11 },
+    },
+    sse_unexpected_code_auth_006: {
+      type: 'counter', values: { count: 99, rate: 99 },
     },
     owned_http_baseline: {
       type: 'trend',
@@ -278,15 +281,16 @@ export default function () {
       && parsed.runMetrics.unexpected403.count === 3
       && parsed.runMetrics.unexpectedOther4xx.count === 4
       && rendered.stdout.includes('unexpected 4xx status buckets: 400=1, 401=2, 403=3, other=4'),
-    'summary preserves only fixed allowlisted unexpected error code totals': () =>
-      parsed.runMetrics.unexpectedCodeCommon010.count === 5
-      && parsed.runMetrics.unexpectedCodeAuth006.count === 6
-      && parsed.runMetrics.unexpectedCodeAuth009.count === 7
-      && parsed.runMetrics.unexpectedCodeAuth010.count === 8
-      && parsed.runMetrics.unexpectedCodeAuth011.count === 9
-      && parsed.runMetrics.unexpectedCodeAuth012.count === 10
-      && parsed.runMetrics.unexpectedCodeOtherOrMissing.count === 11
-      && rendered.stdout.includes('unexpected error code buckets: COMMON_010=5, AUTH_006=6, AUTH_009=7, AUTH_010=8, AUTH_011=9, AUTH_012=10, other-or-missing=11'),
+    'summary preserves only bounded unexpected 403-by-code totals': () =>
+      parsed.runMetrics.unexpected403CodeCommon010.count === 5
+      && parsed.runMetrics.unexpected403CodeAuth006.count === 6
+      && parsed.runMetrics.unexpected403CodeAuth009.count === 7
+      && parsed.runMetrics.unexpected403CodeAuth010.count === 8
+      && parsed.runMetrics.unexpected403CodeAuth011.count === 9
+      && parsed.runMetrics.unexpected403CodeAuth012.count === 10
+      && parsed.runMetrics.unexpected403CodeOtherOrMissing.count === 11
+      && parsed.runMetrics.unexpectedCodeAuth006 === undefined
+      && rendered.stdout.includes('unexpected 403 error code buckets: COMMON_010=5, AUTH_006=6, AUTH_009=7, AUTH_010=8, AUTH_011=9, AUTH_012=10, other-or-missing=11'),
     'reconnect summary preserves the bounded registry settle window': () =>
       reconnectParsed.limits.reconnectSettleSeconds === 6,
     'summary keeps safe run-wide owned HTTP timing aggregates': () =>

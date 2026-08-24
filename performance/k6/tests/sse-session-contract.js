@@ -1,6 +1,10 @@
 import { check } from 'k6'
 
-import { openChangedStream, prepareSseSession } from '../sse/session.js'
+import {
+  openChangedStream,
+  prepareSseSession,
+  selectUnexpected403ErrorCodeBucket,
+} from '../sse/session.js'
 
 export const options = {
   thresholds: {
@@ -65,16 +69,23 @@ function errorMessage(action) {
   }
 }
 
-function unexpectedResponse(status, connectionStage, body = 'forbidden-body') {
+function unexpectedResponse(status, connectionStage, diagnosticBody = 'forbidden-body') {
   const results = []
+  const diagnosticCalls = []
   const transport = {
     open(_url, _params, setup) {
       setup({ on() {}, close() {} })
-      return { status, headers: { Authorization: 'forbidden-header' }, body }
+      return { status, headers: { Authorization: 'forbidden-header' }, error: '' }
     },
   }
   openChangedStream({
     transport,
+    diagnosticClient: {
+      get(url, params) {
+        diagnosticCalls.push({ url, params })
+        return { status, body: diagnosticBody, headers: { Authorization: 'forbidden-header' } }
+      },
+    },
     url: 'https://loadtest-proxy:8443/api/v1/consumers/me/notification-events',
     accessToken: 'access-token-memory-only',
     endpointKind: 'notification-consumer',
@@ -93,7 +104,16 @@ function unexpectedResponse(status, connectionStage, body = 'forbidden-body') {
       traffic: 'sse-stream',
     },
   })
-  return results[0]
+  return {
+    ...results[0],
+    diagnosticCallCount: diagnosticCalls.length,
+    diagnosticRequestIsScoped: diagnosticCalls.length === 1
+      && diagnosticCalls[0].url.endsWith('/api/v1/consumers/me/notification-events')
+      && diagnosticCalls[0].params.headers.Authorization === 'Bearer access-token-memory-only'
+      && diagnosticCalls[0].params.redirects === 0
+      && diagnosticCalls[0].params.timeout === '2s'
+      && diagnosticCalls[0].params.tags.traffic === 'sse-diagnostic',
+  }
 }
 
 export default function () {
@@ -112,6 +132,10 @@ export default function () {
     message: 'unknown-message',
   }))
   const malformedForbidden = unexpectedResponse(403, 'reconnect', '{broken-json')
+  const unauthorized = unexpectedResponse(401, 'reconnect', JSON.stringify({
+    code: 'AUTH_006',
+    message: 'must-not-be-requested',
+  }))
   const rateLimited = unexpectedResponse(429, 'initial')
   const consumerBody = JSON.parse(consumer.client.calls[0].body)
   const operatorBody = JSON.parse(operator.client.calls[0].body)
@@ -170,6 +194,8 @@ export default function () {
       && !JSON.stringify(forbidden).includes('access-token-memory-only'),
     '403 diagnostics distinguish a remapped capacity code without retaining its message': () =>
       remappedCapacity.diagnostic.errorCodeBucket === 'COMMON_010'
+      && remappedCapacity.diagnosticCallCount === 1
+      && remappedCapacity.diagnosticRequestIsScoped
       && !JSON.stringify(remappedCapacity).includes('rate-limit-message'),
     'unknown and malformed 403 bodies collapse to one fixed safe bucket': () =>
       unknownForbidden.diagnostic.errorCodeBucket === 'other-or-missing'
@@ -177,8 +203,13 @@ export default function () {
       && !JSON.stringify(unknownForbidden).includes('AUTH_999')
       && !JSON.stringify(unknownForbidden).includes('unknown-message')
       && !JSON.stringify(malformedForbidden).includes('broken-json'),
+    '403 code selection preserves the status-code association under mixed 401 and 403 failures': () =>
+      unauthorized.diagnosticCallCount === 0
+      && selectUnexpected403ErrorCodeBucket(unauthorized.diagnostic) === null
+      && selectUnexpected403ErrorCodeBucket(forbidden.diagnostic) === 'AUTH_006',
     'capacity 429 remains separate and does not emit unexpected 4xx diagnostics': () =>
       rateLimited.classification === 'capacity_rejected'
-      && rateLimited.diagnostic === null,
+      && rateLimited.diagnostic === null
+      && rateLimited.diagnosticCallCount === 0,
   })
 }
