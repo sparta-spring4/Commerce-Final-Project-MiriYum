@@ -519,7 +519,7 @@ export function openChangedStream({
 }
 
 export function applySteadyMinimumLifetime(behavior, minimumLifetimeSeconds, profile) {
-  return profile === 'steady' && behavior.mode === 'steady'
+  return ['steady', 'capacity'].includes(profile) && behavior.mode === 'steady'
     ? { minimumLifetimeSeconds, ...behavior }
     : behavior
 }
