@@ -501,6 +501,9 @@ def migrate_checkpoint(root: Path, source: Path) -> None:
         **migration,
         "sourcePaidExecution": source_metadata.get("paidExecution", {}),
     }
+    _pin_source_checkpoint_sha256(
+        metadata, root / "calls.canonical.checkpoint.jsonl",
+    )
     write_json(root / "run-metadata.json", metadata)
 
 
@@ -535,7 +538,9 @@ def full_run(root: Path) -> None:
     )
     write_jsonl(root / "results.jsonl", calls)
     write_json(root / "aggregate.json", aggregate_evaluation(calls))
-    write_json(root / "run-metadata.json", _metadata(dataset, config, records, paid_execution))
+    metadata = _metadata(dataset, config, records, paid_execution)
+    _pin_source_checkpoint_sha256(metadata, checkpoint.path)
+    write_json(root / "run-metadata.json", metadata)
 
 
 def embeddings(root: Path) -> None:
@@ -595,8 +600,10 @@ def reanalyze(root: Path, predicate_variant: str) -> None:
     metadata_path = root / "run-metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     _validate_reanalysis_variant(metadata, predicate_variant)
+    checkpoint_path = root / "calls.canonical.checkpoint.jsonl"
+    _validate_source_checkpoint_sha256(metadata, checkpoint_path)
     dataset = _dataset()
-    checkpoint = CheckpointStore(root / "calls.canonical.checkpoint.jsonl")
+    checkpoint = CheckpointStore(checkpoint_path)
     records = checkpoint.records()
     _validate_reanalysis_provenance(metadata, dataset, records)
     validate_checkpoint_matrix(
@@ -643,6 +650,34 @@ def _validate_reanalysis_provenance(
         )
         if record.get("requestId") != expected_request_id:
             raise RuntimeError("reanalysis deterministic request id mismatch")
+
+
+def _checkpoint_sha256(checkpoint_path: Path) -> str:
+    from hashlib import sha256
+
+    if not checkpoint_path.is_file():
+        raise RuntimeError("canonical checkpoint is missing")
+    return sha256(checkpoint_path.read_bytes()).hexdigest()
+
+
+def _pin_source_checkpoint_sha256(
+    metadata: dict[str, Any], checkpoint_path: Path,
+) -> None:
+    current = _checkpoint_sha256(checkpoint_path)
+    recorded = metadata.get("sourceCheckpointSha256")
+    if recorded is not None and recorded != current:
+        raise RuntimeError("canonical checkpoint SHA-256 is already pinned to different bytes")
+    metadata["sourceCheckpointSha256"] = current
+
+
+def _validate_source_checkpoint_sha256(
+    metadata: dict[str, Any], checkpoint_path: Path,
+) -> None:
+    recorded = metadata.get("sourceCheckpointSha256")
+    if not isinstance(recorded, str) or len(recorded) != 64:
+        raise RuntimeError("canonical checkpoint SHA-256 provenance is missing")
+    if recorded != _checkpoint_sha256(checkpoint_path):
+        raise RuntimeError("canonical checkpoint SHA-256 mismatch")
 
 
 def _write_paired_reanalysis_outputs(
@@ -725,9 +760,7 @@ def stamp_reanalysis(
         },
     })
     if checkpoint_path is not None:
-        metadata["sourceCheckpointSha256"] = sha256(
-            checkpoint_path.read_bytes()
-        ).hexdigest()
+        _validate_source_checkpoint_sha256(metadata, checkpoint_path)
     if paired_summary is not None:
         metadata["pairedReanalysis"] = paired_summary
     write_json(metadata_path, metadata)

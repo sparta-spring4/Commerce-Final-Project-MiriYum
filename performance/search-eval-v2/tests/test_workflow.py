@@ -9,6 +9,7 @@ from miriyum_search_eval.cli import (
     ISSUE_616_MOST_SPECIFIC,
     PRE_ISSUE_616,
     _gpt54mini_comparison_config,
+    _pin_source_checkpoint_sha256,
     _validate_prompt_full_provenance,
     _validate_reanalysis_provenance,
     _validate_reanalysis_variant,
@@ -371,6 +372,48 @@ class WorkflowTest(unittest.TestCase):
                 invalid_record["requestId"] = "mse2-other"
             with self.assertRaisesRegex(RuntimeError, message):
                 _validate_reanalysis_provenance(changed, dataset, [invalid_record])
+
+    def test_reanalysis_rejects_changed_canonical_checkpoint_before_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checkpoint = root / "calls.canonical.checkpoint.jsonl"
+            checkpoint.write_bytes(b"original-checkpoint\n")
+            metadata_path = root / "run-metadata.json"
+            metadata_path.write_text(json.dumps({
+                "executionPredicateVariant": ISSUE_616_MOST_SPECIFIC,
+                "sourceCheckpointSha256": sha256(checkpoint.read_bytes()).hexdigest(),
+            }), encoding="utf-8")
+            existing = root / "reanalysis" / "paired-summary.json"
+            existing.parent.mkdir(parents=True)
+            existing.write_bytes(b"existing-summary\n")
+            before = {
+                "metadata": metadata_path.read_bytes(),
+                "summary": existing.read_bytes(),
+            }
+
+            checkpoint.write_bytes(b"changed-checkpoint\n")
+
+            with self.assertRaisesRegex(RuntimeError, "checkpoint SHA-256 mismatch"):
+                reanalyze(root, ISSUE_616_MOST_SPECIFIC)
+
+            self.assertEqual(metadata_path.read_bytes(), before["metadata"])
+            self.assertEqual(existing.read_bytes(), before["summary"])
+
+    def test_canonical_checkpoint_sha_is_pinned_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "calls.canonical.checkpoint.jsonl"
+            checkpoint.write_bytes(b"canonical-checkpoint\n")
+            metadata = {}
+
+            _pin_source_checkpoint_sha256(metadata, checkpoint)
+
+            self.assertEqual(
+                metadata["sourceCheckpointSha256"],
+                sha256(checkpoint.read_bytes()).hexdigest(),
+            )
+            checkpoint.write_bytes(b"changed-checkpoint\n")
+            with self.assertRaisesRegex(RuntimeError, "already pinned"):
+                _pin_source_checkpoint_sha256(metadata, checkpoint)
 
     def test_paired_reanalysis_requires_same_calls_and_no_true_no_answer_fp_gain(self):
         baseline = [{

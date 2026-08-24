@@ -100,7 +100,7 @@ GPT-5.4 mini는 메뉴군 이름 이해는 3~4건 늘었지만, simulated strict
 
 기존 10,000회 LLM 체크포인트를 그대로 사용하고, 최대 100자 `remainingKeyword`의 2자 이상 부분문자열을 indexed exact `IN`과 같은 MySQL `utf8mb4_0900_ai_ci` collation의 anti-join으로 조회해 non-retired current published 메뉴명을 요청당 한 번 찾는다. 전체 결과에서 겹치는 이름 중 가장 구체적인 이름을 먼저 남긴 뒤 최종 100개만 바인딩하고, 후보 조회에서는 visible current published 메뉴만 허용한다. 따라서 hidden current 긴 이름은 짧은 메뉴명으로의 잘못된 후퇴를 막을 수 있지만 결과로 노출되지는 않는다. 아래 차이는 새 LLM 출력이 아니라 검색 predicate와 최종 병합 변화만 반영하며 추가 API 비용은 0원이다.
 
-최초 재분석 구현 기준은 당시 `origin/dev`의 `f188bd701c26ed8f73efd17a163f2f832b84b300`이었다. 보강된 재분석 게이트는 재생성 dataset SHA-256, 메타데이터·레코드 request fingerprint, 모든 deterministic request ID를 먼저 검증하고 baseline/#616을 같은 10,000건으로 동시에 계산한다. 두 결과는 `reanalysis/pre-issue-616/`과 `reanalysis/issue-616-most-specific/`에 분리하며 true-no-answer 오탐이 증가하면 결과 파일을 쓰기 전에 실패한다. `run-metadata.json`에는 canonical checkpoint와 `cli.py`를 포함한 분석 소스 SHA-256을 기록한다. 원래 10,000회 OpenAI 호출의 실행 커밋과 재분석 구현 커밋을 혼동하지 않는다.
+최초 재분석 구현 기준은 당시 `origin/dev`의 `f188bd701c26ed8f73efd17a163f2f832b84b300`이었다. 보강된 재분석 게이트는 재생성 dataset SHA-256, 메타데이터·레코드 request fingerprint, 모든 deterministic request ID를 먼저 검증하고 baseline/#616을 같은 10,000건으로 동시에 계산한다. 두 결과는 `reanalysis/pre-issue-616/`과 `reanalysis/issue-616-most-specific/`에 분리하며 true-no-answer 오탐이 증가하면 결과 파일을 쓰기 전에 실패한다. canonical checkpoint SHA-256은 checkpoint 완성 시 `run-metadata.json`에 고정하고, 재분석은 현재 파일과 먼저 대조해 불일치하면 기존 결과를 덮어쓰기 전에 실패한다. `run-metadata.json`에는 `cli.py`를 포함한 분석 소스 SHA-256도 기록한다. 원래 10,000회 OpenAI 호출의 실행 커밋과 재분석 구현 커밋을 혼동하지 않는다.
 
 | 지표 | Issue #616 전 | Issue #616 재분석 | 변화 |
 |---|---:|---:|---:|
