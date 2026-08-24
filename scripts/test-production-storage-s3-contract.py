@@ -39,6 +39,9 @@ class ProductionS3StorageContractTest(unittest.TestCase):
 
         self.assertEqual("true", environment["MIRIYUM_STORAGE_S3_ENABLED"])
         self.assertEqual("true", environment["MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"])
+        self.assertEqual(
+            "false", environment["MIRIYUM_STORE_ONBOARDING_EVIDENCE_S3_ENABLED"]
+        )
         self.assertIn("MIRIYUM_STORAGE_S3_BUCKET", secret_names)
 
     def test_cd_requires_explicit_s3_activation_and_preflight(self):
