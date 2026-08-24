@@ -51,7 +51,7 @@ import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 @Tag("integration")
-@Tag("integration-shard-d")
+@Tag("integration-shard-c")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
