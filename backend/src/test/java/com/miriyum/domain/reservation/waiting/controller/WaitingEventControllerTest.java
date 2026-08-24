@@ -97,6 +97,7 @@ class WaitingEventControllerTest {
                 .willThrow(new ServiceException(StoreErrorCode.ACCESS_DENIED));
 
         mockMvc.perform(get("/api/v1/store-operators/stores/22/waiting-events")
+                        .accept(MediaType.TEXT_EVENT_STREAM)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
@@ -111,6 +112,7 @@ class WaitingEventControllerTest {
                 .willThrow(new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
 
         mockMvc.perform(get("/api/v1/store-operators/stores/22/waiting-events")
+                        .accept(MediaType.TEXT_EVENT_STREAM)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isNotFound())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
