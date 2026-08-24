@@ -480,6 +480,9 @@ jobs:
           valkey_memory_metrics_base64=$(base64 --wrap=0 deploy/monitoring/publish-valkey-memory-metrics.sh)
           valkey_memory_service_base64=$(base64 --wrap=0 deploy/monitoring/miriyum-valkey-memory-metrics.service)
           valkey_memory_timer_base64=$(base64 --wrap=0 deploy/monitoring/miriyum-valkey-memory-metrics.timer)
+          backend_container_metrics_base64=$(base64 --wrap=0 deploy/monitoring/publish-backend-container-metrics.sh)
+          backend_container_metrics_service_base64=$(base64 --wrap=0 deploy/monitoring/miriyum-backend-container-metrics.service)
+          backend_container_metrics_timer_base64=$(base64 --wrap=0 deploy/monitoring/miriyum-backend-container-metrics.timer)
           image_uri="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           frontend_image_uri="$ECR_REGISTRY/$ECR_REPOSITORY:${IMAGE_TAG}-frontend"
 
@@ -506,12 +509,18 @@ jobs:
                 "echo '$valkey_memory_metrics_base64' | base64 --decode > /opt/miriyum/monitoring/publish-valkey-memory-metrics.sh",
                 "echo '$valkey_memory_service_base64' | base64 --decode > /etc/systemd/system/miriyum-valkey-memory-metrics.service",
                 "echo '$valkey_memory_timer_base64' | base64 --decode > /etc/systemd/system/miriyum-valkey-memory-metrics.timer",
+                "echo '$backend_container_metrics_base64' | base64 --decode > /opt/miriyum/monitoring/publish-backend-container-metrics.sh",
+                "echo '$backend_container_metrics_service_base64' | base64 --decode > /etc/systemd/system/miriyum-backend-container-metrics.service",
+                "echo '$backend_container_metrics_timer_base64' | base64 --decode > /etc/systemd/system/miriyum-backend-container-metrics.timer",
                 "if [ -x /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl ]; then /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/miriyum/monitoring/cloudwatch-agent.json -s; fi",
                 "chmod 700 /opt/miriyum/deploy.sh",
                 "chmod 700 /opt/miriyum/monitoring/publish-valkey-memory-metrics.sh",
+                "chmod 700 /opt/miriyum/monitoring/publish-backend-container-metrics.sh",
                 "systemctl daemon-reload",
                 "systemd-analyze verify /etc/systemd/system/miriyum-valkey-memory-metrics.service /etc/systemd/system/miriyum-valkey-memory-metrics.timer",
-                 "systemctl enable --now miriyum-valkey-memory-metrics.timer",
+                "systemd-analyze verify /etc/systemd/system/miriyum-backend-container-metrics.service /etc/systemd/system/miriyum-backend-container-metrics.timer",
+                "systemctl enable --now miriyum-valkey-memory-metrics.timer",
+                "systemctl enable --now miriyum-backend-container-metrics.timer",
                  "chmod 700 /opt/miriyum/certbot.sh",
                  "chmod 755 /opt/miriyum/nginx/entrypoint/40-select-server-config.sh",
                  "case '$RUNTIME_RECOVERY_MODE' in safe-disable) sed -i '/^MIRIYUM_RUNTIME_CONFIG_ENABLED=/d; /^MIRIYUM_PAYMENT_ENABLED=/d; /^MIRIYUM_STORAGE_S3_ENABLED=/d; /^MIRIYUM_STORE_SEARCH_LLM_ENABLED=/d' /opt/miriyum/.env; printf '\\nMIRIYUM_RUNTIME_CONFIG_ENABLED=false\\nMIRIYUM_PAYMENT_ENABLED=false\\nMIRIYUM_STORAGE_S3_ENABLED=false\\nMIRIYUM_STORE_SEARCH_LLM_ENABLED=false\\n' >> /opt/miriyum/.env; echo 'Approved staging runtime flags disabled.' ;; preserve) echo 'Staging runtime flags preserved.' ;; esac",

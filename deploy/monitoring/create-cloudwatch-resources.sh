@@ -226,6 +226,26 @@ put_missing_data_alarm "miriyum-staging-auth-valkey-memory-collection-missing" \
   --threshold 0.5 \
   --comparison-operator LessThanThreshold
 
+put_alarm "miriyum-staging-backend-container-metrics-collection-failed" \
+  --namespace "$NAMESPACE" \
+  --metric-name BackendContainerMetricsCollectionFailure \
+  --dimensions "Name=InstanceId,Value=$EC2_INSTANCE_ID" \
+  --statistic Sum \
+  --period 300 \
+  --evaluation-periods 1 \
+  --threshold 0 \
+  --comparison-operator GreaterThanThreshold
+
+put_missing_data_alarm "miriyum-staging-backend-container-metrics-collection-missing" \
+  --namespace "$NAMESPACE" \
+  --metric-name BackendContainerMetricsHeartbeat \
+  --dimensions "Name=InstanceId,Value=$EC2_INSTANCE_ID" \
+  --statistic Minimum \
+  --period 300 \
+  --evaluation-periods 1 \
+  --threshold 0.5 \
+  --comparison-operator LessThanThreshold
+
 put_alarm "miriyum-staging-reservation-hold-reconciliation-stalled" \
   --namespace "$NAMESPACE" \
   --metric-name ReservationHoldReconciliationStalled \
@@ -395,6 +415,59 @@ dashboard_body=$(cat <<EOF
         "metrics": [
           ["MiriYum/Staging", "AuthValkeyMemoryCollectionHeartbeat", "InstanceId", "$EC2_INSTANCE_ID"],
           [".", "AuthValkeyMemoryCollectionFailure", ".", "."]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 24,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum staging backend container CPU",
+        "period": 60,
+        "stat": "Average",
+        "metrics": [
+          ["MiriYum/Staging", "BackendContainerCpuUtilizationPercent", "InstanceId", "$EC2_INSTANCE_ID"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 30,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum staging backend container memory",
+        "period": 60,
+        "stat": "Maximum",
+        "metrics": [
+          ["MiriYum/Staging", "BackendContainerMemoryUsageBytes", "InstanceId", "$EC2_INSTANCE_ID"],
+          [".", "BackendContainerMemoryUtilizationPercent", ".", "."]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 36,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum staging backend container collection health",
+        "period": 60,
+        "stat": "Sum",
+        "metrics": [
+          ["MiriYum/Staging", "BackendContainerMetricsHeartbeat", "InstanceId", "$EC2_INSTANCE_ID"],
+          [".", "BackendContainerMetricsCollectionFailure", ".", "."]
         ]
       }
     }
