@@ -94,7 +94,7 @@ class MapDemoStoreSeederTest {
                 .filteredOn(store -> store.getGeocodingStatus() == GeocodingStatus.VERIFIED)
                 .extracting(Store::getRegion, Store::getAddress)
                 .containsExactlyInAnyOrder(
-                        org.assertj.core.groups.Tuple.tuple(Region.SEOUL, "서울특별시 중구 세종대로 110"),
+                        org.assertj.core.groups.Tuple.tuple(Region.SEOUL, "서울특별시 강남구 테헤란로 152"),
                         org.assertj.core.groups.Tuple.tuple(Region.BUSAN, "부산광역시 해운대구 해운대해변로 264"),
                         org.assertj.core.groups.Tuple.tuple(Region.DAEGU, "대구광역시 중구 동성로 2"),
                         org.assertj.core.groups.Tuple.tuple(Region.DAEJEON, "대전광역시 중구 중앙로 101"),
