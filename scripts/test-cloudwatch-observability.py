@@ -1650,6 +1650,55 @@ main
             )
             self.assertNotIn("backend-container", result.stdout + result.stderr + published)
 
+    def test_backend_container_metrics_multiple_containers_publish_failure_not_heartbeat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            aws_arguments = temporary_path / "aws-arguments"
+            fake_aws = temporary_path / "aws"
+            fake_curl = temporary_path / "curl"
+            fake_docker = temporary_path / "docker"
+            fake_aws.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$TEST_AWS_ARGUMENTS"\n',
+                encoding="utf-8",
+            )
+            fake_curl.write_text(
+                '#!/usr/bin/env bash\nif [[ " $* " == *" --request PUT "* ]]; then echo token; else echo i-test; fi\n',
+                encoding="utf-8",
+            )
+            fake_docker.write_text(
+                '#!/usr/bin/env bash\nif [[ "$*" == *"compose"*"ps -q backend"* ]]; then printf "backend-a\\nbackend-b\\n"; else echo "12.50%|64.00MiB / 7.76GiB|0.81%"; fi\n',
+                encoding="utf-8",
+            )
+            for executable in (fake_aws, fake_curl, fake_docker):
+                executable.chmod(0o755)
+
+            result = subprocess.run(
+                [BASH_EXECUTABLE, str(BACKEND_CONTAINER_METRICS_SCRIPT_PATH)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={
+                    **os.environ,
+                    "AWS_BIN": str(fake_aws),
+                    "CURL_BIN": str(fake_curl),
+                    "DOCKER_BIN": str(fake_docker),
+                    "AWS_REGION": "ap-northeast-2",
+                    "TEST_AWS_ARGUMENTS": str(aws_arguments),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("event=backend_container_metrics_collection_failed", result.stderr)
+            published = aws_arguments.read_text(encoding="utf-8")
+            self.assertIn(
+                "MetricName=BackendContainerMetricsCollectionFailure,Value=1",
+                published,
+            )
+            self.assertNotIn("BackendContainerCpuUtilizationPercent", published)
+            self.assertNotIn("BackendContainerMetricsHeartbeat", published)
+
     def test_backend_container_metrics_invalid_stats_publishes_failure_not_zero(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)

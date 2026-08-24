@@ -57,13 +57,22 @@ parse_bytes() {
   awk -v amount="$amount" -v multiplier="$multiplier" 'BEGIN { printf "%.0f\n", amount * multiplier }'
 }
 
-container_id="$($DOCKER_BIN compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps -q backend)"
-if [[ -z "$container_id" ]]; then
+if ! container_output="$($DOCKER_BIN compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps -q backend)"; then
   publish_failure
   exit 1
 fi
 
-if ! stats="$($DOCKER_BIN stats --no-stream --format '{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}' "$container_id")"; then
+container_ids=()
+while IFS= read -r container_id; do
+  [[ -n "$container_id" ]] && container_ids+=("$container_id")
+done <<<"$container_output"
+
+if (( ${#container_ids[@]} != 1 )); then
+  publish_failure
+  exit 1
+fi
+
+if ! stats="$($DOCKER_BIN stats --no-stream --format '{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}' "${container_ids[0]}")"; then
   publish_failure
   exit 1
 fi
