@@ -13,13 +13,16 @@ staging에서는 `MIRIYUM_STAGING_MAP_DEMO_STORES_ENABLED=true`를 `/opt/miriyum
 `MIRIYUM_RUNTIME_ENVIRONMENT=staging`일 때만 등록되므로 production runtime에서는 실행되지 않는다.
 
 시연 후에는 해당 값을 `false`로 되돌리고 같은 SHA를 다시 배포한다. 생성 데이터는 사업자등록번호
-`9000000001`부터 `9000000004`까지이므로, 정리가 필요하면 staging DB에서 이 번호만 대상으로 삭제한다.
+`9000000001`부터 `9000000006`까지이므로, 정리가 필요하면 staging DB에서 이 번호만 대상으로 삭제한다.
+
 ## 준비되는 데이터
 
 | 매장 | 지역 | 좌표 상태 | 좌표 |
 | --- | --- | --- | --- |
 | 마루 한식당 | 서울 | VERIFIED | 37.500600, 127.036500 |
 | 해운대 바다식당 | 부산 | VERIFIED | 35.158700, 129.160400 |
+| 동성로 한상 | 대구 | VERIFIED | 35.869400, 128.594000 |
+| 중앙로 식탁 | 대전 | VERIFIED | 36.328700, 127.428000 |
 | 무등 한상 | 광주 | VERIFIED | 35.146200, 126.922600 |
 | 새봄 식당 | 서울 | UNVERIFIED | 없음 |
 
@@ -46,11 +49,10 @@ $env:MIRIYUM_DEMO_MAP_STORES_ENABLED = 'true'
 ## API 검증
 
 애플리케이션을 실행한 다른 PowerShell에서 각 매장명을 일반 검색과 통합 검색으로
-조회한다. 아래 명령은 네 매장을 모두 조회하므로 VERIFIED 세 건의 좌표와 UNVERIFIED
-한 건의 `coordinates=null`을 같은 절차에서 확인할 수 있다.
+조회한다. VERIFIED 다섯 건의 좌표와 UNVERIFIED 한 건의 `coordinates=null`을 같은 절차에서 확인할 수 있다.
 
 ```powershell
-$storeNames = @('마루 한식당', '해운대 바다식당', '무등 한상', '새봄 식당')
+$storeNames = @('마루 한식당', '해운대 바다식당', '동성로 한상', '중앙로 식탁', '무등 한상', '새봄 식당')
 
 $storeNames | ForEach-Object {
   $storeName = $_
@@ -72,11 +74,11 @@ $storeNames | ForEach-Object {
 }
 ```
 
-각 `normal`과 `integrated` 결과에서 `마루 한식당`, `해운대 바다식당`, `무등 한상`은
-표의 좌표와 일치해야 하며, `새봄 식당`은 `coordinates`가 `null`이어야 한다.
+각 `normal`과 `integrated` 결과에서 VERIFIED 매장 다섯 곳은 표의 좌표와 일치해야 하며,
+`새봄 식당`은 `coordinates`가 `null`이어야 한다.
 
 ## 제한
 
 - 이 데이터는 프론트의 지도 표시만 돕는다. 이미지, 메뉴, 사업자등록증 증빙은 만들지 않는다.
 - `demo` 프로필 또는 enable 값이 없으면 seed runner가 등록되지 않는다.
-- staging/production에서 같은 시연이 필요하면 별도 Issue와 운영 데이터 승인 절차를 거친다.
+- staging 시연은 명시적 flag와 같은 SHA 재배포가 있어야 하며, production에서는 실행되지 않는다.
