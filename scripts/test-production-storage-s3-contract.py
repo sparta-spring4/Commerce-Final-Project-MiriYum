@@ -39,6 +39,9 @@ class ProductionS3StorageContractTest(unittest.TestCase):
 
         self.assertEqual("true", environment["MIRIYUM_STORAGE_S3_ENABLED"])
         self.assertEqual("true", environment["MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"])
+        self.assertEqual(
+            "false", environment["MIRIYUM_STORE_ONBOARDING_EVIDENCE_S3_ENABLED"]
+        )
         self.assertIn("MIRIYUM_STORAGE_S3_BUCKET", secret_names)
 
     def test_cd_requires_explicit_s3_activation_and_preflight(self):
@@ -69,6 +72,7 @@ class ProductionS3StorageContractTest(unittest.TestCase):
             "task_policy": {"Statement": [
                 {"Sid": "ReadBucketVersioning", "Effect": "Allow", "Action": ["s3:GetBucketVersioning"], "Resource": f"arn:aws:s3:::{bucket}"},
                 {"Sid": "ManagePublicImageObjects", "Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], "Resource": [f"arn:aws:s3:::{bucket}/public/stores/*", f"arn:aws:s3:::{bucket}/public/menus/*"]},
+                {"Sid": "ManagePrivateOnboardingEvidenceObjects", "Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], "Resource": f"arn:aws:s3:::{bucket}/private/store-onboarding/*"},
             ]},
             "execution_policy": {"Statement": [{"Sid": "ReadProductionStorageBucketParameter", "Effect": "Allow", "Action": ["ssm:GetParameters"], "Resource": f"arn:aws:ssm:{region}:{account_id}:parameter/miriyum/production/storage-s3-bucket"}]},
         }

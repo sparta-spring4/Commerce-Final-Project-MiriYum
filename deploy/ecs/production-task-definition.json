@@ -30,6 +30,7 @@
         {"name": "MIRIYUM_RUNTIME_CONFIG_ENABLED", "value": "false"},
         {"name": "MIRIYUM_STORAGE_S3_ENABLED", "value": "true"},
         {"name": "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED", "value": "true"},
+        {"name": "MIRIYUM_STORE_ONBOARDING_EVIDENCE_S3_ENABLED", "value": "false"},
         {"name": "MIRIYUM_STORAGE_S3_REGION", "value": "ap-northeast-2"},
         {"name": "MIRIYUM_STORE_SEARCH_LLM_ENABLED", "value": "true"},
         {"name": "MIRIYUM_STORE_SEARCH_LLM_MODEL", "value": "gpt-4o-mini"},

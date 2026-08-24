@@ -50,7 +50,7 @@ class BusinessRegistrationEvidenceUploadServiceTest {
         given(fileStorageFacadeProvider.getIfAvailable()).willReturn(fileStorageFacade);
         BusinessRegistrationEvidenceUploadService service =
                 new BusinessRegistrationEvidenceUploadService(
-                        validator, fileStorageFacadeProvider, Clock.fixed(NOW, ZoneOffset.UTC));
+                        validator, fileStorageFacadeProvider, Clock.fixed(NOW, ZoneOffset.UTC), true);
 
         var result = service.storePending(41L, 2L, upload);
 
@@ -74,7 +74,7 @@ class BusinessRegistrationEvidenceUploadServiceTest {
     void rejectsEvidenceStorageWhenTheRuntimeAdapterIsUnavailable() {
         BusinessRegistrationEvidenceUploadService service =
                 new BusinessRegistrationEvidenceUploadService(
-                        validator, fileStorageFacadeProvider, Clock.fixed(NOW, ZoneOffset.UTC));
+                        validator, fileStorageFacadeProvider, Clock.fixed(NOW, ZoneOffset.UTC), true);
         var validated = new ValidatedBusinessRegistrationEvidence(
                 "image/png", new byte[] {1}, "a".repeat(64));
 
@@ -82,5 +82,20 @@ class BusinessRegistrationEvidenceUploadServiceTest {
                 .isInstanceOf(ServiceException.class)
                 .satisfies(exception -> assertThat(((ServiceException) exception).getErrorCode())
                         .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE));
+    }
+
+    @Test
+    void rejectsPrivateEvidenceStorageWhenTheDedicatedS3GateIsDisabled() {
+        BusinessRegistrationEvidenceUploadService service =
+                new BusinessRegistrationEvidenceUploadService(
+                        validator, fileStorageFacadeProvider, Clock.fixed(NOW, ZoneOffset.UTC), false);
+        var validated = new ValidatedBusinessRegistrationEvidence(
+                "image/png", new byte[] {1}, "a".repeat(64));
+
+        assertThatThrownBy(() -> service.storePending(41L, 2L, validated))
+                .isInstanceOf(ServiceException.class)
+                .satisfies(exception -> assertThat(((ServiceException) exception).getErrorCode())
+                        .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE));
+        then(fileStorageFacadeProvider).shouldHaveNoInteractions();
     }
 }
