@@ -69,6 +69,7 @@ class ProductionS3StorageContractTest(unittest.TestCase):
             "task_policy": {"Statement": [
                 {"Sid": "ReadBucketVersioning", "Effect": "Allow", "Action": ["s3:GetBucketVersioning"], "Resource": f"arn:aws:s3:::{bucket}"},
                 {"Sid": "ManagePublicImageObjects", "Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], "Resource": [f"arn:aws:s3:::{bucket}/public/stores/*", f"arn:aws:s3:::{bucket}/public/menus/*"]},
+                {"Sid": "ManagePrivateOnboardingEvidenceObjects", "Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], "Resource": f"arn:aws:s3:::{bucket}/private/store-onboarding/*"},
             ]},
             "execution_policy": {"Statement": [{"Sid": "ReadProductionStorageBucketParameter", "Effect": "Allow", "Action": ["ssm:GetParameters"], "Resource": f"arn:aws:ssm:{region}:{account_id}:parameter/miriyum/production/storage-s3-bucket"}]},
         }
