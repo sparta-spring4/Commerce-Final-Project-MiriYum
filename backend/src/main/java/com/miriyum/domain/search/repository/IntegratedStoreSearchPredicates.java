@@ -1,22 +1,28 @@
 package com.miriyum.domain.search.repository;
 
-import com.miriyum.domain.store.entity.QStore;
-import com.miriyum.domain.store.enums.OperationStatus;
-import com.miriyum.domain.store.enums.Region;
-import com.miriyum.domain.store.enums.VerificationStatus;
 import com.miriyum.domain.menu.entity.QMenu;
 import com.miriyum.domain.menu.entity.QMenuVersion;
 import com.miriyum.domain.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.menu.enums.MenuVisibility;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidence;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidence.Dimension;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidenceSource;
 import com.miriyum.domain.search.interpreter.PriceRange;
 import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
+import com.miriyum.domain.store.entity.QStore;
+import com.miriyum.domain.store.enums.OperationStatus;
+import com.miriyum.domain.store.enums.Region;
+import com.miriyum.domain.store.enums.VerificationStatus;
 import com.querydsl.core.BooleanBuilder;
 import com.querydsl.core.types.dsl.BooleanExpression;
 import com.querydsl.core.types.dsl.CaseBuilder;
 import com.querydsl.core.types.dsl.Expressions;
+import com.querydsl.core.types.dsl.NumberExpression;
 import com.querydsl.core.types.dsl.StringExpression;
+import com.querydsl.core.types.dsl.StringPath;
 import com.querydsl.jpa.JPAExpressions;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** 공개 상태와 승인 검색 조건을 타입 안전한 QueryDSL predicate로 조립한다. */
@@ -43,11 +49,25 @@ final class IntegratedStoreSearchPredicates {
             IntegratedStoreSearchQuery query,
             List<String> concepts
     ) {
+        return createExpandedForward(
+                store, query, concepts, StructuredFoodEvidence.empty());
+    }
+
+    static BooleanBuilder createExpandedForward(
+            QStore store,
+            IntegratedStoreSearchQuery query,
+            List<String> concepts,
+            StructuredFoodEvidence evidence
+    ) {
         BooleanBuilder predicate = new BooleanBuilder()
                 .and(store.verificationStatus.eq(VerificationStatus.APPROVED))
                 .and(store.operationStatus.ne(OperationStatus.CLOSED));
         addStoreConditions(predicate, store, query);
-        predicate.and(currentExpandedForwardMenuExists(store, query, concepts));
+        BooleanExpression expandedConcept = concepts.isEmpty()
+                ? Expressions.FALSE
+                : currentExpandedForwardMenuExists(store, query, concepts);
+        predicate.and(expandedConcept.or(
+                structuredRelevance(store, query, evidence).gt(0)));
         return predicate;
     }
 
@@ -163,8 +183,167 @@ final class IntegratedStoreSearchPredicates {
             predicate.and(storeNameMatches
                     .or(regionNameMatches)
                     .or(addressMatches)
-                    .or(currentPublishedVisibleMenuExists(store, query, true)));
+                    .or(currentPublishedVisibleMenuExists(store, query, true))
+                    .or(structuredRelevance(store, query).gt(0)));
         }
+    }
+
+    static NumberExpression<Integer> structuredRelevance(
+            QStore store,
+            IntegratedStoreSearchQuery query
+    ) {
+        return structuredRelevance(store, query, query.foodEvidence());
+    }
+
+    static NumberExpression<Integer> structuredRelevance(
+            QStore store,
+            IntegratedStoreSearchQuery query,
+            StructuredFoodEvidence evidence
+    ) {
+        if (evidence == null || !evidence.hasCandidateEvidence()) {
+            return new CaseBuilder()
+                    .when(store.id.isNotNull())
+                    .then(0)
+                    .otherwise(0);
+        }
+        QMenu menu = new QMenu("structuredEvidenceMenu");
+        QMenuVersion version = new QMenuVersion("structuredEvidenceMenuVersion");
+        NumberExpression<Integer> menuRank = menuRank(version, query, evidence);
+        NumberExpression<Integer> dimensionCount = dimensionCount(version, evidence);
+        NumberExpression<Integer> rowScore = menuRank.multiply(10).add(dimensionCount);
+        BooleanBuilder currentMenu = currentMenuPredicate(store, menu, version, query)
+                .and(menuRank.gt(0).or(dimensionCount.goe(2)));
+        return Expressions.numberTemplate(
+                Integer.class,
+                "coalesce(({0}), 0)",
+                JPAExpressions.select(rowScore.max())
+                        .from(menu)
+                        .join(menu.versions, version)
+                        .where(currentMenu));
+    }
+
+    private static NumberExpression<Integer> menuRank(
+            QMenuVersion version,
+            IntegratedStoreSearchQuery query,
+            StructuredFoodEvidence evidence
+    ) {
+        BooleanExpression resolvedExplicit = query.explicitMenuNames().isEmpty()
+                ? Expressions.FALSE
+                : version.name.trim().in(query.explicitMenuNames());
+        BooleanExpression deterministicAlias = matchesField(
+                version.name,
+                evidence.menuFamilies().stream()
+                        .filter(term -> term.source()
+                                == StructuredFoodEvidenceSource.DETERMINISTIC)
+                        .flatMap(term -> term.matchTerms().stream())
+                        .toList());
+        BooleanExpression rawForward = matchesField(
+                version.name,
+                evidence.rawFoodSpans().stream()
+                        .filter(term -> term.source()
+                                == StructuredFoodEvidenceSource.DETERMINISTIC)
+                        .flatMap(term -> term.matchTerms().stream())
+                        .toList());
+        List<String> inferredFamilies = evidence.menuFamilies().stream()
+                .filter(term -> term.source() == StructuredFoodEvidenceSource.LLM)
+                .flatMap(term -> term.matchTerms().stream())
+                .toList();
+        BooleanExpression inferredFamily = matchesAnyMenuField(version, inferredFamilies);
+        return new CaseBuilder()
+                .when(resolvedExplicit.or(deterministicAlias)).then(3)
+                .when(rawForward).then(2)
+                .when(inferredFamily).then(1)
+                .otherwise(0);
+    }
+
+    private static NumberExpression<Integer> dimensionCount(
+            QMenuVersion version,
+            StructuredFoodEvidence evidence
+    ) {
+        NumberExpression<Integer> count = Expressions.asNumber(0);
+        for (Map.Entry<Dimension, List<String>> entry
+                : evidence.coreDimensionTerms().entrySet()) {
+            BooleanExpression matches = matchesAnyMenuField(version, entry.getValue());
+            count = count.add(new CaseBuilder().when(matches).then(1).otherwise(0));
+        }
+        return count;
+    }
+
+    private static BooleanExpression matchesAnyMenuField(
+            QMenuVersion version,
+            List<String> terms
+    ) {
+        if (terms.isEmpty()) {
+            return Expressions.FALSE;
+        }
+        BooleanExpression matches = Expressions.FALSE;
+        for (String term : terms) {
+            String pattern = literalContainsPattern(term);
+            matches = matches.or(version.name.likeIgnoreCase(pattern, LIKE_ESCAPE))
+                    .or(version.description.likeIgnoreCase(pattern, LIKE_ESCAPE))
+                    .or(version.primaryCategoryCode.likeIgnoreCase(pattern, LIKE_ESCAPE))
+                    .or(collectionContains(version, pattern, false))
+                    .or(collectionContains(version, pattern, true));
+        }
+        return matches;
+    }
+
+    private static BooleanExpression collectionContains(
+            QMenuVersion outerVersion,
+            String pattern,
+            boolean localTags
+    ) {
+        QMenuVersion collectionVersion = new QMenuVersion(
+                localTags
+                        ? "structuredEvidenceLocalTagVersion"
+                        : "structuredEvidenceSecondaryCategoryVersion");
+        StringPath value = Expressions.stringPath(
+                localTags
+                        ? "structuredEvidenceLocalTag"
+                        : "structuredEvidenceSecondaryCategory");
+        var query = JPAExpressions.selectOne().from(collectionVersion);
+        if (localTags) {
+            query.join(collectionVersion.localTags, value);
+        } else {
+            query.join(collectionVersion.secondaryCategoryCodes, value);
+        }
+        return query.where(
+                        collectionVersion.id.eq(outerVersion.id),
+                        value.likeIgnoreCase(pattern, LIKE_ESCAPE))
+                .exists();
+    }
+
+    private static BooleanExpression matchesField(
+            StringExpression field,
+            List<String> terms
+    ) {
+        BooleanExpression matches = Expressions.FALSE;
+        for (String term : terms) {
+            matches = matches.or(field.likeIgnoreCase(
+                    literalContainsPattern(term), LIKE_ESCAPE));
+        }
+        return matches;
+    }
+
+    private static BooleanBuilder currentMenuPredicate(
+            QStore store,
+            QMenu menu,
+            QMenuVersion version,
+            IntegratedStoreSearchQuery query
+    ) {
+        BooleanBuilder currentMenu = new BooleanBuilder()
+                .and(menu.storeId.eq(store.id))
+                .and(menu.retired.isFalse())
+                .and(menu.visibility.eq(MenuVisibility.VISIBLE))
+                .and(menu.publishedVersionNumber.eq(version.versionNumber))
+                .and(version.status.eq(MenuVersionStatus.PUBLISHED));
+        if (!query.menuCategoryCodes().isEmpty()) {
+            currentMenu.and(version.primaryCategoryCode.in(query.menuCategoryCodes())
+                    .or(version.secondaryCategoryCodes.any()
+                            .in(query.menuCategoryCodes())));
+        }
+        addPricePredicate(currentMenu, version, query.priceRange());
+        return currentMenu;
     }
 
     static BooleanExpression currentPublishedVisibleMenuExists(
