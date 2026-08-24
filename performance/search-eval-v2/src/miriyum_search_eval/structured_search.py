@@ -10,10 +10,8 @@ from typing import Any, Iterable
 from .matching import (
     _eligible,
     compact,
-    deterministic_remaining_keyword,
     merge_application_candidates,
     normalize,
-    retrieve_original_candidates,
 )
 from .metrics import ranking_metrics, stability_metrics, wilson_interval
 
@@ -513,26 +511,16 @@ def evaluate_structured_variants(
             retrieval_cache[candidate_key] = candidate_pair
     else:
         current, structured = candidate_pair
-    original_key = ("structured-original", query["id"])
-    original = retrieval_cache.get(original_key) if retrieval_cache is not None else None
-    if original is None:
-        original = retrieve_original_candidates(
-            remaining_keyword=deterministic_remaining_keyword(query),
-            stores=dataset["stores"], menus=dataset["menus"],
-            filters=query["filters"], sort=query["sort"], guarded_reverse=True,
-        )
-        if retrieval_cache is not None:
-            retrieval_cache[original_key] = original
     baseline_ranking = _baseline_full_ranking(baseline_call)
     current_ranking = merge_application_candidates(
-        original_store_ids=original.store_ids,
+        original_store_ids=baseline_ranking,
         supplement_store_ids=current.store_ids,
         page_size=None,
     )
-    if query["sort"] == "RECOMMENDED":
+    if query["sort"] == "RECOMMENDED" and not evidence.menu_families:
         structured_ranking = merge_application_candidates(
             original_store_ids=structured.store_ids,
-            supplement_store_ids=original.store_ids,
+            supplement_store_ids=baseline_ranking,
             page_size=None,
         )
     else:
@@ -561,24 +549,31 @@ def evaluate_structured_variants(
     forbidden_menus = set(query["gold"].get("forbiddenMenuIds", []))
     forbidden_stores = set(query["gold"].get("forbiddenStoreIds", []))
     current_safety = _candidate_safety(
-        menu_ids=(*original.menu_ids, *current.menu_ids),
+        menu_ids=current.menu_ids,
         store_ids=current_ranking,
         stores=dataset["stores"], menus=dataset["menus"], filters=query["filters"],
         forbidden_menu_ids=forbidden_menus, forbidden_store_ids=forbidden_stores,
     )
     structured_safety = _candidate_safety(
-        menu_ids=(*original.menu_ids, *structured.menu_ids),
+        menu_ids=structured.menu_ids,
         store_ids=structured_ranking,
         stores=dataset["stores"], menus=dataset["menus"], filters=query["filters"],
         forbidden_menu_ids=forbidden_menus, forbidden_store_ids=forbidden_stores,
     )
-    variants["A"]["safety"] = {
+    baseline_safety = {
         "closedOrForbiddenStoreLeak": bool(baseline_call.get("closedLeak")),
         "privateOrHistoricalMenuLeak": bool(baseline_call.get("privateOrHistoricalLeak")),
         "filterViolation": bool(baseline_call.get("filterViolation")),
     }
-    variants["B"]["safety"] = current_safety
-    variants["C"]["safety"] = structured_safety
+    variants["A"]["safety"] = baseline_safety
+    variants["B"]["safety"] = {
+        key: baseline_safety[key] or current_safety[key]
+        for key in baseline_safety
+    }
+    variants["C"]["safety"] = {
+        key: baseline_safety[key] or structured_safety[key]
+        for key in baseline_safety
+    }
     return {
         "schemaVersion": "miriyum-structured-search-call-v1",
         "queryId": query["id"],

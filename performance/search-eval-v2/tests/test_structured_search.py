@@ -381,7 +381,7 @@ class StructuredCandidateTest(unittest.TestCase):
         self.assertEqual(aggregate["pairedDeltas"]["AtoB"]["strict@8"], 1)
         self.assertEqual(aggregate["pairedDeltas"]["BtoC"]["strict@1"], 1)
 
-    def test_repeated_structured_inputs_reuse_evidence_candidates_and_original(self):
+    def test_repeated_structured_inputs_reuse_evidence_and_candidates(self):
         query = {
             "id": "query-cache",
             "type": "sensory_without_menu",
@@ -439,8 +439,55 @@ class StructuredCandidateTest(unittest.TestCase):
             retrieval_cache=cache,
         )
 
-        self.assertEqual(len(cache), 3)
+        self.assertEqual(len(cache), 2)
         self.assertEqual(first["variants"], second["variants"])
+
+    def test_structured_supplement_never_discards_validated_baseline_candidate(self):
+        query = {
+            "id": "query-baseline-preserved",
+            "type": "alias_bidirectional",
+            "text": "마라탕 찾아줘",
+            "filters": {},
+            "sort": "RECOMMENDED",
+            "gold": {
+                "familyIds": ["family-maratang"],
+                "menuIds": ["menu-baseline-only"],
+                "storeIds": ["store-baseline-only"],
+                "negative": False,
+                "forbiddenMenuIds": [],
+                "forbiddenStoreIds": [],
+            },
+        }
+        query["acceptableGold"] = dict(query["gold"])
+        baseline = {
+            "closedLeak": True,
+            "finalApplicationByCutoff": {
+                label: {"rankedStoreIds": ["store-baseline-only"]}
+                for label in ("@8", "@20", "@50", "all")
+            },
+        }
+
+        result = evaluate_structured_variants(
+            dataset={
+                "families": self.families,
+                "stores": self.stores,
+                "menus": self.menus,
+            },
+            query=query,
+            record={
+                "queryId": query["id"], "repeatIndex": 0,
+                "status": "success", "interpretation": "MATCHABLE", "concepts": [],
+            },
+            baseline_call=baseline,
+        )
+
+        self.assertTrue(result["variants"]["B"]["cutoffs"]["@8"]["strictHit"])
+        self.assertEqual(
+            result["variants"]["C"]["cutoffs"]["@8"]["rankedStoreIds"][0],
+            "store-baseline-only",
+        )
+        self.assertTrue(result["variants"]["B"]["safety"]["closedOrForbiddenStoreLeak"])
+        self.assertTrue(result["variants"]["C"]["safety"]["closedOrForbiddenStoreLeak"])
 
     def test_true_no_answer_false_positive_fails_structured_gate(self):
         query = {
