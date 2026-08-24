@@ -9,6 +9,7 @@ from miriyum_search_eval.cli import (
     ISSUE_616_MOST_SPECIFIC,
     PRE_ISSUE_616,
     _gpt54mini_comparison_config,
+    _load_validated_structured_baseline,
     _pin_source_checkpoint_sha256,
     _validate_prompt_full_provenance,
     _validate_reanalysis_provenance,
@@ -17,6 +18,7 @@ from miriyum_search_eval.cli import (
     generate,
     hash_artifact,
     reanalyze,
+    structured_reanalyze,
 )
 from miriyum_search_eval.runner import CheckpointStore, EvalConfig, deterministic_request_id
 from miriyum_search_eval.workflow import (
@@ -398,6 +400,62 @@ class WorkflowTest(unittest.TestCase):
 
             self.assertEqual(metadata_path.read_bytes(), before["metadata"])
             self.assertEqual(existing.read_bytes(), before["summary"])
+
+    def test_structured_reanalysis_rejects_changed_checkpoint_before_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checkpoint = root / "calls.canonical.checkpoint.jsonl"
+            checkpoint.write_bytes(b"original-checkpoint\n")
+            metadata = root / "run-metadata.json"
+            metadata.write_text(json.dumps({
+                "sourceCheckpointSha256": sha256(checkpoint.read_bytes()).hexdigest(),
+            }), encoding="utf-8")
+            existing = root / "structured-reanalysis" / "aggregate.json"
+            existing.parent.mkdir(parents=True)
+            existing.write_bytes(b"existing-aggregate\n")
+            before = {
+                "metadata": metadata.read_bytes(),
+                "aggregate": existing.read_bytes(),
+            }
+            checkpoint.write_bytes(b"changed-checkpoint\n")
+
+            with self.assertRaisesRegex(RuntimeError, "checkpoint SHA-256 mismatch"):
+                structured_reanalyze(root)
+
+            self.assertEqual(metadata.read_bytes(), before["metadata"])
+            self.assertEqual(existing.read_bytes(), before["aggregate"])
+
+    def test_structured_baseline_must_match_every_checkpoint_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results = root / "reanalysis" / ISSUE_616_MOST_SPECIFIC / "results.jsonl"
+            results.parent.mkdir(parents=True)
+            baseline = {
+                "requestId": "request-1",
+                "queryId": "query-1",
+                "repeatIndex": 0,
+                "actualApplicationPredicate": {"variant": "bidirectional-current"},
+                "originalSearch": {
+                    "variant": "whole-keyword-plus-most-specific-current-published-menu-name",
+                },
+            }
+            results.write_text(json.dumps(baseline) + "\n", encoding="utf-8")
+            records = [{
+                "requestId": "request-1",
+                "queryId": "query-1",
+                "repeatIndex": 0,
+            }]
+
+            self.assertEqual(
+                _load_validated_structured_baseline(root, records),
+                [baseline],
+            )
+            results.write_text(
+                json.dumps({**baseline, "queryId": "changed-query"}) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "baseline result provenance mismatch"):
+                _load_validated_structured_baseline(root, records)
 
     def test_canonical_checkpoint_sha_is_pinned_once(self):
         with tempfile.TemporaryDirectory() as directory:

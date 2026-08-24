@@ -25,6 +25,11 @@ from .runner import (
     deterministic_request_id_from_fingerprint,
     run_requests,
 )
+from .structured_search import (
+    aggregate_structured_comparison,
+    evaluate_structured_variants,
+    prepare_structured_catalog,
+)
 from .validation import validate_dataset
 from .workflow import (
     canonicalize_equivalent_calls,
@@ -43,6 +48,7 @@ from .workflow import (
 PRE_ISSUE_616 = "pre-issue-616"
 ISSUE_616_MOST_SPECIFIC = "issue-616-most-specific"
 PREDICATE_VARIANTS = (PRE_ISSUE_616, ISSUE_616_MOST_SPECIFIC)
+STRUCTURED_EVAL_BASE_SHA = "229b5aa765873c141270e257be65aedae72b9f86"
 
 
 def _repo_root() -> Path:
@@ -628,6 +634,113 @@ def reanalyze(root: Path, predicate_variant: str) -> None:
     )
 
 
+def _load_validated_structured_baseline(
+    root: Path, records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    path = root / "reanalysis" / ISSUE_616_MOST_SPECIFIC / "results.jsonl"
+    if not path.is_file():
+        raise RuntimeError("validated Issue #616 baseline results are missing")
+    baseline_by_request: dict[str, dict[str, Any]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        call = json.loads(line)
+        request_id = call.get("requestId")
+        if not isinstance(request_id, str) or request_id in baseline_by_request:
+            raise RuntimeError("baseline result request IDs are invalid or duplicated")
+        baseline_by_request[request_id] = call
+    if set(baseline_by_request) != {record.get("requestId") for record in records}:
+        raise RuntimeError("baseline result request matrix mismatch")
+    ordered = []
+    for record in records:
+        call = baseline_by_request[record["requestId"]]
+        if (
+            call.get("queryId") != record.get("queryId")
+            or call.get("repeatIndex") != record.get("repeatIndex")
+            or call.get("actualApplicationPredicate", {}).get("variant")
+            != "bidirectional-current"
+            or call.get("originalSearch", {}).get("variant")
+            != "whole-keyword-plus-most-specific-current-published-menu-name"
+        ):
+            raise RuntimeError("baseline result provenance mismatch")
+        ordered.append(call)
+    return ordered
+
+
+def structured_reanalyze(root: Path) -> None:
+    """Compare A/B/C structured retrieval using an existing paid checkpoint."""
+    metadata_path = root / "run-metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    checkpoint_path = root / "calls.canonical.checkpoint.jsonl"
+    _validate_source_checkpoint_sha256(metadata, checkpoint_path)
+    if subprocess.run(
+        ["git", "merge-base", "--is-ancestor", STRUCTURED_EVAL_BASE_SHA, "HEAD"],
+        cwd=_repo_root(), check=False,
+    ).returncode != 0:
+        raise RuntimeError("structured evaluation is not based on approved PR #635 HEAD")
+    dataset = _dataset()
+    checkpoint = CheckpointStore(checkpoint_path)
+    records = checkpoint.records()
+    _validate_reanalysis_provenance(metadata, dataset, records)
+    validate_checkpoint_matrix(
+        queries=dataset["queries"], records=records, repeats=range(5),
+    )
+    baseline_calls = _load_validated_structured_baseline(root, records)
+    query_by_id = {query["id"]: query for query in dataset["queries"]}
+    structured_catalog = prepare_structured_catalog(
+        families=dataset["families"], stores=dataset["stores"],
+        menus=dataset["menus"],
+    )
+    structured_cache: dict[tuple[Any, ...], Any] = {}
+    structured_calls = [
+        evaluate_structured_variants(
+            dataset=dataset,
+            query=query_by_id[record["queryId"]],
+            record=record,
+            baseline_call=baseline_call,
+            prepared_catalog=structured_catalog,
+            retrieval_cache=structured_cache,
+        )
+        for record, baseline_call in zip(records, baseline_calls, strict=True)
+    ]
+    aggregate = aggregate_structured_comparison(structured_calls)
+    output_root = root / "structured-reanalysis"
+    result_path = write_jsonl(output_root / "results.jsonl", structured_calls)
+    aggregate_path = write_json(output_root / "aggregate.json", aggregate)
+    from hashlib import sha256
+    analysis_sources = {
+        "cli": Path(__file__),
+        "structuredSearch": Path(__file__).with_name("structured_search.py"),
+        "matching": Path(__file__).with_name("matching.py"),
+        "evaluation": Path(__file__).with_name("evaluation.py"),
+    }
+    metadata["structuredReanalysis"] = {
+        "schemaVersion": "miriyum-structured-search-reanalysis-v1",
+        "status": "simulated-evidence-not-actual-application",
+        "stackedOnPullRequest": 635,
+        "stackedBaseCommitSha": STRUCTURED_EVAL_BASE_SHA,
+        "analysisCommitSha": _commit_sha(),
+        "analysisWorkingTreeDirty": subprocess.run(
+            ["git", "diff", "--quiet"], cwd=_repo_root(), check=False,
+        ).returncode != 0,
+        "newProviderCalls": 0,
+        "incrementalCostUsd": 0.0,
+        "sourceCheckpointSha256": metadata["sourceCheckpointSha256"],
+        "sourceBaselineResultsSha256": sha256(
+            (root / "reanalysis" / ISSUE_616_MOST_SPECIFIC / "results.jsonl").read_bytes()
+        ).hexdigest(),
+        "analysisSourceSha256": {
+            name: sha256(path.read_bytes()).hexdigest()
+            for name, path in analysis_sources.items()
+        },
+        "gate": aggregate["gate"],
+    }
+    write_json(metadata_path, metadata)
+    write_sha256_manifest(
+        (result_path, aggregate_path), output_root / "sha256.json",
+    )
+
+
 def _validate_reanalysis_provenance(
     metadata: dict[str, Any], dataset: dict[str, Any],
     records: list[dict[str, Any]],
@@ -850,7 +963,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="MiriYum reproducible search evaluation v2")
     parser.add_argument("command", choices=(
         "generate", "migrate-pilot", "migrate-checkpoint", "pilot", "run",
-        "prompt-pilot", "prompt-run", "reanalyze", "stamp-reanalysis",
+        "prompt-pilot", "prompt-run", "reanalyze", "structured-reanalyze",
+        "stamp-reanalysis",
         "embeddings", "report", "hash-artifact", "model-compare",
     ))
     parser.add_argument("--artifact-dir", type=Path, required=True)
@@ -882,6 +996,9 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"{args.command} requires --predicate-variant")
         action = reanalyze if args.command == "reanalyze" else stamp_reanalysis
         action(args.artifact_dir.resolve(), args.predicate_variant)
+        return 0
+    if args.command == "structured-reanalyze":
+        structured_reanalyze(args.artifact_dir.resolve())
         return 0
     actions = {
         "generate": generate, "pilot": pilot, "run": full_run,
