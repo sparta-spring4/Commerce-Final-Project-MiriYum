@@ -197,6 +197,43 @@ function validateBehavior(behavior) {
   return behavior
 }
 
+export function waitForReconnectSettle(delay, settleSeconds) {
+  if (typeof delay !== 'function') {
+    throw new Error('SSE reconnect settle delay is required')
+  }
+  if (!Number.isInteger(settleSeconds) || settleSeconds <= 0 || settleSeconds > 60) {
+    throw new Error('SSE reconnect settle window must be bounded')
+  }
+  delay(settleSeconds)
+  return true
+}
+
+export function runReconnectCycle({
+  openInitial,
+  delay,
+  beforeReconnect,
+  openReconnect,
+  settleSeconds,
+}) {
+  if (typeof openInitial !== 'function'
+    || typeof beforeReconnect !== 'function'
+    || typeof openReconnect !== 'function') {
+    throw new Error('SSE reconnect cycle callbacks are required')
+  }
+  const first = openInitial()
+  if (!first.completed || first.lastEventId === null) {
+    throw new Error('SSE reconnect cursor was not captured')
+  }
+  waitForReconnectSettle(delay, settleSeconds)
+  beforeReconnect()
+  const recovered = openReconnect(first.lastEventId)
+  if (!recovered.completed) throw new Error('SSE reconnect did not recover')
+  return {
+    initialCompleted: true,
+    recoveryCompleted: true,
+  }
+}
+
 function isHeartbeatComment(event) {
   return event !== null
     && typeof event === 'object'

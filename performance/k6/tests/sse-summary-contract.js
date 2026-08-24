@@ -87,6 +87,16 @@ const SLOW_METADATA = {
   },
 }
 
+const RECONNECT_METADATA = {
+  ...METADATA,
+  profile: 'reconnect',
+  runId: 'safe-reconnect-run',
+  limits: {
+    ...METADATA.limits,
+    reconnectSettleSeconds: 6,
+  },
+}
+
 const SLOW_SUMMARY_INPUT = {
   metrics: {
     'sse_slow_cleanup_duration{phase:measured,profile:slow-client,endpoint_kind:waiting-store-operator}': {
@@ -168,6 +178,9 @@ export default function () {
   const rendered = renderSafeSseSummary(SUMMARY_INPUT, METADATA)
   const parsed = JSON.parse(rendered.json)
   const combined = `${rendered.stdout}\n${rendered.json}\n${rendered.markdown}`
+  const reconnectParsed = JSON.parse(
+    renderSafeSseSummary(SUMMARY_INPUT, RECONNECT_METADATA).json,
+  )
 
   const proof = JSON.parse(rendered.json)
   const validated = validateSseSmokeProof(proof, {
@@ -226,6 +239,8 @@ export default function () {
       parsed.limits.connections === 1
       && parsed.limits.holdDurationSeconds === 5
       && parsed.runMetrics.droppedIterations.count === 0,
+    'reconnect summary preserves the bounded registry settle window': () =>
+      reconnectParsed.limits.reconnectSettleSeconds === 6,
     'summary keeps safe run-wide owned HTTP timing aggregates': () =>
       parsed.runMetrics.ownedHttpBaseline.max === 19
       && parsed.runMetrics.ownedHttpBaseline.p95 === 18
