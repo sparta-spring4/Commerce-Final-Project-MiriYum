@@ -15,6 +15,10 @@ const envelope = (mode, items) => ({ code: 'SUCCESS', message: 'ok', data: {
   sourceStoreId: 1, sourceMenuId: 1, quantity: 1, startAt: '2026-08-22T12:00:00+09:00',
   serviceEndAt: '2026-08-22T13:00:00+09:00', timeZoneId: 'Asia/Seoul', mode, items,
 } })
+const integratedEnvelope = (items) => ({ code: 'SUCCESS', message: 'ok', data: {
+  items, normalizedCondition: {}, warnings: [], ruleVersion: 'v1', vocabularyVersion: 'v1',
+  rankingRuleVersion: null, nextCursor: null,
+} })
 
 export default function () {
   const calls = []
@@ -24,6 +28,18 @@ export default function () {
   }
   check(null, {
     'integrated search requires the cursor response contract': () => !throws(() => validateIntegratedSearchResponse({ code: 'SUCCESS', message: 'ok', data: { items: [], normalizedCondition: {}, warnings: [], ruleVersion: 'v1', vocabularyVersion: 'v1', rankingRuleVersion: null, nextCursor: null } })),
+    'integrated search verifies expected stores and their relative order': () => !throws(() => validateIntegratedSearchResponse(
+      integratedEnvelope([{ storeId: 11 }, { storeId: 22 }, { storeId: 33 }]),
+      { expectedStoreIds: [33], expectedOrderedStoreIds: [11, 22, 33], excludedStoreIds: [44] },
+    )),
+    'integrated search rejects a reversed expected store order': () => throws(() => validateIntegratedSearchResponse(
+      integratedEnvelope([{ storeId: 22 }, { storeId: 11 }]),
+      { expectedOrderedStoreIds: [11, 22] },
+    )),
+    'integrated search rejects an excluded abstention quality candidate': () => throws(() => validateIntegratedSearchResponse(
+      integratedEnvelope([{ storeId: 44 }]),
+      { excludedStoreIds: [44] },
+    )),
     'same-store response contains only source store candidates': () => !throws(() => validateAlternativeResponse(envelope('SAME_STORE', [{ ...item, storeId: 1 }]), { sourceStoreId: 1, sourceUnitPrice: 10000 })),
     'nearby candidates stay within three kilometres': () => !throws(() => validateAlternativeResponse(envelope('NEARBY_STORE', [{ ...item, distanceMeters: 3000, coordinates: { latitude: 37.5, longitude: 127 } }]), { sourceStoreId: 1, sourceUnitPrice: 10000 })),
     'nearby distance overflow is rejected': () => throws(() => validateAlternativeResponse(envelope('NEARBY_STORE', [{ ...item, distanceMeters: 3000.1, coordinates: { latitude: 37.5, longitude: 127 } }]), { sourceStoreId: 1, sourceUnitPrice: 10000 })),
@@ -46,6 +62,16 @@ export default function () {
       const result = runSearchLlmCase({ client, baseUrl: 'https://staging.example', fixtureCase: { scenario: 'exact', searchInput: 'synthetic exact', minimumItems: 0 } })
       return result.completed && calls.length === 1 && calls[0].method === 'GET' && calls[0].url.includes('/api/v1/stores?searchInput=')
     },
+    'natural-language execution forwards result-specific expectations': () => throws(() => runSearchLlmCase({
+      client: {
+        get: () => ({ status: 200, json: () => integratedEnvelope([{ storeId: 44 }]) }),
+      },
+      baseUrl: 'https://staging.example',
+      fixtureCase: {
+        scenario: 'natural-language', searchInput: 'synthetic compound concept', minimumItems: 0,
+        expectedStoreIds: [33], excludedStoreIds: [44],
+      },
+    })),
     'alternative search sends only the approved request body': () => {
       calls.length = 0
       const request = { quantity: 1, serviceDate: '2026-08-23', startTime: '12:00', partySize: 2 }
@@ -55,6 +81,13 @@ export default function () {
     'fallback fixtures distinguish disabled and timeout controls': () => !throws(() => validateSearchLlmFixture({ cases: [
       { alias: 'disabled', scenario: 'fallback', fallbackMode: 'disabled', fallbackTarget: 'search', searchInput: 'synthetic fallback', minimumItems: 1 },
       { alias: 'timeout', scenario: 'fallback', fallbackMode: 'timeout', fallbackTarget: 'alternative', storeId: 1, menuId: 1, sourceUnitPrice: 10000, request: { quantity: 1 } },
+    ] })),
+    'natural-language fixture requires a result-specific quality expectation': () => throws(() => validateSearchLlmFixture({ cases: [
+      { alias: 'minimum-only', scenario: 'natural-language', searchInput: 'synthetic natural language', minimumItems: 1 },
+    ] })),
+    'natural-language fixture accepts match and abstention quality expectations': () => !throws(() => validateSearchLlmFixture({ cases: [
+      { alias: 'reverse-match', scenario: 'natural-language', searchInput: 'synthetic compound concept', minimumItems: 1, expectedStoreIds: [33], expectedOrderedStoreIds: [11, 22, 33] },
+      { alias: 'abstention-quality', scenario: 'natural-language', searchInput: 'synthetic no food signal', minimumItems: 0, maximumItems: 0, excludedStoreIds: [44] },
     ] })),
     'fallback fixture without a control mode is rejected': () => throws(() => validateSearchLlmFixture({ cases: [
       { alias: 'missing', scenario: 'fallback', searchInput: 'synthetic fallback' },

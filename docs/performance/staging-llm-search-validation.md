@@ -4,14 +4,46 @@ Issue #568의 exact-first OpenAI 보완 검색과 같은 매장·인근 매장 �
 
 ## 실행 차단 조건
 
-- 실제 staging 실행은 #357 종료, PR #434가 포함된 backend 배포, private health `UP`, OpenAI Secret 전달, CloudWatch LLM meter 조회, 저장소 밖 합성 fixture와 실행 승인이 모두 확인된 뒤에만 진행한다.
+- 실제 staging 실행은 #357 종료, PR #434가 포함된 backend 배포, private health `UP`, OpenAI Secret 전달, CloudWatch LLM meter 조회, 저장소 밖 합성 fixture와 실행 승인이 모두 확인된 뒤에만 진행한다. #592의 양방향 메뉴명 매칭과 #602의 concept abstention을 평가하는 실행은 두 PR이 모두 병합되고 같은 backend full SHA가 staging에 배포된 뒤 진행한다.
 - `LLM_LIVE_TEST_APPROVED=true`가 없거나 계획·누적 합계가 200회 또는 USD 0.50을 초과하면 init context에서 HTTP 요청 전에 실패한다.
 - 하네스는 scenario를 겹치지 않게 배치하고 각 scenario를 고정 `vus: 1`로 실행한다. 각 iteration 뒤 1초를 대기하므로 실행률은 1 iteration/s 미만이며 fixture case 수는 scenario별 상한과 duration 여유를 함께 통과해야 한다. 실제 OpenAI 최대 처리량이나 production 용량을 측정하지 않는다.
-- fixture·환경 파일·결과에는 자격증명, Token, Secret, 검색어, 응답 body, 계정·store·menu ID를 기록하지 않는다.
+- fixture·환경 파일에는 자격증명, Token, Secret을 기록하지 않는다. ignored fixture의 실행 입력인 검색어와 store/menu ID는 공개 artifact·metric label·summary·오류 메시지로 복사하지 않는다.
 
 ## 입력 준비
 
 실제 fixture는 저장소에 추가하지 않고 `performance/k6/fixtures/search-llm.local.json` 같은 ignored 경로에 둔다. 각 case는 안전한 alias, scenario와 실행에 필요한 공개 입력만 가진다. `exact`, `natural-language`, `same-store`, `nearby-store`, `fallback`을 분리하며 fallback case는 `fallbackMode`를 `disabled` 또는 `timeout`으로 명시한다.
+
+`natural-language` case는 결과 개수만으로 통과할 수 없고 다음 품질 기대값 중 하나 이상을 가져야 한다.
+
+- `expectedStoreIds`: 결과에 반드시 포함될 합성 매장 ID
+- `expectedOrderedStoreIds`: 결과에서 상대 순서를 지켜야 할 합성 매장 ID. #592 검증에서는 exact, 정방향 expanded, 역방향 expanded 매장을 이 순서로 둔다.
+- `excludedStoreIds`: 결과에 포함되면 안 되는 알려진 무관 합성 매장 ID
+- `maximumItems`: 통제된 true-no-answer 입력에서 허용할 최대 결과 수. `minimumItems`보다 작을 수 없다.
+
+각 ID 배열은 양의 정수만 중복 없이 가지며 기대 포함·순서 ID와 제외 ID는 겹칠 수 없다. 아래 모양은 설명용이며 실제 검색어와 ID는 ignored fixture에만 둔다.
+
+```json
+{
+  "cases": [
+    {
+      "alias": "compound-reverse-match",
+      "scenario": "natural-language",
+      "searchInput": "<approved compound food expression>",
+      "minimumItems": 3,
+      "expectedStoreIds": [303],
+      "expectedOrderedStoreIds": [101, 202, 303]
+    },
+    {
+      "alias": "no-food-signal-quality",
+      "scenario": "natural-language",
+      "searchInput": "<approved true-no-answer expression>",
+      "minimumItems": 0,
+      "maximumItems": 0,
+      "excludedStoreIds": [404]
+    }
+  ]
+}
+```
 
 같은 매장 case는 현재 `SELLING`, 같은 주 분류, 원본 가격 ±20%, 충분한 공개 수량 후보를 가진다. 인근 매장 case는 같은 매장 적격 후보가 없고 원본 매장의 검증 좌표 기준 3km 이내 후보만 가진다. 실행 전후 합성 메뉴 판매 상태를 기록하되 ID와 이름은 공개 증거에 남기지 않는다.
 
@@ -38,7 +70,7 @@ foreach ($test in $tests) {
 
 같은 값은 저장소 밖 `search-llm-budget.local.json`에도 `schemaVersion`, `approved=true`, run ID, 두 full SHA, planned/cumulative calls와 planned/cumulative USD만 기록한다. init context는 이 artifact가 현재 실행 입력과 정확히 일치해야만 요청을 허용한다. 단가, token 원문이나 Secret은 artifact에 넣지 않는다.
 
-exact case는 전후 `calls` 증분이 0이어야 한다. 자연어와 대체 메뉴는 실제 call·success outcome·token 증분이 있어야 한다. 지표가 조회되지 않으면 성공으로 추측하지 않고 `NOT OBSERVABLE`로 기록한다.
+exact case는 전후 `calls` 증분이 0이어야 한다. 자연어와 대체 메뉴는 실제 call·success outcome·token 증분이 있어야 한다. 현재 backend meter는 `MATCHABLE`, `AMBIGUOUS`, `NO_FOOD_SIGNAL`을 별도 outcome으로 노출하지 않으므로 #602 case의 무관 후보 미포함은 live 품질 관찰이며 provider가 실제로 특정 abstention 값을 반환했다는 증거로 사용하지 않는다. 그 내부 판정을 구분해야 하면 #568 범위 밖의 backend 관측성 계약이 선행돼야 한다. 지표가 조회되지 않으면 성공으로 추측하지 않고 `NOT OBSERVABLE`로 기록한다.
 
 ## 실행
 
