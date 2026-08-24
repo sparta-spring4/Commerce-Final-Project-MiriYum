@@ -874,7 +874,6 @@ jobs:
               echo "::error::ECS primary target group evidence is missing."
               exit 1
             fi
-
             jq -n \
               --slurpfile service "$evidence_directory/service.json" \
               --slurpfile tasks "$evidence_directory/tasks.json" \
@@ -982,7 +981,6 @@ jobs:
             sleep 5
             refresh_replacement_evidence
           done
-
       - name: Cleanup previous ECS task identity evidence
         if: always()
         run: |
