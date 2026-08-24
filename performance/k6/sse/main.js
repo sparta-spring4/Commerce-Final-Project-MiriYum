@@ -503,6 +503,9 @@ export function ownedHttpProbe(data) {
         error: (value, metricTags) => ownedHttpErrors.add(value, metricTags),
       },
       tags,
+      onThresholdExceeded: (diagnostic) => {
+        console.warn(`owned_http_probe_threshold_exceeded ${JSON.stringify(diagnostic)}`)
+      },
     })
     check(result, { 'owned HTTP probe remains healthy': (value) => value.success }, tags)
   } catch (_) {

@@ -122,6 +122,17 @@ export default function () {
     tags: TAGS,
   })
 
+  const exceededDiagnostics = []
+  const exceededProbe = runOwnedHttpProbe({
+    client: recordingClient([response(200, 102.23)]),
+    baseUrl: BASE_URL,
+    session: { target: targets.notification, accessToken: TOKEN, baselineMilliseconds: 10 },
+    maxP95Ratio: 10,
+    metrics: recordingMetrics(),
+    tags: TAGS,
+    onThresholdExceeded: (diagnostic) => exceededDiagnostics.push(diagnostic),
+  })
+
   const triggerClient = recordingClient([
     response(200, 12, {
       items: [{
@@ -369,6 +380,16 @@ export default function () {
       && probe.degradationRatio === 1.5
       && probeMetrics.entries.some((entry) => entry.name === 'ratio' && entry.value === 1.5)
       && probeMetrics.entries.some((entry) => entry.name === 'success' && entry.value === 1),
+    'threshold excess reports only bounded absolute timing evidence': () =>
+      exceededProbe.success === false
+      && exceededDiagnostics.length === 1
+      && exceededDiagnostics[0].endpointKind === 'notification-consumer'
+      && exceededDiagnostics[0].baselineMilliseconds === 10
+      && exceededDiagnostics[0].measuredMilliseconds === 102.23
+      && exceededDiagnostics[0].degradationRatio === 10.223
+      && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(exceededDiagnostics[0].occurredAt)
+      && !JSON.stringify(exceededDiagnostics[0]).includes(TOKEN)
+      && !JSON.stringify(exceededDiagnostics[0]).includes('301'),
     'probe requests expose only safe metric dimensions': () =>
       probeClient.calls.every((call) =>
         Object.keys(call.tags).sort().join(',')

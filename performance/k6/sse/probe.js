@@ -351,6 +351,7 @@ export function runOwnedHttpProbe({
   maxP95Ratio,
   metrics = {},
   tags,
+  onThresholdExceeded,
 }) {
   const selected = requireSession(session)
   if (typeof selected.baselineMilliseconds !== 'number'
@@ -361,6 +362,9 @@ export function runOwnedHttpProbe({
   if (typeof maxP95Ratio !== 'number' || !Number.isFinite(maxP95Ratio)
     || maxP95Ratio < 1 || maxP95Ratio > 10) {
     throw new Error('owned HTTP p95 ratio is invalid')
+  }
+  if (onThresholdExceeded !== undefined && typeof onThresholdExceeded !== 'function') {
+    throw new Error('owned HTTP threshold diagnostic callback is invalid')
   }
   const normalizedBaseUrl = requireText('baseUrl', baseUrl).replace(/\/+$/, '')
   const selectedTags = safeTags(tags)
@@ -378,7 +382,21 @@ export function runOwnedHttpProbe({
     emit(metrics, 'degradationRatio', degradationRatio, selectedTags)
     const success = degradationRatio <= maxP95Ratio
     emit(metrics, success ? 'success' : 'error', 1, selectedTags)
-    return Object.freeze({ success, degradationRatio })
+    if (!success && onThresholdExceeded !== undefined) {
+      onThresholdExceeded(Object.freeze({
+        endpointKind: selectedTags.endpoint_kind,
+        baselineMilliseconds: selected.baselineMilliseconds,
+        measuredMilliseconds: duration,
+        degradationRatio,
+        occurredAt: new Date().toISOString(),
+      }))
+    }
+    return Object.freeze({
+      success,
+      degradationRatio,
+      baselineMilliseconds: selected.baselineMilliseconds,
+      measuredMilliseconds: duration,
+    })
   } catch (_) {
     emit(metrics, 'error', 1, selectedTags)
     throw new Error('owned HTTP measured request failed')
