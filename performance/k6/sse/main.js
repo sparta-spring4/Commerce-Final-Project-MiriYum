@@ -34,6 +34,7 @@ import {
   openChangedStream,
   prepareSseSession,
   runReconnectCycle,
+  selectUnexpected403ErrorCodeBucket,
 } from './session.js'
 import {
   createFixtureFingerprint,
@@ -87,6 +88,15 @@ const unexpected400 = new Counter('sse_unexpected_400')
 const unexpected401 = new Counter('sse_unexpected_401')
 const unexpected403 = new Counter('sse_unexpected_403')
 const unexpectedOther4xx = new Counter('sse_unexpected_other_4xx')
+const unexpected403CodeCommon010 = new Counter('sse_unexpected_403_code_common_010')
+const unexpected403CodeAuth006 = new Counter('sse_unexpected_403_code_auth_006')
+const unexpected403CodeAuth009 = new Counter('sse_unexpected_403_code_auth_009')
+const unexpected403CodeAuth010 = new Counter('sse_unexpected_403_code_auth_010')
+const unexpected403CodeAuth011 = new Counter('sse_unexpected_403_code_auth_011')
+const unexpected403CodeAuth012 = new Counter('sse_unexpected_403_code_auth_012')
+const unexpected403CodeOtherOrMissing = new Counter(
+  'sse_unexpected_403_code_other_or_missing',
+)
 const server5xx = new Counter('sse_server_5xx')
 const unexpectedStatus = new Counter('sse_unexpected_status')
 const heartbeatFrames = new Counter('sse_heartbeat_frames')
@@ -289,6 +299,14 @@ function recordUnexpected4xx(diagnostic, tags) {
   else if (diagnostic?.statusBucket === '401') unexpected401.add(1, tags)
   else if (diagnostic?.statusBucket === '403') unexpected403.add(1, tags)
   else unexpectedOther4xx.add(1, tags)
+  const codeBucket = selectUnexpected403ErrorCodeBucket(diagnostic)
+  if (codeBucket === 'COMMON_010') unexpected403CodeCommon010.add(1, tags)
+  else if (codeBucket === 'AUTH_006') unexpected403CodeAuth006.add(1, tags)
+  else if (codeBucket === 'AUTH_009') unexpected403CodeAuth009.add(1, tags)
+  else if (codeBucket === 'AUTH_010') unexpected403CodeAuth010.add(1, tags)
+  else if (codeBucket === 'AUTH_011') unexpected403CodeAuth011.add(1, tags)
+  else if (codeBucket === 'AUTH_012') unexpected403CodeAuth012.add(1, tags)
+  else if (codeBucket === 'other-or-missing') unexpected403CodeOtherOrMissing.add(1, tags)
   console.warn(`sse_unexpected_4xx ${JSON.stringify(diagnostic)}`)
 }
 
@@ -322,6 +340,7 @@ function openSession(session, behavior, lastEventId = null, connectionStage = 's
   const startedAt = Date.now()
   const result = openChangedStream({
     transport: sse,
+    diagnosticClient: http,
     url: `${config.baseUrl}${endpointPath(target)}`,
     accessToken: session.accessToken,
     lastEventId,

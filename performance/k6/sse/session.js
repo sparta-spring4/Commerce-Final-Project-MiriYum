@@ -12,6 +12,18 @@ const ENDPOINT_AUDIENCES = Object.freeze({
   'waiting-store-operator': 'store-operator',
 })
 const TAG_FIELDS = Object.freeze(['profile', 'audience', 'endpoint_kind'])
+const SAFE_UNEXPECTED_ERROR_CODES = new Set([
+  'COMMON_010',
+  'AUTH_006',
+  'AUTH_009',
+  'AUTH_010',
+  'AUTH_011',
+  'AUTH_012',
+])
+const SAFE_UNEXPECTED_ERROR_CODE_BUCKETS = new Set([
+  ...SAFE_UNEXPECTED_ERROR_CODES,
+  'other-or-missing',
+])
 
 function requireText(name, value) {
   if (typeof value !== 'string' || value.trim() === '') {
@@ -255,7 +267,60 @@ function statusClassification(status) {
   return null
 }
 
-function unexpected4xxDiagnostic(status, classification, tags, connectionStage) {
+function unexpectedErrorCodeBucket(body) {
+  if (typeof body !== 'string' || body === '') return 'other-or-missing'
+  try {
+    const parsed = JSON.parse(body)
+    if (parsed !== null
+      && typeof parsed === 'object'
+      && !Array.isArray(parsed)
+      && SAFE_UNEXPECTED_ERROR_CODES.has(parsed.code)) {
+      return parsed.code
+    }
+  } catch (_) {
+    // 원문이나 파싱 실패 이유는 진단 결과에 보존하지 않는다.
+  }
+  return 'other-or-missing'
+}
+
+export function selectUnexpected403ErrorCodeBucket(diagnostic) {
+  if (diagnostic === null
+    || typeof diagnostic !== 'object'
+    || Array.isArray(diagnostic)
+    || diagnostic.statusBucket !== '403'
+    || !SAFE_UNEXPECTED_ERROR_CODE_BUCKETS.has(diagnostic.errorCodeBucket)) {
+    return null
+  }
+  return diagnostic.errorCodeBucket
+}
+
+function fetchUnexpected403Body({
+  diagnosticClient,
+  status,
+  classification,
+  url,
+  headers,
+  tags,
+}) {
+  if (status !== 403
+    || classification !== 'unexpected_client_error'
+    || typeof diagnosticClient?.get !== 'function') {
+    return null
+  }
+  try {
+    const response = diagnosticClient.get(url, {
+      headers: { ...headers },
+      redirects: 0,
+      timeout: '2s',
+      tags: { ...tags, traffic: 'sse-diagnostic' },
+    })
+    return response?.status === 403 ? response.body : null
+  } catch (_) {
+    return null
+  }
+}
+
+function unexpected4xxDiagnostic(status, body, classification, tags, connectionStage) {
   if (classification !== 'unauthorized' && classification !== 'unexpected_client_error') {
     return null
   }
@@ -263,6 +328,7 @@ function unexpected4xxDiagnostic(status, classification, tags, connectionStage) 
   return Object.freeze({
     classification,
     statusBucket,
+    errorCodeBucket: unexpectedErrorCodeBucket(body),
     connectionStage,
     endpointKind: tags.endpoint_kind,
     observedAtUtc: new Date().toISOString(),
@@ -271,6 +337,7 @@ function unexpected4xxDiagnostic(status, classification, tags, connectionStage) 
 
 export function openChangedStream({
   transport,
+  diagnosticClient = null,
   url,
   accessToken,
   lastEventId = null,
@@ -425,7 +492,18 @@ export function openChangedStream({
     classification,
     selectedTags,
     unexpected4xxDiagnostic(
-      response?.status, classification, selectedTags, connectionStage,
+      response?.status,
+      fetchUnexpected403Body({
+        diagnosticClient,
+        status: response?.status,
+        classification,
+        url: streamUrl,
+        headers,
+        tags: selectedTags,
+      }),
+      classification,
+      selectedTags,
+      connectionStage,
     ),
   )
 
