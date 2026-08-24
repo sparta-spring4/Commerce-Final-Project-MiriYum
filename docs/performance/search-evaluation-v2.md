@@ -1,0 +1,185 @@
+# MiriYum 검색 통합 평가 v2
+
+## 실행 기준
+
+- 소유 Issue: [#593](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/593)
+- 평가 커밋: `3a2d5bef2db30e98b8c6e8bb60267feadd35ff12`
+- 데이터 seed / schema: `20260823` / `miriyum-search-eval-v2`
+- 합성 매장 / 메뉴 / 고유 질의: 500 / 5,000 / 2,000
+- 질의 반복: 각 5회, 분석 대상 채팅 결과 10,000건
+- 요청 모델 / 반환 모델: `gpt-4o-mini` / `gpt-4o-mini-2024-07-18`
+- temperature / max output tokens: `0.0` / `100`
+- 실제 애플리케이션 기준: 병합된 abstention 구조화 응답과 bidirectional menu-name predicate
+- 비교 기준: Issue #589 병합 전 legacy one-way predicate를 같은 LLM 응답에 적용한 counterfactual
+
+정답표는 평가 대상 LLM으로 만들지 않았다. 고정 메뉴·별칭 사전, 결정적 템플릿과 합성 gold manifest를 사용했다. 데이터 검증 결과 고아 정답, 중복 ID, 모순 gold, target leakage, 정답 매장·메뉴 누락은 모두 0건이다.
+
+## v2.1 정답 정의·후보 수 재평가
+
+기존 10,000회 응답을 새 API 호출 없이 전부 재사용했다. strict gold는 과거 비교를 위해 그대로 두고, sensory 질의에만 고정 사전의 `재료 + 맛 + 조리법 + 국물` 네 속성이 모두 같은 메뉴군을 acceptable gold로 추가했다. 평가 대상 LLM은 이 정답 확장에 사용하지 않았다. schema는 `miriyum-search-eval-v2.1`, dataset SHA-256은 `f501ea166b469c9f15717113425f44673e0337e0a31e2e837263b0c6264a53b7`다. 체크포인트 10,000건이 모두 이관됐고 변경·누락, 신규 provider 호출, 추가 비용은 모두 0이다.
+
+기존 `semanticHit`는 메뉴명뿐 아니라 재료·맛 같은 속성 하나만 겹쳐도 성공으로 보던 loose 지표다. 따라서 `76.90%`를 메뉴군 이해율로 해석하면 안 된다. v2.1에서 메뉴군 이름 자체를 맞춘 비율은 strict `1,117/2,000 = 55.85%`, acceptable `1,143/2,000 = 57.15%`였다.
+
+| 최종 병합 후보 범위 | strict 고유 질의 성공 | acceptable 고유 질의 성공 |
+|---|---:|---:|
+| @8 | 1,213/2,000 = 60.65% | 1,262/2,000 = 63.10% |
+| @20 | 1,312/2,000 = 65.60% | 1,364/2,000 = 68.20% |
+| @50 | 1,388/2,000 = 69.40% | 1,433/2,000 = 71.65% |
+| 전체 후보 | 1,429/2,000 = 71.45% | 1,460/2,000 = 73.00% |
+
+sensory 800개만 보면 strict는 `@8 165/800 = 20.63%`, `@20 243/800 = 30.38%`, `@50 313/800 = 39.13%`, 전체 후보 `352/800 = 44.00%`다. acceptable은 각각 `214/800 = 26.75%`, `295/800 = 36.88%`, `358/800 = 44.75%`, `383/800 = 47.88%`다. 즉 @8에서 전체 후보까지 넓히면 순위 손실 일부는 회복되지만, acceptable 기준으로도 전체 후보에 정답이 없는 질의가 `417/800 = 52.13%`라 후보 생성 문제가 더 크게 남는다.
+
+sensory 질의에서 LLM이 속성을 과반 반복으로 보존한 고유 질의 비율은 재료 `467/800 = 58.38%`, 조리법 `230/800 = 28.75%`, 식감 `93/800 = 11.63%`, 국물 `85/800 = 10.63%`, 향 `71/800 = 8.88%`, 맛 `66/800 = 8.25%`였다. 현재 낮은 최종 정답률의 주원인은 @8 크기만이 아니라, 맛·국물·조리법을 함께 보존하지 못하고 재료 중심의 다른 메뉴군을 내는 자연어 해석 단계다.
+
+v2.1 전체 결과는 현재 worktree의 ignored 로컬 경로 `performance/search-eval-v2/artifacts/eval-20260824-gold-v2-1-cutoffs/`에 생성했으며, `report.md`, `aggregate.json`, 10,000건 `results.jsonl`, checkpoint migration 원장과 SHA-256 manifest를 포함한다. 이 대용량 유료 응답 산출물은 Git diff나 깨끗한 checkout에 포함되지 않는다. 동일한 무과금 재현에는 ignored 로컬 원본 `eval-20260824-deterministic-menu-full/`이 필요하며, 영구 공유가 필요하면 별도 승인된 artifact 저장소에 원본과 v2.1 bundle을 게시해야 한다.
+
+## 속성 근거 후보 검색 반사실 평가와 프롬프트 파일럿
+
+기존 10,000회 체크포인트를 추가 호출 없이 재사용해, 메뉴명이 없는 질의에서는 질의 원문의 `재료·맛·조리법·국물` 중 둘 이상이 일치하는 메뉴를 후보로 보강하고 명시적 메뉴명이 있는 질의는 기존 양방향 결과를 그대로 유지하는 `simulated-query-attribute-evidence-v1`을 평가했다. 이는 아직 production predicate가 아닌 오프라인 simulated 결과다.
+
+| 고유 질의 지표 | actual application | simulated evidence | 변화 |
+|---|---:|---:|---:|
+| 전체 strict @8 | 1,213/2,000 = 60.65% | 1,509/2,000 = 75.45% | +296, +14.80%p |
+| 전체 acceptable @20 | 1,364/2,000 = 68.20% | 1,739/2,000 = 86.95% | +375, +18.75%p |
+| sensory strict @8 | 165/800 = 20.63% | 461/800 = 57.63% | +296, +37.00%p |
+| sensory acceptable @20 | 295/800 = 36.88% | 670/800 = 83.75% | +375, +46.88%p |
+
+명시적 메뉴 질의를 기존 결과로 고정한 안전 가드 적용 후 filter-defense @8은 actual/simulated 모두 `86.67%`, true-no-answer 오탐은 모두 0건, 전체 gold-negative 오탐은 모두 `12/915`로 유지됐다. 따라서 속성 근거 검색은 구현 후보로서 유망하지만, 실제 SQL·애플리케이션 성능이나 운영 수치로 단정하지 않는다.
+
+속성 보존 프롬프트의 실제 유료 층화 파일럿은 100개를 한 번씩 짝비교했다. sensory acceptable @20이 `35/40 → 38/40`으로 3건 증가해 사전 게이트의 최소 개선 폭을 정확히 충족했다. filter-defense는 `3/7 → 3/7`, gold-negative 오탐은 `0/7 → 0/7`, 폐점·비공개·과거·필터 누출과 provider/format 실패는 모두 0이었다. 파일럿 비용은 `$0.00836715`, 10,000회 예상 비용은 `$0.836715`였다.
+
+게이트 통과 후 본 실행을 재개했으나 `2,447/10,000` 성공 시점에 지속적인 HTTP 429가 발생해 중단했다. 현재 체크포인트 비용은 `$0.21622275`, 감사 원장을 포함한 HTTP 시도는 2,558회, 재시도는 106회다. 비용 0인 최종 429 네 건은 감사 원장으로 격리했고, 마지막 한 건은 다음 `prompt-run` 시작 시 자동 격리·재시도된다. 이 불완전 표본으로 2,000개 전체 성공률을 계산하지 않으며 프롬프트 본 평가 완료를 주장하지 않는다. 로컬 산출물은 `performance/search-eval-v2/artifacts/eval-20260824-attribute-prompt-pilot/`에 있다.
+
+이 중단을 계기로 하네스에는 최대 재시도를 소진한 429의 자동 circuit breaker를 추가했다. 중단 시 이미 실행 중인 future는 끝까지 회수해 체크포인트에 기록하고 새 요청만 막으므로, 비용 상한·429 중단 뒤에도 유료 응답을 잃어 재호출하지 않는다. 재개 격리는 `providerHttpStatus=429`, `failureKind=http_retryable`, 명시적 숫자형 `costUsd=0`을 모두 만족하는 기록에만 허용한다.
+
+## GPT-4o mini와 GPT-5.4 mini 100질의 짝비교
+
+속성 보존 프롬프트, JSON schema, 동일 층화 질의 100개, `reasoning_effort=none`을 고정하고 모델만 `gpt-4o-mini`에서 `gpt-5.4-mini-2026-03-17`로 바꿨다. 기존 100건을 기준선으로 재사용하고 GPT-5.4 mini 100건만 새로 호출했다. 이는 모델 선택 파일럿이며 production 모델 교체 결과가 아니다.
+
+| 지표 | GPT-4o mini | GPT-5.4 mini | 변화 |
+|---|---:|---:|---:|
+| loose semantic hit | 76/100 | 76/100 | 0 |
+| strict family semantic | 50/100 | 54/100 | +4 |
+| acceptable family semantic | 52/100 | 55/100 | +3 |
+| actual application strict @8 | 55/100 | 56/100 | +1 |
+| simulated evidence strict @8 | 82/100 | 78/100 | -4 |
+| simulated evidence acceptable @8 | 84/100 | 80/100 | -4 |
+| sensory acceptable @20 | 38/40 | 37/40 | -1 |
+| gold-negative 오탐 @8 | 0/7 | 0/7 | 유지 |
+| filter-defense acceptable @8 | 3/7 | 6/7 | +3 |
+
+GPT-5.4 mini는 메뉴군 이름 이해는 3~4건 늘었지만, simulated strict/acceptable @8의 짝별 변화는 7건 손실·3건 회수로 순감 4건이었다. 손실은 composite filter 4건, sensory 2건, 모호한 음성 질의 1건이고, 회수는 filter-defense 3건이다. 손실 시 해석 상태도 `AMBIGUOUS` 2건, `NO_FOOD_SIGNAL` 3건, `MATCHABLE` 2건으로 단일 원인에 국한되지 않았다. 따라서 이 100개 표본만으로 상위 모델이 전체 검색 정답률을 개선한다고 볼 근거는 없으며, 현재 prompt 그대로의 전면 교체는 채택하지 않는다.
+
+비용은 `$0.00836715 → $0.04819275`로 약 5.76배였고, 평균 지연시간은 `1321.3ms → 1076.4ms`, p95는 `2047.9ms → 1389.8ms`였다. GPT-5.4 mini 호출 100건의 provider/format 실패, 429, 중복 호출은 모두 0이다. 산출물은 ignored 로컬 경로 `performance/search-eval-v2/artifacts/eval-20260824-model-gpt54mini-paired100-v2/`에 있으며 요청별 checkpoint, 양쪽 aggregate, 짝비교 summary와 SHA-256을 포함한다.
+
+## 발표·Notion용 핵심 숫자
+
+1. provider/format 성공: 고유 질의 `2,000/2,000 = 100.00%` (Wilson 95% CI `99.81–100.00%`)
+2. LLM semantic 성공: `1,538/2,000 = 76.90%` (Wilson 95% CI `75.00–78.69%`)
+3. legacy one-way 성공: `1,256/2,000 = 62.80%` (Wilson 95% CI `60.66–64.89%`)
+4. LLM 보충 predicate의 후보 풀 기준 actual bidirectional 성공: `1,280/2,000 = 64.00%` (Wilson 95% CI `61.87–66.07%`)
+5. 양방향은 legacy 대비 고유 질의 `24건`, `+1.20%p` 순증가했고 순감소는 0건이었다.
+6. 실제 무정답 음성 질의 오탐은 `0/375 = 0.00%`였다. 답이 있는 call의 abstention은 `1,496/9,085 = 16.47%`였고, Issue #616 전 기본 검색은 이를 구제하지 못했지만 보정 후 `772건`을 구제했다.
+7. top-1 안정률은 `93.71%`, 5회 결과의 평균 pairwise Jaccard는 `0.8803`이었다.
+8. 채팅 분석 비용은 `$0.779856`, 중복 방지 오류의 초과 12건까지 포함한 실제 채팅 비용은 `$0.780873`, embedding을 포함한 이번 실행 총비용은 `$0.831751`이었다.
+
+## 통합 손실과 랭킹
+
+- semantic에서 actual predicate까지의 고유 질의 통합 유실: `76.90% - 64.00% = 12.90%p`
+- Issue #616 전 기본 검색 단독은 답이 있는 `1,817`개 고유 질의 중 `0건`을 맞혔다. 남은 문장 전체를 하나의 literal substring으로 찾던 predicate 특성상 자연어 요청 문구가 붙은 메뉴명을 회수하지 못했다.
+- LLM 보충 후보 풀에서는 답이 있는 고유 질의 `1,100/1,817 = 60.54%`, 최종 사용자 노출 8개에서는 `787/1,817 = 43.31%`가 과반 반복 성공했다.
+- 전체 고유 질의에서 기본 검색→LLM 보충→상위 8개 병합의 최종 성공은 `967/2,000 = 48.35%`였다. 후보 풀 성공 `64.00%`와 혼동하지 않는다.
+- 최종 Recall@1 / @3 / @5 / @8: `25.31% / 30.06% / 31.32% / 32.46%`
+- 최종 MRR / nDCG@8: `0.2986 / 0.3425`
+- latency mean / p50 / p95 / p99 / max: `1038.7 / 1025.3 / 1433.0 / 1943.8 / 11372.6 ms`
+- 2초 초과율: `0.89%`
+- 폐점, 비공개·과거 버전 누출: 각각 `0.00%`
+- 지역, 가격, 카테고리 필터 위반: 각각 `0.00%`
+
+## Issue #616 deterministic 메뉴명 선회수 재분석
+
+기존 10,000회 LLM 체크포인트를 그대로 사용하고, 최대 100자 `remainingKeyword`의 2자 이상 부분문자열을 indexed exact `IN` 조회해 non-retired current published 메뉴명을 요청당 한 번 찾는다. 전체 결과에서 겹치는 이름 중 가장 구체적인 이름을 먼저 남긴 뒤 최종 100개만 바인딩하고, 후보 조회에서는 visible current published 메뉴만 허용한다. 따라서 hidden current 긴 이름은 짧은 메뉴명으로의 잘못된 후퇴를 막을 수 있지만 결과로 노출되지는 않는다. 아래 차이는 새 LLM 출력이 아니라 검색 predicate와 최종 병합 변화만 반영하며 추가 API 비용은 0원이다.
+
+재분석 구현 기준은 최신 `origin/dev`의 `f188bd701c26ed8f73efd17a163f2f832b84b300`이며, `run-metadata.json`에 predicate variant와 evaluator·query·predicate·repository·service·V71 migration SHA-256을 별도로 기록했다. 원래 10,000회 OpenAI 호출의 실행 커밋과 재분석 구현 커밋을 혼동하지 않는다.
+
+| 지표 | Issue #616 전 | Issue #616 재분석 | 변화 |
+|---|---:|---:|---:|
+| 전체 고유 질의 최종 성공 | 967/2,000 = 48.35% | 1,213/2,000 = 60.65% | +246, +12.30%p |
+| answerable 고유 질의 최종 성공 | 787/1,817 = 43.31% | 1,033/1,817 = 56.85% | +246, +13.54%p |
+| answerable call 최종 성공 | 3,913/9,085 = 43.07% | 5,166/9,085 = 56.86% | +1,253, +13.79%p |
+| 실제 사용자 결과까지 실패한 abstention | 1,496/9,085 = 16.47% | 724/9,085 = 7.97% | -772, -8.50%p |
+| true-no-answer 오탐 | 0/375 = 0.00% | 0/375 = 0.00% | 유지 |
+| 전체 gold-negative 오탐 | 12/915 = 1.31% | 12/915 = 1.31% | 유지 |
+
+층화 100질의 paired 표본에서도 최종 상위 8개 정답은 `43/93 = 46.24%`에서 `56/93 = 60.22%`로 13건 증가했고, LLM abstention 중 6건을 deterministic 경로가 구제했으며 모든 gold-negative와 true-no-answer 오탐은 각각 `0/7`, `0/4`를 유지했다. 1차 구현에서 `칼칼한 마라탕`을 더 짧은 `마라탕`으로 후퇴시켜 늘었던 strict filter-defense 오탐 30 call은 가장 구체적인 긴 메뉴명 우선 규칙으로 제거했다.
+
+## 과거 30×3 평가와 비교
+
+| 지표 | 과거 30질의×3회 | v2 고유 질의 단위 |
+|---|---:|---:|
+| LLM 의미 성공 | 81/90 = 90.00% | 1,538/2,000 = 76.90% |
+| legacy one-way DB 호환 | 64/90 = 71.11% | 1,256/2,000 = 62.80% |
+| 의미→legacy one-way 유실 | 17/90 = 18.89%p | 14.10%p |
+| 의미→actual bidirectional 유실 | 과거 actual 없음 | 12.90%p |
+
+과거 평가는 서로 다른 매장 corpus가 없는 30개 합성 메뉴·30개 질의의 call 단위 수치다. v2는 매장 500개와 메뉴 5,000개를 포함하고 고유 질의 2,000개를 통계 단위로 사용하므로 단순 전후 성능 개선치로 해석하면 안 된다.
+
+## Embedding 비교
+
+| 모델 | Recall@1 | Recall@5 | Recall@8 | MRR | 배치 호출 | 비용 |
+|---|---:|---:|---:|---:|---:|---:|
+| `text-embedding-3-small` | 19.03% | 28.51% | 33.70% | 0.4528 | 14 | $0.006784 |
+| `text-embedding-3-large` | 21.75% | 32.09% | 37.24% | 0.5034 | 14 | $0.044094 |
+
+유사도 계산은 같은 2,000×5,000 corpus에서 NumPy `matmul + argpartition`으로 수행했다.
+
+## 호출 원장과 재개 사고
+
+- 분석 대상 채팅 결과: 10,000건
+- 실제 성공 채팅 레코드: 10,012건
+- HTTP 시도: 10,013회
+- 재시도 / 최종 실패: 1 / 0
+- embedding 배치 호출: 28회
+- 초과 12건 원인: 파일럿 평균 토큰 추정치가 request fingerprint에 포함되어 최초 본 실행에서 동일 요청 ID가 달라짐
+- 조치: 원본 체크포인트를 보존하고 실제 API request body가 동일한 기록만 canonical checkpoint로 이관했으며, `(queryId, repeatIndex)` 충돌에서는 파일럿 응답을 우선했다.
+- canonicalization 결과: 원본 1,340건 → 유효 1,328건, 동등 중복 12건, 비동등 거부 0건
+
+초과 12건은 10,000건 분석 표본에 포함하지 않았고 실제 비용 원장에만 포함했다.
+
+## 재현 명령
+
+`performance/search-eval-v2`에서 번들 Python 또는 NumPy가 설치된 Python을 사용한다.
+
+```powershell
+$env:PYTHONPATH='src'
+python -m unittest discover -s tests -v
+python -m miriyum_search_eval generate --artifact-dir artifacts/eval-20260824-post-merge
+python -m miriyum_search_eval pilot --artifact-dir artifacts/eval-20260824-post-merge
+python -m miriyum_search_eval run --artifact-dir artifacts/eval-20260824-post-merge
+python -m miriyum_search_eval reanalyze --artifact-dir artifacts/eval-20260824-deterministic-menu-full --predicate-variant issue-616-most-specific
+python -m miriyum_search_eval migrate-checkpoint --artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs --source-artifact-dir artifacts/eval-20260824-deterministic-menu-full
+python -m miriyum_search_eval reanalyze --artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs --predicate-variant issue-616-most-specific
+python -m miriyum_search_eval report --artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs
+python -m miriyum_search_eval prompt-pilot --artifact-dir artifacts/eval-20260824-attribute-prompt-pilot --source-artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs
+python -m miriyum_search_eval prompt-run --artifact-dir artifacts/eval-20260824-attribute-prompt-pilot
+python -m miriyum_search_eval embeddings --artifact-dir artifacts/eval-20260824-post-merge
+python -m miriyum_search_eval report --artifact-dir artifacts/eval-20260824-post-merge
+```
+
+`OPENAI_API_KEY`는 환경변수에서만 읽는다. checkpoint·결과·로그에는 키와 원문 인증 헤더를 기록하지 않는다.
+
+## 검증과 한계
+
+- Python 하네스 테스트: 66개 전체 통과
+- 영향받은 Java 단위 테스트: `IntegratedStoreSearchQueryTest`, `IntegratedStoreSearchPredicatesTest`, `IntegratedStoreSearchServiceTest` 총 38개 통과
+- `IntegratedStoreSearchRepositoryIT`: Docker/Testcontainers MySQL로 18개 통과
+- representative MySQL `EXPLAIN`/timing은 아직 실행하지 않아 CI 또는 별도 성능 검증 대기다. 후보 행마다 실행되던 correlated `NOT EXISTS`와 non-sargable `LOCATE`는 제거했다. V71의 `name` 선두 복합 index에 최대 4,950개 exact 후보를 조회하고, 가장 구체적인 이름을 계산한 후 최종 100개만 검색 query에 바인딩한다.
+- 실행 후 `origin/dev`가 `1acec13b`까지 전진했지만, 평가한 interpreter·predicate·repository·application 설정은 평가 커밋과 byte-level Git diff가 없음을 확인했다.
+- 실제 애플리케이션 수치는 병합된 SQL predicate를 합성 corpus에 오프라인으로 결정적 모사한 값이다. 운영 DB에 실제 SQL을 실행한 결과가 아니다.
+- 기본 검색 proxy는 합성 manifest에 주소가 없어 매장명·region·current published 메뉴명만 평가했다. 구조화 region·가격·분위기·category span은 고정 합성 vocabulary와 템플릿으로 결정적으로 제거해 `remainingKeyword`를 만들며, 운영 vocabulary 전체를 실제 MySQL에서 실행한 수치는 아니다.
+- 2026-08-24의 over-abstention 완화 prompt 수정안은 별도 층화 파일럿 100회에서 안전 게이트를 통과했지만 동일 질의의 answerable abstention이 `14/93 = 15.05%`에서 `33/93 = 35.48%`로 악화되고 semantic hit가 `80/100`에서 `66/100`으로 감소해 채택하지 않았다. true-no-answer 오탐은 두 조건 모두 `0/4`였다. 본 10,000회는 실행하지 않았고 production prompt와 정본 계약은 원복했다.
+- 합성 언어와 합성 매장 분포이므로 실제 사용자·운영 데이터에 대한 외적 타당성은 제한된다.
+- mode별 메뉴 오탐 건수는 gold family 밖 반환 메뉴의 누적 건수이며 무정답 query-level false-positive rate와 다른 지표다.
+- 10,000개 반복 응답은 안정성 분석에 사용했고 Wilson 신뢰구간은 독립 표본처럼 부풀리지 않고 고유 질의 2,000개로 계산했다.
+
+현재 worktree에서 기존 baseline 상세 결과는 ignored 로컬 경로 `performance/search-eval-v2/artifacts/eval-20260824-post-merge/`, Issue #616 재분석 결과와 명시적 predicate variant·분석 소스 SHA-256은 `performance/search-eval-v2/artifacts/eval-20260824-deterministic-menu-full/`, v2.1 strict/acceptable 및 @8/@20/@50/전체 후보 결과는 `performance/search-eval-v2/artifacts/eval-20260824-gold-v2-1-cutoffs/`에 있다. 이 경로들은 Git에 포함된 영구 배포 위치가 아니다.

@@ -94,6 +94,28 @@ class IntegratedStoreSearchServiceTest {
     }
 
     @Test
+    void resolvesMostSpecificMenuNamesOnceAndReusesThemInSearchQuery() {
+        InterpretedSearchCondition condition = condition(
+                null, null, null, "칼칼한 짬뽕 파는 매장");
+        given(interpreter.interpret("칼칼한 짬뽕 파는 매장"))
+                .willReturn(result(condition));
+        given(repository.resolveMostSpecificPublishedMenuNames(
+                "칼칼한 짬뽕 파는 매장"))
+                .willReturn(List.of("칼칼한 짬뽕"));
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(), null));
+        given(repository.refreshCurrentlyPublic(List.of())).willReturn(List.of());
+
+        service().search("칼칼한 짬뽕 파는 매장", false, false,
+                null, null, 20);
+
+        then(repository).should(times(1)).resolveMostSpecificPublishedMenuNames(
+                "칼칼한 짬뽕 파는 매장");
+        then(repository).should().search(argThat(query ->
+                query.explicitMenuNames().equals(List.of("칼칼한 짬뽕"))));
+    }
+
+    @Test
     void fullExactPageDoesNotCallLlm() {
         InterpretedSearchCondition condition = condition(null, null, null, "라멘");
         given(interpreter.interpret("라멘")).willReturn(result(condition));

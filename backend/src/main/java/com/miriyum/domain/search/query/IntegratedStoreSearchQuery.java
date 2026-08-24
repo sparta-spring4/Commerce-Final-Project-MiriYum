@@ -27,6 +27,7 @@ public final class IntegratedStoreSearchQuery {
     private final LocalDate reservationDate;
     private final LocalTime reservationTime;
     private final String remainingKeyword;
+    private final List<String> explicitMenuNames;
     private final IntegratedStoreSearchSort sort;
     private final int size;
     private final String fingerprint;
@@ -34,6 +35,7 @@ public final class IntegratedStoreSearchQuery {
 
     private IntegratedStoreSearchQuery(
             InterpretedSearchCondition condition,
+            List<String> explicitMenuNames,
             boolean includesInfants,
             boolean availableOnly,
             String principalScope,
@@ -51,6 +53,7 @@ public final class IntegratedStoreSearchQuery {
         this.reservationDate = condition.reservationDate();
         this.reservationTime = condition.reservationTime();
         this.remainingKeyword = condition.remainingKeyword();
+        this.explicitMenuNames = canonicalMenuNames(explicitMenuNames);
         this.sort = sort;
         this.size = size;
         Objects.requireNonNull(principalScope, "principalScope must not be null");
@@ -78,6 +81,7 @@ public final class IntegratedStoreSearchQuery {
 
     public static IntegratedStoreSearchQuery from(
             InterpretedSearchCondition condition,
+            List<String> explicitMenuNames,
             boolean includesInfants,
             boolean availableOnly,
             String principalScope,
@@ -94,12 +98,55 @@ public final class IntegratedStoreSearchQuery {
         }
         return new IntegratedStoreSearchQuery(
                 condition,
+                explicitMenuNames,
                 includesInfants,
                 availableOnly,
                 principalScope,
                 IntegratedStoreSearchSort.parse(sort),
                 cursor,
                 resolvedSize,
+                cursorCodec);
+    }
+
+    public static IntegratedStoreSearchQuery from(
+            InterpretedSearchCondition condition,
+            boolean includesInfants,
+            boolean availableOnly,
+            String principalScope,
+            String sort,
+            String cursor,
+            Integer size,
+            IntegratedSearchCursorCodec cursorCodec
+    ) {
+        return from(
+                condition,
+                List.of(),
+                includesInfants,
+                availableOnly,
+                principalScope,
+                sort,
+                cursor,
+                size,
+                cursorCodec);
+    }
+
+    public static IntegratedStoreSearchQuery from(
+            InterpretedSearchCondition condition,
+            List<String> explicitMenuNames,
+            String sort,
+            String cursor,
+            Integer size,
+            IntegratedSearchCursorCodec cursorCodec
+    ) {
+        return from(
+                condition,
+                explicitMenuNames,
+                false,
+                false,
+                cursorCodec.principalScope(null),
+                sort,
+                cursor,
+                size,
                 cursorCodec);
     }
 
@@ -122,6 +169,14 @@ public final class IntegratedStoreSearchQuery {
     }
 
     private static List<String> canonicalCodes(List<String> values) {
+        if (values == null || values.stream().anyMatch(
+                value -> value == null || value.isBlank() || !value.equals(value.trim()))) {
+            throw validationFailed();
+        }
+        return values.stream().distinct().sorted().toList();
+    }
+
+    private static List<String> canonicalMenuNames(List<String> values) {
         if (values == null || values.stream().anyMatch(
                 value -> value == null || value.isBlank() || !value.equals(value.trim()))) {
             throw validationFailed();
@@ -185,6 +240,10 @@ public final class IntegratedStoreSearchQuery {
 
     public String remainingKeyword() {
         return remainingKeyword;
+    }
+
+    public List<String> explicitMenuNames() {
+        return explicitMenuNames;
     }
 
     public IntegratedStoreSearchSort sort() {

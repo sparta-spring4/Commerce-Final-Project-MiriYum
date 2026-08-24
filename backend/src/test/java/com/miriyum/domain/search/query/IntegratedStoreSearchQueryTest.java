@@ -202,6 +202,22 @@ class IntegratedStoreSearchQueryTest {
         assertValidationFailed(() -> query(condition(), "storeId,desc", null, 20));
     }
 
+    @Test
+    void keepsResolvedMenuNamesOutOfCursorFingerprintButCanonicalizesThem() {
+        InterpretedSearchCondition condition = condition("칼칼한 짬뽕 파는 매장");
+
+        IntegratedStoreSearchQuery first = IntegratedStoreSearchQuery.from(
+                condition, List.of("짬뽕", "칼칼한 짬뽕", "짬뽕"),
+                null, null, 20, CURSOR_CODEC);
+        IntegratedStoreSearchQuery second = IntegratedStoreSearchQuery.from(
+                condition, List.of("칼칼한 짬뽕"),
+                null, null, 20, CURSOR_CODEC);
+
+        assertThat(first.explicitMenuNames())
+                .containsExactly("짬뽕", "칼칼한 짬뽕");
+        assertThat(first.fingerprint()).isEqualTo(second.fingerprint());
+    }
+
     private static IntegratedStoreSearchQuery query(
             InterpretedSearchCondition condition,
             String sort,

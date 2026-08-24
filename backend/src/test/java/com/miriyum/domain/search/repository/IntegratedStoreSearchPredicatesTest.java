@@ -10,6 +10,7 @@ import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
 import com.querydsl.core.BooleanBuilder;
 import com.querydsl.jpa.HQLTemplates;
 import com.querydsl.jpa.JPQLSerializer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -113,6 +114,84 @@ class IntegratedStoreSearchPredicatesTest {
                 .doesNotContain("locate(lower(expandedReverseMenuVersion_localTags");
         assertThat(reverse.constants())
                 .contains("불향 해물 짬뽕", "8000", "15000");
+    }
+
+    @Test
+    void originalKeywordPredicateFindsGuardedMenuNameInsideNaturalLanguage() {
+        InterpretedSearchCondition condition = new InterpretedSearchCondition(
+                List.of(), List.of(), List.of(), List.of(), null,
+                null, null, null, "짬뽕 파는 매장 중 추천순으로 보여줘");
+        IntegratedStoreSearchQuery query = IntegratedStoreSearchQuery.from(
+                condition,
+                List.of("짬뽕"),
+                null,
+                null,
+                20,
+                CURSOR_CODEC);
+
+        RenderedPredicate rendered = render(
+                IntegratedStoreSearchPredicates.create(QStore.store, query));
+
+        assertThat(rendered.jpql())
+                .contains("trim(keywordMenuVersion.name) =")
+                .doesNotContain("locate(lower(keywordMenuVersion.name)")
+                .doesNotContain("moreSpecificKeywordMenuVersion");
+        assertThat(rendered.constants())
+                .contains("%짬뽕 파는 매장 중 추천순으로 보여줘%", "짬뽕");
+    }
+
+    @Test
+    void reverseMenuGuardRejectsEveryGenericNameAndOneCharacterNames() {
+        assertThat(List.of(
+                "면", "탕", "국", "밥", "메뉴", "음식", "요리", "식사",
+                "세트", "정식", "음료", "A"))
+                .allMatch(name -> !IntegratedStoreSearchPredicates
+                        .isEligibleReverseMenuName(name));
+        assertThat(IntegratedStoreSearchPredicates.isEligibleReverseMenuName("국밥"))
+                .isTrue();
+        assertThat(IntegratedStoreSearchPredicates.isEligibleReverseMenuName(" 국밥 "))
+                .isTrue();
+        assertThat(IntegratedStoreSearchPredicates.isEligibleReverseMenuName("😀"))
+                .isFalse();
+        assertThat(IntegratedStoreSearchPredicates.isEligibleReverseMenuName("😀국"))
+                .isTrue();
+    }
+
+    @Test
+    void mostSpecificNamesAreFilteredBeforeFinalBound() {
+        List<String> contained = new ArrayList<>();
+        for (int length = 2; length <= 100; length++) {
+            contained.add("가".repeat(length));
+        }
+        contained.add("나다");
+        contained.add("라마");
+
+        assertThat(IntegratedStoreSearchRepository.mostSpecificNames(contained, 100))
+                .containsExactly("가".repeat(100), "나다", "라마");
+    }
+
+    @Test
+    void substringLookupCandidatesAreDeterministicAndInputBounded() {
+        String keyword = "가".repeat(98) + "짬뽕";
+
+        List<String> candidates = IntegratedStoreSearchRepository
+                .candidateMenuNames(keyword);
+
+        assertThat(candidates).contains("짬뽕", "가짬뽕");
+        assertThat(candidates).doesNotContain("면", "탕", "국", "밥");
+        assertThat(candidates).hasSizeLessThanOrEqualTo(4_950);
+        assertThat(candidates).isSorted();
+    }
+
+    @Test
+    void mostSpecificNamesFollowAccentInsensitiveUnicodeNormalization() {
+        assertThat(IntegratedStoreSearchRepository.mostSpecificNames(
+                List.of("Café", "Cafe\u0301 Latte"), 100))
+                .containsExactly("Cafe\u0301 Latte");
+
+        List<String> supplementary = IntegratedStoreSearchRepository
+                .candidateMenuNames("😀국 추천");
+        assertThat(supplementary).contains("😀국").doesNotContain("😀");
     }
 
     private static RenderedPredicate render(BooleanBuilder predicate) {
