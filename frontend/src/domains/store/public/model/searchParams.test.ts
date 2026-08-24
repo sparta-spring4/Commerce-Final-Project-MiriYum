@@ -18,7 +18,7 @@ describe('readFilters', () => {
   it('URL 문자열을 필터로 읽는다', () => {
     const result = readFilters(
       new URLSearchParams(
-        'keyword=파스타&region=SEOUL&storeCategoryCode=KOREAN&serviceDate=2026-09-01&startTime=19:00&partySize=2&includesInfants=true&availableOnly=true&page=2&sort=name,desc',
+        'keyword=파스타&region=SEOUL&storeCategoryCode=KOREAN&serviceDate=2026-09-01&startTime=19:00&partySize=2&includesInfants=true&availableOnly=true&page=2&size=50&sort=name,desc',
       ),
     )
 
@@ -32,6 +32,7 @@ describe('readFilters', () => {
       includesInfants: true,
       availableOnly: true,
       page: 2,
+      size: 50,
       cursor: '',
       sort: 'name,desc',
     })
@@ -66,6 +67,12 @@ describe('readFilters', () => {
   it('음수 페이지는 첫 페이지로 되돌린다', () => {
     expect(readFilters(new URLSearchParams('page=-3')).page).toBe(0)
   })
+
+  it('10, 20, 50 이외의 페이지 크기는 기본 20개로 되돌린다', () => {
+    expect(readFilters(new URLSearchParams('size=10')).size).toBe(10)
+    expect(readFilters(new URLSearchParams('size=50')).size).toBe(50)
+    expect(readFilters(new URLSearchParams('size=30')).size).toBe(20)
+  })
 })
 
 describe('writeFilters', () => {
@@ -86,6 +93,10 @@ describe('writeFilters', () => {
     expect(writeFilters(filters({ keyword: '  파스타  ' })).get('keyword')).toBe(
       '파스타',
     )
+  })
+
+  it('기본값이 아닌 페이지 크기를 URL에 보존한다', () => {
+    expect(writeFilters(filters({ size: 50 })).get('size')).toBe('50')
   })
 })
 
@@ -213,6 +224,11 @@ describe('toSearchQuery', () => {
 
     expect(query.cursor).toBe('signed-cursor')
     expect(query.page).toBeUndefined()
+  })
+
+  it('선택한 페이지 크기를 일반·통합 검색 모두 서버에 보낸다', () => {
+    expect(toSearchQuery(filters({ size: 10 })).size).toBe(10)
+    expect(toSearchQuery(filters({ keyword: '파스타', size: 50 })).size).toBe(50)
   })
 })
 

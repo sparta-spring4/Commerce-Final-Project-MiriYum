@@ -51,6 +51,16 @@ class StoreOnboardingMigrationIT {
                         "attempt_count", "next_attempt_at", "row_version");
                 assertThat(columns(connection, "store_onboarding_decisions"))
                         .contains("idempotency_key");
+                assertThat(columns(connection, "stores"))
+                        .contains("business_type");
+                assertThat(columns(connection, "store_onboarding_application_versions"))
+                        .contains("business_type");
+                assertThat(nullableColumns(connection, "stores"))
+                        .contains("business_type");
+                assertThat(nullableColumns(connection, "store_onboarding_application_versions"))
+                        .contains("business_type");
+                assertThat(constraints(connection))
+                        .contains("ck_stores_business_type");
                 assertThat(constraints(connection))
                         .contains("uk_store_onboarding_decision_idempotency");
                 assertThat(triggers(connection)).contains(
@@ -110,6 +120,21 @@ class StoreOnboardingMigrationIT {
         try (var statement = connection.prepareStatement("""
                 SELECT column_name FROM information_schema.columns
                 WHERE table_schema=DATABASE() AND table_name=?
+                """)) {
+            statement.setString(1, table);
+            try (var result = statement.executeQuery()) {
+                Set<String> names = new HashSet<>();
+                while (result.next()) names.add(result.getString(1).toLowerCase());
+                return names;
+            }
+        }
+    }
+
+    private static Set<String> nullableColumns(Connection connection, String table)
+            throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema=DATABASE() AND table_name=? AND is_nullable='YES'
                 """)) {
             statement.setString(1, table);
             try (var result = statement.executeQuery()) {

@@ -13,7 +13,6 @@ import com.miriyum.domain.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.menu.model.MenuContent;
 import com.miriyum.domain.menu.repository.MenuRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
@@ -203,7 +202,6 @@ class MenuTransactionFacadeIT {
             long storeId = storeRepository.saveAndFlush(Store.create(
                     operatorId,
                     "1234567890",
-                    BusinessType.CAFE,
                     "Transaction Store",
                     "",
                     Region.SEOUL,

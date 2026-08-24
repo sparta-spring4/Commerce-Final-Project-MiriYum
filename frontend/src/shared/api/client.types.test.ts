@@ -39,6 +39,16 @@ export function allowedCalls() {
     body: { nickname: '미리' },
     idempotencyKey: 'key-1',
   })
+
+  void api('/api/v1/store-operators/onboarding-applications/{applicationId}', {
+    method: 'get',
+    pathParams: { applicationId: 1 },
+  })
+  void api('/api/v1/store-operators/stores', {
+    method: 'post',
+    multipart: new FormData(),
+    idempotencyKey: '123e4567-e89b-12d3-a456-426614174000',
+  })
 }
 
 /** 타입이 막아야 하는 호출. 각 줄에 실제로 오류가 나야 typecheck가 통과한다. */

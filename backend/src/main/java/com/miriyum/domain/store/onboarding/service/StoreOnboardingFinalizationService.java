@@ -53,7 +53,8 @@ public class StoreOnboardingFinalizationService {
         try {
             Store saved = stores.saveAndFlush(Store.createVerified(
                     application.getStoreOperatorAccountId(), snapshot.getBusinessRegistrationNumber(),
-                    snapshot.getBusinessType(), snapshot.getName(), snapshot.getDescription(),
+                    snapshot.getBusinessType(),
+                    snapshot.getName(), snapshot.getDescription(),
                     snapshot.getRegion(), snapshot.getAddress(), snapshot.getStoreCategoryCode(),
                     Set.of(objectMapper.readValue(snapshot.getTagCodesJson(), String[].class)),
                     snapshot.isReservationEnabled(), snapshot.isMenuHoldEnabled(),

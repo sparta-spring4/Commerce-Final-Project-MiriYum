@@ -56,7 +56,6 @@ import com.miriyum.domain.schedule.service.StoreScheduleService;
 import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.error.StoreErrorCode;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -756,7 +755,6 @@ class ReservationPaymentLifecycleIT {
             Store store = storeRepository.saveAndFlush(Store.create(
                     operator.getId(),
                     Long.toString(8_200_000_000L + sequence),
-                    BusinessType.CAFE,
                     "Lifecycle Public Store " + sequence,
                     "",
                     Region.SEOUL,
@@ -941,7 +939,6 @@ class ReservationPaymentLifecycleIT {
             Store store = storeRepository.saveAndFlush(Store.create(
                     operator.getId(),
                     Long.toString(8_100_000_000L + sequence),
-                    BusinessType.CAFE,
                     "Lifecycle Store " + sequence,
                     "",
                     Region.SEOUL,

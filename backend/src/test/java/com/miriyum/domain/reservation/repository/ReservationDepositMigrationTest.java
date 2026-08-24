@@ -376,7 +376,8 @@ class ReservationDepositMigrationTest {
             statement.executeUpdate("""
                     INSERT INTO stores (
                         store_id, store_operator_account_id, business_registration_number,
-                        business_type, name, description, region, address, time_zone_id,
+                        business_type,
+                        name, description, region, address, time_zone_id,
                         applicant_self_attested_at, required_terms_agreed_at,
                         required_terms_version, store_category_code, verification_status,
                         operation_status, reservation_enabled, menu_hold_enabled,

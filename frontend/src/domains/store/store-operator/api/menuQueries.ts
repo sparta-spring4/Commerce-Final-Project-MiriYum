@@ -285,16 +285,20 @@ export function useChangeMenuSellingStatus(storeId: string, menuId: string) {
   })
 }
 
-export function usePutMenuImage(storeId: string, menuId: string) {
+export function usePutMenuImage(storeId: string, fixedMenuId?: string) {
   const { apiClient } = useStoreOperatorAuth()
   const queryClient = useQueryClient()
-  const menuImageKey = storeOperatorKeys.menuImage(storeId, menuId)
 
   return useMutation({
     mutationFn: async (variables: {
+      menuId?: string
       file: File
       idempotencyKey: string
     }): Promise<string> => {
+      const menuId = variables.menuId ?? fixedMenuId
+      if (menuId === undefined || menuId.length === 0) {
+        throw new Error('메뉴 이미지 업로드 대상이 없습니다.')
+      }
       const multipart = new FormData()
       multipart.append('file', variables.file)
       const response = await apiClient(
@@ -308,14 +312,21 @@ export function usePutMenuImage(storeId: string, menuId: string) {
       )
       return response.data.url
     },
-    onMutate: async () => {
+    onMutate: async (variables) => {
+      const menuId = variables.menuId ?? fixedMenuId
+      if (menuId === undefined) return
       await queryClient.cancelQueries({
-        queryKey: menuImageKey,
+        queryKey: storeOperatorKeys.menuImage(storeId, menuId),
         exact: true,
       })
     },
-    onSuccess: (url) => {
-      queryClient.setQueryData(menuImageKey, url)
+    onSuccess: (url, variables) => {
+      const menuId = variables.menuId ?? fixedMenuId
+      if (menuId === undefined) return
+      queryClient.setQueryData(
+        storeOperatorKeys.menuImage(storeId, menuId),
+        url,
+      )
       void queryClient.invalidateQueries({
         queryKey: storeOperatorKeys.menu(storeId, menuId),
         exact: true,

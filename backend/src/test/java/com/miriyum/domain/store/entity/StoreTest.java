@@ -3,7 +3,6 @@ package com.miriyum.domain.store.entity;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.GeocodingStatus;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
@@ -186,7 +185,6 @@ class StoreTest {
         Store store = Store.create(
                 11L,
                 "1234567890",
-                BusinessType.CAFE,
                 "미리윰",
                 "설명",
                 Region.SEOUL,
@@ -211,7 +209,6 @@ class StoreTest {
         assertThatThrownBy(() -> Store.create(
                 11L,
                 "1234567890",
-                BusinessType.CAFE,
                 "미리윰",
                 "",
                 Region.SEOUL,
@@ -233,7 +230,6 @@ class StoreTest {
         assertThatThrownBy(() -> Store.create(
                 11L,
                 "1234567890",
-                BusinessType.CAFE,
                 "미리윰",
                 "",
                 Region.SEOUL,
@@ -255,7 +251,6 @@ class StoreTest {
         Store store = Store.create(
                 11L,
                 "1234567890",
-                BusinessType.OTHER,
                 "미리윰",
                 "",
                 Region.SEOUL,
@@ -278,7 +273,6 @@ class StoreTest {
         Store store = Store.create(
                 11L,
                 "1234567890",
-                BusinessType.BAKERY,
                 "미리윰",
                 "",
                 Region.BUSAN,
@@ -304,7 +298,6 @@ class StoreTest {
         Store store = Store.create(
                 11L,
                 "1234567890",
-                BusinessType.CAFE,
                 "기존 이름",
                 "기존 설명",
                 Region.SEOUL,
@@ -348,7 +341,6 @@ class StoreTest {
         Store store = Store.create(
                 11L,
                 "1234567890",
-                BusinessType.OTHER,
                 "미리윰",
                 "",
                 Region.GWANGJU,
@@ -462,7 +454,6 @@ class StoreTest {
         return Store.create(
                 11L,
                 "1234567890",
-                BusinessType.CAFE,
                 name,
                 "",
                 Region.SEOUL,
@@ -481,7 +472,6 @@ class StoreTest {
         return Store.createVerified(
                 11L,
                 "1234567890",
-                BusinessType.CAFE,
                 "미리윰",
                 "",
                 Region.SEOUL,

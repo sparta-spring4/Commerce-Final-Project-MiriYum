@@ -26,7 +26,6 @@ import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembership
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingLocationProofSessionRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
@@ -453,7 +452,7 @@ class WaitingConsumerApiIT {
 
     private long createStore(long operatorId) {
         long storeId = stores.saveAndFlush(Store.create(
-                operatorId, registrationNumber(), BusinessType.CAFE, "Consumer Waiting Store", "",
+                operatorId, registrationNumber(), "Consumer Waiting Store", "",
                 Region.SEOUL, "Seoul", "CAFE_BAKERY", Set.of(), true, true, true,
                 "Asia/Seoul", LocalDateTime.of(2026, 8, 1, 9, 0),
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();

@@ -26,7 +26,6 @@ import com.miriyum.domain.reservation.waiting.service.WaitingOperatingInterval;
 import com.miriyum.domain.reservation.waiting.service.WaitingOperatingIntervalPort;
 import com.miriyum.domain.reservation.waiting.service.WaitingPartyService;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -333,7 +332,7 @@ class WaitingPartyConcurrencyIT {
         long operatorId = operators.saveAndFlush(StoreOperatorAccount.create(
                 "party-race-" + UUID.randomUUID() + "@example.com", "hashed", "owner")).getId();
         long storeId = stores.saveAndFlush(Store.create(operatorId, registrationNumber(),
-                BusinessType.CAFE, "Party Race Store", "", Region.SEOUL, "Seoul", "CAFE_BAKERY",
+                "Party Race Store", "", Region.SEOUL, "Seoul", "CAFE_BAKERY",
                 Set.of(), true, true, true, "Asia/Seoul",
                 LocalDateTime.of(2026, 8, 1, 9, 0),
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();

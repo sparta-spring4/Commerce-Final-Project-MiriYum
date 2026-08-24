@@ -63,19 +63,49 @@ class StoreOpenApiContractTest {
         assertThat(map(map(multipartBody.get("encoding")).get("application")))
                 .containsEntry("contentType", "application/json");
         assertThat(map(post.get("responses"))).containsKey("202");
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> applicationRequest =
+                map(schemas.get("StoreOnboardingApplicationRequest"));
+        Map<String, Object> description =
+                map(map(applicationRequest.get("properties")).get("description"));
+        assertThat(description)
+                .containsEntry("maxLength", 1000)
+                .doesNotContainKey("minLength");
+        assertThat(list(applicationRequest.get("required")))
+                .doesNotContain("businessType");
+        Map<String, Object> businessType =
+                map(map(applicationRequest.get("properties")).get("businessType"));
+        assertThat(businessType).containsEntry("deprecated", true);
+        assertThat(list(businessType.get("enum")))
+                .containsExactly("CAFE", "BAKERY", "OTHER");
+
+        Map<String, Object> applicationData =
+                map(schemas.get("StoreOnboardingApplicationData"));
+        assertThat(map(map(applicationData.get("properties")).get("nextAction")))
+                .containsEntry(
+                        "$ref", "#/components/schemas/StoreOnboardingNextAction");
+        assertThat(list(map(schemas.get("StoreOnboardingNextAction")).get("enum")))
+                .containsExactly(
+                        "WAIT", "UPLOAD_EVIDENCE", "SUBMIT_CHANGES", "COMPLETE",
+                        "NONE", "MANUAL_OPERATIONS_REVIEW");
     }
 
     @Test
     void managedStoreGeocodingAndFailureResponsesMatchControllerContract()
             throws IOException {
+        Map<String, Object> onboardingDocument = document(Path.of(
+                "..", "docs", "specs", "store-onboarding", "openapi.yaml"));
+        Map<String, Object> onboardingPaths = map(onboardingDocument.get("paths"));
+        Map<String, Object> registration =
+                map(onboardingPaths.get("/api/v1/store-operators/stores"));
+        assertThat(map(map(registration.get("post")).get("responses")))
+                .containsKeys("400", "503");
+
         Path contract = Path.of("..", "docs", "specs", "store-search", "openapi.yaml");
         Map<String, Object> document = document(contract);
 
         Map<String, Object> paths = map(document.get("paths"));
-        Map<String, Object> collection = map(paths.get("/api/v1/store-operators/stores"));
-        assertThat(map(map(collection.get("post")).get("responses")))
-                .containsKeys("400", "503");
-
         Map<String, Object> item = map(paths.get("/api/v1/store-operators/stores/{storeId}"));
         assertThat(map(map(item.get("patch")).get("responses")))
                 .containsKeys("400", "409", "503");

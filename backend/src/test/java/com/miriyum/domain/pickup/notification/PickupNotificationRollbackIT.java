@@ -153,7 +153,7 @@ class PickupNotificationRollbackIT {
         jdbcTemplate.update("""
                 INSERT INTO stores (
                     store_id, store_operator_account_id, business_registration_number,
-                    business_type, name, description, region, address, store_category_code,
+                    name, description, region, address, store_category_code,
                     time_zone_id,
                     verification_status, operation_status,
                     reservation_enabled, menu_hold_enabled, pickup_enabled,
@@ -162,7 +162,7 @@ class PickupNotificationRollbackIT {
                     created_at, updated_at
                 ) VALUES (
                     22, 31, '1234567890',
-                    'CAFE', '미리윰 식당', '테스트 매장', 'SEOUL', '서울시 테스트로 1',
+                    '미리윰 식당', '테스트 매장', 'SEOUL', '서울시 테스트로 1',
                     'CAFE_BAKERY', 'Asia/Seoul', 'APPROVED', 'OPEN',
                     TRUE, TRUE, TRUE, NOW(6), NOW(6),
                     'STORE_ONBOARDING_REQUIRED_TERMS_V1', NOW(6), NOW(6)

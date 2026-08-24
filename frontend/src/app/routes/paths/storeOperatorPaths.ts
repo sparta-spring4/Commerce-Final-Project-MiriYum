@@ -3,6 +3,8 @@ export const STORE_OPERATOR_PATHS = {
   signUp: '/store-operator/sign-up',
   home: '/store-operator',
   storeCreate: '/store-operator/stores/new',
+  onboardingApplication:
+    '/store-operator/onboarding-applications/:applicationId',
   store: '/store-operator/stores/:storeId',
   operatingHours: '/store-operator/stores/:storeId/operating-hours',
   reservationTimeSlots:

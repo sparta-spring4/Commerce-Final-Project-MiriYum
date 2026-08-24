@@ -23,7 +23,6 @@ import com.miriyum.domain.search.dto.publicapi.PublicStoreDetail;
 import com.miriyum.domain.search.repository.StorePublicReadRepository;
 import com.miriyum.domain.search.service.StorePublicQueryService;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -456,7 +455,7 @@ class RepresentativeMenuConcurrencyIT {
         long operatorId = operatorRepository.saveAndFlush(
                 StoreOperatorAccount.create(email, "hashed", "owner")).getId();
         return storeRepository.saveAndFlush(Store.create(
-                operatorId, registrationNumber, BusinessType.CAFE, "store", "",
+                operatorId, registrationNumber, "store", "",
                 Region.SEOUL, "address", "CAFE_BAKERY", Set.of(),
                 true, true, true, "Asia/Seoul",
                 LocalDateTime.of(2026, 8, 13, 9, 0),

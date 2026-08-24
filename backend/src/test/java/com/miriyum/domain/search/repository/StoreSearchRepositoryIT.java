@@ -10,7 +10,6 @@ import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
@@ -358,7 +357,6 @@ class StoreSearchRepositoryIT {
         Store store = Store.create(
                 operatorId,
                 String.format("%010d", sequence),
-                BusinessType.CAFE,
                 name,
                 "검색 통합 테스트 매장",
                 region,

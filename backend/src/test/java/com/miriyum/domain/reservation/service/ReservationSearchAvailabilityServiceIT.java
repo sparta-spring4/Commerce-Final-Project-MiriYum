@@ -15,7 +15,6 @@ import com.miriyum.domain.reservation.dto.response.ResolvedReservationTime;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -165,7 +164,6 @@ class ReservationSearchAvailabilityServiceIT {
         return storeRepository.saveAndFlush(Store.create(
                 operatorId,
                 registrationNumber,
-                BusinessType.CAFE,
                 "Search Availability Store",
                 "",
                 Region.SEOUL,

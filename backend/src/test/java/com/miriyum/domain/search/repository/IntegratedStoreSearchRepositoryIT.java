@@ -9,7 +9,6 @@ import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
 import com.miriyum.domain.reservation.service.ReservationSearchAvailabilityService;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.menu.entity.Menu;
@@ -693,7 +692,6 @@ class IntegratedStoreSearchRepositoryIT {
         Store store = Store.create(
                 fixtureOperatorId,
                 String.format("%010d", 8_000_000 + sequence),
-                BusinessType.CAFE,
                 name,
                 "QueryDSL 통합 테스트 매장",
                 region,
