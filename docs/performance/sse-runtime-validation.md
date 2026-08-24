@@ -28,7 +28,7 @@ SSE는 `data: {}` 변경 신호이며 결과 상태는 Notification 이력 또�
 | reconnect 200 | FAIL | 최신 실행은 setup의 synthetic session cleanup에서 중단되어 SSE 최초·재연결이 0건이며, 완료 범위에서 제외하고 #643으로 이관 |
 | slow-client | BLOCKED | 운영자·소유 매장·fresh WAITING fixture와 timeout 90초·heartbeat 1ms 시험값이 준비되지 않아 #643으로 이관 |
 | Valkey stop/recovery | BLOCKED | 사전 인증 synthetic 계정과 승인된 public owner mutation fixture 필요 |
-| same-SHA backend replacement | FAIL | hold 단계가 기본 30초 timeout으로 threshold를 통과하지 못해 전체 교체 검증을 완료하지 못했고 #643으로 이관 |
+| same-SHA backend replacement | BLOCKED | reconnect 선행 결함과 effective SSE timeout 30초가 같은 SHA 재배포 시간보다 짧아 유효한 교체 검증을 실행하지 않았고 #643으로 이관 |
 | staging 간소화 smoke·Valkey recovery | PASS | #357 승인 조건에서 세 endpoint smoke와 waiting-store-operator 1연결·Valkey 고정 10초 중단 recovery 성공 |
 | staging steady 25→50→100→200 | PASS | 각 단계 목표 연결 수 전부 성공, unexpected 4xx·5xx·transport·contract error·dropped iteration 0 |
 | staging capacity 6+1 | PASS | 단일 계정 정상 6개와 초과 1개의 정확한 429, 동반 HTTP 정상, 전체 threshold 성공 |
