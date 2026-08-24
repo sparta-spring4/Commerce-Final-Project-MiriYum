@@ -84,6 +84,7 @@ jobs:
        github.ref == 'refs/heads/dev')
     outputs:
       deployable: ${{ steps.source.outputs.deployable }}
+      trusted_control_sha: ${{ steps.source.outputs.trusted_control_sha }}
 
     steps:
       - name: Checkout automatic deployment revision
@@ -98,6 +99,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+          GITHUB_SHA: ${{ github.sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$EVENT_NAME" = "workflow_run" ]; then
@@ -159,10 +161,14 @@ jobs:
             if [ "$deployable" != "true" ]; then
               echo "::notice::Skipping staging CD because the revision has no backend deployment input changes."
             fi
+            trusted_control_sha="$WORKFLOW_SHA"
+            echo "trusted_control_sha=$trusted_control_sha" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "deployable=true" >> "$GITHUB_OUTPUT"
+          trusted_control_sha="$GITHUB_SHA"
+          echo "trusted_control_sha=$trusted_control_sha" >> "$GITHUB_OUTPUT"
 
   deploy:
     name: build-and-deploy-backend-staging
@@ -214,7 +220,8 @@ jobs:
       - name: Checkout trusted deployment control revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ needs.verify-source.outputs.trusted_control_sha }}
+          fetch-depth: 0
 
       - name: Preserve trusted notification read deployment controls
         run: |
@@ -224,11 +231,12 @@ jobs:
           cp scripts/validate-staging-load-test-source-ip.js \
             "$RUNNER_TEMP/validate-staging-load-test-source-ip.js"
 
-      - name: Checkout selected deployment revision
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ steps.image.outputs.tag }}
-          fetch-depth: 0
+      # Immutable image 태그는 검증용 Git 객체로만 가져온다. 수동 재배포에서도
+      # workflow를 실행한 dev의 최신 배포 파일을 사용해야 한다.
+      - name: Fetch selected image revision
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: git fetch --no-tags origin "$IMAGE_TAG"
 
       - name: Verify notification read minimum compatible writer revision
         env:
