@@ -290,6 +290,33 @@ def _explicit_menu_names(query_text: str, catalog: HybridPreparedCatalog) -> tup
     )[:100]
 
 
+def _legacy_relevance_tier(
+    *, store: dict[str, Any], keyword: str, explicit_names: set[str],
+    catalog: HybridPreparedCatalog,
+) -> int:
+    if not keyword:
+        return 0
+    store_name = normalize(store.get("name", ""))
+    if store_name == keyword:
+        return 4
+    if keyword in store_name:
+        return 3
+    if any(
+        menu["id"] in catalog.actual_current_menu_ids
+        and (
+            keyword in normalize(menu.get("name", ""))
+            or normalize(menu.get("name", "")) in explicit_names
+        )
+        for menu in catalog.menus_by_store.get(store["id"], ())
+    ):
+        return 2
+    region = normalize(store.get("region", ""))
+    address = normalize(store.get("address", ""))
+    if keyword in region or (address and keyword in address):
+        return 1
+    return 0
+
+
 def _actual_food_evidence_ranking(
     *, query: dict[str, Any], supplied_evidence: dict[str, Any],
     baseline_store_ids: tuple[str, ...], catalog: HybridPreparedCatalog,
@@ -348,11 +375,20 @@ def _actual_food_evidence_ranking(
     baseline_rank = {
         store_id: index for index, store_id in enumerate(baseline_store_ids)
     }
+    legacy_tiers = {
+        store_id: _legacy_relevance_tier(
+            store=store, keyword=evidence_text,
+            explicit_names=explicit_names, catalog=catalog,
+        )
+        for store_id, store in catalog.stores_by_id.items()
+    }
     rows.sort(key=lambda row: (
         -row[2],
+        -legacy_tiers[row[1]["id"]],
         baseline_rank.get(row[1]["id"], len(baseline_rank)),
-        *_business_sort_key(row[0], row[1], query["sort"]),
+        normalize(row[1].get("name", "")),
         row[1]["id"],
+        row[0]["id"],
     ))
     menu_ids = tuple(row[0]["id"] for row in rows)
     store_ids = tuple(dict.fromkeys(row[1]["id"] for row in rows))
@@ -780,17 +816,19 @@ def aggregate_hybrid_comparison(calls: list[dict[str, Any]]) -> dict[str, Any]:
         ):
             if safety[variant][key]:
                 fatal_reasons.append(f"{variant}_{reason}")
-        alias = by_query_type.get("alias_bidirectional")
-        if alias:
+        for query_type in ("alias_bidirectional", "filter_defense"):
+            breakdown = by_query_type.get(query_type)
+            if not breakdown:
+                continue
             for gold in ("strict", "acceptable"):
                 for cutoff in ("@8", "@20"):
                     key = f"{gold}{cutoff}"
                     if (
-                        alias["variants"][variant][key]["successes"]
-                        < alias["variants"]["D"][key]["successes"]
+                        breakdown["variants"][variant][key]["successes"]
+                        < breakdown["variants"]["D"][key]["successes"]
                     ):
                         fatal_reasons.append(
-                            f"{variant}_alias_bidirectional_{gold}_{cutoff[1:]}_regression"
+                            f"{variant}_{query_type}_{gold}_{cutoff[1:]}_regression"
                         )
 
     targets = {

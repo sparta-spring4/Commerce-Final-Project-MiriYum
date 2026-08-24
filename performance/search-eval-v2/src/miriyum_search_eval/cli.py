@@ -66,6 +66,16 @@ def _commit_sha() -> str:
     return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=_repo_root(), text=True).strip()
 
 
+def _git_paths_dirty(*paths: Path) -> bool:
+    command = ["git", "status", "--porcelain"]
+    if paths:
+        command.extend(["--", *(str(path) for path in paths)])
+    completed = subprocess.run(
+        command, cwd=_repo_root(), check=True, capture_output=True, text=True,
+    )
+    return bool(completed.stdout.strip())
+
+
 def _config() -> EvalConfig:
     return EvalConfig()
 
@@ -810,6 +820,7 @@ def _load_validated_hybrid_structured_calls(
 
 def _hybrid_actual_metadata(
     runtime_git_sha: str, *, working_tree_dirty: bool = False,
+    production_working_tree_dirty: bool = False,
 ) -> dict[str, Any]:
     return {
         "status": "actual-predicate-H-with-legacy-evidence-replay",
@@ -820,7 +831,11 @@ def _hybrid_actual_metadata(
         "queryEvidenceProvenance": "legacy-structured-checkpoint-replay",
         "queryEvidenceSchemaComplete": False,
         "missingReplayFields": ["aromas", "textures"],
-        "productionCommitSha": runtime_git_sha,
+        "productionCommitSha": (
+            None if production_working_tree_dirty else runtime_git_sha
+        ),
+        "productionBaseCommitSha": runtime_git_sha,
+        "productionWorkingTreeDirty": production_working_tree_dirty,
         "runtimeGitSha": runtime_git_sha,
         "analysisCommitSha": None if working_tree_dirty else runtime_git_sha,
         "analysisWorkingTreeDirty": working_tree_dirty,
@@ -830,7 +845,7 @@ def _hybrid_actual_metadata(
 
 
 def hybrid_reanalyze(root: Path, source: Path) -> None:
-    """Compare simulated D/E/F/G and actual-application H without paid calls."""
+    """Compare simulated D/E/F/G and actual-predicate H without paid calls."""
     from hashlib import sha256
     from .embeddings import embed_texts, topk_cosine
 
@@ -914,13 +929,19 @@ def hybrid_reanalyze(root: Path, source: Path) -> None:
         "productionSearchPredicate": _repo_root() / "backend/src/main/java/com/miriyum/domain/search/repository/IntegratedStoreSearchPredicates.java",
     }
     runtime_git_sha = _commit_sha()
-    working_tree_dirty = subprocess.run(
-        ["git", "diff", "--quiet"], cwd=_repo_root(), check=False,
-    ).returncode != 0
+    working_tree_dirty = _git_paths_dirty()
+    production_paths = tuple(
+        path.relative_to(_repo_root())
+        for name, path in analysis_sources.items()
+        if name.startswith("production")
+    )
+    production_working_tree_dirty = _git_paths_dirty(*production_paths)
     metadata["hybridReanalysis"] = {
         "schemaVersion": "miriyum-hybrid-search-reanalysis-v1",
         **_hybrid_actual_metadata(
-            runtime_git_sha, working_tree_dirty=working_tree_dirty,
+            runtime_git_sha,
+            working_tree_dirty=working_tree_dirty,
+            production_working_tree_dirty=production_working_tree_dirty,
         ),
         "incrementalCostUsd": 0.0,
         **source_hashes,

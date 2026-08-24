@@ -237,6 +237,30 @@ class HybridSearchTest(unittest.TestCase):
         self.assertFalse(aggregate["gate"]["passed"])
         self.assertIn("G_all_negative_false_positive_regression", aggregate["gate"]["fatalReasons"])
 
+    def test_filter_defense_regression_fails_hybrid_gate(self):
+        query = self._query(
+            "SEOUL의 해물국 찾아줘", query_type="filter_defense",
+        )
+        query["filters"] = {"region": "SEOUL"}
+        result = evaluate_hybrid_variants(
+            dataset=self._dataset(), query=query,
+            structured_call=self._structured_call(query, menu_family=True),
+            embedding_menu_scores=(), prepared_catalog=self.catalog,
+        )
+        for cutoff in ("@8", "@20"):
+            result["variants"]["D"]["cutoffs"][cutoff]["strictHit"] = True
+            result["variants"]["D"]["cutoffs"][cutoff]["acceptableHit"] = True
+            result["variants"][ACTUAL_FOOD_EVIDENCE_VARIANT]["cutoffs"][cutoff]["strictHit"] = False
+            result["variants"][ACTUAL_FOOD_EVIDENCE_VARIANT]["cutoffs"][cutoff]["acceptableHit"] = False
+
+        aggregate = aggregate_hybrid_comparison([result])
+
+        self.assertFalse(aggregate["gate"]["passed"])
+        self.assertIn(
+            "H_filter_defense_acceptable_20_regression",
+            aggregate["gate"]["fatalReasons"],
+        )
+
     def test_h_actual_requires_two_dimensions_on_the_same_menu(self):
         query = self._query("칼칼한 해물 음식 추천해줘")
         structured_call = self._structured_call(query, menu_family=False)
@@ -369,21 +393,25 @@ class HybridSearchTest(unittest.TestCase):
             ["store-distractor"],
         )
 
-    def test_h_actual_uses_legacy_order_to_break_equal_structured_scores(self):
+    def test_h_actual_computes_legacy_tier_before_using_d_order_as_final_tie(self):
         query = self._query("칼칼한 국물 음식 추천해줘")
         structured_call = self._structured_call(query, menu_family=False)
         for cutoff in structured_call["variants"]["C"]["cutoffs"].values():
-            cutoff["rankedStoreIds"] = ["store-target", "store-distractor"]
+            cutoff["rankedStoreIds"] = ["store-distractor", "store-target"]
+        stores = [
+            {**self.stores[0], "name": query["text"]},
+            self.stores[1],
+        ]
         menus = [
             menu("menu-target", "store-target", "family-target", "오늘국", "칼칼한 국물"),
             menu("menu-distractor", "store-distractor", "family-target", "내일국", "칼칼한 국물"),
         ]
         catalog = prepare_hybrid_catalog(
-            families=FAMILIES, stores=self.stores, menus=menus,
+            families=FAMILIES, stores=stores, menus=menus,
         )
 
         result = evaluate_hybrid_variants(
-            dataset={"families": FAMILIES, "stores": self.stores, "menus": menus},
+            dataset={"families": FAMILIES, "stores": stores, "menus": menus},
             query=query, structured_call=structured_call,
             embedding_menu_scores=(), prepared_catalog=catalog,
         )

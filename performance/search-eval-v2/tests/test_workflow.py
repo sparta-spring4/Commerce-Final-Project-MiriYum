@@ -1,6 +1,7 @@
 from pathlib import Path
 from hashlib import sha256
 import json
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -13,6 +14,7 @@ from miriyum_search_eval.cli import (
     PRE_ISSUE_616,
     _gpt54mini_comparison_config,
     _hybrid_actual_metadata,
+    _git_paths_dirty,
     _load_validated_structured_baseline,
     _validate_hybrid_source_files,
     _pin_source_checkpoint_sha256,
@@ -516,6 +518,25 @@ class WorkflowTest(unittest.TestCase):
         dirty = _hybrid_actual_metadata("abc123", working_tree_dirty=True)
         self.assertIsNone(dirty["analysisCommitSha"])
         self.assertTrue(dirty["analysisWorkingTreeDirty"])
+
+        production_dirty = _hybrid_actual_metadata(
+            "abc123", production_working_tree_dirty=True,
+        )
+        self.assertIsNone(production_dirty["productionCommitSha"])
+        self.assertEqual(production_dirty["productionBaseCommitSha"], "abc123")
+        self.assertTrue(production_dirty["productionWorkingTreeDirty"])
+
+    def test_git_paths_dirty_reads_porcelain_for_index_worktree_and_untracked(self):
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="?? new-file.py\n", stderr="",
+        )
+        with mock.patch("miriyum_search_eval.cli.subprocess.run", return_value=completed) as run:
+            self.assertTrue(_git_paths_dirty(Path("new-file.py")))
+
+        self.assertEqual(
+            run.call_args.args[0],
+            ["git", "status", "--porcelain", "--", "new-file.py"],
+        )
 
     def test_canonical_checkpoint_sha_is_pinned_once(self):
         with tempfile.TemporaryDirectory() as directory:
