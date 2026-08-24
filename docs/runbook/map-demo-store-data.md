@@ -37,22 +37,35 @@ $env:MIRIYUM_DEMO_MAP_STORES_ENABLED = 'true'
 
 ## API 검증
 
-애플리케이션을 실행한 다른 PowerShell에서 일반 검색과 통합 검색을 각각 호출한다.
+애플리케이션을 실행한 다른 PowerShell에서 각 매장명을 일반 검색과 통합 검색으로
+조회한다. 아래 명령은 네 매장을 모두 조회하므로 VERIFIED 세 건의 좌표와 UNVERIFIED
+한 건의 `coordinates=null`을 같은 절차에서 확인할 수 있다.
 
 ```powershell
-$normal = Invoke-RestMethod 'http://localhost:8080/api/v1/stores?keyword=%EC%8B%9C%EC%97%B0&size=20'
-$normal.data.items |
-  Select-Object name, region, coordinates |
-  Format-Table -AutoSize
+$storeNames = @('마루 한식당', '해운대 바다식당', '무등 한상', '새봄 식당')
 
-$integrated = Invoke-RestMethod 'http://localhost:8080/api/v1/stores?searchInput=%EC%8B%9C%EC%97%B0&size=20'
-$integrated.data.items |
-  Select-Object name, region, coordinates |
-  Format-Table -AutoSize
+$storeNames | ForEach-Object {
+  $storeName = $_
+  $keyword = [uri]::EscapeDataString($storeName)
+  $normal = Invoke-RestMethod "http://localhost:8080/api/v1/stores?keyword=$keyword&size=20"
+  $integrated = Invoke-RestMethod "http://localhost:8080/api/v1/stores?searchInput=$keyword&size=20"
+
+  Write-Host "[일반 검색] $storeName"
+  $normal.data.items |
+    Where-Object name -eq $storeName |
+    Select-Object name, region, coordinates |
+    Format-Table -AutoSize
+
+  Write-Host "[통합 검색] $storeName"
+  $integrated.data.items |
+    Where-Object name -eq $storeName |
+    Select-Object name, region, coordinates |
+    Format-Table -AutoSize
+}
 ```
 
-두 응답에서 VERIFIED 매장 세 곳은 `coordinates`가 있고, `새봄 식당`은
-`coordinates`가 `null`이어야 한다.
+각 `normal`과 `integrated` 결과에서 `마루 한식당`, `해운대 바다식당`, `무등 한상`은
+표의 좌표와 일치해야 하며, `새봄 식당`은 `coordinates`가 `null`이어야 한다.
 
 ## 제한
 
