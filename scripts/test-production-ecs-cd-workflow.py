@@ -223,6 +223,9 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("final-stopped-task-arns.json", evidence_step)
         self.assertIn("final-stopped-tasks.json", evidence_step)
         self.assertIn("aws elbv2 describe-target-health", evidence_step)
+        self.assertIn("alternateTargetGroupArn", evidence_step)
+        self.assertIn("aws elbv2 describe-rules", evidence_step)
+        self.assertIn("trafficTargetGroupArns", evidence_step)
         self.assertIn("verify-production-ecs", evidence_step)
         self.assertIn("--expected-task-definition", evidence_step)
 

@@ -112,6 +112,7 @@ def verify_production_ecs_evidence(
     expected_task_definition,
     final_stopped_task_arns=None,
     final_stopped_tasks=None,
+    traffic_target_group_arns=None,
 ):
     if final_stopped_task_arns is None:
         final_stopped_task_arns = []
@@ -254,15 +255,37 @@ def verify_production_ecs_evidence(
     ):
         raise DeploymentGateError("a nonterminal stopped ECS task remains")
 
-    target_group_arns = {
-        load_balancer.get("targetGroupArn")
-        for load_balancer in service.get("loadBalancers", [])
-        if load_balancer.get("targetGroupArn")
-    }
+    target_group_arns = set()
+    primary_target_group_arns = set()
+    for load_balancer in service.get("loadBalancers", []):
+        primary_target_group_arn = load_balancer.get("targetGroupArn")
+        if primary_target_group_arn:
+            target_group_arns.add(primary_target_group_arn)
+            primary_target_group_arns.add(primary_target_group_arn)
+
+        alternate_target_group_arn = load_balancer.get(
+            "advancedConfiguration", {}
+        ).get("alternateTargetGroupArn")
+        if alternate_target_group_arn:
+            target_group_arns.add(alternate_target_group_arn)
+
     if not target_group_arns:
         raise DeploymentGateError("ECS target group evidence is missing")
 
-    for target_group_arn in target_group_arns:
+    if traffic_target_group_arns is None:
+        traffic_target_group_arns = primary_target_group_arns
+    elif (
+        not isinstance(traffic_target_group_arns, list)
+        or not traffic_target_group_arns
+        or any(
+            not isinstance(target_group_arn, str) or not target_group_arn
+            for target_group_arn in traffic_target_group_arns
+        )
+        or not set(traffic_target_group_arns).issubset(target_group_arns)
+    ):
+        raise DeploymentGateError("ECS traffic target group evidence is invalid")
+
+    for target_group_arn in set(traffic_target_group_arns):
         target_health = target_health_by_arn.get(target_group_arn)
         if target_health is None:
             raise DeploymentGateError("ECS target group health evidence is missing")
@@ -327,6 +350,7 @@ def run_cli(arguments):
                 options.expected_task_definition,
                 evidence.get("stoppedTaskArns", []),
                 evidence.get("stoppedTasks", {}),
+                evidence.get("trafficTargetGroupArns"),
             )
         else:
             evidence = json.loads(
@@ -708,6 +732,28 @@ class ProductionEcsEvidenceTest(unittest.TestCase):
             self.expected_task_definition,
         )
 
+    def test_active_blue_green_target_group_is_accepted_when_inactive_group_is_empty(self):
+        inactive_target_group_arn = (
+            "arn:aws:elasticloadbalancing:ap-northeast-2:123456789012:"
+            "targetgroup/miriyum-inactive/abcdef"
+        )
+        service = copy.deepcopy(self.service)
+        service["loadBalancers"][0]["advancedConfiguration"] = {
+            "alternateTargetGroupArn": inactive_target_group_arn
+        }
+        target_health = copy.deepcopy(self.target_health)
+        target_health[inactive_target_group_arn] = {"TargetHealthDescriptions": []}
+
+        verify_production_ecs_evidence(
+            service,
+            self.tasks,
+            self.previous_task_arns,
+            self.previous_tasks,
+            target_health,
+            self.expected_task_definition,
+            traffic_target_group_arns=[self.target_group_arn],
+        )
+
     def test_previous_revision_running_task_is_rejected(self):
         tasks = copy.deepcopy(self.tasks)
         tasks["tasks"].append(
@@ -891,6 +937,37 @@ class ProductionEcsEvidenceTest(unittest.TestCase):
                 "stoppedTaskArns": [],
                 "stoppedTasks": {"tasks": [], "failures": []},
                 "targetHealthByArn": self.target_health,
+            }
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("production ECS replacement evidence verified", result.stdout)
+
+    def test_cli_accepts_the_active_blue_green_target_group(self):
+        inactive_target_group_arn = (
+            "arn:aws:elasticloadbalancing:ap-northeast-2:123456789012:"
+            "targetgroup/miriyum-inactive/abcdef"
+        )
+        service = copy.deepcopy(self.service)
+        service["loadBalancers"][0] = {
+            "targetGroupArn": inactive_target_group_arn,
+            "advancedConfiguration": {
+                "alternateTargetGroupArn": self.target_group_arn
+            },
+        }
+        target_health = copy.deepcopy(self.target_health)
+        target_health[inactive_target_group_arn] = {"TargetHealthDescriptions": []}
+
+        result = self._run_cli(
+            {
+                "service": service,
+                "tasks": self.tasks,
+                "previousTaskArns": self.previous_task_arns,
+                "previousTasks": self.previous_tasks,
+                "stoppedTaskArns": [],
+                "stoppedTasks": {"tasks": [], "failures": []},
+                "trafficTargetGroupArns": [self.target_group_arn],
+                "targetHealthByArn": target_health,
             }
         )
 
