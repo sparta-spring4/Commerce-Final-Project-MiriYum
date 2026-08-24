@@ -53,7 +53,8 @@ $requiredFragments = @(
     "/opt/miriyum/nginx/templates/snippets/sse-location.conf"
     "NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA: 515531e122ebbce13d8eead4a3ff15a94c25e0b3"
     "Verify notification read minimum compatible writer revision"
-    "github.workflow_sha"
+    'trusted_control_sha: ${{ steps.source.outputs.trusted_control_sha }}'
+    'ref: ${{ needs.verify-source.outputs.trusted_control_sha }}'
     "Preserve trusted notification read deployment controls"
     '$RUNNER_TEMP/notification-read-deployment-gate.py'
     '$RUNNER_TEMP/notification-read-deploy.sh'
