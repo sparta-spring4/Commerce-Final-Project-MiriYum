@@ -31,6 +31,8 @@ import com.miriyum.domain.search.expansion.StructuredFoodEvidence.Dimension;
 import com.miriyum.domain.search.expansion.StructuredFoodEvidence.EvidenceTerm;
 import com.miriyum.domain.search.expansion.StructuredFoodEvidenceSource;
 import com.miriyum.domain.search.geo.BoundingBox;
+import com.miriyum.domain.search.entity.MenuSearchProfileDimension;
+import com.miriyum.domain.search.entity.MenuSearchProfileSource;
 import com.miriyum.domain.search.query.IntegratedSearchCursorCodec;
 import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
 import com.miriyum.domain.search.service.IntegratedSearchInterpreter;
@@ -738,6 +740,58 @@ class IntegratedStoreSearchRepositoryIT {
 
     @Test
     @Transactional
+    void searchProfileFindsOnlyCurrentVisibleMenuWithTwoDimensions() {
+        Store profiled = createStore(
+                "성수 화로정", Region.SEOUL, "KOREAN", Set.of(), false);
+        Menu profiledMenu = publishMenuWithSearchFields(
+                profiled, "바다 전골", "담백하게 끓인 전골", 16_000,
+                "SOUP_STEW", List.of(), List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+
+        Store oneDimension = createStore(
+                "연남 온기식당", Region.SEOUL, "KOREAN", Set.of(), false);
+        Menu oneDimensionMenu = publishMenuWithSearchFields(
+                oneDimension, "오늘의 전골", "담백한 국물", 15_000,
+                "SOUP_STEW", List.of(), List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+
+        Store hidden = createStore(
+                "서촌 담소반", Region.SEOUL, "KOREAN", Set.of(), false);
+        Menu hiddenMenu = publishMenuWithSearchFields(
+                hidden, "비밀 전골", "담백한 국물", 15_000,
+                "SOUP_STEW", List.of(), List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.HIDDEN, false);
+        flushAndClear();
+
+        insertSearchProfile(
+                profiledMenu,
+                MenuSearchProfileDimension.TASTE, "칼칼한",
+                MenuSearchProfileDimension.INGREDIENT, "해물");
+        insertSearchProfile(
+                oneDimensionMenu,
+                MenuSearchProfileDimension.TASTE, "칼칼한");
+        insertSearchProfile(
+                hiddenMenu,
+                MenuSearchProfileDimension.TASTE, "칼칼한",
+                MenuSearchProfileDimension.INGREDIENT, "해물");
+
+        StructuredFoodEvidence evidence = new DeterministicFoodEvidenceExtractor(
+                new FoodEvidenceVocabulary()).extract("칼칼한 해물 음식");
+        IntegratedStoreSearchSlice result = repository.search(query(
+                condition(List.of(), List.of(), List.of(), List.of(), null,
+                        "칼칼한 해물 음식"),
+                List.of(), evidence, "relevance,desc", null, 20));
+
+        assertThat(result.content())
+                .singleElement()
+                .satisfies(candidate -> {
+                    assertThat(candidate.storeId()).isEqualTo(profiled.getId());
+                    assertThat(candidate.structuredRelevance()).isPositive();
+                });
+    }
+
+    @Test
+    @Transactional
     void structuredDimensionCountPrecedesLegacyNameRelevanceAndSeeksWithoutLoss() {
         Store threeDimensions = createStore(
                 "일반 매장", Region.SEOUL, "KOREAN", Set.of(), false);
@@ -1128,6 +1182,38 @@ class IntegratedStoreSearchRepositoryIT {
     ) {
         return IntegratedStoreSearchQuery.from(
                 condition, explicitMenuNames, sort, cursor, size, cursorCodec);
+    }
+
+    private void insertSearchProfile(Menu menu, Object... dimensionsAndTerms) {
+        Long menuVersionId = jdbcTemplate.queryForObject("""
+                SELECT version.menu_version_id
+                FROM menu_versions version
+                JOIN menus menu_row ON menu_row.menu_id = version.menu_id
+                WHERE menu_row.menu_id = ?
+                  AND version.version_number = menu_row.published_version_number
+                """, Long.class, menu.getId());
+        jdbcTemplate.update("""
+                INSERT INTO menu_search_profiles (
+                    menu_version_id, schema_version, created_at, updated_at
+                ) VALUES (?, 'food-profile-v1', ?, ?)
+                """, menuVersionId, NOW, NOW);
+        Long profileId = jdbcTemplate.queryForObject("""
+                SELECT menu_search_profile_id
+                FROM menu_search_profiles
+                WHERE menu_version_id = ?
+                """, Long.class, menuVersionId);
+        for (int index = 0; index < dimensionsAndTerms.length; index += 2) {
+            MenuSearchProfileDimension dimension =
+                    (MenuSearchProfileDimension) dimensionsAndTerms[index];
+            String term = (String) dimensionsAndTerms[index + 1];
+            jdbcTemplate.update("""
+                    INSERT INTO menu_search_profile_terms (
+                        menu_search_profile_id, dimension, normalized_term,
+                        confidence, source, created_at
+                    ) VALUES (?, ?, ?, 1.0000, ?, ?)
+                    """, profileId, dimension.name(), term,
+                    MenuSearchProfileSource.CURATED.name(), NOW);
+        }
     }
 
     private IntegratedStoreSearchQuery query(

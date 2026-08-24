@@ -117,6 +117,14 @@
 6. page 검색의 `StoreSummary.coordinates`와 통합 검색의 `IntegratedStoreSearchItem.coordinates`는 모두 현재 주소 버전의 `VERIFIED` latitude·longitude만 반환한다. `UNVERIFIED` 또는 주소 버전 불일치 좌표는 `null`이며 검색 요청 중 Kakao Local API를 호출하지 않는다. page 목록과 지도는 같은 응답 항목을 사용하고 좌표가 null인 매장은 목록에서 제외하지 않는다.
 7. `recommendation,desc`는 정적 관련도 순으로 최대 5,000개 후보를 같은 요청 스냅샷에서 수집·최신 검증하고 `StoreRecommendationService`를 한 번 호출한다. 결과는 구조화 음식 관련도와 기존 관련도 tier가 같은 그룹 안에서만 `history-v1` 순서를 유지한다. 낮은 음식 그룹은 개인 이력이 높아도 높은 음식 그룹을 넘지 못한다. 추천 cursor는 음식 그룹·완전한 추천 동점 키·검색 fingerprint를 HMAC 인증하며 다음 페이지에서도 같은 bounded 후보 집합을 재계산해 seek한다.
 8. 결정적 음식 사전은 잔여 표현에서 메뉴 family와 맛·재료·국물·조리법·향·식감·형태를 먼저 추출해 모든 정적 스캔에 사용한다. 첫 정적 검색이 현재 상태·예약 필터까지 소진된 뒤 응답 크기보다 작고 잔여 표현이 있으면 `gpt-4o-mini` Structured Outputs를 한 번 호출한다. LLM은 결정적 추출이 비어 있는 차원만 보충하며 검토 사전에 없는 항목은 버린다. 허용된 근거는 현재 MySQL의 visible·non-retired·current published 메뉴 하나의 이름·설명·주/보조 카테고리·로컬 태그에 대조하고 지역·가격·카테고리와 Store 공개·폐점 필터를 항상 함께 적용한다. 메뉴명 역방향은 trim 2자 이상이고 일반 토큰 denylist에 없는 이름에만 적용한다. 보완 후보 풀은 최대 200개이며 최신 상태와 예약 조건을 재검증한다. 보완은 최초 응답에 한정하고 보완 후보만을 위한 다음 cursor는 발급하지 않는다.
+
+### 메뉴 버전 검색 프로필
+
+- V72부터 `menu_search_profiles`는 정확한 `menu_version_id` 하나에 1:1로 결속되고 `menu_search_profile_terms`는 `MENU_FAMILY`, `ALIAS`, `INGREDIENT`, `TASTE`, `BROTH`, `METHOD`, `AROMA`, `TEXTURE`, `FORM`의 정규화 term과 0~1 confidence, `CURATED`·`RULE_DERIVED`·`LLM_DERIVED` 출처를 저장한다. 프로필 schema는 `food-profile-v1`부터 시작한다.
+- 구조화 검색은 메뉴 이름·설명·카테고리·로컬 태그 근거에 confidence 0.8000 이상인 exact normalized profile term을 보충한다. 메뉴 계열은 `MENU_FAMILY`와 `ALIAS`, 각 속성은 같은 차원의 term만 비교하며 서로 다른 두 핵심 차원 gate와 명시 메뉴명 우선순위를 그대로 유지한다.
+- 프로필은 candidate menu와 같은 current published visible non-retired 메뉴 버전에서만 읽는다. 과거·초안·예약·비공개·은퇴 메뉴의 프로필, 서로 다른 메뉴에 흩어진 term, profile confidence 미달 term은 후보나 점수에 사용하지 않는다.
+- 프로필이 없는 메뉴는 기존 메뉴 필드 검색으로 계속 조회한다. 검색 프로필 생성·갱신 job과 운영자 입력 API는 별도 계약이며 V72에는 읽기 스키마와 검색 predicate만 포함한다.
+- 대량 합성 데이터는 Flyway나 Spring `data.sql`로 자동 적재하지 않는다. `backend/scripts/dev-data/search-profile-demo-500-stores.sql`을 local/dev에서만 명시적으로 실행하며 production에서는 실행하지 않는다.
 9. `AMBIGUOUS`와 `NO_FOOD_SIGNAL`, 알 수 없는 interpretation, OpenAI 비활성, timeout, 429, 오류, 거절 또는 형식 불일치에는 LLM 차원을 비우고 결정적 MySQL 검색 응답을 유지하며 자동 재시도하지 않는다. abstention은 공개 API 응답 형상을 바꾸지 않는다. 이 단계는 embedding, 외부 벡터 저장소·색인·캐시, DB migration을 추가하지 않는다. 현재 production 메뉴에는 맛·재료·조리법 전용 정규화 칼럼이 없으므로 이름·설명·카테고리·로컬 태그의 등록 품질이 구조화 회수율의 상한이다. 외부 요청은 최대 500자의 잔여 표현 또는 품절 메뉴의 공개 문맥만 포함하고 사용자 식별자·연락처·예약 이력·정밀 위치·알레르기 정보와 Secret은 요청·로그에 넣지 않는다. 호출 수·결과·지연·입출력 토큰만 목적별 지표로 남긴다.
 
 `reservationAvailability`는 조회 시점의 발견 보조 정보이며 수량 확보나 예약 성공을 보장하지 않는다. 실제 예약 생성은 Reservation 도메인의 쓰기 트랜잭션에서 현재 영업·접수 시간·수용량을 다시 검증한다.

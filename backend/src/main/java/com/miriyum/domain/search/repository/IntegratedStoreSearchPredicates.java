@@ -4,6 +4,9 @@ import com.miriyum.domain.menu.entity.QMenu;
 import com.miriyum.domain.menu.entity.QMenuVersion;
 import com.miriyum.domain.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.menu.enums.MenuVisibility;
+import com.miriyum.domain.search.entity.MenuSearchProfileDimension;
+import com.miriyum.domain.search.entity.QMenuSearchProfile;
+import com.miriyum.domain.search.entity.QMenuSearchProfileTerm;
 import com.miriyum.domain.search.expansion.StructuredFoodEvidence;
 import com.miriyum.domain.search.expansion.StructuredFoodEvidence.Dimension;
 import com.miriyum.domain.search.expansion.StructuredFoodEvidenceSource;
@@ -21,6 +24,7 @@ import com.querydsl.core.types.dsl.NumberExpression;
 import com.querydsl.core.types.dsl.StringExpression;
 import com.querydsl.core.types.dsl.StringPath;
 import com.querydsl.jpa.JPAExpressions;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -29,6 +33,8 @@ import java.util.Set;
 final class IntegratedStoreSearchPredicates {
 
     private static final char LIKE_ESCAPE = '!';
+    private static final BigDecimal MINIMUM_PROFILE_CONFIDENCE =
+            new BigDecimal("0.8000");
     private static final Set<String> REVERSE_MATCH_EXCLUDED_MENU_NAMES = Set.of(
             "면", "탕", "국", "밥", "메뉴", "음식", "요리", "식사", "세트", "정식", "음료");
 
@@ -248,7 +254,17 @@ final class IntegratedStoreSearchPredicates {
                         .filter(term -> term.source()
                                 == StructuredFoodEvidenceSource.DETERMINISTIC)
                         .flatMap(term -> term.matchTerms().stream())
-                        .toList());
+                        .toList())
+                .or(matchesProfileTerms(
+                        version,
+                        List.of(
+                                MenuSearchProfileDimension.MENU_FAMILY,
+                                MenuSearchProfileDimension.ALIAS),
+                        evidence.menuFamilies().stream()
+                                .filter(term -> term.source()
+                                        == StructuredFoodEvidenceSource.DETERMINISTIC)
+                                .flatMap(term -> term.matchTerms().stream())
+                                .toList()));
         BooleanExpression rawForward = matchesField(
                 version.name,
                 evidence.rawFoodSpans().stream()
@@ -260,7 +276,13 @@ final class IntegratedStoreSearchPredicates {
                 .filter(term -> term.source() == StructuredFoodEvidenceSource.LLM)
                 .flatMap(term -> term.matchTerms().stream())
                 .toList();
-        BooleanExpression inferredFamily = matchesAnyMenuField(version, inferredFamilies);
+        BooleanExpression inferredFamily = matchesAnyMenuField(version, inferredFamilies)
+                .or(matchesProfileTerms(
+                        version,
+                        List.of(
+                                MenuSearchProfileDimension.MENU_FAMILY,
+                                MenuSearchProfileDimension.ALIAS),
+                        inferredFamilies));
         return new CaseBuilder()
                 .when(resolvedExplicit.or(deterministicAlias)).then(3)
                 .when(rawForward).then(2)
@@ -275,7 +297,11 @@ final class IntegratedStoreSearchPredicates {
         NumberExpression<Integer> count = Expressions.asNumber(0);
         for (Map.Entry<Dimension, List<String>> entry
                 : evidence.coreDimensionTerms().entrySet()) {
-            BooleanExpression matches = matchesAnyMenuField(version, entry.getValue());
+            BooleanExpression matches = matchesAnyMenuField(version, entry.getValue())
+                    .or(matchesProfileTerms(
+                            version,
+                            profileDimensions(entry.getKey()),
+                            entry.getValue()));
             count = count.add(new CaseBuilder().when(matches).then(1).otherwise(0));
         }
         return count;
@@ -293,7 +319,11 @@ final class IntegratedStoreSearchPredicates {
         NumberExpression<Integer> count = Expressions.asNumber(0);
         for (String term : query.lexicalFoodTerms()) {
             count = count.add(new CaseBuilder()
-                    .when(matchesAnyMenuField(version, List.of(term)))
+                    .when(matchesAnyMenuField(version, List.of(term))
+                            .or(matchesProfileTerms(
+                                    version,
+                                    List.of(MenuSearchProfileDimension.values()),
+                                    List.of(term))))
                     .then(1)
                     .otherwise(0));
         }
@@ -317,6 +347,47 @@ final class IntegratedStoreSearchPredicates {
                     .or(collectionContains(version, pattern, true));
         }
         return matches;
+    }
+
+    private static BooleanExpression matchesProfileTerms(
+            QMenuVersion version,
+            List<MenuSearchProfileDimension> dimensions,
+            List<String> terms
+    ) {
+        if (dimensions.isEmpty() || terms.isEmpty()) {
+            return Expressions.FALSE;
+        }
+        QMenuSearchProfile profile = new QMenuSearchProfile(
+                "structuredEvidenceSearchProfile");
+        QMenuSearchProfileTerm profileTerm = new QMenuSearchProfileTerm(
+                "structuredEvidenceSearchProfileTerm");
+        return JPAExpressions.selectOne()
+                .from(profileTerm)
+                .join(profileTerm.profile, profile)
+                .where(
+                        profile.menuVersionId.eq(version.id),
+                        profileTerm.dimension.in(dimensions),
+                        profileTerm.normalizedTerm.in(terms),
+                        profileTerm.confidence.goe(MINIMUM_PROFILE_CONFIDENCE))
+                .exists();
+    }
+
+    private static List<MenuSearchProfileDimension> profileDimensions(
+            Dimension dimension
+    ) {
+        return switch (dimension) {
+            case MENU_FAMILY -> List.of(
+                    MenuSearchProfileDimension.MENU_FAMILY,
+                    MenuSearchProfileDimension.ALIAS);
+            case INGREDIENT -> List.of(MenuSearchProfileDimension.INGREDIENT);
+            case TASTE -> List.of(MenuSearchProfileDimension.TASTE);
+            case BROTH -> List.of(MenuSearchProfileDimension.BROTH);
+            case METHOD -> List.of(MenuSearchProfileDimension.METHOD);
+            case AROMA -> List.of(MenuSearchProfileDimension.AROMA);
+            case TEXTURE -> List.of(MenuSearchProfileDimension.TEXTURE);
+            case FORM -> List.of(MenuSearchProfileDimension.FORM);
+            case RAW_FOOD_SPAN -> List.of();
+        };
     }
 
     private static BooleanExpression collectionContains(
