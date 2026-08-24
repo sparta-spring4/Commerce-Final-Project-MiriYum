@@ -110,17 +110,9 @@ class BackendCiPathFilterTest(unittest.TestCase):
             'havingValue = "true", matchIfMissing = true)'
         )
 
-        self.assertIn(
-            'systemProperty("miriyum.reservation.hold-expiration.enabled", "false")',
-            integration_shard_configuration,
-        )
-        self.assertIn(
-            'systemProperty("miriyum.waiting.compensation.enabled", "false")',
-            integration_shard_configuration,
-        )
-        self.assertNotIn('systemProperty("miriyum.reservation.hold-expiration.enabled", "false")', unit_test_configuration)
-        self.assertNotIn('systemProperty("miriyum.waiting.compensation.enabled", "false")', unit_test_configuration)
         for property_name in [
+            "miriyum.reservation.hold-expiration.enabled",
+            "miriyum.waiting.compensation.enabled",
             "miriyum.menu.schedule.enabled",
             "miriyum.store.schedule.activation-enabled",
         ]:

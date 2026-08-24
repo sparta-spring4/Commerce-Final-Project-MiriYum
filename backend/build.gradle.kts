@@ -146,6 +146,8 @@ val integrationTest = tasks.register<Test>("integrationTest") {
         includeTags(integrationTag)
     }
     systemProperty("spring.test.context.cache.maxSize", "4")
+    systemProperty("miriyum.reservation.hold-expiration.enabled", "false")
+    systemProperty("miriyum.waiting.compensation.enabled", "false")
     systemProperty("miriyum.menu.schedule.enabled", "false")
     systemProperty("miriyum.store.schedule.activation-enabled", "false")
     dependsOn(verifyIntegrationTestTags)
