@@ -1,0 +1,11 @@
+[Unit]
+Description=Publish MiriYum staging backend container metrics every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=60s
+Persistent=true
+Unit=miriyum-backend-container-metrics.service
+
+[Install]
+WantedBy=timers.target
