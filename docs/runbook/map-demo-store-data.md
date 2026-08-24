@@ -14,7 +14,6 @@ staging에서는 `MIRIYUM_STAGING_MAP_DEMO_STORES_ENABLED=true`를 `/opt/miriyum
 
 시연 후에는 해당 값을 `false`로 되돌리고 같은 SHA를 다시 배포한다. 생성 데이터는 사업자등록번호
 `9000000001`부터 `9000000004`까지이므로, 정리가 필요하면 staging DB에서 이 번호만 대상으로 삭제한다.
-
 ## 준비되는 데이터
 
 | 매장 | 지역 | 좌표 상태 | 좌표 |
