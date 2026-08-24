@@ -52,6 +52,15 @@ const RUN_AGGREGATE_METRICS = Object.freeze({
   sse_unexpected_401: ['unexpected401', ['count', 'rate']],
   sse_unexpected_403: ['unexpected403', ['count', 'rate']],
   sse_unexpected_other_4xx: ['unexpectedOther4xx', ['count', 'rate']],
+  sse_unexpected_code_common_010: ['unexpectedCodeCommon010', ['count', 'rate']],
+  sse_unexpected_code_auth_006: ['unexpectedCodeAuth006', ['count', 'rate']],
+  sse_unexpected_code_auth_009: ['unexpectedCodeAuth009', ['count', 'rate']],
+  sse_unexpected_code_auth_010: ['unexpectedCodeAuth010', ['count', 'rate']],
+  sse_unexpected_code_auth_011: ['unexpectedCodeAuth011', ['count', 'rate']],
+  sse_unexpected_code_auth_012: ['unexpectedCodeAuth012', ['count', 'rate']],
+  sse_unexpected_code_other_or_missing: [
+    'unexpectedCodeOtherOrMissing', ['count', 'rate'],
+  ],
 })
 
 const VALUE_NAMES = Object.freeze({
@@ -270,6 +279,7 @@ function renderMarkdown(summary) {
   lines.push(
     '',
     `- unexpected 4xx status buckets: 400=${summary.runMetrics.unexpected400?.count ?? 0}, 401=${summary.runMetrics.unexpected401?.count ?? 0}, 403=${summary.runMetrics.unexpected403?.count ?? 0}, other=${summary.runMetrics.unexpectedOther4xx?.count ?? 0}`,
+    `- unexpected error code buckets: COMMON_010=${summary.runMetrics.unexpectedCodeCommon010?.count ?? 0}, AUTH_006=${summary.runMetrics.unexpectedCodeAuth006?.count ?? 0}, AUTH_009=${summary.runMetrics.unexpectedCodeAuth009?.count ?? 0}, AUTH_010=${summary.runMetrics.unexpectedCodeAuth010?.count ?? 0}, AUTH_011=${summary.runMetrics.unexpectedCodeAuth011?.count ?? 0}, AUTH_012=${summary.runMetrics.unexpectedCodeAuth012?.count ?? 0}, other-or-missing=${summary.runMetrics.unexpectedCodeOtherOrMissing?.count ?? 0}`,
   )
   if (summary.profile === 'recovery') {
     const recovery = summary.metrics['waiting-store-operator']?.recoveryDuration

@@ -12,6 +12,14 @@ const ENDPOINT_AUDIENCES = Object.freeze({
   'waiting-store-operator': 'store-operator',
 })
 const TAG_FIELDS = Object.freeze(['profile', 'audience', 'endpoint_kind'])
+const SAFE_UNEXPECTED_ERROR_CODES = new Set([
+  'COMMON_010',
+  'AUTH_006',
+  'AUTH_009',
+  'AUTH_010',
+  'AUTH_011',
+  'AUTH_012',
+])
 
 function requireText(name, value) {
   if (typeof value !== 'string' || value.trim() === '') {
@@ -255,7 +263,23 @@ function statusClassification(status) {
   return null
 }
 
-function unexpected4xxDiagnostic(status, classification, tags, connectionStage) {
+function unexpectedErrorCodeBucket(body) {
+  if (typeof body !== 'string' || body === '') return 'other-or-missing'
+  try {
+    const parsed = JSON.parse(body)
+    if (parsed !== null
+      && typeof parsed === 'object'
+      && !Array.isArray(parsed)
+      && SAFE_UNEXPECTED_ERROR_CODES.has(parsed.code)) {
+      return parsed.code
+    }
+  } catch (_) {
+    // 원문이나 파싱 실패 이유는 진단 결과에 보존하지 않는다.
+  }
+  return 'other-or-missing'
+}
+
+function unexpected4xxDiagnostic(status, body, classification, tags, connectionStage) {
   if (classification !== 'unauthorized' && classification !== 'unexpected_client_error') {
     return null
   }
@@ -263,6 +287,7 @@ function unexpected4xxDiagnostic(status, classification, tags, connectionStage) 
   return Object.freeze({
     classification,
     statusBucket,
+    errorCodeBucket: unexpectedErrorCodeBucket(body),
     connectionStage,
     endpointKind: tags.endpoint_kind,
     observedAtUtc: new Date().toISOString(),
@@ -425,7 +450,7 @@ export function openChangedStream({
     classification,
     selectedTags,
     unexpected4xxDiagnostic(
-      response?.status, classification, selectedTags, connectionStage,
+      response?.status, response?.body, classification, selectedTags, connectionStage,
     ),
   )
 
