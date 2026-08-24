@@ -754,6 +754,38 @@ class ProductionEcsEvidenceTest(unittest.TestCase):
             traffic_target_group_arns=[self.target_group_arn],
         )
 
+    def test_empty_listener_traffic_target_groups_are_rejected(self):
+        with self.assertRaisesRegex(
+            DeploymentGateError, "ECS traffic target group evidence is invalid"
+        ):
+            verify_production_ecs_evidence(
+                self.service,
+                self.tasks,
+                self.previous_task_arns,
+                self.previous_tasks,
+                self.target_health,
+                self.expected_task_definition,
+                traffic_target_group_arns=[],
+            )
+
+    def test_listener_target_group_outside_ecs_service_is_rejected(self):
+        unexpected_target_group_arn = (
+            "arn:aws:elasticloadbalancing:ap-northeast-2:123456789012:"
+            "targetgroup/miriyum-unexpected/abcdef"
+        )
+        with self.assertRaisesRegex(
+            DeploymentGateError, "ECS traffic target group evidence is invalid"
+        ):
+            verify_production_ecs_evidence(
+                self.service,
+                self.tasks,
+                self.previous_task_arns,
+                self.previous_tasks,
+                self.target_health,
+                self.expected_task_definition,
+                traffic_target_group_arns=[unexpected_target_group_arn],
+            )
+
     def test_previous_revision_running_task_is_rejected(self):
         tasks = copy.deepcopy(self.tasks)
         tasks["tasks"].append(
@@ -994,6 +1026,44 @@ class ProductionEcsEvidenceTest(unittest.TestCase):
 
         self.assertEqual(1, result.returncode)
         self.assertIn("has not completed deregistration", result.stderr)
+
+    def test_cli_rejects_empty_listener_traffic_target_groups(self):
+        result = self._run_cli(
+            {
+                "service": self.service,
+                "tasks": self.tasks,
+                "previousTaskArns": self.previous_task_arns,
+                "previousTasks": self.previous_tasks,
+                "stoppedTaskArns": [],
+                "stoppedTasks": {"tasks": [], "failures": []},
+                "trafficTargetGroupArns": [],
+                "targetHealthByArn": self.target_health,
+            }
+        )
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn("ECS traffic target group evidence is invalid", result.stderr)
+
+    def test_cli_rejects_listener_target_group_outside_ecs_service(self):
+        unexpected_target_group_arn = (
+            "arn:aws:elasticloadbalancing:ap-northeast-2:123456789012:"
+            "targetgroup/miriyum-unexpected/abcdef"
+        )
+        result = self._run_cli(
+            {
+                "service": self.service,
+                "tasks": self.tasks,
+                "previousTaskArns": self.previous_task_arns,
+                "previousTasks": self.previous_tasks,
+                "stoppedTaskArns": [],
+                "stoppedTasks": {"tasks": [], "failures": []},
+                "trafficTargetGroupArns": [unexpected_target_group_arn],
+                "targetHealthByArn": self.target_health,
+            }
+        )
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn("ECS traffic target group evidence is invalid", result.stderr)
 
     def test_cli_fails_closed_without_traceback_for_malformed_evidence_shape(self):
         result = self._run_cli([])
