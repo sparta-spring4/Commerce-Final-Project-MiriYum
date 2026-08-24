@@ -33,6 +33,7 @@ class HybridPreparedCatalog:
     menus_by_id: dict[str, dict[str, Any]]
     menus_by_store: dict[str, tuple[dict[str, Any], ...]]
     searchable_tokens_by_menu: dict[str, frozenset[str]]
+    searchable_vocabulary: frozenset[str]
 
 
 @dataclass(frozen=True)
@@ -72,18 +73,27 @@ def prepare_hybrid_catalog(
 ) -> HybridPreparedCatalog:
     menus_by_store: dict[str, list[dict[str, Any]]] = defaultdict(list)
     searchable_tokens = {}
+    families_by_id = {family["id"]: family for family in families}
     for menu in menus:
         menus_by_store[menu["storeId"]].append(menu)
+        attributes = families_by_id.get(menu["familyId"], {}).get("attributes", {})
         searchable_tokens[menu["id"]] = frozenset(_tokens(" ".join((
             menu.get("name", ""), menu.get("description", ""),
             *menu.get("tags", []),
+            *(str(attributes.get(field, "")) for field in (
+                "ingredient", "taste", "broth", "method", "aroma", "texture",
+            )),
         ))))
     return HybridPreparedCatalog(
-        families_by_id={family["id"]: family for family in families},
+        families_by_id=families_by_id,
         stores_by_id={store["id"]: store for store in stores},
         menus_by_id={menu["id"]: menu for menu in menus},
         menus_by_store={key: tuple(values) for key, values in menus_by_store.items()},
         searchable_tokens_by_menu=searchable_tokens,
+        searchable_vocabulary=frozenset(
+            token for tokens in searchable_tokens.values() for token in tokens
+            if token not in _LEXICAL_STOPWORDS
+        ),
     )
 
 
@@ -100,6 +110,11 @@ def retrieve_lexical_candidates(
     catalog: HybridPreparedCatalog,
 ) -> LexicalCandidateResult:
     query_tokens = set(informative_query_tokens(query_text, filters=filters))
+    compact_query = compact(query_text)
+    query_tokens.update(
+        token for token in catalog.searchable_vocabulary
+        if compact(token) in compact_query
+    )
     if len(query_tokens) < 2:
         return LexicalCandidateResult((), (), {})
     rows = []

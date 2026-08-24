@@ -103,6 +103,15 @@ class HybridSearchTest(unittest.TestCase):
         self.assertEqual(two_tokens.store_ids, ("store-target",))
         self.assertEqual(two_tokens.menu_match_counts, {"menu-target": 2})
 
+    def test_lexical_candidate_uses_family_aroma_texture_with_korean_suffixes(self):
+        result = retrieve_lexical_candidates(
+            query_text="바다향이고 탱글한 식감인 음식 추천해줘",
+            filters={}, sort="RECOMMENDED", catalog=self.catalog,
+        )
+
+        self.assertEqual(result.store_ids, ("store-target",))
+        self.assertEqual(result.menu_match_counts, {"menu-target": 2})
+
     def test_hybrid_keeps_explicit_menu_ranking_unchanged(self):
         query = self._query("해물국 찾아줘", query_type="alias_bidirectional")
         structured_call = self._structured_call(query, menu_family=True)
