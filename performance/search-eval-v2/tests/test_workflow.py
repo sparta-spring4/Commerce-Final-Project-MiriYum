@@ -3,13 +3,17 @@ from hashlib import sha256
 import json
 import tempfile
 import unittest
+from unittest import mock
 
 from miriyum_search_eval.catalog import DatasetConfig, generate_dataset
 from miriyum_search_eval.cli import (
+    HYBRID_EMBEDDING_CHECKPOINT_SHA,
+    HYBRID_STRUCTURED_RESULTS_SHA,
     ISSUE_616_MOST_SPECIFIC,
     PRE_ISSUE_616,
     _gpt54mini_comparison_config,
     _load_validated_structured_baseline,
+    _validate_hybrid_source_files,
     _pin_source_checkpoint_sha256,
     _validate_prompt_full_provenance,
     _validate_reanalysis_provenance,
@@ -456,6 +460,44 @@ class WorkflowTest(unittest.TestCase):
             )
             with self.assertRaisesRegex(RuntimeError, "baseline result provenance mismatch"):
                 _load_validated_structured_baseline(root, records)
+
+    def test_hybrid_source_files_require_frozen_structured_and_embedding_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "gold"
+            source = Path(directory) / "embedding-source"
+            structured = root / "structured-reanalysis" / "results.jsonl"
+            embedding = (
+                source / "embeddings" / "text-embedding-3-large"
+                / "embedding-checkpoint.jsonl"
+            )
+            structured.parent.mkdir(parents=True)
+            embedding.parent.mkdir(parents=True)
+            structured.write_bytes(b"structured")
+            embedding.write_bytes(b"embedding")
+
+            with mock.patch(
+                "miriyum_search_eval.cli.HYBRID_STRUCTURED_RESULTS_SHA",
+                sha256(structured.read_bytes()).hexdigest(),
+            ), mock.patch(
+                "miriyum_search_eval.cli.HYBRID_EMBEDDING_CHECKPOINT_SHA",
+                sha256(embedding.read_bytes()).hexdigest(),
+            ):
+                hashes = _validate_hybrid_source_files(root, source)
+
+            self.assertEqual(
+                hashes["structuredResultsSha256"],
+                sha256(structured.read_bytes()).hexdigest(),
+            )
+            self.assertEqual(
+                hashes["embeddingCheckpointSha256"],
+                sha256(embedding.read_bytes()).hexdigest(),
+            )
+            structured.write_bytes(b"changed")
+            with self.assertRaisesRegex(RuntimeError, "structured results SHA-256"):
+                _validate_hybrid_source_files(root, source)
+
+        self.assertEqual(len(HYBRID_STRUCTURED_RESULTS_SHA), 64)
+        self.assertEqual(len(HYBRID_EMBEDDING_CHECKPOINT_SHA), 64)
 
     def test_canonical_checkpoint_sha_is_pinned_once(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -12,6 +12,11 @@ from typing import Any
 from .artifacts import write_dataset_artifacts, write_json, write_jsonl, write_sha256_manifest
 from .catalog import DatasetConfig, generate_dataset
 from .evaluation import aggregate_evaluation, derive_call_diagnostics, evaluate_call
+from .hybrid_search import (
+    aggregate_hybrid_comparison,
+    evaluate_hybrid_variants,
+    prepare_hybrid_catalog,
+)
 from .metrics import ranking_metrics
 from .matching import prepare_catalog
 from .reporting import render_report
@@ -49,6 +54,8 @@ PRE_ISSUE_616 = "pre-issue-616"
 ISSUE_616_MOST_SPECIFIC = "issue-616-most-specific"
 PREDICATE_VARIANTS = (PRE_ISSUE_616, ISSUE_616_MOST_SPECIFIC)
 STRUCTURED_EVAL_BASE_SHA = "229b5aa765873c141270e257be65aedae72b9f86"
+HYBRID_STRUCTURED_RESULTS_SHA = "9df2560af0cd46ab012c69f298a776126db0bbbbfcb1ab052ecb820249b57ba0"
+HYBRID_EMBEDDING_CHECKPOINT_SHA = "f9cabb92c0613e84730bd3aec343f41be1b2444e21c2ac541a0f17aa0db59d58"
 
 
 def _repo_root() -> Path:
@@ -741,6 +748,181 @@ def structured_reanalyze(root: Path) -> None:
     )
 
 
+def _validate_hybrid_source_files(root: Path, source: Path) -> dict[str, str]:
+    from hashlib import sha256
+
+    structured_path = root / "structured-reanalysis" / "results.jsonl"
+    embedding_path = (
+        source / "embeddings" / "text-embedding-3-large"
+        / "embedding-checkpoint.jsonl"
+    )
+    if not structured_path.is_file():
+        raise RuntimeError("structured results are missing")
+    if not embedding_path.is_file():
+        raise RuntimeError("large embedding checkpoint is missing")
+    structured_sha = sha256(structured_path.read_bytes()).hexdigest()
+    embedding_sha = sha256(embedding_path.read_bytes()).hexdigest()
+    if structured_sha != HYBRID_STRUCTURED_RESULTS_SHA:
+        raise RuntimeError("structured results SHA-256 mismatch")
+    if embedding_sha != HYBRID_EMBEDDING_CHECKPOINT_SHA:
+        raise RuntimeError("embedding checkpoint SHA-256 mismatch")
+    return {
+        "structuredResultsSha256": structured_sha,
+        "embeddingCheckpointSha256": embedding_sha,
+    }
+
+
+def _load_validated_hybrid_structured_calls(
+    root: Path, dataset: dict[str, Any],
+) -> list[dict[str, Any]]:
+    path = root / "structured-reanalysis" / "results.jsonl"
+    by_key: dict[tuple[str, int], dict[str, Any]] = {}
+    with path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            call = json.loads(line)
+            key = (call.get("queryId"), call.get("repeatIndex"))
+            if (
+                call.get("schemaVersion") != "miriyum-structured-search-call-v1"
+                or not isinstance(key[0], str)
+                or not isinstance(key[1], int)
+                or key in by_key
+                or "C" not in call.get("variants", {})
+            ):
+                raise RuntimeError(
+                    f"structured result matrix/provenance mismatch at line {line_number}"
+                )
+            by_key[key] = call
+    expected = {
+        (query["id"], repeat_index)
+        for query in dataset["queries"]
+        for repeat_index in range(5)
+    }
+    if set(by_key) != expected:
+        raise RuntimeError("structured result matrix must contain exactly 2,000 x 5 calls")
+    return [
+        by_key[(query["id"], repeat_index)]
+        for query in dataset["queries"]
+        for repeat_index in range(5)
+    ]
+
+
+def hybrid_reanalyze(root: Path, source: Path) -> None:
+    """Compare D/E/F/G without new provider calls or production changes."""
+    from hashlib import sha256
+    from .embeddings import embed_texts, topk_cosine
+
+    source_hashes = _validate_hybrid_source_files(root, source)
+    metadata_path = root / "run-metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    dataset = _dataset()
+    if metadata.get("datasetSha256") != dataset["metadata"]["datasetSha256"]:
+        raise RuntimeError("hybrid reanalysis dataset provenance mismatch")
+    structured_calls = _load_validated_hybrid_structured_calls(root, dataset)
+
+    menu_ids = [menu["id"] for menu in dataset["menus"]]
+    menu_texts = [
+        f"{menu['name']} {menu['description']} {' '.join(menu['tags'])}"
+        for menu in dataset["menus"]
+    ]
+    query_ids = [query["id"] for query in dataset["queries"]]
+    query_texts = [query["text"] for query in dataset["queries"]]
+
+    class NoProviderCallTransport:
+        def __call__(self, model, texts, timeout_seconds):
+            raise RuntimeError("frozen embedding cache is incomplete; provider calls are forbidden")
+
+    embedding_root = source / "embeddings"
+    corpus = embed_texts(
+        ids=menu_ids, texts=menu_texts, model="text-embedding-3-large",
+        artifact_dir=embedding_root, transport=NoProviderCallTransport(),
+    )
+    query_embeddings = embed_texts(
+        ids=query_ids, texts=query_texts, model="text-embedding-3-large",
+        artifact_dir=embedding_root, transport=NoProviderCallTransport(),
+    )
+    if (
+        corpus.ids != tuple(menu_ids)
+        or query_embeddings.ids != tuple(query_ids)
+        or corpus.vectors.shape != (5_000, 3_072)
+        or query_embeddings.vectors.shape != (2_000, 3_072)
+        or corpus.requested_model != "text-embedding-3-large"
+        or query_embeddings.requested_model != "text-embedding-3-large"
+    ):
+        raise RuntimeError("frozen embedding identities, model, or dimensions mismatch")
+    indices, scores = topk_cosine(
+        query_embeddings.vectors, corpus.vectors, k=200,
+    )
+    embedding_by_query = {
+        query_id: tuple(
+            (menu_ids[int(index)], float(score))
+            for index, score in zip(row_indices, row_scores)
+        )
+        for query_id, row_indices, row_scores in zip(
+            query_ids, indices, scores,
+        )
+    }
+    query_by_id = {query["id"]: query for query in dataset["queries"]}
+    catalog = prepare_hybrid_catalog(
+        families=dataset["families"], stores=dataset["stores"],
+        menus=dataset["menus"],
+    )
+    hybrid_calls = [
+        evaluate_hybrid_variants(
+            dataset=dataset, query=query_by_id[call["queryId"]],
+            structured_call=call,
+            embedding_menu_scores=embedding_by_query[call["queryId"]],
+            prepared_catalog=catalog,
+        )
+        for call in structured_calls
+    ]
+    aggregate = aggregate_hybrid_comparison(hybrid_calls)
+
+    output_root = root / "hybrid-reanalysis"
+    result_path = write_jsonl(output_root / "results.jsonl", hybrid_calls)
+    aggregate_path = write_json(output_root / "aggregate.json", aggregate)
+    analysis_sources = {
+        "cli": Path(__file__),
+        "hybridSearch": Path(__file__).with_name("hybrid_search.py"),
+        "structuredSearch": Path(__file__).with_name("structured_search.py"),
+        "embeddings": Path(__file__).with_name("embeddings.py"),
+        "matching": Path(__file__).with_name("matching.py"),
+    }
+    metadata["hybridReanalysis"] = {
+        "schemaVersion": "miriyum-hybrid-search-reanalysis-v1",
+        "status": "simulated-evidence-not-actual-application",
+        "analysisCommitSha": _commit_sha(),
+        "analysisWorkingTreeDirty": subprocess.run(
+            ["git", "diff", "--quiet"], cwd=_repo_root(), check=False,
+        ).returncode != 0,
+        "newProviderCalls": 0,
+        "incrementalCostUsd": 0.0,
+        **source_hashes,
+        "embeddingSourceArtifact": str(source.resolve()),
+        "embeddingSourceDatasetSha256": json.loads(
+            (source / "run-metadata.json").read_text(encoding="utf-8")
+        ).get("datasetSha256"),
+        "currentDatasetSha256": dataset["metadata"]["datasetSha256"],
+        "requestedEmbeddingModel": "text-embedding-3-large",
+        "returnedEmbeddingModels": sorted(set(
+            corpus.returned_models + query_embeddings.returned_models
+        )),
+        "embeddingTopK": 200,
+        "similarityImplementation": "numpy-matmul-argpartition",
+        "analysisSourceSha256": {
+            name: sha256(path.read_bytes()).hexdigest()
+            for name, path in analysis_sources.items()
+        },
+        "targets": aggregate["targets"],
+        "gate": aggregate["gate"],
+    }
+    write_json(metadata_path, metadata)
+    write_sha256_manifest(
+        (result_path, aggregate_path), output_root / "sha256.json",
+    )
+
+
 def _validate_reanalysis_provenance(
     metadata: dict[str, Any], dataset: dict[str, Any],
     records: list[dict[str, Any]],
@@ -964,6 +1146,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=(
         "generate", "migrate-pilot", "migrate-checkpoint", "pilot", "run",
         "prompt-pilot", "prompt-run", "reanalyze", "structured-reanalyze",
+        "hybrid-reanalyze",
         "stamp-reanalysis",
         "embeddings", "report", "hash-artifact", "model-compare",
     ))
@@ -999,6 +1182,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "structured-reanalyze":
         structured_reanalyze(args.artifact_dir.resolve())
+        return 0
+    if args.command == "hybrid-reanalyze":
+        if args.source_artifact_dir is None:
+            parser.error("hybrid-reanalyze requires --source-artifact-dir")
+        hybrid_reanalyze(
+            args.artifact_dir.resolve(), args.source_artifact_dir.resolve(),
+        )
         return 0
     actions = {
         "generate": generate, "pilot": pilot, "run": full_run,
