@@ -10,7 +10,8 @@ public record IntegratedSearchCursor(
 
     public IntegratedSearchCursor {
         if (structuredRelevance < 0
-                || structuredRelevance > 36
+                || structuredRelevance
+                > IntegratedStoreSearchQuery.MAX_STRUCTURED_RELEVANCE
                 || relevanceTier < 0
                 || relevanceTier > 4
                 || sortValue == null

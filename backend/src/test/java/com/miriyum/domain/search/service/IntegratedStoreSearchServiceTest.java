@@ -227,9 +227,9 @@ class IntegratedStoreSearchServiceTest {
                 null, null, null, "칼칼한 마라탕");
         given(interpreter.interpret("칼칼한 마라탕"))
                 .willReturn(result(condition));
-        IntegratedStoreSearchCandidate first = candidate(1L, "첫째", 31, 2);
-        IntegratedStoreSearchCandidate second = candidate(2L, "둘째", 31, 2);
-        IntegratedStoreSearchCandidate third = candidate(3L, "셋째", 31, 2);
+        IntegratedStoreSearchCandidate first = candidate(1L, "첫째", 40, 2);
+        IntegratedStoreSearchCandidate second = candidate(2L, "둘째", 40, 2);
+        IntegratedStoreSearchCandidate third = candidate(3L, "셋째", 40, 2);
         IntegratedStoreSearchCandidate lower = candidate(4L, "낮은 그룹", 10, 4);
         List<IntegratedStoreSearchCandidate> candidates =
                 List.of(first, second, third, lower);
@@ -255,6 +255,46 @@ class IntegratedStoreSearchServiceTest {
                 .containsExactly("1", "2");
         assertThat(secondPage.items()).extracting(item -> item.storeId())
                 .containsExactly("3", "4");
+    }
+
+    @Test
+    void relevancePaginationAcceptsScoresFromFourOrMoreLexicalMatches() {
+        InterpretedSearchCondition condition = condition(
+                null, null, null, "칼칼한 해물 바질 토마토");
+        given(interpreter.interpret("칼칼한 해물 바질 토마토"))
+                .willReturn(result(condition));
+        IntegratedStoreSearchCandidate first = candidate(1L, "첫째", 40, 2);
+        IntegratedStoreSearchCandidate second = candidate(2L, "둘째", 39, 2);
+        IntegratedStoreSearchQuery firstQuery = IntegratedStoreSearchQuery.from(
+                condition, false, false, CURSOR_CODEC.principalScope(null),
+                "relevance,desc", null, 1, CURSOR_CODEC);
+        String next = CURSOR_CODEC.encode(
+                firstQuery,
+                first.structuredRelevance(),
+                first.relevanceTier(),
+                first.name(),
+                first.storeId());
+        given(repository.search(any()))
+                .willReturn(new IntegratedStoreSearchSlice(List.of(first), next))
+                .willReturn(new IntegratedStoreSearchSlice(List.of(second), null));
+        given(repository.cursorAfter(any(), org.mockito.ArgumentMatchers.eq(first)))
+                .willReturn(next);
+        given(repository.refreshCurrentlyPublic(any()))
+                .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
+
+        var firstPage = service().search(
+                "칼칼한 해물 바질 토마토", false, false,
+                "relevance,desc", null, 1);
+        var secondPage = service().search(
+                "칼칼한 해물 바질 토마토", false, false,
+                "relevance,desc", firstPage.nextCursor(), 1);
+
+        assertThat(firstPage.items()).extracting(item -> item.storeId())
+                .containsExactly("1");
+        assertThat(firstPage.nextCursor()).isEqualTo(next);
+        assertThat(secondPage.items()).extracting(item -> item.storeId())
+                .containsExactly("2");
+        assertThat(secondPage.nextCursor()).isNull();
     }
 
     @Test

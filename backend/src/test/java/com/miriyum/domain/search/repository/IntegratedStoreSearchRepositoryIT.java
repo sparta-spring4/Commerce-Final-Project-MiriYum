@@ -852,12 +852,12 @@ class IntegratedStoreSearchRepositoryIT {
 
     @Test
     @Transactional
-    void twoInformativeMenuFieldTokensSupplementStructuredCandidates() {
-        Store twoTokens = createStore(
-                "원문 두 토큰 매장", Region.SEOUL, "KOREAN", Set.of(), false);
+    void fourInformativeMenuFieldTokensProduceScoreAboveLegacyBound() {
+        Store fourTokens = createStore(
+                "원문 네 토큰 매장", Region.SEOUL, "KOREAN", Set.of(), false);
         publishMenuWithSearchFields(
-                twoTokens, "오늘의 전골", "바질 토마토", 14_000,
-                "BEVERAGE", List.of(), List.of("바질", "토마토"),
+                fourTokens, "오늘의 전골", "칼칼한 해물 바질 토마토", 14_000,
+                "BEVERAGE", List.of(), List.of("칼칼한", "해물", "바질", "토마토"),
                 MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
         Store oneToken = createStore(
                 "원문 한 토큰 매장", Region.SEOUL, "KOREAN", Set.of(), false);
@@ -877,9 +877,10 @@ class IntegratedStoreSearchRepositoryIT {
                         "칼칼한 해물 바질 토마토 음식 추천해줘"),
                 List.of(), evidence, "relevance,desc", null, 20));
 
-        assertThat(result.content())
-                .extracting(IntegratedStoreSearchCandidate::storeId)
-                .containsExactly(twoTokens.getId());
+        assertThat(result.content()).singleElement().satisfies(candidate -> {
+            assertThat(candidate.storeId()).isEqualTo(fourTokens.getId());
+            assertThat(candidate.structuredRelevance()).isEqualTo(46);
+        });
     }
 
     @Test

@@ -20,7 +20,16 @@ public final class IntegratedStoreSearchQuery {
 
     private static final int DEFAULT_SIZE = 20;
     private static final int MAX_SIZE = 50;
-    private static final int MAX_LEXICAL_FOOD_TERMS = 20;
+    public static final int MAX_LEXICAL_FOOD_TERMS = 20;
+    public static final int STRUCTURED_LEXICAL_MATCH_WEIGHT = 10;
+    public static final int STRUCTURED_DIMENSION_MATCH_WEIGHT = 3;
+    public static final int STRUCTURED_MENU_RANK_WEIGHT = 2;
+    public static final int MAX_STRUCTURED_MENU_RANK = 3;
+    public static final int MAX_STRUCTURED_RELEVANCE =
+            MAX_LEXICAL_FOOD_TERMS * STRUCTURED_LEXICAL_MATCH_WEIGHT
+                    + StructuredFoodEvidence.MAX_CORE_DIMENSION_COUNT
+                    * STRUCTURED_DIMENSION_MATCH_WEIGHT
+                    + MAX_STRUCTURED_MENU_RANK * STRUCTURED_MENU_RANK_WEIGHT;
     private static final Pattern SEARCH_TOKEN = Pattern.compile("[0-9A-Za-z가-힣]+");
     private static final Set<String> LEXICAL_STOPWORDS = Set.of(
             "가게", "곳", "메뉴", "음식", "요리", "식사", "추천", "추천해줘",

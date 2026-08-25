@@ -172,7 +172,7 @@ class IntegratedStoreSearchQueryTest {
                 20,
                 CURSOR_CODEC);
         String cursor = CURSOR_CODEC.encode(
-                firstPage, 32, 2, "마라탕 전문점", 7L);
+                firstPage, 40, 2, "마라탕 전문점", 7L);
 
         IntegratedStoreSearchQuery nextPage = IntegratedStoreSearchQuery.from(
                 condition("칼칼한 마라탕"),
@@ -188,7 +188,7 @@ class IntegratedStoreSearchQueryTest {
 
         assertThat(nextPage.foodEvidence()).isEqualTo(evidence);
         assertThat(nextPage.cursor()).get().satisfies(decoded -> {
-            assertThat(decoded.structuredRelevance()).isEqualTo(32);
+            assertThat(decoded.structuredRelevance()).isEqualTo(40);
             assertThat(decoded.relevanceTier()).isEqualTo(2);
             assertThat(decoded.sortValue()).isEqualTo("마라탕 전문점");
             assertThat(decoded.storeId()).isEqualTo(7L);

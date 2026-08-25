@@ -27,7 +27,9 @@ class StructuredSearchRelevanceTest {
 
     @Test
     void rejectsValuesOutsideRepositoryScoreBounds() {
-        assertThatThrownBy(() -> StructuredSearchRelevance.of(37, 0))
+        assertThat(StructuredSearchRelevance.of(224, 4).structuredRelevance())
+                .isEqualTo(224);
+        assertThatThrownBy(() -> StructuredSearchRelevance.of(225, 0))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> StructuredSearchRelevance.of(0, 5))
                 .isInstanceOf(IllegalArgumentException.class);
