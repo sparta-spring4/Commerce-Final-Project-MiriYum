@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -121,6 +122,39 @@ class FileStorageFacadeIntegrationTest {
                 .get()
                 .extracting(FileMetadata::getStorageStatus)
                 .isEqualTo(FileStorageStatus.PENDING);
+    }
+
+    @Test
+    @DisplayName("바깥 REPEATABLE_READ 읽기 뒤 별도 저장된 대기 메타데이터도 같은 업무 트랜잭션에서 확정한다")
+    void confirmsPendingMetadataCreatedAfterOuterTransactionSnapshot() {
+        String fileId = UUID.randomUUID().toString();
+        String objectKey = "private/store-onboarding/11/evidence/object-snapshot";
+        FileStorageFacade facade = new FileStorageFacade(new RecordingFileStoragePort(), transactionExecutor);
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+
+        transaction.executeWithoutResult(status -> {
+            // MySQL의 일관 읽기 스냅샷을 먼저 만들고, PENDING 저장은 REQUIRES_NEW로 커밋한다.
+            fileMetadataRepository.count();
+
+            facade.storePending(pendingMetadata(
+                    fileId,
+                    objectKey,
+                    FILE_CHECKSUM,
+                    Instant.parse("2026-08-10T06:20:00Z")), new FileStorageRequest(
+                    objectKey,
+                    "image/jpeg",
+                    4L,
+                    new ByteArrayInputStream("file".getBytes(StandardCharsets.UTF_8))));
+
+            facade.confirmWithinCurrentTransaction(UUID.fromString(fileId));
+        });
+
+        assertThat(fileMetadataRepository.findById(fileId))
+                .isPresent()
+                .get()
+                .extracting(FileMetadata::getStorageStatus)
+                .isEqualTo(FileStorageStatus.CONFIRMED);
     }
 
     @Test
