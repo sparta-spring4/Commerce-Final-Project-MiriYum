@@ -35,6 +35,12 @@ from .structured_search import (
     evaluate_structured_variants,
     prepare_structured_catalog,
 )
+from .staging_workflow import (
+    generate_staging_artifacts,
+    report_from_checkpoint,
+    run_staging_full,
+    run_staging_pilot,
+)
 from .validation import validate_dataset
 from .workflow import (
     canonicalize_equivalent_calls,
@@ -1196,11 +1202,28 @@ def main(argv: list[str] | None = None) -> int:
         "hybrid-reanalyze",
         "stamp-reanalysis",
         "embeddings", "report", "hash-artifact", "model-compare",
+        "staging-generate", "staging-pilot", "staging-run", "staging-report",
     ))
     parser.add_argument("--artifact-dir", type=Path, required=True)
     parser.add_argument("--source-artifact-dir", type=Path)
     parser.add_argument("--predicate-variant", choices=PREDICATE_VARIANTS)
+    parser.add_argument("--seed-sql", type=Path)
     args = parser.parse_args(argv)
+    if args.command == "staging-generate":
+        seed_sql = args.seed_sql or (
+            _repo_root() / "backend/scripts/dev-data/search-profile-demo-500-stores.sql"
+        )
+        generate_staging_artifacts(args.artifact_dir.resolve(), seed_sql=seed_sql.resolve())
+        return 0
+    if args.command == "staging-pilot":
+        run_staging_pilot(args.artifact_dir.resolve())
+        return 0
+    if args.command == "staging-run":
+        run_staging_full(args.artifact_dir.resolve())
+        return 0
+    if args.command == "staging-report":
+        report_from_checkpoint(args.artifact_dir.resolve())
+        return 0
     if args.command == "migrate-pilot":
         if args.source_artifact_dir is None:
             parser.error("migrate-pilot requires --source-artifact-dir")

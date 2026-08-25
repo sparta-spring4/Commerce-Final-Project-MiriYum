@@ -114,3 +114,51 @@ fallback은 다른 scenario와 같은 실행에 섞지 않는다. 배포 담당�
 summary에는 scenario별 API p50/p95/p99, actual RPS, 오류, run ID, 두 full SHA와 fixture fingerprint만 남는다. 검색어, 응답 body, ID와 credential은 남기지 않는다. CloudWatch 증분은 위 절차의 외부 증거로 결합한다.
 
 실패·성공·중단과 관계없이 staging OpenAI enabled/model/timeout 설정과 합성 메뉴 판매 상태를 승인된 실행 전 값으로 복구하고 같은 SHA를 재배포한다. private health `UP`, exact 검색과 일반 대체 추천의 정상 응답을 확인한다. 원복 증거가 없으면 #568 실행을 완료로 기록하지 않는다.
+
+## 2,000질의 × 5회 black-box 대규모 평가 (#668)
+
+이 평가는 `backend/scripts/dev-data/search-profile-demo-500-stores.sql`로 생성된 합성 매장 500개와 메뉴 5,000개만 대상으로 한다. 기존 로컬 300개 메뉴 계열 평가셋과 staging fixture의 60개 메뉴 template은 서로 다른 corpus이므로 gold label을 재사용하지 않는다. seed `20260825`와 원본 SQL SHA-256에 결속된 staging 전용 manifest를 결정적으로 생성한다.
+
+질의 2,000개의 고정 분포는 메뉴명 없는 감각 표현 800개, 지역·가격·업종 복합 조건 400개, 별칭·양방향 표현 300개, 동일 메뉴 매장 정렬 200개, 음식 외 음성 질의 150개, 일반 token·불가능 조합 방어 150개다. 파일럿은 같은 평가셋에서 40/20/15/10/8/7개를 층화 추출한다. 파일럿 반복 0은 본평가의 첫 반복으로 checkpoint에서 재사용한다.
+
+```powershell
+cd performance/search-eval-v2
+$env:PYTHONPATH = 'src'
+$artifact = '<repository-outside-artifact-directory>'
+
+.\.venv\Scripts\python.exe -m miriyum_search_eval.cli staging-generate --artifact-dir $artifact
+.\.venv\Scripts\python.exe -m miriyum_search_eval.cli staging-pilot --artifact-dir $artifact
+# 파일럿 CloudWatch 실측을 cloudwatch-pilot-proof.json으로 결합한 뒤에만 실행한다.
+.\.venv\Scripts\python.exe -m miriyum_search_eval.cli staging-run --artifact-dir $artifact
+.\.venv\Scripts\python.exe -m miriyum_search_eval.cli staging-report --artifact-dir $artifact
+```
+
+유료 HTTP 명령은 다음 환경값을 모두 요구하며 하나라도 없으면 network 요청 전에 실패한다.
+
+- `STAGING_EVAL_RUN_ID`: 재개 전체에서 고정한 안전한 run ID
+- `STAGING_EVAL_BACKEND_SHA`: staging에 실제 배포된 backend full SHA
+- `STAGING_EVAL_HARNESS_SHA`: 깨끗한 checkout의 평가 하네스 full SHA
+- `STAGING_EVAL_APPROVED=true`
+- `STAGING_EVAL_HARNESS_VERIFIED=true`
+- `STAGING_EVAL_CLOUDWATCH_VERIFIED=true`
+- `STAGING_EVAL_REQUESTED_MODEL`: staging 배포 설정에서 확인한 요청 모델
+- `STAGING_EVAL_TEMPERATURE`: staging 배포 설정에서 확인한 temperature
+- `STAGING_EVAL_SYSTEM_INSTRUCTION_SHA256`: 배포 SHA의 system instruction SHA-256
+- `STAGING_EVAL_JSON_SCHEMA_SHA256`: 배포 SHA의 structured-output JSON schema SHA-256
+
+환경값은 실행 대상 식별자일 뿐 운영 증거를 대신하지 않는다. artifact 디렉터리의 `staging-preflight.json`도 다음 항목을 같은 run ID·backend/harness/dataset·모델·temperature·instruction/schema SHA에 결속해 가져야 한다.
+
+- 실제 배포 host와 backend full SHA readback, 확인 시각
+- private health `UP`와 확인 시각
+- 합성 corpus 500개 매장·5,000개 메뉴 및 seed SQL SHA-256 검증
+- CloudWatch meter 읽기 권한과 확인 시각
+- 최대 10,000 logical call과 USD 상한이 명시된 유료 실행 승인
+- 시작·종료 시각과 분당 40회가 명시된 공유 rate-limit window 승인
+
+배포·health·CloudWatch 확인 증거는 실행 시작 기준 30분 이내여야 한다. 현재 시각이 승인 window 밖이거나 증거가 누락·불일치하면 `urlopen` 전에 실패하고, 하네스는 모든 재시도 직전과 pacing 대기 직후에도 wall clock을 다시 확인해 긴 본평가 중 window가 끝나면 다음 요청을 차단한다. `staging-execution-timing.json`은 파일럿과 본평가의 실제 시작·종료를 같은 provenance로 기록한다. CloudWatch meter window는 이 실제 구간 전체를 포함하고 승인 window 안에 있으며 검증 시각보다 미래가 아니어야 한다. 파일럿 gate와 본평가 전 CloudWatch proof도 같은 provenance와 파일럿의 결정적 request ID 100개를 대조하므로, 다른 실행의 통과 파일을 복사해 본평가를 시작할 수 없다.
+
+기본 host는 `https://staging-api.miriyum.click`만 허용한다. 하네스는 순차 실행, 호출 시작 간 최소 1.5초, timeout 10초, 429·5xx·timeout 최대 4회 재시도, 연속 최종 실패 3건 circuit breaker를 적용한다. 각 HTTP 시도 전에 intent를 `staging-calls.checkpoint.jsonl`에 append하고 `fsync`한 뒤 요청한다. intent만 있고 결과가 없는 비정상 종료는 과금 불확실 상태로 차단해 자동 재전송하지 않는다. run·backend·harness·dataset·모델 설정·query·repeat에 결속된 결정적 request ID를 사용한다. response body와 header, 인증 정보는 기록하지 않고 예약 범위 안의 합성 `storeId` 문자열과 계약 version, 상태, latency만 남긴다. 예약 범위 밖 ID는 원문을 저장하지 않고 corpus contamination 형식 오류로 처리한다.
+
+파일럿은 정확한 층화 request ID 100개의 성공, format/final provider 실패 0건, 재시도 10회 이하, 양성 @8 40% 이상, 성공한 음성 질의 오탐률 25% 이하일 때만 gate를 통과한다. checkpoint 전체 시도에서 회복된 429·5xx·timeout도 별도로 집계한다. 본평가 전 `cloudwatch-pilot-proof.json`은 같은 provenance와 meter 시작·종료 시각, 정확히 100회 LLM 호출, 0보다 큰 input/output token과 실제 비용, 비어 있지 않은 returned model 목록을 가져야 한다. 파일럿 단가로 계산한 10,000회 예상 비용이 preflight 승인 USD 상한을 넘으면 본평가를 차단한다. 해당 증명이 없거나 서로 다르면 9,900개 추가 호출을 시작하지 않는다.
+
+정답률은 고유 질의 2,000개의 반복 0만 통계 단위로 삼고 Wilson 95% 구간을 계산한다. Recall·MRR·nDCG의 분모는 양성 질의 1,700개이고, 음성 300개는 성공 응답만을 분모로 오탐률과 전체 true-negative 정확도를 별도 계산한다. 10,000회 호출은 서로 다른 repeat index 5개가 모두 성공한 질의의 top-1 안정률과 pairwise Jaccard에만 사용한다. 공개 API가 최대 50개만 반환하므로 @1/@3/@5/@8/@20/@50, MRR, nDCG, 음성 질의 오탐률, 지역·가격·업종 위반률과 latency만 실제로 관측한다. exact/forward/reverse/alias 표는 질의 구성 strata별 회수율이며 내부 match branch의 실행 증거가 아니다. 내부 LLM semantic hit, 애플리케이션 predicate hit, 전체 후보, 현재 corpus에 없는 폐점·비공개·과거 버전 누출률은 결과에서 `notObservable`로 명시하며 추정값으로 채우지 않는다. 10,000개 HTTP matrix 뒤에는 `cloudwatch-full-proof.json`의 calls, input/output token, returned model, 실제 비용과 HTTP attempt 수를 대조해야 보고서 상태가 `FINAL_WITH_CLOUDWATCH`가 된다.
