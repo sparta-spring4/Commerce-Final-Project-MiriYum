@@ -16,16 +16,6 @@ BEGIN
     DECLARE fixture_brand VARCHAR(30);
     DECLARE fixture_category VARCHAR(50);
 
-    IF EXISTS (
-        SELECT 1
-        FROM stores
-        WHERE store_id BETWEEN 8900001 AND 8900500
-          AND business_registration_number NOT LIKE '89%'
-    ) THEN
-        SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'reserved store id range 8900001..8900500 is occupied';
-    END IF;
-
     CREATE TEMPORARY TABLE IF NOT EXISTS search_fixture_stores (
         fixture_number INT NOT NULL PRIMARY KEY,
         operator_id BIGINT NOT NULL,
@@ -193,6 +183,440 @@ BEGIN
         ('CAFE_BAKERY',8,'상큼 레몬 에이드','레몬향과 탄산을 더해 상큼하게 만든 음료',6000,'BEVERAGE','아메리카노','아아','레몬향','상큼한',NULL,'추출','레몬향','가벼운',NULL),
         ('CAFE_BAKERY',9,'수제 치즈버거','소고기와 치즈를 넣어 촉촉하게 구운 수제 버거',15000,'PIZZA_BURGER_SANDWICH','햄버거','버거','소고기','고소한',NULL,'수제','훈연향','촉촉한',NULL),
         ('CAFE_BAKERY',10,'브런치 고르곤졸라 피자','치즈를 듬뿍 올려 바삭하게 구운 브런치 피자',17000,'PIZZA_BURGER_SANDWICH','피자','피짜','치즈','고소한',NULL,'굽기',NULL,'바삭한',NULL);
+
+    CREATE TEMPORARY TABLE IF NOT EXISTS search_fixture_expected_menus (
+        menu_sequence INT NOT NULL PRIMARY KEY,
+        fixture_number INT NOT NULL,
+        operator_id BIGINT NOT NULL,
+        store_id BIGINT NOT NULL,
+        menu_id BIGINT NOT NULL,
+        menu_version_id BIGINT NOT NULL,
+        inventory_bucket_id BIGINT NOT NULL,
+        search_profile_id BIGINT NOT NULL,
+        menu_slot INT NOT NULL,
+        menu_name VARCHAR(100) NOT NULL,
+        local_tag VARCHAR(30) NOT NULL,
+        origin_ingredient VARCHAR(100) NOT NULL,
+        origin_label VARCHAR(200) NOT NULL,
+        UNIQUE KEY uk_search_fixture_expected_menu_id (menu_id),
+        UNIQUE KEY uk_search_fixture_expected_inventory (inventory_bucket_id),
+        UNIQUE KEY uk_search_fixture_expected_profile (search_profile_id)
+    );
+    DELETE FROM search_fixture_expected_menus;
+
+    INSERT INTO search_fixture_expected_menus (
+        menu_sequence, fixture_number, operator_id, store_id, menu_id,
+        menu_version_id, inventory_bucket_id, search_profile_id, menu_slot,
+        menu_name, local_tag, origin_ingredient, origin_label
+    )
+    SELECT (fixture.fixture_number - 1) * 10 + template.menu_slot,
+           fixture.fixture_number, fixture.operator_id, fixture.store_id,
+           89000000 + (fixture.fixture_number - 1) * 10 + template.menu_slot,
+           89000000 + (fixture.fixture_number - 1) * 10 + template.menu_slot,
+           189000000 + (fixture.fixture_number - 1) * 10 + template.menu_slot,
+           99000000 + (fixture.fixture_number - 1) * 10 + template.menu_slot,
+           template.menu_slot, template.menu_name,
+           LEFT(COALESCE(template.taste, template.ingredient, template.menu_family), 30),
+           COALESCE(template.ingredient, '주재료'), '합성 원산지 표본'
+    FROM search_fixture_stores fixture
+    JOIN search_fixture_menu_templates template
+      ON template.category_code = fixture.category_code;
+
+    CREATE TEMPORARY TABLE IF NOT EXISTS search_fixture_expected_terms (
+        term_id BIGINT NOT NULL PRIMARY KEY,
+        search_profile_id BIGINT NOT NULL,
+        dimension VARCHAR(30) NOT NULL,
+        normalized_term VARCHAR(60) NOT NULL,
+        UNIQUE KEY uk_search_fixture_expected_term_value (
+            search_profile_id, dimension, normalized_term
+        )
+    );
+    DELETE FROM search_fixture_expected_terms;
+
+    INSERT INTO search_fixture_expected_terms (
+        term_id, search_profile_id, dimension, normalized_term
+    )
+    SELECT 990000000 + ((fixture.fixture_number - 1) * 10 + template.menu_slot) * 10
+               + dimension_row.dimension_order,
+           99000000 + (fixture.fixture_number - 1) * 10 + template.menu_slot,
+           dimension_row.dimension_name,
+           dimension_row.term_value
+    FROM search_fixture_stores fixture
+    JOIN search_fixture_menu_templates template
+      ON template.category_code = fixture.category_code
+    JOIN LATERAL (
+        SELECT 1 AS dimension_order, 'MENU_FAMILY' AS dimension_name,
+               template.menu_family AS term_value
+        UNION ALL SELECT 2, 'ALIAS', template.alias_term
+        UNION ALL SELECT 3, 'INGREDIENT', template.ingredient
+        UNION ALL SELECT 4, 'TASTE', template.taste
+        UNION ALL SELECT 5, 'BROTH', template.broth
+        UNION ALL SELECT 6, 'METHOD', template.method
+        UNION ALL SELECT 7, 'AROMA', template.aroma
+        UNION ALL SELECT 8, 'TEXTURE', template.texture_term
+        UNION ALL SELECT 9, 'FORM', template.form_term
+    ) AS dimension_row ON dimension_row.term_value IS NOT NULL;
+
+    -- Fail closed before the first persistent INSERT. A rerun is accepted only
+    -- when every occupied reserved id and generated unique key has the fixture's
+    -- exact identifier and expected owner/foreign-key relationship.
+    IF EXISTS (
+        SELECT 1
+        FROM store_operator_accounts account
+        LEFT JOIN search_fixture_stores fixture
+          ON fixture.operator_id = account.store_operator_account_id
+        WHERE account.store_operator_account_id BETWEEN 8900001 AND 8900500
+          AND (fixture.operator_id IS NULL
+               OR BINARY account.email <> BINARY CONCAT(
+                   'search-fixture-', LPAD(fixture.fixture_number, 4, '0'),
+                   '@example.invalid'))
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture operator id collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM store_operator_accounts account
+        JOIN search_fixture_stores fixture
+          ON account.email = CONCAT(
+              'search-fixture-', LPAD(fixture.fixture_number, 4, '0'),
+              '@example.invalid')
+        WHERE account.store_operator_account_id <> fixture.operator_id
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture operator email collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM stores store_row
+        LEFT JOIN search_fixture_stores fixture ON fixture.store_id = store_row.store_id
+        WHERE store_row.store_id BETWEEN 8900001 AND 8900500
+          AND (fixture.store_id IS NULL
+               OR store_row.store_operator_account_id <> fixture.operator_id
+               OR BINARY store_row.business_registration_number <> BINARY CONCAT(
+                   '89', LPAD(fixture.fixture_number, 8, '0')))
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture store id collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM stores store_row
+        JOIN search_fixture_stores fixture
+          ON store_row.business_registration_number = CONCAT(
+              '89', LPAD(fixture.fixture_number, 8, '0'))
+        WHERE store_row.store_id <> fixture.store_id
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture store business number collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM store_enforcement_states state_row
+        LEFT JOIN search_fixture_stores fixture
+          ON fixture.store_id = state_row.store_enforcement_state_id
+        WHERE state_row.store_enforcement_state_id BETWEEN 8900001 AND 8900500
+          AND (fixture.store_id IS NULL OR state_row.store_id <> fixture.store_id)
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture enforcement id collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM store_enforcement_states state_row
+        JOIN search_fixture_stores fixture ON fixture.store_id = state_row.store_id
+        WHERE state_row.store_enforcement_state_id <> fixture.store_id
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture enforcement ownership collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM store_operating_schedule_versions version_row
+        LEFT JOIN search_fixture_stores fixture
+          ON fixture.store_id = version_row.operating_schedule_version_id
+        WHERE version_row.operating_schedule_version_id BETWEEN 8900001 AND 8900500
+          AND (fixture.store_id IS NULL OR version_row.store_id <> fixture.store_id
+               OR version_row.version_number <> 1
+               OR NOT (version_row.effective_at
+                        <=> TIMESTAMP('2026-08-25 00:00:00')))
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture operating schedule id collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM store_operating_schedule_versions version_row
+        JOIN search_fixture_stores fixture ON fixture.store_id = version_row.store_id
+        WHERE (version_row.version_number = 1
+               OR version_row.effective_at = TIMESTAMP('2026-08-25 00:00:00'))
+          AND version_row.operating_schedule_version_id <> fixture.store_id
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture operating schedule collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM store_reservation_schedule_versions version_row
+        LEFT JOIN search_fixture_stores fixture
+          ON fixture.store_id = version_row.reservation_schedule_version_id
+        WHERE version_row.reservation_schedule_version_id BETWEEN 8900001 AND 8900500
+          AND (fixture.store_id IS NULL OR version_row.store_id <> fixture.store_id
+               OR version_row.version_number <> 1
+               OR version_row.validated_operating_version_id <> fixture.store_id
+               OR NOT (version_row.effective_at
+                        <=> TIMESTAMP('2026-08-25 00:00:00')))
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture reservation schedule id collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM store_reservation_schedule_versions version_row
+        JOIN search_fixture_stores fixture ON fixture.store_id = version_row.store_id
+        WHERE (version_row.version_number = 1
+               OR version_row.effective_at = TIMESTAMP('2026-08-25 00:00:00'))
+          AND version_row.reservation_schedule_version_id <> fixture.store_id
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture reservation schedule collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM store_operating_schedule_entries entry_row
+        JOIN search_fixture_stores fixture
+          ON fixture.store_id = entry_row.operating_schedule_version_id
+        WHERE entry_row.entry_order BETWEEN 0 AND 6
+          AND (entry_row.day_of_week <> ELT(
+                   entry_row.entry_order + 1,
+                   'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY',
+                   'FRIDAY', 'SATURDAY', 'SUNDAY')
+               OR entry_row.interval_kind <> 'BUSINESS_HOURS'
+               OR entry_row.start_time <> IF(
+                   fixture.category_code = 'CAFE_BAKERY', '09:00:00', '11:00:00')
+               OR entry_row.end_time <> IF(
+                   fixture.category_code = 'CAFE_BAKERY', '21:00:00', '22:00:00')
+               OR entry_row.overnight <> FALSE
+               OR entry_row.week_start_minute <> entry_row.entry_order * 1440
+                    + IF(fixture.category_code = 'CAFE_BAKERY', 540, 660)
+               OR entry_row.week_end_minute <> entry_row.entry_order * 1440
+                    + IF(fixture.category_code = 'CAFE_BAKERY', 1260, 1320))
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture operating schedule entry collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM store_reservation_schedule_entries entry_row
+        JOIN search_fixture_stores fixture
+          ON fixture.store_id = entry_row.reservation_schedule_version_id
+        WHERE entry_row.entry_order BETWEEN 0 AND 6
+          AND (entry_row.day_of_week <> ELT(
+                   entry_row.entry_order + 1,
+                   'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY',
+                   'FRIDAY', 'SATURDAY', 'SUNDAY')
+               OR entry_row.start_time <> IF(
+                   fixture.category_code = 'CAFE_BAKERY', '10:00:00', '12:00:00')
+               OR entry_row.end_time <> IF(
+                   fixture.category_code = 'CAFE_BAKERY', '20:00:00', '21:00:00')
+               OR entry_row.overnight <> FALSE
+               OR entry_row.week_start_minute <> entry_row.entry_order * 1440
+                    + IF(fixture.category_code = 'CAFE_BAKERY', 600, 720)
+               OR entry_row.week_end_minute <> entry_row.entry_order * 1440
+                    + IF(fixture.category_code = 'CAFE_BAKERY', 1200, 1260))
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture reservation schedule entry collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM store_schedule_state state_row
+        JOIN search_fixture_stores fixture ON fixture.store_id = state_row.store_id
+        WHERE NOT (state_row.active_operating_schedule_version_id <=> fixture.store_id)
+           OR NOT (state_row.active_reservation_schedule_version_id <=> fixture.store_id)
+           OR state_row.next_operating_version <> 2
+           OR state_row.next_reservation_version <> 2
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture schedule state collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM menus menu_row
+        LEFT JOIN search_fixture_expected_menus expected
+          ON expected.menu_id = menu_row.menu_id
+        WHERE menu_row.menu_id BETWEEN 89000001 AND 89005000
+          AND (expected.menu_id IS NULL OR menu_row.store_id <> expected.store_id
+               OR NOT (menu_row.published_version_number <=> 1)
+               OR menu_row.visibility <> 'VISIBLE'
+               OR menu_row.selling_status <> 'SELLING'
+               OR menu_row.retired <> FALSE)
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture menu ownership collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM menu_versions version_row
+        LEFT JOIN search_fixture_expected_menus expected
+          ON expected.menu_version_id = version_row.menu_version_id
+        WHERE version_row.menu_version_id BETWEEN 89000001 AND 89005000
+          AND (expected.menu_version_id IS NULL
+               OR version_row.menu_id <> expected.menu_id
+               OR version_row.version_number <> 1
+               OR version_row.created_by_operator_id <> expected.operator_id
+               OR BINARY version_row.name <> BINARY expected.menu_name)
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture menu version id collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM menu_versions version_row
+        JOIN search_fixture_expected_menus expected
+          ON expected.menu_id = version_row.menu_id
+         AND version_row.version_number = 1
+        WHERE version_row.menu_version_id <> expected.menu_version_id
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture menu version collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM menu_version_local_tags tag_row
+        JOIN search_fixture_expected_menus expected
+          ON expected.menu_version_id = tag_row.menu_version_id
+        WHERE (tag_row.sort_order = 0
+               OR tag_row.tag_value = expected.local_tag COLLATE utf8mb4_0900_as_cs)
+          AND (tag_row.sort_order <> 0
+               OR BINARY tag_row.tag_value <> BINARY expected.local_tag)
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture local tag collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM menu_version_allergen_disclosures allergen_row
+        JOIN search_fixture_expected_menus expected
+          ON expected.menu_version_id = allergen_row.menu_version_id
+        WHERE (allergen_row.sort_order = 0 OR allergen_row.allergen_code = 'WHEAT')
+          AND (allergen_row.sort_order <> 0
+               OR allergen_row.allergen_code <> 'WHEAT'
+               OR allergen_row.disclosure_status <> 'MAY_CONTAIN')
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture allergen collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM menu_version_origin_disclosures origin_row
+        JOIN search_fixture_expected_menus expected
+          ON expected.menu_version_id = origin_row.menu_version_id
+        WHERE origin_row.sort_order = 0
+          AND (BINARY origin_row.ingredient_name <> BINARY expected.origin_ingredient
+               OR BINARY origin_row.origin_label <> BINARY expected.origin_label)
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture origin disclosure collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM menu_inventory_buckets bucket
+        LEFT JOIN search_fixture_expected_menus expected
+          ON expected.inventory_bucket_id = bucket.menu_inventory_bucket_id
+        WHERE bucket.menu_inventory_bucket_id BETWEEN 189000001 AND 189005000
+          AND (expected.inventory_bucket_id IS NULL OR bucket.menu_id <> expected.menu_id)
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture inventory bucket id collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM menu_inventory_buckets bucket
+        JOIN search_fixture_expected_menus expected ON expected.menu_id = bucket.menu_id
+        WHERE bucket.service_date = CURRENT_DATE + INTERVAL 1 DAY
+          AND bucket.start_time = '12:00:00'
+          AND bucket.end_date = CURRENT_DATE + INTERVAL 1 DAY
+          AND bucket.end_time = '14:00:00'
+          AND bucket.inventory_policy_version = 1
+          AND bucket.menu_inventory_bucket_id <> expected.inventory_bucket_id
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture inventory bucket collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM menu_search_profiles profile
+        LEFT JOIN search_fixture_expected_menus expected
+          ON expected.search_profile_id = profile.menu_search_profile_id
+        WHERE profile.menu_search_profile_id BETWEEN 99000001 AND 99005000
+          AND (expected.search_profile_id IS NULL
+               OR profile.menu_version_id <> expected.menu_version_id
+               OR profile.schema_version <> 'food-profile-v1')
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture profile id collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM menu_search_profiles profile
+        JOIN search_fixture_expected_menus expected
+          ON expected.menu_version_id = profile.menu_version_id
+        WHERE profile.menu_search_profile_id <> expected.search_profile_id
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture profile ownership collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM menu_search_profile_terms term
+        LEFT JOIN search_fixture_expected_terms expected
+          ON expected.term_id = term.menu_search_profile_term_id
+        WHERE term.menu_search_profile_term_id BETWEEN 990000011 AND 990050009
+          AND (expected.term_id IS NULL
+               OR term.menu_search_profile_id <> expected.search_profile_id
+               OR term.dimension <> expected.dimension
+               OR BINARY term.normalized_term <> BINARY expected.normalized_term)
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture profile term id collision';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM menu_search_profile_terms term
+        JOIN search_fixture_expected_terms expected
+          ON expected.search_profile_id = term.menu_search_profile_id
+         AND expected.dimension = term.dimension
+         AND expected.normalized_term = term.normalized_term
+        WHERE term.menu_search_profile_term_id <> expected.term_id
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'search fixture profile term collision';
+    END IF;
 
     INSERT INTO store_operator_accounts (
         store_operator_account_id, email, password_hash, phone, display_name,
