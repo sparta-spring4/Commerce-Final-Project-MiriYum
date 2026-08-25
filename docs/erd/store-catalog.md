@@ -18,6 +18,8 @@ erDiagram
     MENU_VERSIONS ||--o{ MENU_VERSION_LOCAL_TAGS : has
     MENU_VERSIONS ||--o{ MENU_VERSION_ALLERGEN_DISCLOSURES : discloses
     MENU_VERSIONS ||--o{ MENU_VERSION_ORIGIN_DISCLOSURES : discloses
+    MENU_VERSIONS ||--o| MENU_SEARCH_PROFILES : search_profile
+    MENU_SEARCH_PROFILES ||--o{ MENU_SEARCH_PROFILE_TERMS : contains
     MENUS ||--o{ MENU_INVENTORY_BUCKETS : inventory
     MENU_INVENTORY_BUCKETS ||--o{ MENU_INVENTORY_LEDGER : records
     STORES ||--o{ STORE_REGULAR_CLOSURE_VERSIONS : owns
@@ -43,5 +45,6 @@ erDiagram
 | V53 | `store_enforcement_states`, `store_sanction_cases`, `store_sanction_impact_previews`, `store_sanctions`, `store_sanction_approvals` |
 | V67 | `store_business_registration_evidences` |
 | V71 | `menu_versions` 메뉴명 exact 검색 복합 index (`name`, `status`, `menu_id`, `version_number`) |
+| V72 | `menu_search_profiles`, `menu_search_profile_terms` 메뉴 버전별 구조화 검색 근거 |
 
-일정·재고·대표 메뉴·제재 감사는 대상 매장 또는 업무 ID를 보관하는 원장이다. 사업자등록증 증빙은 파일 메타데이터의 `file_id`를 물리 FK로 참조하고, 신청·버전과 운영자 식별자는 업무 경계에서 검증한다. 상세 FK와 상태 제약은 해당 migration을 우선한다.
+일정·재고·대표 메뉴·제재 감사는 대상 매장 또는 업무 ID를 보관하는 원장이다. 검색 프로필은 정확한 `menu_version_id`에 1:1로 연결되고 정규화 term은 profile 아래에서 차원·값별로 유일하다. 사업자등록증 증빙은 파일 메타데이터의 `file_id`를 물리 FK로 참조하고, 신청·버전과 운영자 식별자는 업무 경계에서 검증한다. 상세 FK와 상태 제약은 해당 migration을 우선한다.
