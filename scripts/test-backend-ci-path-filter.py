@@ -81,6 +81,12 @@ class BackendCiPathFilterTest(unittest.TestCase):
         self.assertNotIn("integration-shard-d", command_registry)
         self.assertNotIn("integrationTestShardD", command_registry)
 
+    def test_integration_shards_allow_the_observed_shard_c_runtime(self):
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        integration_job = workflow[workflow.index("  integration-test:"):workflow.index("  backend-ci:")]
+
+        self.assertIn("timeout-minutes: 50", integration_job)
+
     def test_integration_test_jvm_disables_default_enabled_database_schedulers(self):
         build_script = (ROOT / "backend" / "build.gradle.kts").read_text(encoding="utf-8")
         integration_shard_start = build_script.index("fun registerIntegrationTestShard")
