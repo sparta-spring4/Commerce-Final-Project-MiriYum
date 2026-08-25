@@ -21,6 +21,15 @@ on:
           - preserve
           - enable
           - disable
+      runtime_config:
+        description: "Runtime config: preserve (default), enable, or disable"
+        required: false
+        default: preserve
+        type: choice
+        options:
+          - preserve
+          - enable
+          - disable
 
 permissions:
   contents: read
@@ -41,6 +50,7 @@ env:
   MIRIYUM_STORAGE_S3_ENABLED: ${{ vars.MIRIYUM_STORAGE_S3_ENABLED }}
   MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED: ${{ vars.MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED }}
   PAYMENT_RUNTIME: ${{ inputs.payment_runtime || 'preserve' }}
+  RUNTIME_CONFIG_MODE: ${{ inputs.runtime_config || 'preserve' }}
   MIRIYUM_PORTONE_STORE_ID: ${{ vars.MIRIYUM_PORTONE_STORE_ID }}
   NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA: 515531e122ebbce13d8eead4a3ff15a94c25e0b3
 
@@ -473,14 +483,25 @@ jobs:
             exit 1
           fi
 
-          runtime_config_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
+          current_runtime_config_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
             [.containerDefinitions[] | select(.name == $container) | .environment[]?
               | select(.name == "MIRIYUM_RUNTIME_CONFIG_ENABLED") | .value][0] // "false"
           ' current-task-definition.json)
-          if [ "$runtime_config_enabled" != "true" ] && [ "$runtime_config_enabled" != "false" ]; then
+          if [ "$current_runtime_config_enabled" != "true" ] && [ "$current_runtime_config_enabled" != "false" ]; then
             echo "::error::Current task definition has an invalid MIRIYUM_RUNTIME_CONFIG_ENABLED value."
             exit 1
           fi
+
+          runtime_config_mode="$RUNTIME_CONFIG_MODE"
+          case "$runtime_config_mode" in
+            preserve) runtime_config_enabled="$current_runtime_config_enabled" ;;
+            enable) runtime_config_enabled="true" ;;
+            disable) runtime_config_enabled="false" ;;
+            *)
+              echo "::error::runtime_config must be preserve, enable, or disable."
+              exit 1
+              ;;
+          esac
 
           storage_s3_enabled="$MIRIYUM_STORAGE_S3_ENABLED"
           storage_s3_reconciliation_enabled="$MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"
