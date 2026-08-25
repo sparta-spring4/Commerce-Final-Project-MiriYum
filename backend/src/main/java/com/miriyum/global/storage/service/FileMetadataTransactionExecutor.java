@@ -59,7 +59,10 @@ public class FileMetadataTransactionExecutor {
     /** 바깥 업무·멱등 결과 트랜잭션과 함께 파일 공개 상태를 확정한다. */
     @Transactional(propagation = Propagation.MANDATORY)
     public FileMetadata confirmWithinCurrentTransaction(String fileId) {
-        FileMetadata metadata = findMetadata(fileId);
+        // PENDING 메타데이터는 외부 저장 전용 REQUIRES_NEW 트랜잭션에서 커밋된다.
+        // MySQL REPEATABLE_READ의 기존 읽기 스냅샷에서도 최신 행을 확인하도록 상태 전이는 잠금 조회를 사용한다.
+        FileMetadata metadata = fileMetadataRepository.findByFileIdForUpdate(fileId)
+                .orElseThrow(() -> new IllegalStateException("파일 메타데이터를 찾을 수 없습니다."));
         metadata.confirm();
         return saveTerminalState(metadata);
     }
