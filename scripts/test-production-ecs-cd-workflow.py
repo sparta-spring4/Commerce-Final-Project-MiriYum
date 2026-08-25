@@ -59,6 +59,83 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn('.name == "Backend CI" and .head_branch == "main" and .conclusion == "success"', self.workflow)
         self.assertIn('Manual deployment requires a successful Backend CI run for this main SHA.', self.workflow)
 
+    def test_manual_runtime_config_control_defaults_to_preserve_and_supports_enable_disable(self):
+        dispatch_inputs = self.workflow.split("  workflow_dispatch:", 1)[1].split(
+            "\npermissions:", 1
+        )[0]
+        source_step = self.workflow.split("- name: Verify deployment source", 1)[1].split(
+            "- name:", 1
+        )[0]
+
+        self.assertIn("runtime_config_mode:", dispatch_inputs)
+        self.assertIn("default: preserve", dispatch_inputs)
+        self.assertIn("- preserve", dispatch_inputs)
+        self.assertIn("- enable", dispatch_inputs)
+        self.assertIn("- disable", dispatch_inputs)
+        self.assertIn("MANUAL_RUNTIME_CONFIG_MODE: ${{ inputs.runtime_config_mode }}", source_step)
+        self.assertIn('runtime_config_mode="preserve"', source_step)
+        self.assertIn('runtime_config_mode="$MANUAL_RUNTIME_CONFIG_MODE"', source_step)
+        self.assertIn('echo "runtime_config_mode=$runtime_config_mode" >> "$GITHUB_OUTPUT"', source_step)
+        self.assertIn(
+            "runtime_config_mode: ${{ steps.source.outputs.runtime_config_mode }}",
+            self.workflow,
+        )
+
+    def test_requested_runtime_config_mode_controls_the_next_task_definition(self):
+        task_definition_step = self.workflow.split(
+            "- name: Register task definition with the new image", 1
+        )[1].split("- name: Capture previous ECS task identities", 1)[0]
+
+        self.assertIn(
+            "RUNTIME_CONFIG_MODE: ${{ needs.verify-source.outputs.runtime_config_mode }}",
+            task_definition_step,
+        )
+        self.assertIn('case "$RUNTIME_CONFIG_MODE" in', task_definition_step)
+        self.assertIn(
+            'if [ "$RUNTIME_CONFIG_MODE" = "enable" ] && [ "$runtime_config_enabled" != "false" ]; then',
+            task_definition_step,
+        )
+        self.assertIn(
+            "Production runtime config enable requires the current flag to be false",
+            task_definition_step,
+        )
+        self.assertIn('preserve)', task_definition_step)
+        self.assertIn('enable)', task_definition_step)
+        self.assertIn('runtime_config_enabled="true"', task_definition_step)
+        self.assertIn('disable)', task_definition_step)
+        self.assertIn('runtime_config_enabled="false"', task_definition_step)
+        self.assertIn('Unsupported production runtime config mode', task_definition_step)
+        self.assertIn('if [ "$runtime_config_enabled" = "true" ]; then', task_definition_step)
+        self.assertNotIn("aws secretsmanager get-secret-value", task_definition_step)
+
+    def test_failed_manual_enable_deploys_a_disabled_same_image_recovery_revision(self):
+        recovery_step_name = "- name: Disable production runtime config after failed enable"
+        self.assertIn(recovery_step_name, self.workflow)
+        recovery_step = self.workflow.split(
+            recovery_step_name, 1
+        )[1].split("- name: Cleanup previous ECS task identity evidence", 1)[0]
+
+        self.assertIn("if: >-", recovery_step)
+        self.assertIn("always()", recovery_step)
+        self.assertIn("failure() || cancelled()", recovery_step)
+        self.assertIn(
+            "needs.verify-source.outputs.runtime_config_mode == 'enable'",
+            recovery_step,
+        )
+        self.assertIn("steps.task-definition.outcome == 'success'", recovery_step)
+        self.assertIn(
+            "IMAGE_URI: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ needs.verify-source.outputs.image_tag }}",
+            recovery_step,
+        )
+        self.assertIn("aws ecs describe-task-definition", recovery_step)
+        self.assertIn('{name: "MIRIYUM_RUNTIME_CONFIG_ENABLED", value: "false"}', recovery_step)
+        self.assertIn('.name != "SPRING_APPLICATION_JSON"', recovery_step)
+        self.assertIn("aws ecs register-task-definition", recovery_step)
+        self.assertIn("aws ecs update-service", recovery_step)
+        self.assertIn("for attempt in $(seq 1 80)", recovery_step)
+        self.assertIn("Production runtime config disable recovery completed", recovery_step)
+        self.assertNotIn("aws secretsmanager get-secret-value", recovery_step)
+
     def test_production_deployment_requires_immutable_ecr_tags(self):
         self.assertIn("Require immutable ECR image tags", self.workflow)
         self.assertIn("imageTagMutability", self.workflow)
@@ -169,7 +246,7 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
     def test_deploy_job_timeout_covers_image_build_and_stability_wait_budget(self):
         deploy_job = self.workflow.split("  deploy:", 1)[1].split("    permissions:", 1)[0]
 
-        self.assertIn("timeout-minutes: 50", deploy_job)
+        self.assertIn("timeout-minutes: 70", deploy_job)
 
     def test_automatic_and_manual_sources_enforce_the_notification_writer_floor(self):
         self.assertIn(

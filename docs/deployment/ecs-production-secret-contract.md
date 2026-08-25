@@ -115,6 +115,19 @@ The staging equivalent is the SSM SecureString `/miriyum/staging/backend-runtime
 existing deployment path. Never put JSON values in GitHub variables, task definition
 `environment`, workflow output, logs, issues, or PRs.
 
+`Backend CD (Production ECS)` keeps this flag unchanged for automatic `main` deployments. An
+approved manual dispatch from `dev` may select `runtime_config_mode=preserve`, `enable`, or
+`disable` for an existing immutable full-SHA image. `enable` registers a task revision with
+`MIRIYUM_RUNTIME_CONFIG_ENABLED=true` and the whole `SPRING_APPLICATION_JSON` secret reference;
+`disable` registers the same image with the flag set to `false` and removes that secret reference.
+`enable` is accepted only when the live task currently has runtime config disabled, so failure
+recovery cannot turn off unrelated settings that were already active. Both modes retain the
+existing `production` Environment approval and main-history/CI gates. If an `enable` run fails or
+is cancelled after the enabled task definition is registered, the workflow deploys a fail-closed
+revision of the same image with runtime config disabled. This control path does not itself
+authorize SSE activation or prove endpoint health; Issue #540's prerequisite, observation, and
+rollback evidence remains required before leaving production runtime config enabled.
+
 ## OpenAI search key
 
 `OPENAI_API_KEY` is a separate SSM SecureString parameter, not a key in `miriyum/production/application`. Store it at `/miriyum/shared/openai-api-key`; the ECS execution role needs `ssm:GetParameter` for only that parameter ARN. Production CD derives that ARN from the deployment account and injects it through the ECS `secrets` field, so neither the API key nor its value is registered as a normal task environment variable.

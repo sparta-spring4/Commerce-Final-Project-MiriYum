@@ -1,4 +1,4 @@
-# 기본 브랜치(dev)가 main CI를 통과한 immutable SHA 이미지를 ECR에 push하고, 현재 ECS 설정을 보존한 채 이미지만 교체한다.
+# main CI 자동 배포는 현재 ECS runtime 설정을 보존하고, 승인된 수동 배포만 runtime config를 전환한다.
 name: Backend CD (Production ECS)
 
 on:
@@ -12,6 +12,15 @@ on:
         description: "Deploy an existing immutable 40-character Git SHA image tag"
         required: true
         type: string
+      runtime_config_mode:
+        description: "Production runtime config: preserve, enable, or disable"
+        required: true
+        default: preserve
+        type: choice
+        options:
+          - preserve
+          - enable
+          - disable
 
 permissions:
   contents: read
@@ -51,6 +60,7 @@ jobs:
     outputs:
       deployable: ${{ steps.source.outputs.deployable }}
       image_tag: ${{ steps.source.outputs.image_tag }}
+      runtime_config_mode: ${{ steps.source.outputs.runtime_config_mode }}
 
     steps:
       - name: Verify deployment source
@@ -59,8 +69,10 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
           MANUAL_TAG: ${{ inputs.image_tag }}
+          MANUAL_RUNTIME_CONFIG_MODE: ${{ inputs.runtime_config_mode }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          runtime_config_mode="preserve"
           if [ "$EVENT_NAME" = "workflow_run" ]; then
             current_main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
 
@@ -73,6 +85,16 @@ jobs:
             image_tag="$WORKFLOW_SHA"
           else
             image_tag="$MANUAL_TAG"
+            runtime_config_mode="$MANUAL_RUNTIME_CONFIG_MODE"
+
+            case "$runtime_config_mode" in
+              preserve|enable|disable)
+                ;;
+              *)
+                echo "::error::Unsupported production runtime config mode: $runtime_config_mode"
+                exit 1
+                ;;
+            esac
 
             if ! [[ "$image_tag" =~ ^[0-9a-f]{40}$ ]]; then
               echo "::error::Only a full 40-character Git SHA image tag can be deployed."
@@ -101,6 +123,7 @@ jobs:
 
           echo "deployable=true" >> "$GITHUB_OUTPUT"
           echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
+          echo "runtime_config_mode=$runtime_config_mode" >> "$GITHUB_OUTPUT"
 
       - name: Checkout trusted production control revision
         if: steps.source.outputs.deployable == 'true'
@@ -135,8 +158,8 @@ jobs:
     needs: verify-source
     environment: production
     runs-on: ubuntu-24.04
-    # ARM64 이미지 빌드와 20분 ECS 안정화 대기를 모두 수용한다.
-    timeout-minutes: 50
+    # ARM64 이미지 빌드, 20분 ECS 안정화와 실패 시 20분 비활성 복구를 모두 수용한다.
+    timeout-minutes: 70
     permissions:
       actions: read
       contents: read
@@ -428,6 +451,7 @@ jobs:
         id: task-definition
         env:
           IMAGE_URI: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ needs.verify-source.outputs.image_tag }}
+          RUNTIME_CONFIG_MODE: ${{ needs.verify-source.outputs.runtime_config_mode }}
         run: |
           current_task_definition=$(aws ecs describe-services \
             --cluster "$ECS_CLUSTER" \
@@ -465,6 +489,26 @@ jobs:
             echo "::error::Current task definition has an invalid MIRIYUM_RUNTIME_CONFIG_ENABLED value."
             exit 1
           fi
+
+          if [ "$RUNTIME_CONFIG_MODE" = "enable" ] && [ "$runtime_config_enabled" != "false" ]; then
+            echo "::error::Production runtime config enable requires the current flag to be false."
+            exit 1
+          fi
+
+          case "$RUNTIME_CONFIG_MODE" in
+            preserve)
+              ;;
+            enable)
+              runtime_config_enabled="true"
+              ;;
+            disable)
+              runtime_config_enabled="false"
+              ;;
+            *)
+              echo "::error::Unsupported production runtime config mode: $RUNTIME_CONFIG_MODE"
+              exit 1
+              ;;
+          esac
 
           storage_s3_enabled="$MIRIYUM_STORAGE_S3_ENABLED"
           storage_s3_reconciliation_enabled="$MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"
@@ -982,6 +1026,124 @@ jobs:
             sleep 5
             refresh_replacement_evidence
           done
+      - name: Disable production runtime config after failed enable
+        if: >-
+          always() &&
+          needs.verify-source.outputs.runtime_config_mode == 'enable' &&
+          steps.task-definition.outcome == 'success' &&
+          (failure() || cancelled())
+        env:
+          IMAGE_URI: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ needs.verify-source.outputs.image_tag }}
+        run: |
+          recovery_source_task_definition=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --query 'services[0].taskDefinition' \
+            --output text)
+
+          aws ecs describe-task-definition \
+            --task-definition "$recovery_source_task_definition" \
+            --query taskDefinition \
+            --output json > recovery-current-task-definition.json
+
+          recovery_container_count=$(jq --arg container "$ECS_CONTAINER_NAME" \
+            '[.containerDefinitions[] | select(.name == $container)] | length' \
+            recovery-current-task-definition.json)
+          if [ "$recovery_container_count" != "1" ]; then
+            echo "::error::Runtime config recovery requires exactly one $ECS_CONTAINER_NAME container."
+            exit 1
+          fi
+
+          jq --arg image "$IMAGE_URI" --arg container "$ECS_CONTAINER_NAME" '
+            .containerDefinitions |= map(
+              if .name == $container then
+                .image = $image
+                | .environment = ((.environment // [] | map(select(
+                    .name != "MIRIYUM_RUNTIME_CONFIG_ENABLED"
+                  ))) + [
+                    {name: "MIRIYUM_RUNTIME_CONFIG_ENABLED", value: "false"}
+                  ])
+                | .secrets = (.secrets // [] | map(select(
+                    .name != "SPRING_APPLICATION_JSON"
+                  )))
+              else . end
+            )
+            | del(
+                .taskDefinitionArn,
+                .revision,
+                .status,
+                .requiresAttributes,
+                .compatibilities,
+                .registeredAt,
+                .registeredBy,
+                .deregisteredAt
+              )
+          ' recovery-current-task-definition.json > recovery-next-task-definition.json
+
+          recovery_runtime_flag_count=$(jq --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .environment[]?
+              | select(.name == "MIRIYUM_RUNTIME_CONFIG_ENABLED" and .value == "false")]
+            | length
+          ' recovery-next-task-definition.json)
+          recovery_runtime_secret_count=$(jq --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .secrets[]?
+              | select(.name == "SPRING_APPLICATION_JSON")]
+            | length
+          ' recovery-next-task-definition.json)
+          recovery_image=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
+            .containerDefinitions[] | select(.name == $container) | .image
+          ' recovery-next-task-definition.json)
+          if [ "$recovery_runtime_flag_count" != "1" ] \
+            || [ "$recovery_runtime_secret_count" != "0" ] \
+            || [ "$recovery_image" != "$IMAGE_URI" ]; then
+            echo "::error::Runtime config recovery task definition is not fail-closed."
+            exit 1
+          fi
+
+          recovery_task_definition_arn=$(aws ecs register-task-definition \
+            --cli-input-json file://recovery-next-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "$recovery_task_definition_arn" \
+            --output json >/dev/null
+
+          for attempt in $(seq 1 80); do
+            service=$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$ECS_SERVICE" \
+              --query 'services[0]' \
+              --output json)
+
+            primary_task_definition=$(jq -r '.deployments[] | select(.status == "PRIMARY") | .taskDefinition' <<< "$service")
+            primary_rollout_state=$(jq -r '.deployments[] | select(.status == "PRIMARY") | .rolloutState // "UNKNOWN"' <<< "$service")
+            running_count=$(jq -r '.runningCount' <<< "$service")
+            desired_count=$(jq -r '.desiredCount' <<< "$service")
+            pending_count=$(jq -r '.pendingCount' <<< "$service")
+
+            if jq -e '.deployments[] | select(.status == "PRIMARY" and .rolloutState == "FAILED")' \
+              <<< "$service" >/dev/null; then
+              echo "::error::Production runtime config disable recovery entered FAILED rollout state."
+              exit 1
+            fi
+
+            if [ "$primary_task_definition" = "$recovery_task_definition_arn" ] \
+              && [ "$primary_rollout_state" = "COMPLETED" ] \
+              && [ "$running_count" = "$desired_count" ] \
+              && [ "$pending_count" = "0" ]; then
+              echo "Production runtime config disable recovery completed."
+              exit 0
+            fi
+
+            echo "Waiting for production runtime config disable recovery ($attempt/80)..."
+            sleep 15
+          done
+
+          echo "::error::Production runtime config disable recovery did not stabilize within 20 minutes."
+          exit 1
       - name: Cleanup previous ECS task identity evidence
         if: always()
         run: |
