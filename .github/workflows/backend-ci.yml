@@ -117,7 +117,8 @@ jobs:
     runs-on: ubuntu-24.04
     # GitHub-hosted runner 세 개에서 대기 없이 동시에 시작하도록 통합 테스트를
     # 실측 duration 기준의 세 shard로 재분배한다.
-    timeout-minutes: 40
+    # Shard C가 40분 제한에 도달해 취소된 실행(32831879705)의 완료 여유를 둔다.
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
