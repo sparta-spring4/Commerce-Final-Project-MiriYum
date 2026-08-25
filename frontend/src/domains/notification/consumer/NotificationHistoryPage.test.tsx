@@ -27,6 +27,7 @@ function historyItem(overrides: Record<string, unknown> = {}) {
     occurredAt: '2026-08-13T10:00:00+09:00',
     createdAt: '2026-08-13T10:00:01+09:00',
     deliveredAt: '2026-08-13T10:00:02+09:00',
+    readAt: null,
     action: null,
     ...overrides,
   }
@@ -89,7 +90,13 @@ async function renderPage(
   eventStream = eventStreamHarness().client,
 ) {
   const { NotificationHistoryPage } = await import('./NotificationHistoryPage')
+  const { NotificationCenterProvider } = await import('./NotificationCenterProvider')
   const apiClient = createApiClient()
+  server.use(
+    http.get('/api/v1/consumers/me/notifications/unread-count', () =>
+      HttpResponse.json({ code: 'SUCCESS', message: '조회', data: { unreadCount: 1 } }),
+    ),
+  )
 
   function Wrapper({ children }: { children: ReactNode }) {
     return (
@@ -99,24 +106,21 @@ async function renderPage(
     )
   }
 
-  const rendered = render(
-    <NotificationHistoryPage
+  const page = (key: number) => (
+    <NotificationCenterProvider
+      key={key}
       apiClient={apiClient}
       eventStream={eventStream}
-      sessionKey={sessionKey}
-    />,
-    { wrapper: Wrapper },
+      sessionKey={key}
+    >
+      <NotificationHistoryPage apiClient={apiClient} sessionKey={key} />
+    </NotificationCenterProvider>
   )
+  const rendered = render(page(sessionKey), { wrapper: Wrapper })
   return {
     ...rendered,
     rerenderSession(nextSessionKey: number) {
-      rendered.rerender(
-        <NotificationHistoryPage
-          apiClient={apiClient}
-          eventStream={eventStream}
-          sessionKey={nextSessionKey}
-        />,
-      )
+      rendered.rerender(page(nextSessionKey))
     },
   }
 }
@@ -303,6 +307,78 @@ describe('NotificationHistoryPage', () => {
     ).toHaveAttribute('href', '/pickup-reservations/pickup%2F701')
   })
 
+  test('marks an actionless waiting notification read when selected', async () => {
+    let readCalls = 0
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(successResponse([historyItem({
+          purpose: 'WAITING_NEAR_ENTRY',
+          title: '곧 입장할 차례입니다.',
+          resource: { type: 'WAITING_TEAM', id: '701' },
+          action: null,
+        })])),
+      ),
+      http.post('/api/v1/consumers/me/notifications/:notificationId/reads', () => {
+        readCalls += 1
+        return HttpResponse.json({ code: 'SUCCESS', message: '읽음', data: { unreadCount: 0 } })
+      }),
+    )
+
+    await renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '읽음으로 표시' }))
+
+    await waitFor(() => expect(readCalls).toBe(1))
+  })
+
+  test('marks every account notification read instead of only the current page', async () => {
+    let readAllCalls = 0
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(successResponse([historyItem()])),
+      ),
+      http.post('/api/v1/consumers/me/notifications/reads', () => {
+        readAllCalls += 1
+        return HttpResponse.json({ code: 'SUCCESS', message: '전체 읽음', data: { unreadCount: 0 } })
+      }),
+    )
+
+    await renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '모두 읽음' }))
+
+    await waitFor(() => expect(readAllCalls).toBe(1))
+  })
+
+  test('does not block a reservation detail link when the read request fails', async () => {
+    let readCalls = 0
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(successResponse([historyItem({
+          action: {
+            type: 'RESERVATION_DETAIL',
+            resource: { type: 'RESERVATION', id: '501' },
+            availability: 'AVAILABLE',
+            expiresAt: null,
+          },
+        })])),
+      ),
+      http.post('/api/v1/consumers/me/notifications/:notificationId/reads', () => {
+        readCalls += 1
+        return HttpResponse.json(
+          { code: 'COMMON_012', message: '일시 오류' },
+          { status: 503 },
+        )
+      }),
+    )
+
+    await renderPage()
+    const link = await screen.findByRole('link', { name: '예약 상세 보기' })
+    expect(link).toHaveAttribute('href', '/reservations/501')
+    fireEvent.click(link)
+
+    await waitFor(() => expect(readCalls).toBe(1))
+    expect(await screen.findByRole('alert')).toHaveTextContent('읽음 상태를 저장하지 못했습니다.')
+  })
+
   test.each(['EXPIRED', 'SUPERSEDED', 'UNAVAILABLE'])(
     'disables a %s detail action instead of navigating',
     async (availability) => {
@@ -380,7 +456,9 @@ describe('NotificationHistoryPage', () => {
 
     expect(await screen.findByText('예약이 확정되었습니다.')).toBeVisible()
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '예약 상세 보기' }),
+    ).not.toBeInTheDocument()
   })
 
   test('renders the delivery time in Asia/Seoul on a UTC device', async () => {

@@ -33,11 +33,10 @@ import { useConsumerAuth } from '../shells/consumer/ConsumerAuthProvider'
 import { CONSUMER_PATHS } from './paths/consumerPaths'
 
 function ConsumerNotificationHistoryRoute() {
-  const { apiClient, notificationEventStream, sessionKey } = useConsumerAuth()
+  const { apiClient, sessionKey } = useConsumerAuth()
   return (
     <NotificationHistoryPage
       apiClient={apiClient}
-      eventStream={notificationEventStream}
       sessionKey={sessionKey}
     />
   )

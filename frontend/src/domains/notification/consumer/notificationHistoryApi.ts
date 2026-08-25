@@ -43,6 +43,8 @@ function isNotificationHistoryItem(
     typeof value.createdAt === 'string' &&
     typeof value.deliveredAt === 'string' &&
     !Number.isNaN(Date.parse(value.deliveredAt)) &&
+    (value.readAt === null ||
+      (typeof value.readAt === 'string' && !Number.isNaN(Date.parse(value.readAt)))) &&
     isAction(value.action)
   )
 }

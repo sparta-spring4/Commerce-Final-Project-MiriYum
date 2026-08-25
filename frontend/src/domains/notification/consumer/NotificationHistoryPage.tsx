@@ -11,16 +11,11 @@ import {
   type NotificationHistoryItem,
 } from './notificationHistoryApi'
 import { getNotificationPurposeLabel } from './notificationPurposeLabel'
-import type {
-  NotificationEventConnectionState,
-  NotificationEventStreamClient,
-} from './notificationEventStream'
-
-const NOTIFICATION_HISTORY_QUERY_ROOT = ['consumer', 'notification-history'] as const
+import { useNotificationCenter } from './NotificationCenterProvider'
+import { notificationQueryKeys } from './notificationQueryKeys'
 
 type NotificationHistoryPageProps = {
   apiClient: ApiClient
-  eventStream: NotificationEventStreamClient
   sessionKey: number
 }
 
@@ -91,19 +86,40 @@ function resolveDetailAction(
   return null
 }
 
-function NotificationItem({ item }: { item: NotificationHistoryItem }) {
+function NotificationItem({
+  item,
+  onRead,
+}: {
+  item: NotificationHistoryItem
+  onRead: (notificationId: string) => void
+}) {
   const detailAction = resolveDetailAction(item.action)
+  const unread = item.readAt === null
+  const waitingWithoutAction =
+    unread && item.action === null && item.resource.type === 'WAITING_TEAM'
 
   return (
     <li>
-      <article>
+      <article data-read={unread ? 'false' : 'true'}>
         <p>{getNotificationPurposeLabel(item.purpose)}</p>
         <h2>{item.title}</h2>
         <time dateTime={item.deliveredAt}>
           {formatDeliveredAt(item.deliveredAt)}
         </time>
         {detailAction?.kind === 'link' ? (
-          <Link to={detailAction.to}>{detailAction.label}</Link>
+          <Link
+            to={detailAction.to}
+            onClick={() => {
+              if (unread) onRead(item.notificationId)
+            }}
+          >
+            {detailAction.label}
+          </Link>
+        ) : null}
+        {waitingWithoutAction ? (
+          <button type="button" onClick={() => onRead(item.notificationId)}>
+            읽음으로 표시
+          </button>
         ) : null}
         {detailAction?.kind === 'disabled' ? (
           <button type="button" disabled>
@@ -191,14 +207,14 @@ function HistoryError({
 
 export function NotificationHistoryPage({
   apiClient,
-  eventStream,
   sessionKey,
 }: NotificationHistoryPageProps) {
   const queryClient = useQueryClient()
-  const [eventConnectionState, setEventConnectionState] =
-    useState<NotificationEventConnectionState | null>(null)
+  const { unreadCount, connectionState: eventConnectionState, markRead, markAllRead } =
+    useNotificationCenter()
+  const [readError, setReadError] = useState(false)
   const queryKey = useMemo(
-    () => [...NOTIFICATION_HISTORY_QUERY_ROOT, sessionKey] as const,
+    () => notificationQueryKeys.history(sessionKey),
     [sessionKey],
   )
   const history = useInfiniteQuery({
@@ -214,65 +230,6 @@ export function NotificationHistoryPage({
         ? lastPage.nextCursor
         : undefined,
   })
-
-  useEffect(() => {
-    const controller = new AbortController()
-    let refreshRequested = false
-    let refreshRunning = false
-
-    const refreshHistory = async () => {
-      if (refreshRunning) {
-        return
-      }
-
-      refreshRunning = true
-      try {
-        while (refreshRequested && !controller.signal.aborted) {
-          const queryState = queryClient.getQueryState(queryKey)
-          if (
-            queryState?.fetchStatus === 'fetching' &&
-            queryState.data === undefined
-          ) {
-            await queryClient.cancelQueries({
-              queryKey,
-              exact: true,
-            })
-          }
-
-          if (controller.signal.aborted) {
-            return
-          }
-
-          refreshRequested = false
-          await queryClient.invalidateQueries({
-            queryKey,
-            exact: true,
-          })
-        }
-      } finally {
-        refreshRunning = false
-      }
-    }
-
-    setEventConnectionState(null)
-    void eventStream.subscribe({
-      signal: controller.signal,
-      onChanged: () => {
-        if (controller.signal.aborted) {
-          return
-        }
-
-        refreshRequested = true
-        void refreshHistory()
-      },
-      onConnectionStateChange: setEventConnectionState,
-    })
-
-    return () => {
-      refreshRequested = false
-      controller.abort()
-    }
-  }, [eventStream, queryClient, queryKey])
 
   useEffect(
     () => () => {
@@ -293,9 +250,27 @@ export function NotificationHistoryPage({
 
   const items = history.data?.pages.flatMap((page) => page.items) ?? []
 
+  const requestRead = (notificationId: string) => {
+    setReadError(false)
+    void markRead(notificationId).catch(() => setReadError(true))
+  }
+
   return (
     <main>
       <h1>알림 이력</h1>
+
+      <button
+        type="button"
+        disabled={unreadCount === 0}
+        onClick={() => {
+          setReadError(false)
+          void markAllRead().catch(() => setReadError(true))
+        }}
+      >
+        모두 읽음
+      </button>
+
+      {readError ? <p role="alert">읽음 상태를 저장하지 못했습니다.</p> : null}
 
       {eventConnectionState === 'reconnecting' ? (
         <p
@@ -327,7 +302,7 @@ export function NotificationHistoryPage({
       {items.length > 0 ? (
         <ul>
           {items.map((item) => (
-            <NotificationItem key={item.notificationId} item={item} />
+            <NotificationItem key={item.notificationId} item={item} onRead={requestRead} />
           ))}
         </ul>
       ) : null}
