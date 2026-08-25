@@ -15,9 +15,9 @@ Issue #568의 exact-first OpenAI 보완 검색과 같은 매장·인근 매장 �
 
 `natural-language` case는 결과 개수만으로 통과할 수 없고 다음 품질 기대값 중 하나 이상을 가져야 한다.
 
-- `expectedStoreIds`: 결과에 반드시 포함될 합성 매장 ID
-- `expectedOrderedStoreIds`: 결과에서 상대 순서를 지켜야 할 합성 매장 ID. #592 검증에서는 exact, 정방향 expanded, 역방향 expanded 매장을 이 순서로 둔다.
-- `excludedStoreIds`: 결과에 포함되면 안 되는 알려진 무관 합성 매장 ID
+- `expectedStoreIds`: 결과에 반드시 포함될 합성 매장 PublicId 문자열
+- `expectedOrderedStoreIds`: 결과에서 상대 순서를 지켜야 할 합성 매장 PublicId 문자열. #592 검증에서는 exact, 정방향 expanded, 역방향 expanded 매장을 이 순서로 둔다.
+- `excludedStoreIds`: 결과에 포함되면 안 되는 알려진 무관 합성 매장 PublicId 문자열
 - `maximumItems`: 통제된 true-no-answer 입력에서 허용할 최대 결과 수. `minimumItems`보다 작을 수 없다.
 
 각 ID 배열은 양의 정수만 중복 없이 가지며 기대 포함·순서 ID와 제외 ID는 겹칠 수 없다. 아래 모양은 설명용이며 실제 검색어와 ID는 ignored fixture에만 둔다.
@@ -30,8 +30,8 @@ Issue #568의 exact-first OpenAI 보완 검색과 같은 매장·인근 매장 �
       "scenario": "natural-language",
       "searchInput": "<approved compound food expression>",
       "minimumItems": 3,
-      "expectedStoreIds": [303],
-      "expectedOrderedStoreIds": [101, 202, 303]
+      "expectedStoreIds": ["303"],
+      "expectedOrderedStoreIds": ["101", "202", "303"]
     },
     {
       "alias": "no-food-signal-quality",
@@ -39,7 +39,7 @@ Issue #568의 exact-first OpenAI 보완 검색과 같은 매장·인근 매장 �
       "searchInput": "<approved true-no-answer expression>",
       "minimumItems": 0,
       "maximumItems": 0,
-      "excludedStoreIds": [404]
+      "excludedStoreIds": ["404"]
     }
   ]
 }

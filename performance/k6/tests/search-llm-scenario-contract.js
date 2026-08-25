@@ -29,16 +29,19 @@ export default function () {
   check(null, {
     'integrated search requires the cursor response contract': () => !throws(() => validateIntegratedSearchResponse({ code: 'SUCCESS', message: 'ok', data: { items: [], normalizedCondition: {}, warnings: [], ruleVersion: 'v1', vocabularyVersion: 'v1', rankingRuleVersion: null, nextCursor: null } })),
     'integrated search verifies expected stores and their relative order': () => !throws(() => validateIntegratedSearchResponse(
-      integratedEnvelope([{ storeId: 11 }, { storeId: 22 }, { storeId: 33 }]),
-      { expectedStoreIds: [33], expectedOrderedStoreIds: [11, 22, 33], excludedStoreIds: [44] },
+      integratedEnvelope([{ storeId: '11' }, { storeId: '22' }, { storeId: '33' }]),
+      { expectedStoreIds: ['33'], expectedOrderedStoreIds: ['11', '22', '33'], excludedStoreIds: ['44'] },
     )),
     'integrated search rejects a reversed expected store order': () => throws(() => validateIntegratedSearchResponse(
-      integratedEnvelope([{ storeId: 22 }, { storeId: 11 }]),
-      { expectedOrderedStoreIds: [11, 22] },
+      integratedEnvelope([{ storeId: '22' }, { storeId: '11' }]),
+      { expectedOrderedStoreIds: ['11', '22'] },
     )),
     'integrated search rejects an excluded abstention quality candidate': () => throws(() => validateIntegratedSearchResponse(
-      integratedEnvelope([{ storeId: 44 }]),
-      { excludedStoreIds: [44] },
+      integratedEnvelope([{ storeId: '44' }]),
+      { excludedStoreIds: ['44'] },
+    )),
+    'integrated search rejects a numeric storeId outside the PublicId contract': () => throws(() => validateIntegratedSearchResponse(
+      integratedEnvelope([{ storeId: 11 }]),
     )),
     'same-store response contains only source store candidates': () => !throws(() => validateAlternativeResponse(envelope('SAME_STORE', [{ ...item, storeId: 1 }]), { sourceStoreId: 1, sourceUnitPrice: 10000 })),
     'nearby candidates stay within three kilometres': () => !throws(() => validateAlternativeResponse(envelope('NEARBY_STORE', [{ ...item, distanceMeters: 3000, coordinates: { latitude: 37.5, longitude: 127 } }]), { sourceStoreId: 1, sourceUnitPrice: 10000 })),
@@ -64,12 +67,12 @@ export default function () {
     },
     'natural-language execution forwards result-specific expectations': () => throws(() => runSearchLlmCase({
       client: {
-        get: () => ({ status: 200, json: () => integratedEnvelope([{ storeId: 44 }]) }),
+        get: () => ({ status: 200, json: () => integratedEnvelope([{ storeId: '44' }]) }),
       },
       baseUrl: 'https://staging.example',
       fixtureCase: {
         scenario: 'natural-language', searchInput: 'synthetic compound concept', minimumItems: 0,
-        expectedStoreIds: [33], excludedStoreIds: [44],
+        expectedStoreIds: ['33'], excludedStoreIds: ['44'],
       },
     })),
     'alternative search sends only the approved request body': () => {
@@ -86,8 +89,11 @@ export default function () {
       { alias: 'minimum-only', scenario: 'natural-language', searchInput: 'synthetic natural language', minimumItems: 1 },
     ] })),
     'natural-language fixture accepts match and abstention quality expectations': () => !throws(() => validateSearchLlmFixture({ cases: [
-      { alias: 'reverse-match', scenario: 'natural-language', searchInput: 'synthetic compound concept', minimumItems: 1, expectedStoreIds: [33], expectedOrderedStoreIds: [11, 22, 33] },
-      { alias: 'abstention-quality', scenario: 'natural-language', searchInput: 'synthetic no food signal', minimumItems: 0, maximumItems: 0, excludedStoreIds: [44] },
+      { alias: 'reverse-match', scenario: 'natural-language', searchInput: 'synthetic compound concept', minimumItems: 1, expectedStoreIds: ['33'], expectedOrderedStoreIds: ['11', '22', '33'] },
+      { alias: 'abstention-quality', scenario: 'natural-language', searchInput: 'synthetic no food signal', minimumItems: 0, maximumItems: 0, excludedStoreIds: ['44'] },
+    ] })),
+    'natural-language fixture rejects numeric store expectations outside the PublicId contract': () => throws(() => validateSearchLlmFixture({ cases: [
+      { alias: 'numeric-id', scenario: 'natural-language', searchInput: 'synthetic compound concept', minimumItems: 1, expectedStoreIds: [33] },
     ] })),
     'fallback fixture without a control mode is rejected': () => throws(() => validateSearchLlmFixture({ cases: [
       { alias: 'missing', scenario: 'fallback', searchInput: 'synthetic fallback' },

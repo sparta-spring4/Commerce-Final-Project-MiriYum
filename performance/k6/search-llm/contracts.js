@@ -8,10 +8,21 @@ function success(response) {
   return object('data', value.data)
 }
 
+function isPublicId(value) {
+  return typeof value === 'string' && /^[1-9][0-9]*$/.test(value)
+}
+
+function publicId(name, value) {
+  if (!isPublicId(value)) {
+    throw new Error(`${name} is invalid`)
+  }
+  return value
+}
+
 function optionalStoreIds(name, value) {
   if (value === undefined) return null
   if (!Array.isArray(value) || value.length === 0
-    || value.some((storeId) => !Number.isInteger(storeId) || storeId < 1)
+    || value.some((storeId) => !isPublicId(storeId))
     || new Set(value).size !== value.length) {
     throw new Error(`${name} is invalid`)
   }
@@ -45,10 +56,7 @@ export function validateIntegratedSearchResponse(response, expected = {}) {
   }
   const storeIds = data.items.map((item) => {
     object('integrated search item', item)
-    if (!Number.isInteger(item.storeId) || item.storeId < 1) {
-      throw new Error('integrated search item storeId is invalid')
-    }
-    return item.storeId
+    return publicId('integrated search item storeId', item.storeId)
   })
   if (new Set(storeIds).size !== storeIds.length) throw new Error('integrated search stores are duplicated')
   const included = expected.expectedStoreIds || []
