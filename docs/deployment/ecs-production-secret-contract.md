@@ -60,9 +60,18 @@ The initial production task keeps Kakao OAuth, member support, and payment disab
 | --- | --- |
 | `MIRIYUM_KAKAO_ENABLED` | `MIRIYUM_KAKAO_REST_API_KEY`, `MIRIYUM_KAKAO_CLIENT_SECRET`, `MIRIYUM_KAKAO_STATE_SECRET`, `MIRIYUM_KAKAO_SIGN_UP_TICKET_SECRET`, `MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_ACTIVE_SECRET` |
 | `MIRIYUM_MEMBER_SUPPORT_ENABLED` | `MIRIYUM_MEMBER_SUPPORT_PROOF_DIGEST_SECRET`, `MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_ACTIVE_KEY` |
-| `MIRIYUM_PAYMENT_ENABLED` | `MIRIYUM_PAYMENT_CURSOR_SECRET`, `MIRIYUM_PORTONE_API_SECRET`, `MIRIYUM_PORTONE_WEBHOOK_SECRET` |
+| `MIRIYUM_PAYMENT_ENABLED` | `MIRIYUM_PAYMENT_CURSOR_SECRET`, `MIRIYUM_PORTONE_API_SECRET` |
+| `MIRIYUM_PORTONE_WEBHOOK_ENABLED` | `MIRIYUM_PORTONE_WEBHOOK_SECRET` |
 
-When a feature is enabled, add its actual values to the same JSON secret and replace its placeholder references in the task definition in the same PR.
+When a feature is enabled, add its actual values to the same JSON secret and replace its placeholder references in the task definition in the same PR. `MIRIYUM_PORTONE_WEBHOOK_ENABLED` remains `false` unless a separate reviewed inbound-webhook contract is approved; payment activation alone never maps the webhook secret.
+
+Production CD changes payment runtime only through its manual `payment_runtime` input: `preserve`
+keeps the current task setting, `enable` injects the Store ID plus the payment cursor/API secret
+selectors, and `disable` sets `MIRIYUM_PAYMENT_ENABLED=false` while removing the Store ID and
+payment secret selectors. Automatic main-triggered CD always uses
+`preserve`. `enable` requires the production GitHub Environment variable
+`MIRIYUM_PORTONE_STORE_ID` and the two JSON keys to already exist in the application secret;
+the workflow never reads or prints their values.
 
 ### Member-support PII key rotation
 

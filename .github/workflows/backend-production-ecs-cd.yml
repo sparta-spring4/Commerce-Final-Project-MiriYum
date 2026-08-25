@@ -21,6 +21,15 @@ on:
           - preserve
           - enable
           - disable
+      payment_runtime:
+        description: "Payment runtime: preserve (default), enable, or disable"
+        required: false
+        default: preserve
+        type: choice
+        options:
+          - preserve
+          - enable
+          - disable
 
 permissions:
   contents: read
@@ -40,6 +49,8 @@ env:
   QR_STORAGE_GENERATION: ${{ vars.MIRIYUM_QR_STORAGE_GENERATION }}
   MIRIYUM_STORAGE_S3_ENABLED: ${{ vars.MIRIYUM_STORAGE_S3_ENABLED }}
   MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED: ${{ vars.MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED }}
+  PAYMENT_RUNTIME: ${{ inputs.payment_runtime || 'preserve' }}
+  MIRIYUM_PORTONE_STORE_ID: ${{ vars.MIRIYUM_PORTONE_STORE_ID }}
   NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA: 515531e122ebbce13d8eead4a3ff15a94c25e0b3
 
 jobs:
@@ -246,6 +257,11 @@ jobs:
 
           if [ "$MIRIYUM_STORAGE_S3_ENABLED" != "$MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED" ]; then
             echo "::error::MIRIYUM_STORAGE_S3_ENABLED and MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED must match."
+            exit 1
+          fi
+
+          if [ "$PAYMENT_RUNTIME" != "preserve" ] && [ "$PAYMENT_RUNTIME" != "enable" ] && [ "$PAYMENT_RUNTIME" != "disable" ]; then
+            echo "::error::payment_runtime must be preserve, enable, or disable."
             exit 1
           fi
 
@@ -512,6 +528,30 @@ jobs:
 
           storage_s3_enabled="$MIRIYUM_STORAGE_S3_ENABLED"
           storage_s3_reconciliation_enabled="$MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"
+          payment_runtime="$PAYMENT_RUNTIME"
+
+          if [ "$payment_runtime" = "enable" ] && [ -z "$MIRIYUM_PORTONE_STORE_ID" ]; then
+            echo "::error::MIRIYUM_PORTONE_STORE_ID must be configured when payment is enabled."
+            exit 1
+          fi
+
+          payment_cursor_secret_arn=""
+          portone_api_secret_arn=""
+          if [ "$payment_runtime" = "enable" ]; then
+            application_secret_value_from=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
+              [.containerDefinitions[] | select(.name == $container) | .secrets[]?
+                | select(.name == "MIRIYUM_DB_URL") | .valueFrom][0] // ""
+            ' current-task-definition.json)
+            if [[ "$application_secret_value_from" =~ ^(arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+):MIRIYUM_DB_URL::$ ]]; then
+              application_secret_arn="${BASH_REMATCH[1]}"
+            else
+              echo "::error::Current task definition MIRIYUM_DB_URL must select its matching Secrets Manager JSON key."
+              exit 1
+            fi
+
+            payment_cursor_secret_arn="${application_secret_arn}:MIRIYUM_PAYMENT_CURSOR_SECRET::"
+            portone_api_secret_arn="${application_secret_arn}:MIRIYUM_PORTONE_API_SECRET::"
+          fi
 
           runtime_config_secret_arn=""
           if [ "$runtime_config_enabled" = "true" ]; then
@@ -537,6 +577,10 @@ jobs:
             --arg storage_s3_enabled "$storage_s3_enabled" \
             --arg storage_s3_reconciliation_enabled "$storage_s3_reconciliation_enabled" \
             --arg storage_s3_bucket_parameter_arn "$storage_s3_bucket_parameter_arn" \
+            --arg payment_runtime "$payment_runtime" \
+            --arg portone_store_id "$MIRIYUM_PORTONE_STORE_ID" \
+            --arg payment_cursor_secret_arn "$payment_cursor_secret_arn" \
+            --arg portone_api_secret_arn "$portone_api_secret_arn" \
             --arg aws_region "$AWS_REGION" '
             .containerDefinitions |= map(
               if .name == $container then
@@ -552,6 +596,11 @@ jobs:
                     and .name != "MIRIYUM_STORAGE_S3_ENABLED"
                     and .name != "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"
                     and .name != "MIRIYUM_STORAGE_S3_REGION"
+                    and .name != "MIRIYUM_PORTONE_WEBHOOK_ENABLED"
+                    and (if $payment_runtime == "preserve" then true
+                         else .name != "MIRIYUM_PAYMENT_ENABLED"
+                           and .name != "MIRIYUM_PORTONE_STORE_ID"
+                         end)
                   ))) + [
                     {name: "MIRIYUM_STORE_SEARCH_LLM_ENABLED", value: $llm_enabled},
                     {name: "MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS", value: "5000"},
@@ -562,18 +611,36 @@ jobs:
                     {name: "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE", value: "MiriYum/Production"},
                     {name: "MIRIYUM_STORAGE_S3_ENABLED", value: $storage_s3_enabled},
                     {name: "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED", value: $storage_s3_reconciliation_enabled},
-                    {name: "MIRIYUM_STORAGE_S3_REGION", value: $aws_region}
-                  ])
+                    {name: "MIRIYUM_STORAGE_S3_REGION", value: $aws_region},
+                    {name: "MIRIYUM_PORTONE_WEBHOOK_ENABLED", value: "false"}
+                  ] + (if $payment_runtime == "enable" then
+                    [
+                      {name: "MIRIYUM_PAYMENT_ENABLED", value: "true"},
+                      {name: "MIRIYUM_PORTONE_STORE_ID", value: $portone_store_id}
+                    ]
+                  elif $payment_runtime == "disable" then
+                    [{name: "MIRIYUM_PAYMENT_ENABLED", value: "false"}]
+                  else [] end))
                 | .secrets = ((.secrets // [] | map(select(
                     .name != "SPRING_APPLICATION_JSON"
                     and .name != "OPENAI_API_KEY"
                     and .name != "MIRIYUM_STORAGE_S3_BUCKET"
+                    and .name != "MIRIYUM_PORTONE_WEBHOOK_SECRET"
+                    and (if $payment_runtime == "preserve" then true
+                         else .name != "MIRIYUM_PAYMENT_CURSOR_SECRET"
+                           and .name != "MIRIYUM_PORTONE_API_SECRET"
+                         end)
                   ))) + (if $runtime_config_enabled == "true" then
                     [{name: "SPRING_APPLICATION_JSON", valueFrom: $runtime_config_secret_arn}]
                   else [] end) + (if $storage_s3_enabled == "true" then
                     [{name: "MIRIYUM_STORAGE_S3_BUCKET", valueFrom: $storage_s3_bucket_parameter_arn}]
                   else [] end) + (if $llm_enabled == "true" then
                     [{name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}]
+                  else [] end) + (if $payment_runtime == "enable" then
+                    [
+                      {name: "MIRIYUM_PAYMENT_CURSOR_SECRET", valueFrom: $payment_cursor_secret_arn},
+                      {name: "MIRIYUM_PORTONE_API_SECRET", valueFrom: $portone_api_secret_arn}
+                    ]
                   else [] end))
               else . end
             )
