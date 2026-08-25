@@ -95,8 +95,7 @@ function NotificationItem({
 }) {
   const detailAction = resolveDetailAction(item.action)
   const unread = item.readAt === null
-  const waitingWithoutAction =
-    unread && item.action === null && item.resource.type === 'WAITING_TEAM'
+  const unreadWithoutLink = unread && detailAction?.kind !== 'link'
 
   return (
     <li>
@@ -116,7 +115,7 @@ function NotificationItem({
             {detailAction.label}
           </Link>
         ) : null}
-        {waitingWithoutAction ? (
+        {unreadWithoutLink ? (
           <button type="button" onClick={() => onRead(item.notificationId)}>
             읽음으로 표시
           </button>

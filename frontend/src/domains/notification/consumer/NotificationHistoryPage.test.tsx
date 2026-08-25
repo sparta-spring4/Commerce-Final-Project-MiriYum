@@ -330,6 +330,58 @@ describe('NotificationHistoryPage', () => {
     await waitFor(() => expect(readCalls).toBe(1))
   })
 
+  test('marks an actionless non-waiting notification read when selected', async () => {
+    let readCalls = 0
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(successResponse([historyItem({
+          purpose: 'RESERVATION_VISIT_COMPLETED',
+          title: '방문이 완료되었습니다.',
+          action: null,
+        })])),
+      ),
+      http.post('/api/v1/consumers/me/notifications/:notificationId/reads', () => {
+        readCalls += 1
+        return HttpResponse.json({ code: 'SUCCESS', message: '읽음', data: { unreadCount: 0 } })
+      }),
+    )
+
+    await renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '읽음으로 표시' }))
+
+    await waitFor(() => expect(readCalls).toBe(1))
+  })
+
+  test('marks an expired action read without enabling navigation', async () => {
+    let readCalls = 0
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(successResponse([historyItem({
+          action: {
+            type: 'RESERVATION_DETAIL',
+            resource: { type: 'RESERVATION', id: '501' },
+            availability: 'EXPIRED',
+            expiresAt: null,
+          },
+        })])),
+      ),
+      http.post('/api/v1/consumers/me/notifications/:notificationId/reads', () => {
+        readCalls += 1
+        return HttpResponse.json({ code: 'SUCCESS', message: '읽음', data: { unreadCount: 0 } })
+      }),
+    )
+
+    await renderPage()
+
+    expect(
+      await screen.findByRole('button', { name: '예약 상세 보기' }),
+    ).toBeDisabled()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '읽음으로 표시' }))
+
+    await waitFor(() => expect(readCalls).toBe(1))
+  })
+
   test('marks every account notification read instead of only the current page', async () => {
     let readAllCalls = 0
     server.use(
