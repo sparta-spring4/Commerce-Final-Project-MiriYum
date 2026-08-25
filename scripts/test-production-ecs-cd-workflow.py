@@ -142,6 +142,50 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn('{name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}', self.workflow)
         self.assertIn('else [] end', self.workflow)
 
+    def test_payment_activation_uses_explicit_environment_values_and_excludes_webhooks(self):
+        self.assertIn(
+            'payment_runtime:', self.workflow
+        )
+        self.assertIn(
+            'Payment runtime: preserve (default), enable, or disable', self.workflow
+        )
+        self.assertIn(
+            'PAYMENT_RUNTIME: ${{ inputs.payment_runtime || \'preserve\' }}', self.workflow
+        )
+        self.assertIn(
+            'MIRIYUM_PORTONE_STORE_ID: ${{ vars.MIRIYUM_PORTONE_STORE_ID }}', self.workflow
+        )
+        self.assertNotIn('MIRIYUM_PAYMENT_ENABLED: ${{ vars.', self.workflow)
+        self.assertIn('payment_runtime must be preserve, enable, or disable.', self.workflow)
+        self.assertIn('payment_runtime="$PAYMENT_RUNTIME"', self.workflow)
+        self.assertIn('preserve) payment_enabled="$current_payment_enabled" ;;', self.workflow)
+        self.assertIn('enable) payment_enabled="true" ;;', self.workflow)
+        self.assertIn('disable) payment_enabled="false" ;;', self.workflow)
+        self.assertIn(
+            'MIRIYUM_PORTONE_STORE_ID must be configured when payment is enabled.',
+            self.workflow,
+        )
+        self.assertIn('current_payment_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME"', self.workflow)
+        self.assertIn('--arg payment_enabled "$payment_enabled"', self.workflow)
+        self.assertIn('--arg portone_store_id "$MIRIYUM_PORTONE_STORE_ID"', self.workflow)
+        self.assertIn('.name != "MIRIYUM_PAYMENT_ENABLED"', self.workflow)
+        self.assertIn('.name != "MIRIYUM_PORTONE_WEBHOOK_ENABLED"', self.workflow)
+        self.assertIn('.name != "MIRIYUM_PORTONE_STORE_ID"', self.workflow)
+        self.assertIn('.name != "MIRIYUM_PAYMENT_CURSOR_SECRET"', self.workflow)
+        self.assertIn('.name != "MIRIYUM_PORTONE_API_SECRET"', self.workflow)
+        self.assertIn('{name: "MIRIYUM_PAYMENT_ENABLED", value: $payment_enabled}', self.workflow)
+        self.assertIn('{name: "MIRIYUM_PORTONE_WEBHOOK_ENABLED", value: "false"}', self.workflow)
+        self.assertIn('{name: "MIRIYUM_PORTONE_STORE_ID", value: $portone_store_id}', self.workflow)
+        self.assertIn(
+            '{name: "MIRIYUM_PAYMENT_CURSOR_SECRET", valueFrom: $payment_cursor_secret_arn}',
+            self.workflow,
+        )
+        self.assertIn(
+            '{name: "MIRIYUM_PORTONE_API_SECRET", valueFrom: $portone_api_secret_arn}',
+            self.workflow,
+        )
+        self.assertNotIn('MIRIYUM_PORTONE_WEBHOOK_SECRET", valueFrom: $', self.workflow)
+
     def test_runtime_config_defaults_to_disabled_and_injects_only_when_enabled(self):
         self.assertIn("RUNTIME_CONFIG_SECRET_NAME: miriyum/production/backend-runtime-config", self.workflow)
         self.assertIn('select(.name == "MIRIYUM_RUNTIME_CONFIG_ENABLED") | .value][0] // "false"', self.workflow)
