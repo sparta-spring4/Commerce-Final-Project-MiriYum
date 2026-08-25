@@ -62,6 +62,145 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn('.name == "Backend CI" and .head_branch == "main" and .conclusion == "success"', self.workflow)
         self.assertIn('Manual deployment requires a successful Backend CI run for this main SHA.', self.workflow)
 
+    def test_manual_sse_runtime_control_defaults_to_preserve_and_supports_enable_disable(self):
+        dispatch_inputs = self.workflow.split("  workflow_dispatch:", 1)[1].split(
+            "\npermissions:", 1
+        )[0]
+        source_step = self.workflow.split("- name: Verify deployment source", 1)[1].split(
+            "- name:", 1
+        )[0]
+
+        self.assertIn("sse_runtime_mode:", dispatch_inputs)
+        self.assertIn("default: preserve", dispatch_inputs)
+        self.assertIn("- preserve", dispatch_inputs)
+        self.assertIn("- enable", dispatch_inputs)
+        self.assertIn("- disable", dispatch_inputs)
+        self.assertIn("MANUAL_SSE_RUNTIME_MODE: ${{ inputs.sse_runtime_mode }}", source_step)
+        self.assertIn('sse_runtime_mode="preserve"', source_step)
+        self.assertIn('sse_runtime_mode="$MANUAL_SSE_RUNTIME_MODE"', source_step)
+        self.assertIn('echo "sse_runtime_mode=$sse_runtime_mode" >> "$GITHUB_OUTPUT"', source_step)
+        self.assertIn(
+            "sse_runtime_mode: ${{ steps.source.outputs.sse_runtime_mode }}",
+            self.workflow,
+        )
+
+    def test_requested_sse_runtime_mode_controls_only_sse_configuration(self):
+        task_definition_step = self.workflow.split(
+            "- name: Register task definition with the new image", 1
+        )[1].split("- name: Capture previous ECS task identities", 1)[0]
+
+        self.assertIn(
+            "SSE_RUNTIME_MODE: ${{ needs.verify-source.outputs.sse_runtime_mode }}",
+            task_definition_step,
+        )
+        self.assertIn('case "$SSE_RUNTIME_MODE" in', task_definition_step)
+        self.assertIn(
+            'if [ "$SSE_RUNTIME_MODE" = "enable" ] && [ "$sse_enabled" != "false" ]; then',
+            task_definition_step,
+        )
+        self.assertIn(
+            "Production SSE enable requires the current flag to be false",
+            task_definition_step,
+        )
+        self.assertIn('preserve)', task_definition_step)
+        self.assertIn('enable)', task_definition_step)
+        self.assertIn('sse_enabled="true"', task_definition_step)
+        self.assertIn('disable)', task_definition_step)
+        self.assertIn('sse_enabled="false"', task_definition_step)
+        self.assertIn('Unsupported production SSE runtime mode', task_definition_step)
+        self.assertIn('if [ "$sse_enabled" = "true" ]; then', task_definition_step)
+        self.assertIn(
+            "SSE_RUNTIME_SECRET_NAME: miriyum/production/backend-sse-runtime",
+            self.workflow,
+        )
+        self.assertIn('select(.name == "MIRIYUM_SSE_ENABLED") | .value][0] // "false"', task_definition_step)
+        self.assertIn('{name: "MIRIYUM_SSE_ENABLED", value: $sse_enabled}', task_definition_step)
+        self.assertIn('{name: "MIRIYUM_SSE_CURSOR_SECRET", valueFrom: ($sse_secret_arn + ":MIRIYUM_SSE_CURSOR_SECRET::")}', task_definition_step)
+        self.assertNotIn("aws secretsmanager get-secret-value", task_definition_step)
+
+    def test_failed_manual_enable_deploys_an_sse_disabled_same_image_recovery_revision(self):
+        recovery_step_name = "- name: Disable production SSE after failed enable"
+        self.assertIn(recovery_step_name, self.workflow)
+        recovery_step = self.workflow.split(
+            recovery_step_name, 1
+        )[1].split("- name: Cleanup previous ECS task identity evidence", 1)[0]
+
+        self.assertIn("if: >-", recovery_step)
+        self.assertIn("always()", recovery_step)
+        self.assertIn("failure() || cancelled()", recovery_step)
+        self.assertIn(
+            "needs.verify-source.outputs.sse_runtime_mode == 'enable'",
+            recovery_step,
+        )
+        self.assertIn("steps.task-definition.outcome == 'success'", recovery_step)
+        self.assertIn(
+            "IMAGE_URI: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ needs.verify-source.outputs.image_tag }}",
+            recovery_step,
+        )
+        self.assertIn("aws ecs describe-task-definition", recovery_step)
+        self.assertIn('{name: "MIRIYUM_SSE_ENABLED", value: "false"}', recovery_step)
+        self.assertIn('.name != "MIRIYUM_SSE_CURSOR_SECRET"', recovery_step)
+        self.assertNotIn('.name != "SPRING_APPLICATION_JSON"', recovery_step)
+        self.assertNotIn('.name != "MIRIYUM_RUNTIME_CONFIG_ENABLED"', recovery_step)
+        self.assertIn("aws ecs register-task-definition", recovery_step)
+        self.assertIn("aws ecs update-service", recovery_step)
+        self.assertIn("for attempt in $(seq 1 80)", recovery_step)
+        self.assertIn("Production SSE disable recovery completed", recovery_step)
+        self.assertNotIn("aws secretsmanager get-secret-value", recovery_step)
+
+    def test_sse_disable_fixture_preserves_shared_runtime_config_and_other_secrets(self):
+        jq = shutil.which("jq")
+        if jq is None:
+            self.skipTest("jq is required for the workflow transformation fixture")
+
+        filter_start = self.workflow.index('--arg aws_region "$AWS_REGION" \'\n')
+        filter_start = self.workflow.index("\n", filter_start) + 1
+        filter_end = self.workflow.index("\n          ' current-task-definition.json", filter_start)
+        jq_filter = self.workflow[filter_start:filter_end]
+        source = {"containerDefinitions": [{
+            "name": "backend",
+            "image": "old-image",
+            "environment": [
+                {"name": "MIRIYUM_RUNTIME_CONFIG_ENABLED", "value": "true"},
+                {"name": "MIRIYUM_SSE_ENABLED", "value": "true"},
+                {"name": "OTHER", "value": "kept"},
+            ],
+            "secrets": [
+                {"name": "SPRING_APPLICATION_JSON", "valueFrom": "arn:shared-runtime"},
+                {"name": "MIRIYUM_SSE_CURSOR_SECRET", "valueFrom": "arn:sse:cursor"},
+                {"name": "MIRIYUM_SSE_TIMEOUT", "valueFrom": "arn:sse:timeout"},
+                {"name": "OTHER_SECRET", "valueFrom": "arn:other"},
+            ],
+        }]}
+        command = [
+            jq,
+            "--arg", "image", "new-image", "--arg", "container", "backend",
+            "--arg", "runtime_config_secret_arn", "arn:shared-runtime",
+            "--arg", "sse_secret_arn", "arn:sse",
+            "--arg", "sse_runtime", "disable", "--arg", "sse_enabled", "false",
+            "--arg", "openai_parameter_arn", "arn:openai", "--arg", "llm_enabled", "false",
+            "--arg", "qr_storage_generation", "generation",
+            "--arg", "runtime_config_enabled", "true", "--arg", "storage_s3_enabled", "false",
+            "--arg", "storage_s3_reconciliation_enabled", "false",
+            "--arg", "storage_s3_bucket_parameter_arn", "arn:bucket",
+            "--arg", "payment_runtime", "preserve", "--arg", "portone_store_id", "store",
+            "--arg", "payment_cursor_secret_arn", "arn:payment:cursor",
+            "--arg", "portone_api_secret_arn", "arn:payment:api",
+            "--arg", "aws_region", "ap-northeast-2", jq_filter,
+        ]
+        result = subprocess.run(command, input=json.dumps(source), text=True, capture_output=True, check=True)
+        backend = json.loads(result.stdout)["containerDefinitions"][0]
+        environment = {item["name"]: item["value"] for item in backend["environment"]}
+        secrets = {item["name"]: item["valueFrom"] for item in backend["secrets"]}
+
+        self.assertEqual("true", environment["MIRIYUM_RUNTIME_CONFIG_ENABLED"])
+        self.assertEqual("false", environment["MIRIYUM_SSE_ENABLED"])
+        self.assertEqual("kept", environment["OTHER"])
+        self.assertEqual("arn:shared-runtime", secrets["SPRING_APPLICATION_JSON"])
+        self.assertEqual("arn:other", secrets["OTHER_SECRET"])
+        self.assertNotIn("MIRIYUM_SSE_CURSOR_SECRET", secrets)
+        self.assertNotIn("MIRIYUM_SSE_TIMEOUT", secrets)
+
     def test_production_deployment_requires_immutable_ecr_tags(self):
         self.assertIn("Require immutable ECR image tags", self.workflow)
         self.assertIn("imageTagMutability", self.workflow)
@@ -223,6 +362,8 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
             "--arg", "image", "new-image",
             "--arg", "container", "backend",
             "--arg", "runtime_config_secret_arn", "arn:runtime",
+            "--arg", "sse_secret_arn", "arn:sse",
+            "--arg", "sse_runtime", "preserve", "--arg", "sse_enabled", "false",
             "--arg", "openai_parameter_arn", "arn:openai",
             "--arg", "llm_enabled", "false",
             "--arg", "qr_storage_generation", "generation",
@@ -279,6 +420,8 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
             jq,
             "--arg", "image", "new-image", "--arg", "container", "backend",
             "--arg", "runtime_config_secret_arn", "arn:runtime",
+            "--arg", "sse_secret_arn", "arn:sse",
+            "--arg", "sse_runtime", "preserve", "--arg", "sse_enabled", "false",
             "--arg", "openai_parameter_arn", "arn:openai", "--arg", "llm_enabled", "false",
             "--arg", "qr_storage_generation", "generation",
             "--arg", "runtime_config_enabled", "false", "--arg", "storage_s3_enabled", "false",
@@ -326,7 +469,7 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
     def test_deploy_job_timeout_covers_image_build_and_stability_wait_budget(self):
         deploy_job = self.workflow.split("  deploy:", 1)[1].split("    permissions:", 1)[0]
 
-        self.assertIn("timeout-minutes: 50", deploy_job)
+        self.assertIn("timeout-minutes: 70", deploy_job)
 
     def test_automatic_and_manual_sources_enforce_the_notification_writer_floor(self):
         self.assertIn(
