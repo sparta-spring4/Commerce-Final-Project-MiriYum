@@ -17,8 +17,29 @@ public record IntegratedStoreSearchCandidate(
         boolean menuHoldEnabled,
         boolean pickupEnabled,
         LocalDateTime createdAt,
+        int structuredRelevance,
         int relevanceTier,
         BigDecimal latitude,
         BigDecimal longitude
 ) {
+    public IntegratedStoreSearchCandidate(
+            long storeId,
+            String name,
+            Region region,
+            String address,
+            String storeCategoryCode,
+            OperationStatus operationStatus,
+            boolean reservationEnabled,
+            boolean menuHoldEnabled,
+            boolean pickupEnabled,
+            LocalDateTime createdAt,
+            int relevanceTier,
+            BigDecimal latitude,
+            BigDecimal longitude
+    ) {
+        this(
+                storeId, name, region, address, storeCategoryCode, operationStatus,
+                reservationEnabled, menuHoldEnabled, pickupEnabled, createdAt,
+                0, relevanceTier, latitude, longitude);
+    }
 }

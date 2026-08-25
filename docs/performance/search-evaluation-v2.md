@@ -52,6 +52,71 @@ v2.1 전체 결과는 현재 worktree의 ignored 로컬 경로 `performance/sear
 
 이 중단을 계기로 하네스에는 최대 재시도를 소진한 429의 자동 circuit breaker를 추가했다. 중단 시 이미 실행 중인 future는 끝까지 회수해 체크포인트에 기록하고 새 요청만 막으므로, 비용 상한·429 중단 뒤에도 유료 응답을 잃어 재호출하지 않는다. 재개 격리는 `providerHttpStatus=429`, `failureKind=http_retryable`, 명시적 숫자형 `costUsd=0`을 모두 만족하는 기록에만 허용한다.
 
+## 구조화 음식 근거 A/B/C 재분석
+
+PR #635가 `dev`에 병합된 뒤의 actual application 결과 A를 고정 기준선으로 사용하고, 같은 10,000회 체크포인트에 신규 API 호출 없이 두 반사실 조건을 비교했다. B는 `rawFoodSpans`, 메뉴 계열, 재료, 맛, 국물, 조리법, 형태를 분리한 구조화 후보를 A 뒤에 보충하되 현재 정렬을 유지한다. C는 B와 같은 후보를 사용하고 메뉴명이 없는 질의에만 구조화 음식 근거 우선 정렬을 적용한다. 명시적 메뉴·별칭 질의는 현재 후보와 순서를 보존한다. B와 C는 production predicate가 아닌 simulated evidence다.
+
+| 고유 질의 지표 | A: merged actual | B: structured candidate | C: structured + ranking |
+|---|---:|---:|---:|
+| strict @1 | 1,044/2,000 = 52.20% | 1,085/2,000 = 54.25% | 1,116/2,000 = 55.80% |
+| strict @8 | 1,213/2,000 = 60.65% | 1,330/2,000 = 66.50% | 1,354/2,000 = 67.70% |
+| acceptable @8 | 1,262/2,000 = 63.10% | 1,420/2,000 = 71.00% | 1,435/2,000 = 71.75% |
+| strict @20 | 1,312/2,000 = 65.60% | 1,494/2,000 = 74.70% | 1,503/2,000 = 75.15% |
+| strict @50 | 1,388/2,000 = 69.40% | 1,613/2,000 = 80.65% | 1,614/2,000 = 80.70% |
+| strict 전체 후보 | 1,429/2,000 = 71.45% | 1,679/2,000 = 83.95% | 1,679/2,000 = 83.95% |
+| strict Recall@8 | 37.91% | 42.52% | 43.74% |
+| MRR / nDCG@8 | 0.4587 / 0.4501 | 0.4891 / 0.5001 | 0.5058 / 0.5173 |
+
+A→B의 strict @8 순증은 117개, `+5.85%p`로 후보 보강 효과다. B→C 순증은 24개, `+1.20%p`로 정렬 효과다. 최종 C의 A 대비 순증은 141개, `+7.05%p`이며 Wilson 95% CI는 A `58.49–62.77%`, C `65.62–69.71%`다. sensory strict @8은 `165/800 = 20.63% → 248/800 = 31.00% → 272/800 = 34.00%`, sensory acceptable @8은 `214/800 = 26.75% → 338/800 = 42.25% → 353/800 = 44.13%`였다.
+
+안전 게이트는 통과했다. true-no-answer 오탐은 A/B/C 모두 0건, 전체 gold-negative 오탐은 모두 3건이며 폐점·미승인 매장, 비공개·과거 메뉴, 지역·가격·분위기·category 위반은 모두 0건이다. alias/bidirectional strict @8은 `244/300 → 250/300 → 250/300`, filter-defense는 `129/150 → 147/150 → 147/150`으로 기준선을 잃지 않았다. top-1 안정률은 `95.25% → 95.22% → 95.24%`, pairwise Jaccard는 `0.8946 → 0.8937 → 0.8924`로 정답률 개선과 함께 작은 안정성 감소가 관측됐다.
+
+초기 구조화안은 구체적인 family ID를 `면/탕/국/밥` 같은 공통 이름으로 다시 펼치고 기존 양방향 후보를 대체해 filter-defense 오탐과 별칭 손실을 만들었다. 최종안은 구체 family ID 우선, 일반 토큰 단독 후보 금지, 메뉴명 없는 질의의 서로 다른 핵심 속성 2개 이상, 기존 후보 보존 후 구조화 후보 보충이라는 네 가드를 적용했다. 안전 게이트 통과는 오프라인 구현 후보라는 뜻이며 production 활성화를 승인하지 않는다.
+
+최종 분석 커밋은 `2456e9d40aa8ab95a8687ef57f2ef3097815abe9`, 작업 트리는 clean, 신규 provider 호출과 추가 비용은 각각 0회와 `$0`이다. ignored 산출물 `structured-reanalysis/results.jsonl`과 `aggregate.json`의 SHA-256은 각각 `9df2560af0cd46ab012c69f298a776126db0bbbbfcb1ab052ecb820249b57ba0`, `06a72a6e85cc8677f1894a3d8f393d2bf9c60921b7efcd796d3dd49359ee46bb`다.
+
+## 단일 하이브리드 D/E/F/G 재분석
+
+Issue #625의 평가 전용 확장으로 구조화 C를 D 기준선으로 고정하고, 같은 10,000회 결과에 새 provider 호출 없이 세 조건을 더 비교했다. E는 메뉴 설명·태그와 고정 메뉴 사전의 재료·맛·국물·조리법·향·식감 중 서로 다른 두 근거 이상이 있는 후보를 D 뒤에 보충한다. F는 E에 기존 `text-embedding-3-large`의 메뉴별 상위 200개 후보를 합친다. G는 F의 후보 집합을 바꾸지 않고 구조화 속성, 어휘 근거, embedding similarity와 기존 순위 보존 보너스를 하나의 고정 점수로 합쳐 `RECOMMENDED` 결과만 다시 정렬한다. 사용자 원문에서 결정적으로 확인한 메뉴명·별칭과 명시 필터 정렬은 D를 그대로 보존하며, LLM이 추론한 메뉴 계열은 사용자 명시 메뉴로 오인하지 않는다.
+
+| 고유 질의 지표 | D: structured C | E: 사전·설명 후보 | F: E + large embedding | G: 단일 hybrid ranking |
+|---|---:|---:|---:|---:|
+| strict @1 | 55.80% | 55.80% | 55.85% | 78.60% |
+| strict @8 | 67.70% | 67.70% | 67.75% | 84.10% |
+| strict @20 | 75.15% | 75.15% | 75.20% | 89.25% |
+| strict 전체 후보 | 83.95% | 94.20% | 94.25% | 94.25% |
+| acceptable @8 | 71.75% | 71.75% | 71.80% | 85.75% |
+| acceptable @20 | 1,596/2,000 = 79.80% | 79.80% | 1,597/2,000 = 79.85% | 1,824/2,000 = 91.20% |
+| acceptable 전체 후보 | 87.35% | 95.45% | 95.50% | 95.50% |
+
+주 목표 acceptable @20 `90%`와 후보 상한 목표 acceptable 전체 `95%`를 각각 `91.20%`, `95.50%`로 충족했다. G acceptable @20의 Wilson 95% CI는 `89.88–92.36%`다. strict @20은 `89.25%`이므로 90% 달성 주장은 acceptable 기준에만 적용한다. sensory 800개 acceptable @20은 `61.25% → 89.63%`, 전체 후보는 `78.88% → 99.13%`였다. E가 전체 후보를 크게 늘렸지만 기존 결과 뒤에 붙이기만 해 @20은 변하지 않았고, F의 embedding 단독 순증은 고유 질의 1개였다. 최종 개선의 핵심은 embedding 모델 교체가 아니라 고정 사전 속성 후보를 상위 20개로 올린 G 정렬이었다.
+
+안전 게이트는 통과했다. D/E/F/G의 true-no-answer 오탐은 모두 0건, 전체 gold-negative 오탐은 모두 3건이며 폐점·미승인 매장, 비공개·과거 메뉴, 지역·가격·분위기·category 위반은 모두 0건이다. 명시 메뉴·별칭 유형 acceptable @20은 네 조건 모두 `91.33%`로 유지됐다. @20 top-1 안정률은 `95.24% → 96.05%`, 평균 pairwise Jaccard는 `0.8902 → 0.9299`로 개선됐다.
+
+이는 production backend나 actual application predicate를 변경한 결과가 아니라 합성 corpus의 `simulated-evidence-not-actual-application` 반사실 평가다. 운영 활성화는 승인하지 않는다. 최종 분석 커밋은 `50bb146aa3f469061e3737fc95ec7e8b488673a5`, 실행 시 tracked worktree는 clean, 신규 provider 호출과 추가 비용은 0회와 `$0`이다. frozen structured 결과 SHA-256은 `9df2560af0cd46ab012c69f298a776126db0bbbbfcb1ab052ecb820249b57ba0`, embedding checkpoint SHA-256은 `f9cabb92c0613e84730bd3aec343f41be1b2444e21c2ac541a0f17aa0db59d58`다. 최종 `hybrid-reanalysis/results.jsonl`과 `aggregate.json` SHA-256은 각각 `c36877da4333902b869c8051f8ed958d7f36581a6a3b9e22c9192cee8dd805c8`, `7ac93b2c67a9dfc3acab4ab182bf5c0421640eb6582ea7dc8768dc346c786190`이다.
+
+### H: 수정된 운영 food-evidence predicate의 구형 체크포인트 재생
+
+H는 G의 `91.20%` simulated 구조를 운영 수치로 오인하지 않기 위해 추가했다. 초기 H는 명시 메뉴 질의에도 속성 후보를 덧붙이고 `menuRank*10+dimensionCount`로 LLM 메뉴 계열 하나를 여러 감각 차원보다 앞세워 acceptable @20 `74.60%`, 전체 음성 오탐 68건, filter-defense `54.67%`로 회귀했다. 수정 H는 명시 메뉴가 결정적으로 해소되면 D 후보·순서를 그대로 유지하고, 메뉴가 없는 질의에서만 현재 공개 메뉴의 이름·설명·카테고리·태그에 일치한 정보성 원문 토큰을 보충한다. 같은 메뉴에서 서로 다른 원문 토큰 2개 이상 또는 구조화 차원 2개 이상이 맞아야 하며, 점수는 원문 토큰·구조화 차원·메뉴 계열의 고정 가중 순서로 계산한다. 후보 판정에는 합성 `familyId`, 합성 family attributes, gold label을 사용하지 않았다.
+
+단, 기존 10,000회 체크포인트는 현재 provider schema에 새로 추가된 `aromas`, `textures`를 포함하지 않는다. 따라서 H는 `actualApplication=false`, `actualApplicationPredicate=true`, `queryEvidenceProvenance=legacy-structured-checkpoint-replay`, `queryEvidenceSchemaComplete=false`인 무과금 predicate 재생이다. 현재 production 앱의 새 schema를 end-to-end로 실행한 actual application 결과가 아니며, D/E/F/G도 계속 simulated다.
+
+| 고유 질의 지표 | D 기준선 | G simulated | H actual predicate replay |
+|---|---:|---:|---:|
+| strict @8 | 67.70% | 84.10% | 1,465/2,000 = 73.25% |
+| strict @20 | 75.15% | 89.25% | 1,631/2,000 = 81.55% |
+| acceptable @20 | 79.80% | 91.20% | 1,712/2,000 = 85.60% |
+| acceptable 전체 후보 | 87.35% | 95.50% | 1,889/2,000 = 94.45% |
+| sensory acceptable @20 | 61.25% | 89.63% | 603/800 = 75.38% |
+| alias acceptable @20 | 91.33% | 91.33% | 277/300 = 92.33% |
+| filter-defense acceptable @20 | 147/150 = 98.00% | 147/150 = 98.00% | 147/150 = 98.00% |
+
+수정 H acceptable @20의 Wilson 95% CI는 `83.99–87.07%`로 목표 90%에는 아직 미달한다. top-1 안정률은 `95.56%`, 평균 pairwise Jaccard는 `0.9088`이다. true-no-answer 오탐은 0건, 전체 gold-negative 오탐은 D/G와 같은 3건이며 폐점·미승인 매장, 비공개·과거 메뉴, 필터 위반은 모두 0이다. filter-defense도 D/G와 같은 `147/150`으로 복구되어 안전 게이트는 통과했다. 초기 H와 비교하면 acceptable @20은 `74.60% → 85.60%`, 전체 음성 오탐은 `68 → 3`, filter-defense는 `54.67% → 98.00%`다.
+
+G의 남은 우위는 합성 family에만 있는 향·식감·국물 속성을 정렬에 직접 사용한 효과를 포함한다. 현재 운영 메뉴의 이름·설명·카테고리·태그에는 이 속성이 항상 존재하지 않으므로 G `91.20%`를 그대로 actual 수치로 재현할 수 없다. 별도 메뉴 속성 저장·색인 계약 없이 이 정보를 production 코드에 복사하면 gold leakage가 된다. 따라서 수정 H는 안전 게이트 통과를 확인했지만 `actualApplication=false`, `productionActivationApproved=false`를 유지한다.
+
+이 실행은 기존 10,000개 LLM 체크포인트와 frozen embedding만 재사용했으며 신규 provider/embedding 호출과 비용은 모두 0이다. 결과 파일은 ignored 로컬 artifact이고, `hybrid-reanalysis/results.jsonl`과 `aggregate.json` SHA-256은 각각 `c68cb6bfddfbc3a8562546f18d22ec875228e28e40c9a259626ed136501ac669`, `057f77f6ee7e2e04e2e27096d723a9cf288ec6d71d4f1f6ede0c3c6596738447`다.
+
 ## GPT-4o mini와 GPT-5.4 mini 100질의 짝비교
 
 속성 보존 프롬프트, JSON schema, 동일 층화 질의 100개, `reasoning_effort=none`을 고정하고 모델만 `gpt-4o-mini`에서 `gpt-5.4-mini-2026-03-17`로 바꿨다. 기존 100건을 기준선으로 재사용하고 GPT-5.4 mini 100건만 새로 호출했다. 이는 모델 선택 파일럿이며 production 모델 교체 결과가 아니다.
@@ -159,6 +224,8 @@ python -m miriyum_search_eval run --artifact-dir artifacts/eval-20260824-post-me
 python -m miriyum_search_eval reanalyze --artifact-dir artifacts/eval-20260824-deterministic-menu-full --predicate-variant issue-616-most-specific
 python -m miriyum_search_eval migrate-checkpoint --artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs --source-artifact-dir artifacts/eval-20260824-deterministic-menu-full
 python -m miriyum_search_eval reanalyze --artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs --predicate-variant issue-616-most-specific
+python -m miriyum_search_eval structured-reanalyze --artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs
+python -m miriyum_search_eval hybrid-reanalyze --artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs --source-artifact-dir artifacts/eval-20260824-post-merge
 python -m miriyum_search_eval report --artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs
 python -m miriyum_search_eval prompt-pilot --artifact-dir artifacts/eval-20260824-attribute-prompt-pilot --source-artifact-dir artifacts/eval-20260824-gold-v2-1-cutoffs
 python -m miriyum_search_eval prompt-run --artifact-dir artifacts/eval-20260824-attribute-prompt-pilot
@@ -170,12 +237,12 @@ python -m miriyum_search_eval report --artifact-dir artifacts/eval-20260824-post
 
 ## 검증과 한계
 
-- Python 하네스 테스트: 69개 전체 통과
-- 영향받은 Java 단위 테스트: `IntegratedStoreSearchQueryTest`, `IntegratedStoreSearchPredicatesTest`, `IntegratedStoreSearchServiceTest` 총 36개 통과
-- `IntegratedStoreSearchRepositoryIT`: Docker/Testcontainers MySQL로 19개 통과. UCA expansion인 `ß ↔ ss`에서도 hidden current 긴 이름이 짧은 visible 이름으로 후퇴하지 않음을 포함한다.
+- Python 하네스 테스트: H actual predicate replay 경계 테스트를 포함해 113개 전체 통과
+- 영향받은 Java 단위 테스트: search interpreter·expansion·query·service·controller·OpenAPI 계약 범위 186개 통과
+- `IntegratedStoreSearchRepositoryIT`: Docker/Testcontainers MySQL로 22개 통과. UCA expansion인 `ß ↔ ss`에서도 hidden current 긴 이름이 짧은 visible 이름으로 후퇴하지 않음을 포함한다.
 - representative MySQL `EXPLAIN`/timing은 아직 실행하지 않아 CI 또는 별도 성능 검증 대기다. 후보 행마다 실행되던 correlated `NOT EXISTS`와 후보 조회의 non-sargable `LOCATE`는 제거했다. V71의 `name` 선두 복합 index에 최대 4,950개 exact 후보를 조회하고, 같은 collation anti-join으로 가장 구체적인 이름을 계산한 후 최종 100개만 검색 query에 바인딩한다.
-- 실행 후 `origin/dev`가 `1acec13b`까지 전진했지만, 평가한 interpreter·predicate·repository·application 설정은 평가 커밋과 byte-level Git diff가 없음을 확인했다.
-- 실제 애플리케이션 수치는 병합된 SQL predicate를 합성 corpus에 오프라인으로 결정적 모사한 값이다. 운영 DB에 실제 SQL을 실행한 결과가 아니다.
+- 전체 backend suite는 저장소 정책에 따라 로컬에서 실행하지 않았으며 `PENDING GitHub CI`다.
+- H는 병합된 SQL predicate를 합성 corpus에 오프라인으로 결정적 모사하되 구형 structured checkpoint를 재생한 값이다. 현재 provider schema와 운영 DB를 end-to-end로 실행한 actual application 결과가 아니다.
 - 기본 검색 proxy는 합성 manifest에 주소가 없어 매장명·region·current published 메뉴명만 평가했다. 구조화 region·가격·분위기·category span은 고정 합성 vocabulary와 템플릿으로 결정적으로 제거해 `remainingKeyword`를 만들며, 운영 vocabulary 전체를 실제 MySQL에서 실행한 수치는 아니다.
 - 2026-08-24의 over-abstention 완화 prompt 수정안은 별도 층화 파일럿 100회에서 안전 게이트를 통과했지만 동일 질의의 answerable abstention이 `14/93 = 15.05%`에서 `33/93 = 35.48%`로 악화되고 semantic hit가 `80/100`에서 `66/100`으로 감소해 채택하지 않았다. true-no-answer 오탐은 두 조건 모두 `0/4`였다. 본 10,000회는 실행하지 않았고 production prompt와 정본 계약은 원복했다.
 - 합성 언어와 합성 매장 분포이므로 실제 사용자·운영 데이터에 대한 외적 타당성은 제한된다.

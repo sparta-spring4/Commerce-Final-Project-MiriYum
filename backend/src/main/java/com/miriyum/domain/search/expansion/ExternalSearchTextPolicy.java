@@ -1,5 +1,9 @@
 package com.miriyum.domain.search.expansion;
 
+import com.miriyum.domain.search.expansion.StructuredFoodEvidence.Dimension;
+import com.miriyum.domain.search.interpreter.FoodEvidenceVocabulary;
+import java.util.Comparator;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -54,6 +58,13 @@ final class ExternalSearchTextPolicy {
     }
 
     static boolean allowsExternalInterpretation(SearchConceptRequest request) {
+        return allowsExternalInterpretation(request, null);
+    }
+
+    static boolean allowsExternalInterpretation(
+            SearchConceptRequest request,
+            FoodEvidenceVocabulary vocabulary
+    ) {
         String text = request.text();
         if (text == null || text.isBlank()
                 || !SAFE_CHARACTERS.matcher(text).matches()
@@ -71,16 +82,46 @@ final class ExternalSearchTextPolicy {
         }
         return !LONG_NUMBER.matcher(text).find()
                 && (request.purpose() != SearchConceptPurpose.STORE_SEARCH
-                || containsOnlyApprovedStoreSearchTerms(text));
+                || containsOnlyApprovedStoreSearchTerms(text, vocabulary));
     }
 
-    private static boolean containsOnlyApprovedStoreSearchTerms(String text) {
-        String normalized = STORE_SEARCH_TOKEN_SEPARATOR.matcher(text).replaceAll(" ").trim();
+    private static boolean containsOnlyApprovedStoreSearchTerms(
+            String text,
+            FoodEvidenceVocabulary vocabulary
+    ) {
+        String approvedFoodRemoved = vocabulary == null
+                ? text
+                : removeApprovedFoodTerms(text, vocabulary);
+        String normalized = STORE_SEARCH_TOKEN_SEPARATOR
+                .matcher(approvedFoodRemoved)
+                .replaceAll(" ")
+                .trim();
         if (normalized.isEmpty()) {
-            return false;
+            return vocabulary != null;
         }
         return Stream.of(normalized.split("\\s+"))
                 .allMatch(term -> APPROVED_STORE_SEARCH_TERM.matcher(term).matches());
+    }
+
+    private static String removeApprovedFoodTerms(
+            String text,
+            FoodEvidenceVocabulary vocabulary
+    ) {
+        List<String> aliases = Stream.of(Dimension.values())
+                .flatMap(dimension -> vocabulary.entries(dimension).stream())
+                .flatMap(entry -> entry.aliases().stream())
+                .distinct()
+                .sorted(Comparator.comparingInt(String::length).reversed())
+                .toList();
+        String remaining = text;
+        for (String alias : aliases) {
+            remaining = Pattern.compile(
+                            Pattern.quote(alias),
+                            CASE_INSENSITIVE_UNICODE)
+                    .matcher(remaining)
+                    .replaceAll(" ");
+        }
+        return remaining;
     }
 
     private static boolean containsCoordinatePair(String text) {

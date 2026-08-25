@@ -25,7 +25,8 @@ import com.miriyum.domain.search.config.OpenAiSearchInterpretationProperties;
 import com.miriyum.domain.search.config.StoreSearchCandidateLimit;
 import com.miriyum.domain.search.expansion.SearchConceptExpansion;
 import com.miriyum.domain.search.expansion.SearchConceptExpansionService;
-import com.miriyum.domain.search.expansion.SearchConceptRequest;
+import com.miriyum.domain.search.interpreter.DeterministicFoodEvidenceExtractor;
+import com.miriyum.domain.search.interpreter.FoodEvidenceVocabulary;
 import com.miriyum.domain.search.interpreter.InterpretationResult;
 import com.miriyum.domain.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.search.query.IntegratedSearchCursorCodec;
@@ -62,13 +63,16 @@ class IntegratedStoreSearchServiceTest {
     @Mock StoreRecommendationService recommendationService;
     @Mock SearchConceptExpansionService expansionService;
 
+    private final DeterministicFoodEvidenceExtractor foodEvidenceExtractor =
+            new DeterministicFoodEvidenceExtractor(new FoodEvidenceVocabulary());
+
     private final Clock clock = Clock.fixed(
             Instant.parse("2026-08-06T06:00:00Z"), ZoneOffset.UTC);
 
     @BeforeEach
     void useProductionCandidateLimit() {
         given(candidateLimit.value()).willReturn(5_000);
-        org.mockito.Mockito.lenient().when(expansionService.expand(any()))
+        org.mockito.Mockito.lenient().when(expansionService.expand(any(), any()))
                 .thenReturn(SearchConceptExpansion.empty());
     }
 
@@ -113,6 +117,184 @@ class IntegratedStoreSearchServiceTest {
                 "칼칼한 짬뽕 파는 매장");
         then(repository).should().search(argThat(query ->
                 query.explicitMenuNames().equals(List.of("칼칼한 짬뽕"))));
+    }
+
+    @Test
+    void deterministicEvidenceIsUsedByTheStaticScanAndLlmSupplement() {
+        InterpretedSearchCondition condition = condition(
+                null, null, null, "칼칼한 해물 음식");
+        given(interpreter.interpret("칼칼한 해물 음식"))
+                .willReturn(result(condition));
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(), null));
+        given(repository.refreshCurrentlyPublic(List.of())).willReturn(List.of());
+
+        service().search(
+                "칼칼한 해물 음식", false, false, null, null, 20);
+
+        then(repository).should().search(argThat(query ->
+                query.foodEvidence().tastes().size() == 1
+                        && query.foodEvidence().ingredients().size() == 1));
+        then(expansionService).should().expand(
+                any(),
+                argThat(evidence -> evidence.tastes().size() == 1
+                        && evidence.ingredients().size() == 1));
+    }
+
+    @Test
+    void providerFailureDoesNotDiscardDeterministicCandidates() {
+        InterpretedSearchCondition condition = condition(
+                null, null, null, "칼칼한 해물 음식");
+        given(interpreter.interpret("칼칼한 해물 음식"))
+                .willReturn(result(condition));
+        IntegratedStoreSearchCandidate deterministic = candidate(
+                1L, "결정적 후보", 2, 0);
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(deterministic), null));
+        given(repository.refreshCurrentlyPublic(any()))
+                .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
+        given(expansionService.expand(any(), any())).willReturn(null);
+
+        var data = service().search(
+                "칼칼한 해물 음식", false, false, null, null, 2);
+
+        assertThat(data.items()).extracting(item -> item.storeId())
+                .containsExactly("1");
+    }
+
+    @Test
+    void rejectedUnknownLlmTermsDoNotDiscardDeterministicCandidates() {
+        InterpretedSearchCondition condition = condition(
+                null, null, null, "칼칼한 해물 음식");
+        given(interpreter.interpret("칼칼한 해물 음식"))
+                .willReturn(result(condition));
+        IntegratedStoreSearchCandidate deterministic = candidate(
+                1L, "결정적 후보", 2, 0);
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(deterministic), null));
+        given(repository.refreshCurrentlyPublic(any()))
+                .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
+        given(expansionService.expand(any(), any())).willReturn(
+                new SearchConceptExpansion(
+                        List.of(),
+                        foodEvidenceExtractor.extract("칼칼한 해물 음식"),
+                        10,
+                        4));
+        given(repository.searchExpanded(
+                any(), any(), any(), org.mockito.ArgumentMatchers.anyInt()))
+                .willReturn(List.of());
+
+        var data = service().search(
+                "칼칼한 해물 음식", false, false, null, null, 2);
+
+        assertThat(data.items()).extracting(item -> item.storeId())
+                .containsExactly("1");
+    }
+
+    @Test
+    void recommendationCannotMoveALowerFoodGroupAboveAHigherGroup() {
+        InterpretedSearchCondition condition = condition(
+                null, null, null, "칼칼한 마라탕");
+        given(interpreter.interpret("칼칼한 마라탕"))
+                .willReturn(result(condition));
+        IntegratedStoreSearchCandidate higherFood = candidate(
+                1L, "음식 근거 우선", 31, 2);
+        IntegratedStoreSearchCandidate lowerFood = candidate(
+                2L, "이력 점수 우선", 10, 4);
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(
+                        List.of(higherFood, lowerFood), null));
+        given(repository.refreshCurrentlyPublic(any()))
+                .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
+        given(recommendationService.rank(any(), any(), any(), any()))
+                .willReturn(List.of(
+                        ranked(lowerFood, 70),
+                        ranked(higherFood, 10)));
+
+        var data = service().search(
+                9L, "칼칼한 마라탕", false, false,
+                "recommendation,desc", null, 2);
+
+        assertThat(data.items()).extracting(item -> item.storeId())
+                .containsExactly("1", "2");
+        assertThat(data.rankingRuleVersion())
+                .isEqualTo("food-evidence-v1+history-v1");
+    }
+
+    @Test
+    void recommendationCursorContinuesInsideFoodGroupWithoutDuplicateOrSkip() {
+        InterpretedSearchCondition condition = condition(
+                null, null, null, "칼칼한 마라탕");
+        given(interpreter.interpret("칼칼한 마라탕"))
+                .willReturn(result(condition));
+        IntegratedStoreSearchCandidate first = candidate(1L, "첫째", 40, 2);
+        IntegratedStoreSearchCandidate second = candidate(2L, "둘째", 40, 2);
+        IntegratedStoreSearchCandidate third = candidate(3L, "셋째", 40, 2);
+        IntegratedStoreSearchCandidate lower = candidate(4L, "낮은 그룹", 10, 4);
+        List<IntegratedStoreSearchCandidate> candidates =
+                List.of(first, second, third, lower);
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(candidates, null));
+        given(repository.refreshCurrentlyPublic(any()))
+                .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
+        given(recommendationService.rank(any(), any(), any(), any()))
+                .willReturn(List.of(
+                        ranked(lower, 70),
+                        ranked(first, 60),
+                        ranked(second, 50),
+                        ranked(third, 40)));
+
+        var firstPage = service().search(
+                9L, "칼칼한 마라탕", false, false,
+                "recommendation,desc", null, 2);
+        var secondPage = service().search(
+                9L, "칼칼한 마라탕", false, false,
+                "recommendation,desc", firstPage.nextCursor(), 2);
+
+        assertThat(firstPage.items()).extracting(item -> item.storeId())
+                .containsExactly("1", "2");
+        assertThat(secondPage.items()).extracting(item -> item.storeId())
+                .containsExactly("3", "4");
+    }
+
+    @Test
+    void relevancePaginationAcceptsScoresFromFourOrMoreLexicalMatches() {
+        InterpretedSearchCondition condition = condition(
+                null, null, null, "칼칼한 해물 바질 토마토");
+        given(interpreter.interpret("칼칼한 해물 바질 토마토"))
+                .willReturn(result(condition));
+        IntegratedStoreSearchCandidate first = candidate(1L, "첫째", 40, 2);
+        IntegratedStoreSearchCandidate second = candidate(2L, "둘째", 39, 2);
+        IntegratedStoreSearchQuery firstQuery = IntegratedStoreSearchQuery.from(
+                condition, false, false, CURSOR_CODEC.principalScope(null),
+                "relevance,desc", null, 1, CURSOR_CODEC);
+        String next = CURSOR_CODEC.encode(
+                firstQuery,
+                first.structuredRelevance(),
+                first.relevanceTier(),
+                first.name(),
+                first.storeId());
+        given(repository.search(any()))
+                .willReturn(new IntegratedStoreSearchSlice(List.of(first), next))
+                .willReturn(new IntegratedStoreSearchSlice(List.of(second), null));
+        given(repository.cursorAfter(any(), org.mockito.ArgumentMatchers.eq(first)))
+                .willReturn(next);
+        given(repository.refreshCurrentlyPublic(any()))
+                .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
+
+        var firstPage = service().search(
+                "칼칼한 해물 바질 토마토", false, false,
+                "relevance,desc", null, 1);
+        var secondPage = service().search(
+                "칼칼한 해물 바질 토마토", false, false,
+                "relevance,desc", firstPage.nextCursor(), 1);
+
+        assertThat(firstPage.items()).extracting(item -> item.storeId())
+                .containsExactly("1");
+        assertThat(firstPage.nextCursor()).isEqualTo(next);
+        assertThat(secondPage.items()).extracting(item -> item.storeId())
+                .containsExactly("2");
+        assertThat(secondPage.nextCursor()).isNull();
     }
 
     @Test
@@ -214,14 +396,13 @@ class IntegratedStoreSearchServiceTest {
         IntegratedStoreSearchCandidate candidate = candidate(2L, "김치찌개집");
         given(repository.search(any())).willReturn(
                 new IntegratedStoreSearchSlice(List.of(), null));
-        given(expansionService.expand(new SearchConceptRequest(
-                "얼큰한 국물",
-                com.miriyum.domain.search.expansion.SearchConceptPurpose.STORE_SEARCH)))
+        given(expansionService.expand(any(), any()))
                 .willReturn(new SearchConceptExpansion(
                         List.of("김치찌개", "찌개"), 130, 20));
         given(repository.searchExpanded(
                 any(),
                 org.mockito.ArgumentMatchers.eq(List.of("김치찌개", "찌개")),
+                any(),
                 org.mockito.ArgumentMatchers.eq(200)))
                 .willReturn(List.of(candidate));
         given(repository.refreshCurrentlyPublic(List.of())).willReturn(List.of());
@@ -246,9 +427,10 @@ class IntegratedStoreSearchServiceTest {
         IntegratedStoreSearchCandidate duplicateExact = candidate(1L, "정확 후보", 1);
         given(repository.search(any())).willReturn(
                 new IntegratedStoreSearchSlice(List.of(exact), null));
-        given(expansionService.expand(any())).willReturn(new SearchConceptExpansion(
+        given(expansionService.expand(any(), any())).willReturn(new SearchConceptExpansion(
                 List.of("매운 제육볶음"), 130, 20));
-        given(repository.searchExpanded(any(), any(), org.mockito.ArgumentMatchers.eq(200)))
+        given(repository.searchExpanded(
+                any(), any(), any(), org.mockito.ArgumentMatchers.eq(200)))
                 .willReturn(List.of(reverse, duplicateExact, forward));
         given(repository.refreshCurrentlyPublic(any()))
                 .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
@@ -269,9 +451,10 @@ class IntegratedStoreSearchServiceTest {
         IntegratedStoreSearchCandidate available = candidate(2L, "김치찌개집");
         given(repository.search(any())).willReturn(
                 new IntegratedStoreSearchSlice(List.of(), null));
-        given(expansionService.expand(any())).willReturn(new SearchConceptExpansion(
+        given(expansionService.expand(any(), any())).willReturn(new SearchConceptExpansion(
                 List.of("김치찌개", "찌개"), 130, 20));
-        given(repository.searchExpanded(any(), any(), org.mockito.ArgumentMatchers.eq(200)))
+        given(repository.searchExpanded(
+                any(), any(), any(), org.mockito.ArgumentMatchers.eq(200)))
                 .willReturn(List.of(unavailable, available));
         given(repository.refreshCurrentlyPublic(any()))
                 .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
@@ -413,7 +596,8 @@ class IntegratedStoreSearchServiceTest {
                 .containsExactly("3", "1");
         assertThat(firstPage.items()).extracting(item -> item.recommendationReason())
                 .containsExactly(RecommendationReason.KEYWORD, RecommendationReason.KEYWORD);
-        assertThat(firstPage.rankingRuleVersion()).isEqualTo("history-v1");
+        assertThat(firstPage.rankingRuleVersion())
+                .isEqualTo("food-evidence-v1+history-v1");
         assertThat(firstPage.nextCursor()).isNotBlank();
         assertThat(secondPage.items()).extracting(item -> item.storeId())
                 .containsExactly("2");
@@ -428,24 +612,22 @@ class IntegratedStoreSearchServiceTest {
     }
 
     @Test
-    void recommendationAppendsSeparatelyRankedExpandedTierAfterExactTier() {
+    void recommendationRanksExactAndExpandedOnceWithinSearchGroups() {
         InterpretedSearchCondition condition = condition(null, null, null, "얼큰한 국물");
         RecommendationSearchSignals signals = new RecommendationSearchSignals(
                 condition.storeCategoryCodes(),
                 condition.menuCategoryCodes(),
                 condition.tagCodes());
         given(interpreter.interpret("얼큰한 국물")).willReturn(result(condition));
-        IntegratedStoreSearchCandidate exact = candidate(1L, "정확 후보");
-        IntegratedStoreSearchCandidate expanded = candidate(2L, "김치찌개집");
+        IntegratedStoreSearchCandidate exact = candidate(1L, "정확 후보", 3);
+        IntegratedStoreSearchCandidate expanded = candidate(2L, "김치찌개집", 1);
         given(repository.search(any())).willReturn(
                 new IntegratedStoreSearchSlice(List.of(exact), null));
         given(repository.refreshCurrentlyPublic(any()))
                 .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
-        given(expansionService.expand(new SearchConceptRequest(
-                "얼큰한 국물",
-                com.miriyum.domain.search.expansion.SearchConceptPurpose.STORE_SEARCH)))
+        given(expansionService.expand(any(), any()))
                 .willReturn(new SearchConceptExpansion(List.of("김치찌개"), 130, 20));
-        given(repository.searchExpanded(any(), any(),
+        given(repository.searchExpanded(any(), any(), any(),
                 org.mockito.ArgumentMatchers.eq(200)))
                 .willReturn(List.of(exact, expanded));
         given(recommendationService.rank(
@@ -453,8 +635,9 @@ class IntegratedStoreSearchServiceTest {
                 any(),
                 org.mockito.ArgumentMatchers.eq(signals),
                 org.mockito.ArgumentMatchers.eq(clock.instant())))
-                .willReturn(List.of(ranked(exact, 10)))
-                .willReturn(List.of(ranked(expanded, 50)));
+                .willReturn(List.of(
+                        ranked(expanded, 50),
+                        ranked(exact, 10)));
 
         var data = service().search(
                 null, "얼큰한 국물", false, false,
@@ -463,8 +646,8 @@ class IntegratedStoreSearchServiceTest {
         assertThat(data.items()).extracting(item -> item.storeId())
                 .containsExactly("1", "2");
         assertThat(data.nextCursor()).isNull();
-        then(expansionService).should(times(1)).expand(any());
-        then(recommendationService).should(times(2)).rank(
+        then(expansionService).should(times(1)).expand(any(), any());
+        then(recommendationService).should(times(1)).rank(
                 org.mockito.ArgumentMatchers.isNull(),
                 any(),
                 org.mockito.ArgumentMatchers.eq(signals),
@@ -482,9 +665,10 @@ class IntegratedStoreSearchServiceTest {
                 new IntegratedStoreSearchSlice(List.of(exact), null));
         given(repository.refreshCurrentlyPublic(any()))
                 .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
-        given(expansionService.expand(any())).willReturn(new SearchConceptExpansion(
+        given(expansionService.expand(any(), any())).willReturn(new SearchConceptExpansion(
                 List.of("매운 제육볶음"), 130, 20));
-        given(repository.searchExpanded(any(), any(), org.mockito.ArgumentMatchers.eq(200)))
+        given(repository.searchExpanded(
+                any(), any(), any(), org.mockito.ArgumentMatchers.eq(200)))
                 .willReturn(List.of(reverse, forward));
         given(recommendationService.rank(
                 org.mockito.ArgumentMatchers.isNull(),
@@ -521,6 +705,7 @@ class IntegratedStoreSearchServiceTest {
                 CURSOR_CODEC,
                 recommendationService,
                 expansionService,
+                foodEvidenceExtractor,
                 llmProperties(),
                 clock);
     }
@@ -535,9 +720,10 @@ class IntegratedStoreSearchServiceTest {
                 new IntegratedStoreSearchSlice(List.of(staleExact), null));
         given(repository.refreshCurrentlyPublic(List.of())).willReturn(List.of());
         given(repository.refreshCurrentlyPublic(List.of(staleExact))).willReturn(List.of());
-        given(expansionService.expand(any())).willReturn(new SearchConceptExpansion(
+        given(expansionService.expand(any(), any())).willReturn(new SearchConceptExpansion(
                 List.of("김치찌개"), 130, 20));
-        given(repository.searchExpanded(any(), any(), org.mockito.ArgumentMatchers.eq(200)))
+        given(repository.searchExpanded(
+                any(), any(), any(), org.mockito.ArgumentMatchers.eq(200)))
                 .willReturn(List.of(expanded));
         given(repository.refreshCurrentlyPublic(List.of(expanded)))
                 .willReturn(List.of(expanded));
@@ -616,6 +802,21 @@ class IntegratedStoreSearchServiceTest {
                 id, name, Region.SEOUL, "서울 중구", "KOREAN",
                 OperationStatus.OPEN, true, true, false,
                 LocalDateTime.of(2026, 8, 6, 9, 0), relevanceTier,
+                new BigDecimal("37.500000000000000"),
+                new BigDecimal("127.000000000000000"));
+    }
+
+    private static IntegratedStoreSearchCandidate candidate(
+            long id,
+            String name,
+            int structuredRelevance,
+            int relevanceTier
+    ) {
+        return new IntegratedStoreSearchCandidate(
+                id, name, Region.SEOUL, "서울 중구", "KOREAN",
+                OperationStatus.OPEN, true, true, false,
+                LocalDateTime.of(2026, 8, 6, 9, 0),
+                structuredRelevance, relevanceTier,
                 new BigDecimal("37.500000000000000"),
                 new BigDecimal("127.000000000000000"));
     }

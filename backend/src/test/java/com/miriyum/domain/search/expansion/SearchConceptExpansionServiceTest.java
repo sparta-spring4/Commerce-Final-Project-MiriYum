@@ -8,6 +8,9 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 
 import com.miriyum.domain.search.config.OpenAiSearchInterpretationProperties;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidence.Dimension;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidence.EvidenceTerm;
+import com.miriyum.domain.search.interpreter.FoodEvidenceVocabulary;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -166,10 +169,82 @@ class SearchConceptExpansionServiceTest {
                 List.of("하나", "둘", "셋", "넷", "다섯"), 10, 5));
 
         SearchConceptExpansion result = new SearchConceptExpansionService(
-                properties(true, 3), interpreter, new SimpleMeterRegistry())
+                properties(true, 3),
+                interpreter,
+                new FoodEvidenceVocabulary(),
+                new SimpleMeterRegistry())
                 .expand(request);
 
         assertThat(result.concepts()).containsExactly("하나", "둘", "셋");
+    }
+
+    @Test
+    void deterministicDimensionsWinAndLlmOnlyFillsEmptyDimensions() {
+        var vocabulary = new FoodEvidenceVocabulary();
+        StructuredFoodEvidence deterministic = evidence(
+                vocabulary,
+                "마라탕",
+                "칼칼한",
+                null);
+        StructuredFoodEvidence llm = evidence(
+                vocabulary,
+                "짬뽕",
+                "달콤한",
+                "해물");
+        var request = new SearchConceptRequest("칼칼한 마라탕", STORE_SEARCH);
+        given(interpreter.interpret(request)).willReturn(new SearchConceptExpansion(
+                List.of("짬뽕"), llm, 20, 5));
+
+        SearchConceptExpansion result = service(true, new SimpleMeterRegistry())
+                .expand(request, deterministic);
+
+        assertThat(result.foodEvidence().menuFamilies())
+                .extracting(EvidenceTerm::id)
+                .containsExactly("MALATANG");
+        assertThat(result.foodEvidence().tastes())
+                .extracting(EvidenceTerm::id)
+                .containsExactly("SPICY_SHARP");
+        assertThat(result.foodEvidence().ingredients())
+                .extracting(EvidenceTerm::id)
+                .containsExactly("SEAFOOD");
+    }
+
+    @Test
+    void disabledProviderReturnsDeterministicEvidenceWithoutInteraction() {
+        var vocabulary = new FoodEvidenceVocabulary();
+        StructuredFoodEvidence deterministic = evidence(
+                vocabulary,
+                "마라탕",
+                "칼칼한",
+                null);
+        var request = new SearchConceptRequest("칼칼한 마라탕", STORE_SEARCH);
+
+        SearchConceptExpansion result = service(false, new SimpleMeterRegistry())
+                .expand(request, deterministic);
+
+        assertThat(result.foodEvidence()).isEqualTo(deterministic);
+        assertThat(result.concepts()).isEmpty();
+        then(interpreter).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void discardsLlmTermsOutsideReviewedVocabulary() {
+        StructuredFoodEvidence unknown = new StructuredFoodEvidence(
+                List.of(),
+                List.of(new EvidenceTerm(
+                        "UNREVIEWED",
+                        "우주라면",
+                        List.of("우주라면"),
+                        StructuredFoodEvidenceSource.LLM)),
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        var request = new SearchConceptRequest("얼큰한 국물", STORE_SEARCH);
+        given(interpreter.interpret(request)).willReturn(new SearchConceptExpansion(
+                List.of("우주라면"), unknown, 10, 4));
+
+        SearchConceptExpansion result = service(true, new SimpleMeterRegistry())
+                .expand(request, StructuredFoodEvidence.empty());
+
+        assertThat(result.foodEvidence()).isEqualTo(StructuredFoodEvidence.empty());
     }
 
     private SearchConceptExpansionService service(
@@ -177,7 +252,39 @@ class SearchConceptExpansionServiceTest {
             SimpleMeterRegistry registry
     ) {
         return new SearchConceptExpansionService(
-                properties(enabled, 8), interpreter, registry);
+                properties(enabled, 8),
+                interpreter,
+                new FoodEvidenceVocabulary(),
+                registry);
+    }
+
+    private static StructuredFoodEvidence evidence(
+            FoodEvidenceVocabulary vocabulary,
+            String menu,
+            String taste,
+            String ingredient
+    ) {
+        List<EvidenceTerm> menus = menu == null
+                ? List.of()
+                : List.of(vocabulary.resolve(
+                        Dimension.MENU_FAMILY,
+                        menu,
+                        StructuredFoodEvidenceSource.DETERMINISTIC).orElseThrow());
+        List<EvidenceTerm> tastes = taste == null
+                ? List.of()
+                : List.of(vocabulary.resolve(
+                        Dimension.TASTE,
+                        taste,
+                        StructuredFoodEvidenceSource.DETERMINISTIC).orElseThrow());
+        List<EvidenceTerm> ingredients = ingredient == null
+                ? List.of()
+                : List.of(vocabulary.resolve(
+                        Dimension.INGREDIENT,
+                        ingredient,
+                        StructuredFoodEvidenceSource.LLM).orElseThrow());
+        return new StructuredFoodEvidence(
+                List.of(), menus, ingredients, tastes,
+                List.of(), List.of(), List.of(), List.of(), List.of());
     }
 
     private static OpenAiSearchInterpretationProperties properties(

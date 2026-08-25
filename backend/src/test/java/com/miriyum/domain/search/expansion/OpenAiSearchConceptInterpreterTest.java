@@ -1,7 +1,6 @@
 package com.miriyum.domain.search.expansion;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
-import static com.github.tomakehurst.wiremock.client.WireMock.equalToJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
@@ -20,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.miriyum.domain.search.config.OpenAiSearchInterpretationProperties;
 import com.miriyum.domain.search.config.SearchInterpretationHttpConfig;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidence.EvidenceTerm;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,66 +45,70 @@ class OpenAiSearchConceptInterpreterTest {
     }
 
     @Test
-    void sendsAbstentionSchemaAndInstructionAndMapsMatchableUsage() {
+    void sendsStrictFoodDimensionSchemaAndMapsMatchableUsage() {
         wireMock.stubFor(post(urlEqualTo("/v1/chat/completions"))
-                .willReturn(okJson(successResponse())));
+                .willReturn(okJson(storeSearchSuccessResponse())));
         OpenAiSearchConceptInterpreter interpreter = interpreter(properties(2_000));
 
         SearchConceptExpansion result = interpreter.interpret(
                 new SearchConceptRequest("얼큰한 국물", STORE_SEARCH));
 
         assertThat(result.concepts()).containsExactly("김치찌개", "찌개");
+        assertThat(result.foodEvidence().rawFoodSpans())
+                .extracting(EvidenceTerm::surface)
+                .containsExactly("얼큰한 국물");
+        assertThat(result.foodEvidence().menuFamilies())
+                .extracting(EvidenceTerm::surface)
+                .containsExactly("김치찌개");
+        assertThat(result.foodEvidence().tastes())
+                .extracting(EvidenceTerm::surface)
+                .containsExactly("얼큰한");
+        assertThat(result.foodEvidence().broths())
+                .extracting(EvidenceTerm::surface)
+                .containsExactly("국물");
+        assertThat(result.foodEvidence().menuFamilies())
+                .extracting(EvidenceTerm::source)
+                .containsOnly(StructuredFoodEvidenceSource.LLM);
         assertThat(result.inputTokens()).isEqualTo(130);
         assertThat(result.outputTokens()).isEqualTo(20);
         wireMock.verify(1, postRequestedFor(urlEqualTo("/v1/chat/completions"))
                 .withHeader("Authorization", equalTo("Bearer test-secret"))
-                .withRequestBody(equalToJson("""
-                        {
-                          "model":"gpt-4o-mini",
-                          "messages":[
-                            {"role":"system","content":"사용자 원문에 실제 음식, 재료, 맛 또는 조리법 근거가 있는지 먼저 판정하세요. 음식 계열을 안전하게 특정할 수 있으면 interpretation은 MATCHABLE이고 concepts에 짧은 한국어 음식명과 검색 동의어를 최대 8개까지 가장 관련 높은 순서로 작성하세요. 실제 음식 근거가 없으면 interpretation은 NO_FOOD_SIGNAL이고 concepts는 빈 배열입니다. 음식 관련 가능성은 있지만 음식 계열을 안전하게 특정하기 어려우면 interpretation은 AMBIGUOUS이고 concepts는 빈 배열입니다. 은유나 음식과 무관한 표현을 메뉴명으로 바꾸거나 입력에 없는 메뉴명을 발명하지 마세요. MATCHABLE에서는 맛, 재료, 국물 여부, 조리 형태를 종합하되 서로 다른 음식 계열의 후보를 다양하게 제시하고 같은 계열의 표현만 반복하지 마세요. '메뉴명:', '재료:', '맛:', '조리형태:' 같은 라벨이나 설명 문장을 쓰지 마세요. 알레르기, 식이 안전, 재고, 예약 가능 여부를 추론하지 마세요."},
-                            {"role":"user","content":"얼큰한 국물"}
-                          ],
-                          "max_tokens":100,
-                          "temperature":0.0,
-                          "response_format":{
-                            "type":"json_schema",
-                            "json_schema":{
-                              "name":"search_concepts",
-                              "strict":true,
-                              "schema":{
-                                "type":"object",
-                                "additionalProperties":false,
-                                "required":["interpretation","concepts"],
-                                "properties":{
-                                  "interpretation":{
-                                    "type":"string",
-                                    "enum":["MATCHABLE","AMBIGUOUS","NO_FOOD_SIGNAL"]
-                                  },
-                                  "concepts":{
-                                    "type":"array",
-                                    "maxItems":8,
-                                    "items":{"type":"string","maxLength":60}
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                        """, true, true)));
+                .withRequestBody(matchingJsonPath("$.model", equalTo("gpt-4o-mini")))
+                .withRequestBody(matchingJsonPath("$.temperature", equalTo("0.0")))
+                .withRequestBody(matchingJsonPath(
+                        "$.response_format.json_schema.strict", equalTo("true")))
+                .withRequestBody(matchingJsonPath(
+                        "$.response_format.json_schema.schema.additionalProperties",
+                        equalTo("false")))
+                .withRequestBody(matchingJsonPath(
+                        "$.response_format.json_schema.schema.properties.menuFamilies.type",
+                        equalTo("array")))
+                .withRequestBody(matchingJsonPath(
+                        "$.response_format.json_schema.schema.properties.ingredients.type",
+                        equalTo("array")))
+                .withRequestBody(matchingJsonPath(
+                        "$.response_format.json_schema.schema.properties.tastes.type",
+                        equalTo("array")))
+                .withRequestBody(matchingJsonPath(
+                        "$.response_format.json_schema.schema.properties.aromas.type",
+                        equalTo("array")))
+                .withRequestBody(matchingJsonPath(
+                        "$.response_format.json_schema.schema.required[10]",
+                        equalTo("forms"))));
     }
 
     @ParameterizedTest
     @MethodSource("abstentionResponses")
     void discardsConceptsForAbstentionAndPreservesUsage(String interpretation) {
         wireMock.stubFor(post(urlEqualTo("/v1/chat/completions"))
-                .willReturn(okJson(successResponse(interpretation))));
+                .willReturn(okJson(storeSearchSuccessResponse(interpretation))));
         OpenAiSearchConceptInterpreter interpreter = interpreter(properties(2_000));
 
         SearchConceptExpansion result = interpreter.interpret(
                 new SearchConceptRequest("파란 침묵 좌표", STORE_SEARCH));
 
         assertThat(result.concepts()).isEmpty();
+        assertThat(result.foodEvidence()).isEqualTo(StructuredFoodEvidence.empty());
         assertThat(result.inputTokens()).isEqualTo(130);
         assertThat(result.outputTokens()).isEqualTo(20);
     }
@@ -119,7 +123,7 @@ class OpenAiSearchConceptInterpreterTest {
                 .withRequestBody(matchingJsonPath(
                         "$.response_format.json_schema.schema.properties.concepts.minItems",
                         equalTo("8")))
-                .willReturn(okJson(successResponse())));
+                .willReturn(okJson(menuAlternativeSuccessResponse())));
         OpenAiSearchConceptInterpreter interpreter = interpreter(properties(2_000));
 
         SearchConceptExpansion result = interpreter.interpret(new SearchConceptRequest(
@@ -169,7 +173,7 @@ class OpenAiSearchConceptInterpreterTest {
     @Test
     void mapsTimeoutWithoutRetry() {
         wireMock.stubFor(post(urlEqualTo("/v1/chat/completions"))
-                .willReturn(okJson(successResponse()).withFixedDelay(500)));
+                .willReturn(okJson(storeSearchSuccessResponse()).withFixedDelay(500)));
 
         assertFailure(interpreter(properties(100)), TIMEOUT);
 
@@ -243,8 +247,8 @@ class OpenAiSearchConceptInterpreterTest {
                 Arguments.of("{\"choices\":[],\"usage\":null}", MALFORMED_RESPONSE));
     }
 
-    private static String successResponse() {
-        return successResponse("MATCHABLE");
+    private static String storeSearchSuccessResponse() {
+        return storeSearchSuccessResponse("MATCHABLE");
     }
 
     private static Stream<Arguments> abstentionResponses() {
@@ -259,10 +263,19 @@ class OpenAiSearchConceptInterpreterTest {
                 Arguments.of("{\"interpretation\":\"MATCHABLE\",\"concepts\":[123]}"));
     }
 
-    private static String successResponse(String interpretation) {
+    private static String storeSearchSuccessResponse(String interpretation) {
+        return responseWithContent("""
+                {"interpretation":"%s","concepts":["김치찌개","찌개"],
+                 "rawFoodSpans":["얼큰한 국물"],"menuFamilies":["김치찌개"],
+                 "ingredients":[],"tastes":["얼큰한"],"broths":["국물"],
+                 "methods":[],"aromas":[],"textures":[],"forms":[]}
+                """.formatted(interpretation).replaceAll("\\s+", " "));
+    }
+
+    private static String menuAlternativeSuccessResponse() {
         return responseWithContent(
-                "{\"interpretation\":\"" + interpretation
-                        + "\",\"concepts\":[\"김치찌개\",\"찌개\"]}");
+                "{\"interpretation\":\"MATCHABLE\","
+                        + "\"concepts\":[\"김치찌개\",\"찌개\"]}");
     }
 
     private static String responseWithContent(String content) {

@@ -127,6 +127,17 @@ class StoreSearchOpenApiContractTest {
                 .containsExactlyInAnyOrder(
                         "items", "normalizedCondition", "warnings", "ruleVersion",
                         "vocabularyVersion", "rankingRuleVersion", "nextCursor");
+        Map<String, Object> integratedSearchProperties = map(
+                map(schemas.get("IntegratedStoreSearchData")).get("properties"));
+        assertThat((String) map(integratedSearchProperties.get(
+                "vocabularyVersion")).get("description"))
+                .contains("catalog-v1+food-evidence-v1");
+        Map<String, Object> rankingRuleVersion = map(
+                integratedSearchProperties.get("rankingRuleVersion"));
+        assertThat(list(rankingRuleVersion.get("type")))
+                .containsExactly("string", "null");
+        assertThat((String) rankingRuleVersion.get("description"))
+                .contains("food-evidence-v1+history-v1");
         assertThat(list(map(schemas.get("IntegratedStoreSearchItem")).get("required")))
                 .contains("coordinates", "reservationAvailability", "recommendationReason");
         assertThat(list(map(schemas.get("RecommendationReason")).get("required")))

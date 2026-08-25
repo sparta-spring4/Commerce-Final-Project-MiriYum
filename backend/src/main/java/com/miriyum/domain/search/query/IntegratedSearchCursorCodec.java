@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 @Component
 public final class IntegratedSearchCursorCodec {
 
-    private static final String VERSION = "v1";
+    private static final String VERSION = "v2";
     private static final int MAX_CURSOR_LENGTH = 1_024;
     private static final String HMAC_ALGORITHM = "HmacSHA256";
     private static final String SIGNING_CONTEXT = "miriyum-store-search-cursor\0";
@@ -37,7 +37,7 @@ public final class IntegratedSearchCursorCodec {
             String sortValue,
             long storeId
     ) {
-        return encode(query, 0, sortValue, storeId);
+        return encode(query, 0, 0, sortValue, storeId);
     }
 
     /** Returns a keyed opaque scope that binds cursors to an anonymous or consumer principal. */
@@ -57,9 +57,21 @@ public final class IntegratedSearchCursorCodec {
             String sortValue,
             long storeId
     ) {
+        return encode(query, 0, relevanceTier, sortValue, storeId);
+    }
+
+    public String encode(
+            IntegratedStoreSearchQuery query,
+            int structuredRelevance,
+            int relevanceTier,
+            String sortValue,
+            long storeId
+    ) {
         if (query == null || sortValue == null || storeId <= 0) {
             throw new IllegalArgumentException("query and cursor values are required");
         }
+        new IntegratedSearchCursor(
+                structuredRelevance, relevanceTier, sortValue, storeId);
         String encodedSortValue = Base64.getUrlEncoder().withoutPadding().encodeToString(
                 sortValue.getBytes(StandardCharsets.UTF_8));
         String payload = String.join(
@@ -67,6 +79,7 @@ public final class IntegratedSearchCursorCodec {
                 VERSION,
                 query.fingerprint(),
                 query.sort().name(),
+                Integer.toString(structuredRelevance),
                 Integer.toString(relevanceTier),
                 encodedSortValue,
                 Long.toString(storeId));
@@ -85,26 +98,28 @@ public final class IntegratedSearchCursorCodec {
                 throw validationFailed();
             }
             String[] parts = rawCursor.split("\\.", -1);
-            if (parts.length != 7
+            if (parts.length != 8
                     || !VERSION.equals(parts[0])
                     || !expectedFingerprint.equals(parts[1])
                     || !expectedSort.name().equals(parts[2])) {
                 throw validationFailed();
             }
-            String payload = String.join(".", Arrays.copyOf(parts, 6));
+            String payload = String.join(".", Arrays.copyOf(parts, 7));
             byte[] expectedSignature = Base64.getUrlDecoder().decode(sign(payload));
-            byte[] actualSignature = Base64.getUrlDecoder().decode(parts[6]);
+            byte[] actualSignature = Base64.getUrlDecoder().decode(parts[7]);
             if (!MessageDigest.isEqual(expectedSignature, actualSignature)) {
                 throw validationFailed();
             }
-            int relevanceTier = Integer.parseInt(parts[3]);
+            int structuredRelevance = Integer.parseInt(parts[3]);
+            int relevanceTier = Integer.parseInt(parts[4]);
             String sortValue = new String(
-                    Base64.getUrlDecoder().decode(parts[4]), StandardCharsets.UTF_8);
-            long storeId = Long.parseLong(parts[5]);
+                    Base64.getUrlDecoder().decode(parts[5]), StandardCharsets.UTF_8);
+            long storeId = Long.parseLong(parts[6]);
             if (sortValue.isEmpty() || storeId <= 0) {
                 throw validationFailed();
             }
-            return new IntegratedSearchCursor(relevanceTier, sortValue, storeId);
+            return new IntegratedSearchCursor(
+                    structuredRelevance, relevanceTier, sortValue, storeId);
         } catch (IllegalArgumentException exception) {
             throw validationFailed();
         }

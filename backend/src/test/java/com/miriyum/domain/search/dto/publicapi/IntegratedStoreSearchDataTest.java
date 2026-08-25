@@ -31,14 +31,20 @@ class IntegratedStoreSearchDataTest {
                 LocalDate.of(2026, 8, 7), LocalTime.of(18, 0), "조용한");
 
         IntegratedStoreSearchData data = new IntegratedStoreSearchData(
-                items, condition, warnings, "rule-v1", "catalog-v1", "history-v1", null);
+                items, condition, warnings, "rule-v1",
+                "catalog-v1+food-evidence-v1",
+                "food-evidence-v1+history-v1",
+                null);
         items.clear();
         warnings.clear();
 
         assertThat(data.items()).hasSize(1);
         assertThat(data.items().getFirst().coordinates()).isNull();
         assertThat(data.warnings()).hasSize(1);
-        assertThat(data.rankingRuleVersion()).isEqualTo("history-v1");
+        assertThat(data.vocabularyVersion())
+                .isEqualTo("catalog-v1+food-evidence-v1");
+        assertThat(data.rankingRuleVersion())
+                .isEqualTo("food-evidence-v1+history-v1");
         assertThatThrownBy(() -> data.items().clear())
                 .isInstanceOf(UnsupportedOperationException.class);
     }
