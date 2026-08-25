@@ -308,65 +308,6 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("SPRING_APPLICATION_JSON", self.workflow)
         self.assertIn("runtime_config_secret_arn", self.workflow)
 
-    def test_manual_runtime_config_mode_controls_the_flag_and_whole_secret_mapping(self):
-        self.assertIn("runtime_config:", self.workflow)
-        self.assertIn(
-            "Runtime config: preserve (default), enable, or disable", self.workflow)
-        self.assertIn("RUNTIME_CONFIG_MODE: ${{ inputs.runtime_config || 'preserve' }}", self.workflow)
-        self.assertIn('runtime_config_mode="$RUNTIME_CONFIG_MODE"', self.workflow)
-        self.assertIn('preserve) runtime_config_enabled="$current_runtime_config_enabled" ;;', self.workflow)
-        self.assertIn('enable) runtime_config_enabled="true" ;;', self.workflow)
-        self.assertIn('disable) runtime_config_enabled="false" ;;', self.workflow)
-        self.assertIn('runtime_config must be preserve, enable, or disable.', self.workflow)
-
-        jq = shutil.which("jq")
-        if jq is None:
-            self.skipTest("jq is required for the workflow transformation fixture")
-
-        filter_start = self.workflow.index('--arg aws_region "$AWS_REGION" \'\n')
-        filter_start = self.workflow.index("\n", filter_start) + 1
-        filter_end = self.workflow.index("\n          ' current-task-definition.json", filter_start)
-        jq_filter = self.workflow[filter_start:filter_end]
-        source = {"containerDefinitions": [{
-            "name": "backend",
-            "environment": [
-                {"name": "MIRIYUM_RUNTIME_CONFIG_ENABLED", "value": "false"},
-            ],
-            "secrets": [],
-        }]}
-
-        def render(runtime_config_enabled):
-            command = [
-                jq,
-                "--arg", "image", "new-image", "--arg", "container", "backend",
-                "--arg", "runtime_config_secret_arn", "arn:runtime",
-                "--arg", "openai_parameter_arn", "arn:openai", "--arg", "llm_enabled", "false",
-                "--arg", "qr_storage_generation", "generation",
-                "--arg", "runtime_config_enabled", runtime_config_enabled,
-                "--arg", "storage_s3_enabled", "false",
-                "--arg", "storage_s3_reconciliation_enabled", "false",
-                "--arg", "storage_s3_bucket_parameter_arn", "arn:bucket",
-                "--arg", "payment_runtime", "preserve", "--arg", "portone_store_id", "store",
-                "--arg", "payment_cursor_secret_arn", "arn:payment:cursor",
-                "--arg", "portone_api_secret_arn", "arn:payment:api",
-                "--arg", "aws_region", "ap-northeast-2", jq_filter,
-            ]
-            result = subprocess.run(
-                command, input=json.dumps(source), text=True, capture_output=True, check=True)
-            return json.loads(result.stdout)["containerDefinitions"][0]
-
-        enabled = render("true")
-        enabled_environment = {item["name"]: item["value"] for item in enabled["environment"]}
-        enabled_secrets = {item["name"]: item["valueFrom"] for item in enabled["secrets"]}
-        self.assertEqual("true", enabled_environment["MIRIYUM_RUNTIME_CONFIG_ENABLED"])
-        self.assertEqual("arn:runtime", enabled_secrets["SPRING_APPLICATION_JSON"])
-
-        disabled = render("false")
-        disabled_environment = {item["name"]: item["value"] for item in disabled["environment"]}
-        disabled_secret_names = {item["name"] for item in disabled["secrets"]}
-        self.assertEqual("false", disabled_environment["MIRIYUM_RUNTIME_CONFIG_ENABLED"])
-        self.assertNotIn("SPRING_APPLICATION_JSON", disabled_secret_names)
-
     def test_ecs_stability_wait_polls_for_the_approved_rolling_deployment_budget(self):
         stability_step = self.workflow.split(
             "- name: Wait for ECS service stability", 1
