@@ -133,6 +133,7 @@ describe('readNotificationHistoryPage', () => {
                 occurredAt: '2026-08-13T10:00:00+09:00',
                 createdAt: '2026-08-13T10:00:01+09:00',
                 deliveredAt: '2026-08-13T10:00:02+09:00',
+                readAt: null,
                 action: {
                   type: 'WAITING_DETAIL',
                   resource: { type: 'WAITING', id: '701' },
@@ -148,6 +149,7 @@ describe('readNotificationHistoryPage', () => {
                 occurredAt: '2026-08-13T09:00:00+09:00',
                 createdAt: '2026-08-13T09:00:01+09:00',
                 deliveredAt: '2026-08-13T09:00:02+09:00',
+                readAt: '2026-08-13T09:05:00+09:00',
                 action: null,
               },
             ],
@@ -168,5 +170,36 @@ describe('readNotificationHistoryPage', () => {
       '예약이 확정되었습니다.',
       '예약이 취소되었습니다.',
     ])
+  })
+
+  test('rejects a history item without the nullable read state', async () => {
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json({
+          code: 'SUCCESS',
+          message: '알림 이력을 조회했습니다.',
+          data: {
+            items: [{
+              notificationId: '1001',
+              purpose: 'RESERVATION_CONFIRMED',
+              title: '예약이 확정되었습니다.',
+              resource: { type: 'RESERVATION', id: '501' },
+              occurredAt: '2026-08-13T10:00:00+09:00',
+              createdAt: '2026-08-13T10:00:01+09:00',
+              deliveredAt: '2026-08-13T10:00:02+09:00',
+              action: null,
+            }],
+            hasNext: false,
+            nextCursor: null,
+          },
+        }),
+      ),
+    )
+    const { readNotificationHistoryPage } = await import('./notificationHistoryApi')
+
+    await expect(readNotificationHistoryPage(createApiClient())).rejects.toMatchObject({
+      name: 'ApiContractError',
+      violation: 'notificationHistoryData',
+    })
   })
 })

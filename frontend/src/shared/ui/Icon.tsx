@@ -13,6 +13,7 @@
 export type IconName =
   | 'search'
   | 'mail'
+  | 'bell'
   | 'lock'
   | 'eye'
   | 'eyeOff'
@@ -56,6 +57,12 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <rect x="2.5" y="4.5" width="19" height="15" rx="2.5" />
       <path d="m3.5 7 8.5 5.5L20.5 7" />
+    </>
+  ),
+  bell: (
+    <>
+      <path d="M5.5 17.5h13l-1.5-2.25V10a5 5 0 0 0-10 0v5.25Z" />
+      <path d="M9.75 20a2.5 2.5 0 0 0 4.5 0" />
     </>
   ),
   lock: (
