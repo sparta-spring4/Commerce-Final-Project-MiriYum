@@ -11,7 +11,7 @@ from typing import Any
 
 SCHEMA_VERSION = "miriyum-staging-search-eval-v1"
 CORPUS_SOURCE = "backend/scripts/dev-data/search-profile-demo-500-stores.sql"
-APPROVED_CORPUS_SHA256 = "5aaf573eb4e09851b30753ed2e4da4669f0c95d2f0ff674471024afff40c37db"
+APPROVED_CORPUS_SHA256 = "e1c758eec4dd0bab3312c3e193c6489a67c476fcaaf33d84bad54aad271c9784"
 QUERY_COUNTS = {
     "sensory_without_menu": 800,
     "composite_filter": 400,
@@ -353,8 +353,8 @@ def dataset_fingerprint(dataset: dict[str, Any]) -> str:
 
 
 def generate_staging_dataset(seed_sql: Path, *, seed: int) -> dict[str, Any]:
-    source_bytes = seed_sql.read_bytes()
-    sql_text = source_bytes.decode("utf-8")
+    sql_text = seed_sql.read_bytes().decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    source_bytes = sql_text.encode("utf-8")
     templates = _menu_templates(sql_text)
     stores = _stores()
     menus = _menus(stores, templates)

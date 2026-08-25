@@ -7,6 +7,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import subprocess
 from typing import Any
 
 from .artifacts import write_json, write_jsonl, write_sha256_manifest
@@ -35,6 +36,14 @@ STAGING_METER_NAMES = {
     "miriyum.search.llm.calls", "miriyum.search.llm.latency",
     "miriyum.search.llm.outcomes", "miriyum.search.llm.tokens",
 }
+HARNESS_PATHS = (
+    "performance/search-eval-v2",
+    "performance/k6/search-llm",
+    "performance/k6/tests/search-llm-scenario-contract.js",
+    "backend/scripts/dev-data/search-profile-demo-500-stores.sql",
+    "docs/performance/staging-llm-search-validation.md",
+)
+REQUIRED_PUBLIC_ID_CONTRACT_BLOB = "08ccb829ac0c7ccedc3c2744ad6f817080b90e45"
 
 
 def _env_true(name: str) -> bool:
@@ -120,9 +129,45 @@ def _provenance(config: StagingEvalConfig) -> dict[str, Any]:
     }
 
 
+def _repository_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def verify_harness_checkout(config: StagingEvalConfig) -> dict[str, Any]:
+    repository = _repository_root()
+
+    def git(*arguments: str) -> str:
+        try:
+            completed = subprocess.run(
+                ["git", *arguments], cwd=repository, check=True,
+                capture_output=True, text=True,
+            )
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise RuntimeError("unable to verify staging harness checkout") from error
+        return completed.stdout.strip()
+
+    head = git("rev-parse", "HEAD")
+    if head != config.harness_sha:
+        raise RuntimeError("staging harness SHA does not match the actual git HEAD")
+    dirty = git("status", "--porcelain", "--untracked-files=all", "--", *HARNESS_PATHS)
+    if dirty:
+        raise RuntimeError("staging harness checkout is dirty")
+    public_id_contract_blob = git("rev-parse", "HEAD:performance/k6/search-llm/contracts.js")
+    if public_id_contract_blob != REQUIRED_PUBLIC_ID_CONTRACT_BLOB:
+        raise RuntimeError("staging harness does not contain the approved PublicId contract")
+    return {"headSha": head, "clean": True}
+
+
+def _pilot_request_ids_sha256(dataset: dict[str, Any], config: StagingEvalConfig) -> str:
+    queries = staging_pilot_queries(dataset["queries"], seed=dataset["metadata"]["seed"])
+    request_ids = sorted(staging_request_id(query, 0, config) for query in queries)
+    return sha256("\n".join(request_ids).encode("ascii")).hexdigest()
+
+
 def validate_pilot_cloudwatch_proof(
     path: Path, *, expected: dict[str, Any], execution_start: datetime,
-    execution_end: datetime, validation_now: datetime | None = None,
+    execution_end: datetime, expected_pilot_request_ids_sha256: str,
+    validation_now: datetime | None = None,
 ) -> dict[str, Any]:
     if not path.is_file():
         raise RuntimeError("CloudWatch pilot proof is missing; full staging run is blocked")
@@ -136,6 +181,25 @@ def validate_pilot_cloudwatch_proof(
         raise RuntimeError("CloudWatch pilot proof meter identity mismatch")
     if any(proof.get(name) != value for name, value in expected.items()):
         raise RuntimeError("CloudWatch pilot proof provenance mismatch")
+    if proof.get("pilotRequestIdsSha256") != expected_pilot_request_ids_sha256:
+        raise RuntimeError("CloudWatch pilot proof request ID digest mismatch")
+    observation = proof.get("requestIdObservation", {})
+    observation_status = observation.get("status")
+    if observation_status == "OBSERVED":
+        if (
+            observation.get("observedRequestIdsSha256") != expected_pilot_request_ids_sha256
+            or observation.get("observedRequestIds") != 100
+        ):
+            raise RuntimeError("CloudWatch pilot proof observed request IDs mismatch")
+    elif observation_status == "NOT_OBSERVABLE":
+        if (
+            observation.get("exclusiveStagingTrafficWindowVerified") is not True
+            or not isinstance(observation.get("isolationMethod"), str)
+            or not observation["isolationMethod"].strip()
+        ):
+            raise RuntimeError("CloudWatch pilot proof requires an exclusive traffic window")
+    else:
+        raise RuntimeError("CloudWatch pilot proof has invalid request ID observability")
     for name in ("observedLlmCalls", "inputTokens", "outputTokens"):
         if not isinstance(proof.get(name), int) or proof[name] <= 0:
             raise RuntimeError(f"CloudWatch pilot proof has invalid {name}")
@@ -207,10 +271,18 @@ def validate_staging_preflight(
     if (
         approval.get("approved") is not True
         or approval.get("maxLogicalCalls", 0) < config.max_calls
+        or approval.get("maxHttpAttempts", 0) < config.max_http_attempts
         or not isinstance(approval.get("maxCostUsd"), (int, float))
         or approval["maxCostUsd"] <= 0
+        or not isinstance(approval.get("maxCostPerHttpAttemptUsd"), (int, float))
+        or approval["maxCostPerHttpAttemptUsd"] <= 0
     ):
         raise RuntimeError("staging paid execution approval is insufficient")
+    conservative_attempt_cost = (
+        config.max_http_attempts * approval["maxCostPerHttpAttemptUsd"]
+    )
+    if conservative_attempt_cost > approval["maxCostUsd"]:
+        raise RuntimeError("approved budget does not cover the HTTP attempt cost cap")
     if window.get("approved") is not True or window.get("maxRequestsPerMinute") != 40:
         raise RuntimeError("shared staging rate-limit window is not approved")
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -417,6 +489,7 @@ def run_staging_pilot(
     dataset = load_staging_dataset(root)
     config = staging_config_from_environment(dataset["metadata"]["datasetSha256"], mode="pilot")
     config.validate()
+    verify_harness_checkout(config)
     preflight = validate_staging_preflight(
         root / "staging-preflight.json", config=config, dataset=dataset,
     )
@@ -438,6 +511,7 @@ def run_staging_pilot(
     gate = {
         "schemaVersion": "miriyum-staging-search-pilot-gate-v1",
         **_provenance(config), **evidence,
+        "pilotRequestIdsSha256": _pilot_request_ids_sha256(dataset, config),
         "fullRunRequiresCloudWatchProof": True,
     }
     write_jsonl(root / "staging-pilot-results.jsonl", evaluated)
@@ -456,6 +530,7 @@ def run_staging_full(
     dataset = load_staging_dataset(root)
     config = staging_config_from_environment(dataset["metadata"]["datasetSha256"], mode="full")
     config.validate()
+    verify_harness_checkout(config)
     preflight = validate_staging_preflight(
         root / "staging-preflight.json", config=config, dataset=dataset,
     )
@@ -471,6 +546,7 @@ def run_staging_full(
     )
     pilot_usage = validate_pilot_cloudwatch_proof(
         root / "cloudwatch-pilot-proof.json", expected=_provenance(config),
+        expected_pilot_request_ids_sha256=_pilot_request_ids_sha256(dataset, config),
         execution_start=pilot_start, execution_end=pilot_end,
     )
     pilot_meter_start = _utc(pilot_usage["meterWindowStartUtc"], "meterWindowStartUtc")
@@ -479,7 +555,10 @@ def run_staging_full(
     approved_end = _utc(preflight["rateLimitWindow"]["endsAtUtc"], "rateLimitWindow.endsAtUtc")
     if pilot_meter_start < approved_start or pilot_meter_end > approved_end:
         raise RuntimeError("pilot CloudWatch proof is outside the approved execution window")
-    projected_cost = pilot_usage["actualCostUsd"] / pilot_usage["observedLlmCalls"] * 10_000
+    projected_cost = (
+        pilot_usage["actualCostUsd"] / pilot_usage["observedLlmCalls"]
+        * config.max_http_attempts
+    )
     if projected_cost > preflight["approval"]["maxCostUsd"]:
         raise RuntimeError("pilot projected cost exceeds the approved full-run budget")
     _mark_execution_timing(root, config=config, field="fullStartedAtUtc")
@@ -519,6 +598,8 @@ def validate_pilot_transition(
     expected_pilot_ids = {staging_request_id(query, 0, config) for query in pilot_queries}
     if set(terminal) != expected_pilot_ids or any(record.get("status") != "success" for record in terminal.values()):
         raise RuntimeError("checkpoint does not contain exactly this run's 100 successful pilot calls")
+    if gate.get("pilotRequestIdsSha256") != _pilot_request_ids_sha256(dataset, config):
+        raise RuntimeError("staging pilot gate request ID digest mismatch")
     recomputed = _pilot_gate_evidence(dataset, list(terminal.values()), result_ledger)
     if recomputed["passed"] is not True or any(gate.get(name) != value for name, value in recomputed.items()):
         raise RuntimeError("staging pilot gate does not match recomputed checkpoint evidence")

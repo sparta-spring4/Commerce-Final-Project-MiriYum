@@ -146,19 +146,19 @@ $artifact = '<repository-outside-artifact-directory>'
 - `STAGING_EVAL_SYSTEM_INSTRUCTION_SHA256`: 배포 SHA의 system instruction SHA-256
 - `STAGING_EVAL_JSON_SCHEMA_SHA256`: 배포 SHA의 structured-output JSON schema SHA-256
 
-환경값은 실행 대상 식별자일 뿐 운영 증거를 대신하지 않는다. artifact 디렉터리의 `staging-preflight.json`도 다음 항목을 같은 run ID·backend/harness/dataset·모델·temperature·instruction/schema SHA에 결속해 가져야 한다.
+환경값은 실행 대상 식별자일 뿐 운영 증거를 대신하지 않는다. 유료 호출 전에 하네스는 `STAGING_EVAL_HARNESS_SHA`를 실제 `git rev-parse HEAD`와 대조하고, 평가 하네스·k6 검색 계약·seed SQL·이 문서 경로의 `git status --porcelain`이 비어 있는지도 직접 검사한다. 또한 #667에서 확정한 문자열 PublicId 검사 `contracts.js`의 immutable Git blob(`08ccb829ac0c7ccedc3c2744ad6f817080b90e45`)을 대조한다. 불일치하거나 dirty이거나 #667 계약이 없으면 transport 생성 전에 중단한다. artifact 디렉터리의 `staging-preflight.json`도 다음 항목을 같은 run ID·backend/harness/dataset·모델·temperature·instruction/schema SHA에 결속해 가져야 한다.
 
 - 실제 배포 host와 backend full SHA readback, 확인 시각
 - private health `UP`와 확인 시각
-- 합성 corpus 500개 매장·5,000개 메뉴 및 seed SQL SHA-256 검증
+- 합성 corpus 500개 매장·5,000개 메뉴 및 seed SQL의 canonical LF SHA-256(`e1c758eec4dd0bab3312c3e193c6489a67c476fcaaf33d84bad54aad271c9784`) 검증. checkout의 LF/CRLF 차이는 같은 corpus로 취급한다.
 - CloudWatch meter 읽기 권한과 확인 시각
-- 최대 10,000 logical call과 USD 상한이 명시된 유료 실행 승인
+- 최대 10,000 logical call, 최대 12,000 HTTP attempt, attempt당 보수 단가와 총 USD 상한이 명시된 유료 실행 승인. `12,000 × maxCostPerHttpAttemptUsd <= maxCostUsd`여야 한다.
 - 시작·종료 시각과 분당 40회가 명시된 공유 rate-limit window 승인
 
 배포·health·CloudWatch 확인 증거는 실행 시작 기준 30분 이내여야 한다. 현재 시각이 승인 window 밖이거나 증거가 누락·불일치하면 `urlopen` 전에 실패하고, 하네스는 모든 재시도 직전과 pacing 대기 직후에도 wall clock을 다시 확인해 긴 본평가 중 window가 끝나면 다음 요청을 차단한다. `staging-execution-timing.json`은 파일럿과 본평가의 실제 시작·종료를 같은 provenance로 기록한다. CloudWatch meter window는 이 실제 구간 전체를 포함하고 승인 window 안에 있으며 검증 시각보다 미래가 아니어야 한다. 파일럿 gate와 본평가 전 CloudWatch proof도 같은 provenance와 파일럿의 결정적 request ID 100개를 대조하므로, 다른 실행의 통과 파일을 복사해 본평가를 시작할 수 없다.
 
 기본 host는 `https://staging-api.miriyum.click`만 허용한다. 하네스는 순차 실행, 호출 시작 간 최소 1.5초, timeout 10초, 429·5xx·timeout 최대 4회 재시도, 연속 최종 실패 3건 circuit breaker를 적용한다. 각 HTTP 시도 전에 intent를 `staging-calls.checkpoint.jsonl`에 append하고 `fsync`한 뒤 요청한다. intent만 있고 결과가 없는 비정상 종료는 과금 불확실 상태로 차단해 자동 재전송하지 않는다. run·backend·harness·dataset·모델 설정·query·repeat에 결속된 결정적 request ID를 사용한다. response body와 header, 인증 정보는 기록하지 않고 예약 범위 안의 합성 `storeId` 문자열과 계약 version, 상태, latency만 남긴다. 예약 범위 밖 ID는 원문을 저장하지 않고 corpus contamination 형식 오류로 처리한다.
 
-파일럿은 정확한 층화 request ID 100개의 성공, format/final provider 실패 0건, 재시도 10회 이하, 양성 @8 40% 이상, 성공한 음성 질의 오탐률 25% 이하일 때만 gate를 통과한다. checkpoint 전체 시도에서 회복된 429·5xx·timeout도 별도로 집계한다. 본평가 전 `cloudwatch-pilot-proof.json`은 같은 provenance와 meter 시작·종료 시각, 정확히 100회 LLM 호출, 0보다 큰 input/output token과 실제 비용, 비어 있지 않은 returned model 목록을 가져야 한다. 파일럿 단가로 계산한 10,000회 예상 비용이 preflight 승인 USD 상한을 넘으면 본평가를 차단한다. 해당 증명이 없거나 서로 다르면 9,900개 추가 호출을 시작하지 않는다.
+파일럿은 정확한 층화 request ID 100개의 성공, format/final provider 실패 0건, 재시도 10회 이하, 양성 @8 40% 이상, 성공한 음성 질의 오탐률 25% 이하일 때만 gate를 통과한다. checkpoint 전체 시도에서 회복된 429·5xx·timeout도 별도로 집계하고, 정렬한 request ID 100개의 SHA-256 digest를 `staging-pilot-gate.json`에 기록한다. 본평가 전 `cloudwatch-pilot-proof.json`은 같은 digest, provenance와 meter 시작·종료 시각, 정확히 100회 LLM 호출, 0보다 큰 input/output token과 실제 비용, 비어 있지 않은 returned model 목록을 가져야 한다. 서버 meter/trace에서 request ID 집합을 직접 관측했다면 `requestIdObservation.status=OBSERVED`와 관측 digest·100개를 대조한다. 현재처럼 직접 대조할 수 없다면 `status=NOT_OBSERVABLE`로 명시하고, 같은 시간대의 다른 staging 자연어 검색을 배제한 전용 실행 window와 그 방법을 증명해야 한다. 어느 조건도 충족하지 않으면 본평가를 차단한다. 파일럿 단가도 최대 12,000 HTTP attempt로 보수적으로 투영해 preflight 승인 USD 상한과 비교한다. 해당 증명이 없거나 서로 다르면 9,900개 추가 logical call을 시작하지 않는다.
 
 정답률은 고유 질의 2,000개의 반복 0만 통계 단위로 삼고 Wilson 95% 구간을 계산한다. Recall·MRR·nDCG의 분모는 양성 질의 1,700개이고, 음성 300개는 성공 응답만을 분모로 오탐률과 전체 true-negative 정확도를 별도 계산한다. 10,000회 호출은 서로 다른 repeat index 5개가 모두 성공한 질의의 top-1 안정률과 pairwise Jaccard에만 사용한다. 공개 API가 최대 50개만 반환하므로 @1/@3/@5/@8/@20/@50, MRR, nDCG, 음성 질의 오탐률, 지역·가격·업종 위반률과 latency만 실제로 관측한다. exact/forward/reverse/alias 표는 질의 구성 strata별 회수율이며 내부 match branch의 실행 증거가 아니다. 내부 LLM semantic hit, 애플리케이션 predicate hit, 전체 후보, 현재 corpus에 없는 폐점·비공개·과거 버전 누출률은 결과에서 `notObservable`로 명시하며 추정값으로 채우지 않는다. 10,000개 HTTP matrix 뒤에는 `cloudwatch-full-proof.json`의 calls, input/output token, returned model, 실제 비용과 HTTP attempt 수를 대조해야 보고서 상태가 `FINAL_WITH_CLOUDWATCH`가 된다.

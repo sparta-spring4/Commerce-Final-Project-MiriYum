@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+
+import miriyum_search_eval.staging_workflow as staging_workflow
 
 from miriyum_search_eval.staging_workflow import (
     _pilot_gate_evidence,
@@ -29,6 +33,22 @@ SEED_SQL = REPO_ROOT / "backend/scripts/dev-data/search-profile-demo-500-stores.
 
 
 class StagingWorkflowTest(unittest.TestCase):
+    @staticmethod
+    def _environment(*, harness_sha: str = "b" * 40) -> dict[str, str]:
+        return {
+            "PATH": os.environ.get("PATH", ""),
+            "STAGING_EVAL_RUN_ID": "run-1",
+            "STAGING_EVAL_BACKEND_SHA": "a" * 40,
+            "STAGING_EVAL_HARNESS_SHA": harness_sha,
+            "STAGING_EVAL_APPROVED": "true",
+            "STAGING_EVAL_HARNESS_VERIFIED": "true",
+            "STAGING_EVAL_CLOUDWATCH_VERIFIED": "true",
+            "STAGING_EVAL_REQUESTED_MODEL": "gpt-4.1-mini",
+            "STAGING_EVAL_TEMPERATURE": "0",
+            "STAGING_EVAL_SYSTEM_INSTRUCTION_SHA256": "d" * 64,
+            "STAGING_EVAL_JSON_SCHEMA_SHA256": "e" * 64,
+        }
+
     def test_generate_writes_valid_reproducible_manifest_and_hashes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -96,21 +116,55 @@ class StagingWorkflowTest(unittest.TestCase):
                     "miriyum.search.llm.calls", "miriyum.search.llm.latency",
                     "miriyum.search.llm.outcomes", "miriyum.search.llm.tokens",
                 ],
+                "pilotRequestIdsSha256": "f" * 64,
+                "requestIdObservation": {
+                    "status": "NOT_OBSERVABLE",
+                    "exclusiveStagingTrafficWindowVerified": True,
+                    "isolationMethod": "reserved window with natural-language traffic disabled",
+                },
             }), encoding="utf-8")
 
             validated = validate_pilot_cloudwatch_proof(
                 proof, expected=expected,
+                expected_pilot_request_ids_sha256="f" * 64,
                 execution_start=datetime(2026, 8, 25, 0, 1, tzinfo=timezone.utc),
                 execution_end=datetime(2026, 8, 25, 0, 9, tzinfo=timezone.utc),
                 validation_now=datetime(2026, 8, 25, 0, 11, tzinfo=timezone.utc),
             )
 
             zero_usage = json.loads(proof.read_text(encoding="utf-8"))
+            wrong_request_ids = dict(zero_usage)
+            wrong_request_ids["pilotRequestIdsSha256"] = "9" * 64
+            proof.write_text(json.dumps(wrong_request_ids), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "request ID digest"):
+                validate_pilot_cloudwatch_proof(
+                    proof, expected=expected,
+                    expected_pilot_request_ids_sha256="f" * 64,
+                    execution_start=datetime(2026, 8, 25, 0, 1, tzinfo=timezone.utc),
+                    execution_end=datetime(2026, 8, 25, 0, 9, tzinfo=timezone.utc),
+                    validation_now=datetime(2026, 8, 25, 0, 11, tzinfo=timezone.utc),
+                )
+            missing_isolation = dict(zero_usage)
+            missing_isolation["requestIdObservation"] = {
+                "status": "NOT_OBSERVABLE",
+                "exclusiveStagingTrafficWindowVerified": False,
+                "isolationMethod": "",
+            }
+            proof.write_text(json.dumps(missing_isolation), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "exclusive traffic window"):
+                validate_pilot_cloudwatch_proof(
+                    proof, expected=expected,
+                    expected_pilot_request_ids_sha256="f" * 64,
+                    execution_start=datetime(2026, 8, 25, 0, 1, tzinfo=timezone.utc),
+                    execution_end=datetime(2026, 8, 25, 0, 9, tzinfo=timezone.utc),
+                    validation_now=datetime(2026, 8, 25, 0, 11, tzinfo=timezone.utc),
+                )
             zero_usage["actualCostUsd"] = 0.0
             proof.write_text(json.dumps(zero_usage), encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "actualCostUsd"):
                 validate_pilot_cloudwatch_proof(
                     proof, expected=expected,
+                    expected_pilot_request_ids_sha256="f" * 64,
                     execution_start=datetime(2026, 8, 25, 0, 1, tzinfo=timezone.utc),
                     execution_end=datetime(2026, 8, 25, 0, 9, tzinfo=timezone.utc),
                     validation_now=datetime(2026, 8, 25, 0, 11, tzinfo=timezone.utc),
@@ -121,6 +175,7 @@ class StagingWorkflowTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "actual pilot interval"):
                 validate_pilot_cloudwatch_proof(
                     proof, expected=expected,
+                    expected_pilot_request_ids_sha256="f" * 64,
                     execution_start=datetime(2026, 8, 25, 0, 1, tzinfo=timezone.utc),
                     execution_end=datetime(2026, 8, 25, 0, 9, tzinfo=timezone.utc),
                     validation_now=datetime(2026, 8, 25, 0, 11, tzinfo=timezone.utc),
@@ -155,7 +210,10 @@ class StagingWorkflowTest(unittest.TestCase):
             "privateHealth": {"status": "UP", "checkedAtUtc": "2026-08-25T11:55:00Z"},
             "corpus": {"verified": True, "stores": 500, "menus": 5000, "sourceSha256": "f" * 64},
             "cloudwatch": {"readAccessVerified": True, "checkedAtUtc": "2026-08-25T11:55:00Z"},
-            "approval": {"approved": True, "maxLogicalCalls": 10000, "maxCostUsd": 1.0},
+            "approval": {
+                "approved": True, "maxLogicalCalls": 10000, "maxHttpAttempts": 12000,
+                "maxCostPerHttpAttemptUsd": 0.00005, "maxCostUsd": 1.0,
+            },
             "rateLimitWindow": {"approved": True, "startsAtUtc": "2026-08-25T00:00:00Z",
                                 "endsAtUtc": "2026-08-25T23:59:59Z", "maxRequestsPerMinute": 40},
         }
@@ -169,6 +227,128 @@ class StagingWorkflowTest(unittest.TestCase):
             )
 
         self.assertTrue(validated["cloudwatch"]["readAccessVerified"])
+
+    def test_preflight_rejects_cost_approval_that_does_not_cover_http_attempt_cap(self):
+        with patch.dict(os.environ, self._environment(), clear=True):
+            config = staging_config_from_environment("c" * 64, mode="full")
+        dataset = {"metadata": {"corpusSourceSha256": "f" * 64}}
+        proof_value = {
+            "schemaVersion": "miriyum-staging-search-preflight-v1", "verified": True,
+            "runId": "run-1", "backendSha": "a" * 40, "harnessSha": "b" * 40,
+            "datasetSha256": "c" * 64, "requestedModel": "gpt-4.1-mini",
+            "temperature": 0.0, "systemInstructionSha256": "d" * 64,
+            "jsonSchemaSha256": "e" * 64,
+            "deployment": {"host": "https://staging-api.miriyum.click", "backendSha": "a" * 40,
+                           "checkedAtUtc": "2026-08-25T11:55:00Z"},
+            "privateHealth": {"status": "UP", "checkedAtUtc": "2026-08-25T11:55:00Z"},
+            "corpus": {"verified": True, "stores": 500, "menus": 5000, "sourceSha256": "f" * 64},
+            "cloudwatch": {"readAccessVerified": True, "checkedAtUtc": "2026-08-25T11:55:00Z"},
+            "approval": {
+                "approved": True, "maxLogicalCalls": 10000, "maxHttpAttempts": 12000,
+                "maxCostPerHttpAttemptUsd": 0.0001, "maxCostUsd": 1.0,
+            },
+            "rateLimitWindow": {"approved": True, "startsAtUtc": "2026-08-25T00:00:00Z",
+                                "endsAtUtc": "2026-08-25T23:59:59Z", "maxRequestsPerMinute": 40},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            proof = Path(directory) / "staging-preflight.json"
+            proof.write_text(json.dumps(proof_value), encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "HTTP attempt cost"):
+                validate_staging_preflight(
+                    proof, config=config, dataset=dataset,
+                    now=datetime(2026, 8, 25, 12, tzinfo=timezone.utc),
+                )
+
+    def test_dirty_harness_checkout_blocks_pilot_before_transport(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory) / "repo"
+            repository.mkdir()
+            subprocess.run(["git", "init"], cwd=repository, check=True, capture_output=True)
+            harness_file = repository / "performance/search-eval-v2/src/miriyum_search_eval/harness.py"
+            harness_file.parent.mkdir(parents=True)
+            harness_file.write_text("VALUE = 1\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Eval Test", "-c", "user.email=eval@example.invalid",
+                 "commit", "-m", "fixture"],
+                cwd=repository, check=True, capture_output=True,
+            )
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=repository, check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            harness_file.write_text("VALUE = 2\n", encoding="utf-8")
+            artifact_root = Path(directory) / "artifacts"
+            generate_staging_artifacts(artifact_root, seed_sql=SEED_SQL)
+            transport = unittest.mock.Mock()
+
+            with (
+                patch.dict(os.environ, self._environment(harness_sha=head), clear=True),
+                patch.object(staging_workflow, "_repository_root", return_value=repository, create=True),
+                self.assertRaisesRegex(RuntimeError, "dirty"),
+            ):
+                staging_workflow.run_staging_pilot(artifact_root, transport=transport)
+
+        transport.search.assert_not_called()
+
+    def test_mismatched_harness_head_blocks_pilot_before_transport(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory) / "repo"
+            repository.mkdir()
+            subprocess.run(["git", "init"], cwd=repository, check=True, capture_output=True)
+            harness_file = repository / "performance/search-eval-v2/src/miriyum_search_eval/harness.py"
+            harness_file.parent.mkdir(parents=True)
+            harness_file.write_text("VALUE = 1\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Eval Test", "-c", "user.email=eval@example.invalid",
+                 "commit", "-m", "fixture"],
+                cwd=repository, check=True, capture_output=True,
+            )
+            artifact_root = Path(directory) / "artifacts"
+            generate_staging_artifacts(artifact_root, seed_sql=SEED_SQL)
+            transport = unittest.mock.Mock()
+
+            with (
+                patch.dict(os.environ, self._environment(harness_sha="b" * 40), clear=True),
+                patch.object(staging_workflow, "_repository_root", return_value=repository),
+                self.assertRaisesRegex(RuntimeError, "actual git HEAD"),
+            ):
+                staging_workflow.run_staging_pilot(artifact_root, transport=transport)
+
+        transport.search.assert_not_called()
+
+    def test_checkout_without_public_id_contract_blocks_pilot_before_transport(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory) / "repo"
+            repository.mkdir()
+            subprocess.run(["git", "init"], cwd=repository, check=True, capture_output=True)
+            contract = repository / "performance/k6/search-llm/contracts.js"
+            contract.parent.mkdir(parents=True)
+            contract.write_text("const numericStoreId = true\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Eval Test", "-c", "user.email=eval@example.invalid",
+                 "commit", "-m", "fixture"],
+                cwd=repository, check=True, capture_output=True,
+            )
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=repository, check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            artifact_root = Path(directory) / "artifacts"
+            generate_staging_artifacts(artifact_root, seed_sql=SEED_SQL)
+            transport = unittest.mock.Mock()
+
+            with (
+                patch.dict(os.environ, self._environment(harness_sha=head), clear=True),
+                patch.object(staging_workflow, "_repository_root", return_value=repository),
+                self.assertRaisesRegex(RuntimeError, "PublicId contract"),
+            ):
+                staging_workflow.run_staging_pilot(artifact_root, transport=transport)
+
+        transport.search.assert_not_called()
 
     def test_full_transition_requires_exact_current_100_pilot_request_ids(self):
         environment = {
@@ -193,8 +373,10 @@ class StagingWorkflowTest(unittest.TestCase):
             }
             gate = root / "staging-pilot-gate.json"
             checkpoint = StagingCheckpoint(root / "staging-calls.checkpoint.jsonl")
+            pilot_request_ids = []
             for query in staging_pilot_queries(dataset["queries"], seed=dataset["metadata"]["seed"]):
                 request_id = staging_request_id(query, 0, config)
+                pilot_request_ids.append(request_id)
                 base = {
                     "schemaVersion": CALL_SCHEMA_VERSION, **provenance,
                     "requestId": request_id, "attemptId": f"{request_id}:1", "attempt": 1,
@@ -211,10 +393,21 @@ class StagingWorkflowTest(unittest.TestCase):
             gate.write_text(json.dumps({
                 "schemaVersion": "miriyum-staging-search-pilot-gate-v1",
                 **provenance, **evidence,
+                "pilotRequestIdsSha256": sha256(
+                    "\n".join(sorted(pilot_request_ids)).encode("ascii")
+                ).hexdigest(),
             }), encoding="utf-8")
 
             validate_pilot_transition(gate, checkpoint=checkpoint, config=config, dataset=dataset)
+            wrong_request_ids = json.loads(gate.read_text(encoding="utf-8"))
+            wrong_request_ids["pilotRequestIdsSha256"] = "9" * 64
+            gate.write_text(json.dumps(wrong_request_ids), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "request ID digest"):
+                validate_pilot_transition(gate, checkpoint=checkpoint, config=config, dataset=dataset)
             stale = json.loads(gate.read_text(encoding="utf-8"))
+            stale["pilotRequestIdsSha256"] = sha256(
+                "\n".join(sorted(pilot_request_ids)).encode("ascii")
+            ).hexdigest()
             stale["backendSha"] = "9" * 40
             gate.write_text(json.dumps(stale), encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "provenance"):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
+import tempfile
 import unittest
 
 from miriyum_search_eval.staging_catalog import (
@@ -76,11 +77,29 @@ class StagingCatalogTest(unittest.TestCase):
         self.assertEqual(dataset_fingerprint(first), dataset_fingerprint(second))
         self.assertEqual(
             first["metadata"]["corpusSourceSha256"],
-            "5aaf573eb4e09851b30753ed2e4da4669f0c95d2f0ff674471024afff40c37db",
+            "e1c758eec4dd0bab3312c3e193c6489a67c476fcaaf33d84bad54aad271c9784",
         )
         self.assertEqual(
             first["metadata"]["corpusSource"],
             "backend/scripts/dev-data/search-profile-demo-500-stores.sql",
+        )
+
+    def test_lf_and_crlf_checkouts_generate_the_same_dataset(self):
+        canonical_text = SEED_SQL.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lf_sql = root / "lf.sql"
+            crlf_sql = root / "crlf.sql"
+            lf_sql.write_bytes(canonical_text.encode("utf-8"))
+            crlf_sql.write_bytes(canonical_text.replace("\n", "\r\n").encode("utf-8"))
+
+            lf_dataset = generate_staging_dataset(lf_sql, seed=20260825)
+            crlf_dataset = generate_staging_dataset(crlf_sql, seed=20260825)
+
+        self.assertEqual(lf_dataset, crlf_dataset)
+        self.assertEqual(
+            lf_dataset["metadata"]["corpusSourceSha256"],
+            "e1c758eec4dd0bab3312c3e193c6489a67c476fcaaf33d84bad54aad271c9784",
         )
 
     def test_pilot_is_deterministic_and_stratified(self):
