@@ -135,7 +135,8 @@ jobs:
     needs: verify-source
     environment: production
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # ARM64 이미지 빌드와 20분 ECS 안정화 대기를 모두 수용한다.
+    timeout-minutes: 50
     permissions:
       actions: read
       contents: read
