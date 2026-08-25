@@ -60,9 +60,18 @@ The initial production task keeps Kakao OAuth, member support, and payment disab
 | --- | --- |
 | `MIRIYUM_KAKAO_ENABLED` | `MIRIYUM_KAKAO_REST_API_KEY`, `MIRIYUM_KAKAO_CLIENT_SECRET`, `MIRIYUM_KAKAO_STATE_SECRET`, `MIRIYUM_KAKAO_SIGN_UP_TICKET_SECRET`, `MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_ACTIVE_SECRET` |
 | `MIRIYUM_MEMBER_SUPPORT_ENABLED` | `MIRIYUM_MEMBER_SUPPORT_PROOF_DIGEST_SECRET`, `MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_ACTIVE_KEY` |
-| `MIRIYUM_PAYMENT_ENABLED` | `MIRIYUM_PAYMENT_CURSOR_SECRET`, `MIRIYUM_PORTONE_API_SECRET`, `MIRIYUM_PORTONE_WEBHOOK_SECRET` |
+| `MIRIYUM_PAYMENT_ENABLED` | `MIRIYUM_PAYMENT_CURSOR_SECRET`, `MIRIYUM_PORTONE_API_SECRET` |
+| `MIRIYUM_PORTONE_WEBHOOK_ENABLED` | `MIRIYUM_PORTONE_WEBHOOK_SECRET` |
 
-When a feature is enabled, add its actual values to the same JSON secret and replace its placeholder references in the task definition in the same PR.
+When a feature is enabled, add its actual values to the same JSON secret and replace its placeholder references in the task definition in the same PR. `MIRIYUM_PORTONE_WEBHOOK_ENABLED` remains `false` unless a separate reviewed inbound-webhook contract is approved; payment activation alone never maps the webhook secret.
+
+Production CD changes payment runtime only through its manual `payment_runtime` input: `preserve`
+keeps the current task setting, `enable` injects the Store ID plus the payment cursor/API secret
+selectors, and `disable` sets `MIRIYUM_PAYMENT_ENABLED=false` while removing the Store ID and
+payment secret selectors. Automatic main-triggered CD always uses
+`preserve`. `enable` requires the production GitHub Environment variable
+`MIRIYUM_PORTONE_STORE_ID` and the two JSON keys to already exist in the application secret;
+the workflow never reads or prints their values.
 
 ### Member-support PII key rotation
 
@@ -114,6 +123,39 @@ The staging equivalent is the SSM SecureString `/miriyum/staging/backend-runtime
 `MIRIYUM_RUNTIME_CONFIG_ENABLED=true`; a missing or `false` flag skips the SSM call and keeps the
 existing deployment path. Never put JSON values in GitHub variables, task definition
 `environment`, workflow output, logs, issues, or PRs.
+
+Production SSE settings use a separate JSON secret named
+`miriyum/production/backend-sse-runtime`; they are not stored in the shared
+`miriyum/production/backend-runtime-config` JSON. The SSE secret contains exactly these seven
+string keys and does not contain `MIRIYUM_SSE_ENABLED`:
+
+- `MIRIYUM_SSE_CURSOR_SECRET`
+- `MIRIYUM_SSE_TIMEOUT`
+- `MIRIYUM_SSE_HEARTBEAT_INTERVAL`
+- `MIRIYUM_SSE_CORRECTION_INTERVAL`
+- `MIRIYUM_SSE_CORRECTION_BATCH_SIZE`
+- `MIRIYUM_SSE_MAX_CONNECTIONS_TOTAL`
+- `MIRIYUM_SSE_MAX_CONNECTIONS_PER_ACCOUNT`
+
+The ECS task execution role needs `secretsmanager:GetSecretValue` for only this SSE secret ARN
+and `kms:Decrypt` when the secret uses a customer-managed KMS key. The production deployment role
+needs `secretsmanager:DescribeSecret` to resolve the ARN without reading or logging its value.
+
+`Backend CD (Production ECS)` preserves both shared runtime config and SSE state for automatic
+`main` deployments. An approved manual dispatch from `dev` may select
+`sse_runtime_mode=preserve`, `enable`, or `disable` for an existing immutable full-SHA image.
+`enable` registers a task revision with `MIRIYUM_SSE_ENABLED=true` and maps the seven dedicated
+secret selectors above. `disable` registers the same image with `MIRIYUM_SSE_ENABLED=false` and
+removes only the SSE selectors. Both paths retain `MIRIYUM_RUNTIME_CONFIG_ENABLED`,
+`SPRING_APPLICATION_JSON`, storage settings, payment settings, and every other non-SSE task
+setting. `enable` is accepted only when the live task currently has SSE disabled.
+
+Both modes retain the existing `production` Environment approval and main-history/CI gates. If an
+`enable` run fails or is cancelled after the enabled task definition is registered, the workflow
+deploys a fail-closed revision of the same image with only SSE disabled and verifies that every
+non-SSE environment and secret mapping is unchanged. This control path does not itself authorize
+SSE activation or prove endpoint health; Issue #540's prerequisite, observation, and rollback
+evidence remains required before leaving production SSE enabled.
 
 ## OpenAI search key
 

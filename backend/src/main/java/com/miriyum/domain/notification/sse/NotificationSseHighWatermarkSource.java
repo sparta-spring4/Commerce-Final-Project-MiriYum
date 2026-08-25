@@ -2,7 +2,6 @@ package com.miriyum.domain.notification.sse;
 
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.notification.repository.NotificationReadRepository;
-import com.miriyum.domain.notification.repository.NotificationTaskRepository;
 import com.miriyum.global.sse.SseAudience;
 import com.miriyum.global.sse.SseHighWatermarkSource;
 import com.miriyum.global.sse.SseSignalState;
@@ -17,16 +16,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class NotificationSseHighWatermarkSource implements SseHighWatermarkSource {
 
     private final ConsumerAccountService accountService;
-    private final NotificationTaskRepository taskRepository;
     private final NotificationReadRepository readRepository;
 
     public NotificationSseHighWatermarkSource(
             ConsumerAccountService accountService,
-            NotificationTaskRepository taskRepository,
             NotificationReadRepository readRepository
     ) {
         this.accountService = accountService;
-        this.taskRepository = taskRepository;
         this.readRepository = readRepository;
     }
 
@@ -42,11 +38,8 @@ public class NotificationSseHighWatermarkSource implements SseHighWatermarkSourc
             throw new IllegalArgumentException("unsupported notification SSE audience");
         }
         accountService.requireActiveAccount(scope.accountId());
-        long changeVersion = readRepository.findChangeVersion(scope.accountId());
-        long legacyDeliveryWatermark =
-                taskRepository.findDeliveredInAppHighWatermark(scope.accountId());
         return new SseSignalState(
-                Math.max(changeVersion, legacyDeliveryWatermark),
+                readRepository.findChangeVersion(scope.accountId()),
                 Set.of(SseWakeUpTarget.notificationAccount(scope.accountId()))
         );
     }

@@ -38,6 +38,7 @@
         {"name": "MIRIYUM_CLOUDWATCH_METRICS_ENABLED", "value": "true"},
         {"name": "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE", "value": "MiriYum/Production"},
         {"name": "MIRIYUM_PAYMENT_ENABLED", "value": "false"},
+        {"name": "MIRIYUM_PORTONE_WEBHOOK_ENABLED", "value": "false"},
         {"name": "MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED", "value": "true"},
         {"name": "MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED", "value": "true"},
         {"name": "MIRIYUM_WAITING_CLOSURE_ENABLED", "value": "false"},

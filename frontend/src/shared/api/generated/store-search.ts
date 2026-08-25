@@ -333,8 +333,9 @@ export interface components {
       normalizedCondition: components["schemas"]["NormalizedSearchCondition"];
       warnings: components["schemas"]["InterpretationWarning"][];
       ruleVersion: string;
+      /** @description 현재 승인 Catalog와 음식 근거 사전을 결합한 catalog-v1+food-evidence-v1 */
       vocabularyVersion: string;
-      /** @description recommendation,desc일 때 history-v1, 다른 정렬에서는 null */
+      /** @description recommendation,desc일 때 food-evidence-v1+history-v1, 다른 정렬에서는 null */
       rankingRuleVersion: string | null;
       nextCursor: string | null;
     };

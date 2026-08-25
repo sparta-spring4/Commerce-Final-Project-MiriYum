@@ -5,10 +5,10 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.notification.repository.NotificationReadRepository;
-import com.miriyum.domain.notification.repository.NotificationTaskRepository;
 import com.miriyum.global.sse.SseAudience;
 import com.miriyum.global.sse.SseSignalState;
 import com.miriyum.global.sse.SseStreamScope;
@@ -26,9 +26,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 class NotificationSseHighWatermarkSourceTest {
 
     @Test
-    void readsEveryWatermarkInsideOneReadOnlyTransaction() {
+    void readsAccountChangeVersionInsideOneReadOnlyTransaction() {
         ConsumerAccountService accounts = mock(ConsumerAccountService.class);
-        NotificationTaskRepository tasks = mock(NotificationTaskRepository.class);
         NotificationReadRepository reads = mock(NotificationReadRepository.class);
         doAnswer(invocation -> {
             assertReadOnlyTransaction();
@@ -38,25 +37,19 @@ class NotificationSseHighWatermarkSourceTest {
             assertReadOnlyTransaction();
             return 113L;
         }).when(reads).findChangeVersion(41L);
-        doAnswer(invocation -> {
-            assertReadOnlyTransaction();
-            return 109L;
-        }).when(tasks).findDeliveredInAppHighWatermark(41L);
         NotificationSseHighWatermarkSource source = transactional(
-                new NotificationSseHighWatermarkSource(accounts, tasks, reads));
+                new NotificationSseHighWatermarkSource(accounts, reads));
 
         source.read(SseStreamScope.notificationConsumer(41L));
     }
 
     @Test
-    void returnsTheGreaterOfAccountChangeVersionAndLegacyPublicHistoryWatermark() {
+    void returnsTheAccountChangeVersionAfterReadRoutesAreActivated() {
         ConsumerAccountService accounts = mock(ConsumerAccountService.class);
-        NotificationTaskRepository tasks = mock(NotificationTaskRepository.class);
         NotificationReadRepository reads = mock(NotificationReadRepository.class);
-        given(tasks.findDeliveredInAppHighWatermark(41L)).willReturn(109L);
         given(reads.findChangeVersion(41L)).willReturn(113L);
         NotificationSseHighWatermarkSource source =
-                new NotificationSseHighWatermarkSource(accounts, tasks, reads);
+                new NotificationSseHighWatermarkSource(accounts, reads);
 
         SseSignalState state = source.read(SseStreamScope.notificationConsumer(41L));
 
@@ -64,10 +57,8 @@ class NotificationSseHighWatermarkSourceTest {
         assertThat(state.watermark()).isEqualTo(113L);
         assertThat(state.wakeUpTargets())
                 .containsExactly(SseWakeUpTarget.notificationAccount(41L));
-        InOrder order = inOrder(accounts, reads, tasks);
-        order.verify(accounts).requireActiveAccount(41L);
-        order.verify(reads).findChangeVersion(41L);
-        order.verify(tasks).findDeliveredInAppHighWatermark(41L);
+        verify(accounts).requireActiveAccount(41L);
+        verify(reads).findChangeVersion(41L);
     }
 
     private static NotificationSseHighWatermarkSource transactional(

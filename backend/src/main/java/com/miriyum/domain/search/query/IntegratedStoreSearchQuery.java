@@ -2,6 +2,7 @@ package com.miriyum.domain.search.query;
 
 import com.miriyum.domain.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.search.interpreter.PriceRange;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidence;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
@@ -11,12 +12,30 @@ import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /** #110의 허용 조건을 QueryDSL 조회와 seek cursor에 사용할 불변 입력으로 만든다. */
 public final class IntegratedStoreSearchQuery {
 
     private static final int DEFAULT_SIZE = 20;
     private static final int MAX_SIZE = 50;
+    public static final int MAX_LEXICAL_FOOD_TERMS = 20;
+    public static final int STRUCTURED_LEXICAL_MATCH_WEIGHT = 10;
+    public static final int STRUCTURED_DIMENSION_MATCH_WEIGHT = 3;
+    public static final int STRUCTURED_MENU_RANK_WEIGHT = 2;
+    public static final int MAX_STRUCTURED_MENU_RANK = 3;
+    public static final int MAX_STRUCTURED_RELEVANCE =
+            MAX_LEXICAL_FOOD_TERMS * STRUCTURED_LEXICAL_MATCH_WEIGHT
+                    + StructuredFoodEvidence.MAX_CORE_DIMENSION_COUNT
+                    * STRUCTURED_DIMENSION_MATCH_WEIGHT
+                    + MAX_STRUCTURED_MENU_RANK * STRUCTURED_MENU_RANK_WEIGHT;
+    private static final Pattern SEARCH_TOKEN = Pattern.compile("[0-9A-Za-z가-힣]+");
+    private static final Set<String> LEXICAL_STOPWORDS = Set.of(
+            "가게", "곳", "메뉴", "음식", "요리", "식사", "추천", "추천해줘",
+            "찾아줘", "찾아", "에서", "으로", "만든", "같은", "있는", "나는",
+            "맛에", "향이", "나고", "국물", "가격", "이하", "이상",
+            "면", "탕", "국", "밥", "세트", "정식", "음료");
 
     private final List<String> regionCodes;
     private final List<String> storeCategoryCodes;
@@ -27,7 +46,9 @@ public final class IntegratedStoreSearchQuery {
     private final LocalDate reservationDate;
     private final LocalTime reservationTime;
     private final String remainingKeyword;
+    private final List<String> lexicalFoodTerms;
     private final List<String> explicitMenuNames;
+    private final StructuredFoodEvidence foodEvidence;
     private final IntegratedStoreSearchSort sort;
     private final int size;
     private final String fingerprint;
@@ -36,6 +57,7 @@ public final class IntegratedStoreSearchQuery {
     private IntegratedStoreSearchQuery(
             InterpretedSearchCondition condition,
             List<String> explicitMenuNames,
+            StructuredFoodEvidence foodEvidence,
             boolean includesInfants,
             boolean availableOnly,
             String principalScope,
@@ -53,7 +75,10 @@ public final class IntegratedStoreSearchQuery {
         this.reservationDate = condition.reservationDate();
         this.reservationTime = condition.reservationTime();
         this.remainingKeyword = condition.remainingKeyword();
+        this.lexicalFoodTerms = lexicalFoodTerms(remainingKeyword);
         this.explicitMenuNames = canonicalMenuNames(explicitMenuNames);
+        this.foodEvidence = Objects.requireNonNull(
+                foodEvidence, "foodEvidence must not be null");
         this.sort = sort;
         this.size = size;
         Objects.requireNonNull(principalScope, "principalScope must not be null");
@@ -82,6 +107,7 @@ public final class IntegratedStoreSearchQuery {
     public static IntegratedStoreSearchQuery from(
             InterpretedSearchCondition condition,
             List<String> explicitMenuNames,
+            StructuredFoodEvidence foodEvidence,
             boolean includesInfants,
             boolean availableOnly,
             String principalScope,
@@ -99,12 +125,37 @@ public final class IntegratedStoreSearchQuery {
         return new IntegratedStoreSearchQuery(
                 condition,
                 explicitMenuNames,
+                foodEvidence,
                 includesInfants,
                 availableOnly,
                 principalScope,
                 IntegratedStoreSearchSort.parse(sort),
                 cursor,
                 resolvedSize,
+                cursorCodec);
+    }
+
+    public static IntegratedStoreSearchQuery from(
+            InterpretedSearchCondition condition,
+            List<String> explicitMenuNames,
+            boolean includesInfants,
+            boolean availableOnly,
+            String principalScope,
+            String sort,
+            String cursor,
+            Integer size,
+            IntegratedSearchCursorCodec cursorCodec
+    ) {
+        return from(
+                condition,
+                explicitMenuNames,
+                StructuredFoodEvidence.empty(),
+                includesInfants,
+                availableOnly,
+                principalScope,
+                sort,
+                cursor,
+                size,
                 cursorCodec);
     }
 
@@ -121,6 +172,7 @@ public final class IntegratedStoreSearchQuery {
         return from(
                 condition,
                 List.of(),
+                StructuredFoodEvidence.empty(),
                 includesInfants,
                 availableOnly,
                 principalScope,
@@ -184,6 +236,18 @@ public final class IntegratedStoreSearchQuery {
         return values.stream().distinct().sorted().toList();
     }
 
+    private static List<String> lexicalFoodTerms(String keyword) {
+        return SEARCH_TOKEN.matcher(keyword)
+                .results()
+                .map(match -> match.group().toLowerCase(java.util.Locale.ROOT))
+                .filter(token -> token.codePointCount(0, token.length()) >= 2)
+                .filter(token -> !LEXICAL_STOPWORDS.contains(token))
+                .filter(token -> !token.chars().allMatch(Character::isDigit))
+                .distinct()
+                .limit(MAX_LEXICAL_FOOD_TERMS)
+                .toList();
+    }
+
     private static ServiceException validationFailed() {
         return new ServiceException(CommonErrorCode.VALIDATION_FAILED);
     }
@@ -242,8 +306,16 @@ public final class IntegratedStoreSearchQuery {
         return remainingKeyword;
     }
 
+    public List<String> lexicalFoodTerms() {
+        return lexicalFoodTerms;
+    }
+
     public List<String> explicitMenuNames() {
         return explicitMenuNames;
+    }
+
+    public StructuredFoodEvidence foodEvidence() {
+        return foodEvidence;
     }
 
     public IntegratedStoreSearchSort sort() {

@@ -1,8 +1,9 @@
 package com.miriyum.domain.search.service;
 
-import com.miriyum.domain.store.enums.Region;
+import com.miriyum.domain.search.interpreter.FoodEvidenceVocabulary;
 import com.miriyum.domain.search.interpreter.SearchVocabulary;
 import com.miriyum.domain.search.interpreter.VocabularyEntry;
+import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.service.CatalogItemView;
 import com.miriyum.domain.store.service.CatalogKind;
 import com.miriyum.domain.store.service.CatalogService;
@@ -14,7 +15,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class SearchVocabularyProvider {
 
-    static final String VOCABULARY_VERSION = "catalog-v1";
+    static final String VOCABULARY_VERSION =
+            "catalog-v1+" + FoodEvidenceVocabulary.VERSION;
 
     private static final Map<Region, String> REGION_DISPLAY_NAMES = Map.of(
             Region.SEOUL, "서울",

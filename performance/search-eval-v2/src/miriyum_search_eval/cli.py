@@ -12,6 +12,11 @@ from typing import Any
 from .artifacts import write_dataset_artifacts, write_json, write_jsonl, write_sha256_manifest
 from .catalog import DatasetConfig, generate_dataset
 from .evaluation import aggregate_evaluation, derive_call_diagnostics, evaluate_call
+from .hybrid_search import (
+    aggregate_hybrid_comparison,
+    evaluate_hybrid_variants,
+    prepare_hybrid_catalog,
+)
 from .metrics import ranking_metrics
 from .matching import prepare_catalog
 from .reporting import render_report
@@ -24,6 +29,17 @@ from .runner import (
     deterministic_request_id,
     deterministic_request_id_from_fingerprint,
     run_requests,
+)
+from .structured_search import (
+    aggregate_structured_comparison,
+    evaluate_structured_variants,
+    prepare_structured_catalog,
+)
+from .staging_workflow import (
+    generate_staging_artifacts,
+    report_from_checkpoint,
+    run_staging_full,
+    run_staging_pilot,
 )
 from .validation import validate_dataset
 from .workflow import (
@@ -43,6 +59,9 @@ from .workflow import (
 PRE_ISSUE_616 = "pre-issue-616"
 ISSUE_616_MOST_SPECIFIC = "issue-616-most-specific"
 PREDICATE_VARIANTS = (PRE_ISSUE_616, ISSUE_616_MOST_SPECIFIC)
+STRUCTURED_EVAL_BASE_SHA = "229b5aa765873c141270e257be65aedae72b9f86"
+HYBRID_STRUCTURED_RESULTS_SHA = "9df2560af0cd46ab012c69f298a776126db0bbbbfcb1ab052ecb820249b57ba0"
+HYBRID_EMBEDDING_CHECKPOINT_SHA = "f9cabb92c0613e84730bd3aec343f41be1b2444e21c2ac541a0f17aa0db59d58"
 
 
 def _repo_root() -> Path:
@@ -51,6 +70,16 @@ def _repo_root() -> Path:
 
 def _commit_sha() -> str:
     return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=_repo_root(), text=True).strip()
+
+
+def _git_paths_dirty(*paths: Path) -> bool:
+    command = ["git", "status", "--porcelain"]
+    if paths:
+        command.extend(["--", *(str(path) for path in paths)])
+    completed = subprocess.run(
+        command, cwd=_repo_root(), check=True, capture_output=True, text=True,
+    )
+    return bool(completed.stdout.strip())
 
 
 def _config() -> EvalConfig:
@@ -628,6 +657,325 @@ def reanalyze(root: Path, predicate_variant: str) -> None:
     )
 
 
+def _load_validated_structured_baseline(
+    root: Path, records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    path = root / "reanalysis" / ISSUE_616_MOST_SPECIFIC / "results.jsonl"
+    if not path.is_file():
+        raise RuntimeError("validated Issue #616 baseline results are missing")
+    baseline_by_request: dict[str, dict[str, Any]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        call = json.loads(line)
+        request_id = call.get("requestId")
+        if not isinstance(request_id, str) or request_id in baseline_by_request:
+            raise RuntimeError("baseline result request IDs are invalid or duplicated")
+        baseline_by_request[request_id] = call
+    if set(baseline_by_request) != {record.get("requestId") for record in records}:
+        raise RuntimeError("baseline result request matrix mismatch")
+    ordered = []
+    for record in records:
+        call = baseline_by_request[record["requestId"]]
+        if (
+            call.get("queryId") != record.get("queryId")
+            or call.get("repeatIndex") != record.get("repeatIndex")
+            or call.get("actualApplicationPredicate", {}).get("variant")
+            != "bidirectional-current"
+            or call.get("originalSearch", {}).get("variant")
+            != "whole-keyword-plus-most-specific-current-published-menu-name"
+        ):
+            raise RuntimeError("baseline result provenance mismatch")
+        ordered.append(call)
+    return ordered
+
+
+def structured_reanalyze(root: Path) -> None:
+    """Compare A/B/C structured retrieval using an existing paid checkpoint."""
+    metadata_path = root / "run-metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    checkpoint_path = root / "calls.canonical.checkpoint.jsonl"
+    _validate_source_checkpoint_sha256(metadata, checkpoint_path)
+    if subprocess.run(
+        ["git", "merge-base", "--is-ancestor", STRUCTURED_EVAL_BASE_SHA, "HEAD"],
+        cwd=_repo_root(), check=False,
+    ).returncode != 0:
+        raise RuntimeError("structured evaluation is not based on approved PR #635 HEAD")
+    dataset = _dataset()
+    checkpoint = CheckpointStore(checkpoint_path)
+    records = checkpoint.records()
+    _validate_reanalysis_provenance(metadata, dataset, records)
+    validate_checkpoint_matrix(
+        queries=dataset["queries"], records=records, repeats=range(5),
+    )
+    baseline_calls = _load_validated_structured_baseline(root, records)
+    query_by_id = {query["id"]: query for query in dataset["queries"]}
+    structured_catalog = prepare_structured_catalog(
+        families=dataset["families"], stores=dataset["stores"],
+        menus=dataset["menus"],
+    )
+    structured_cache: dict[tuple[Any, ...], Any] = {}
+    structured_calls = [
+        evaluate_structured_variants(
+            dataset=dataset,
+            query=query_by_id[record["queryId"]],
+            record=record,
+            baseline_call=baseline_call,
+            prepared_catalog=structured_catalog,
+            retrieval_cache=structured_cache,
+        )
+        for record, baseline_call in zip(records, baseline_calls, strict=True)
+    ]
+    aggregate = aggregate_structured_comparison(structured_calls)
+    output_root = root / "structured-reanalysis"
+    result_path = write_jsonl(output_root / "results.jsonl", structured_calls)
+    aggregate_path = write_json(output_root / "aggregate.json", aggregate)
+    from hashlib import sha256
+    analysis_sources = {
+        "cli": Path(__file__),
+        "structuredSearch": Path(__file__).with_name("structured_search.py"),
+        "matching": Path(__file__).with_name("matching.py"),
+        "evaluation": Path(__file__).with_name("evaluation.py"),
+    }
+    metadata["structuredReanalysis"] = {
+        "schemaVersion": "miriyum-structured-search-reanalysis-v1",
+        "status": "simulated-evidence-not-actual-application",
+        "stackedOnPullRequest": 635,
+        "stackedBaseCommitSha": STRUCTURED_EVAL_BASE_SHA,
+        "analysisCommitSha": _commit_sha(),
+        "analysisWorkingTreeDirty": subprocess.run(
+            ["git", "diff", "--quiet"], cwd=_repo_root(), check=False,
+        ).returncode != 0,
+        "newProviderCalls": 0,
+        "incrementalCostUsd": 0.0,
+        "sourceCheckpointSha256": metadata["sourceCheckpointSha256"],
+        "sourceBaselineResultsSha256": sha256(
+            (root / "reanalysis" / ISSUE_616_MOST_SPECIFIC / "results.jsonl").read_bytes()
+        ).hexdigest(),
+        "analysisSourceSha256": {
+            name: sha256(path.read_bytes()).hexdigest()
+            for name, path in analysis_sources.items()
+        },
+        "gate": aggregate["gate"],
+    }
+    write_json(metadata_path, metadata)
+    write_sha256_manifest(
+        (result_path, aggregate_path), output_root / "sha256.json",
+    )
+
+
+def _validate_hybrid_source_files(root: Path, source: Path) -> dict[str, str]:
+    from hashlib import sha256
+
+    structured_path = root / "structured-reanalysis" / "results.jsonl"
+    embedding_path = (
+        source / "embeddings" / "text-embedding-3-large"
+        / "embedding-checkpoint.jsonl"
+    )
+    if not structured_path.is_file():
+        raise RuntimeError("structured results are missing")
+    if not embedding_path.is_file():
+        raise RuntimeError("large embedding checkpoint is missing")
+    structured_sha = sha256(structured_path.read_bytes()).hexdigest()
+    embedding_sha = sha256(embedding_path.read_bytes()).hexdigest()
+    if structured_sha != HYBRID_STRUCTURED_RESULTS_SHA:
+        raise RuntimeError("structured results SHA-256 mismatch")
+    if embedding_sha != HYBRID_EMBEDDING_CHECKPOINT_SHA:
+        raise RuntimeError("embedding checkpoint SHA-256 mismatch")
+    return {
+        "structuredResultsSha256": structured_sha,
+        "embeddingCheckpointSha256": embedding_sha,
+    }
+
+
+def _load_validated_hybrid_structured_calls(
+    root: Path, dataset: dict[str, Any],
+) -> list[dict[str, Any]]:
+    path = root / "structured-reanalysis" / "results.jsonl"
+    by_key: dict[tuple[str, int], dict[str, Any]] = {}
+    with path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            call = json.loads(line)
+            key = (call.get("queryId"), call.get("repeatIndex"))
+            if (
+                call.get("schemaVersion") != "miriyum-structured-search-call-v1"
+                or not isinstance(key[0], str)
+                or not isinstance(key[1], int)
+                or key in by_key
+                or "C" not in call.get("variants", {})
+            ):
+                raise RuntimeError(
+                    f"structured result matrix/provenance mismatch at line {line_number}"
+                )
+            by_key[key] = call
+    expected = {
+        (query["id"], repeat_index)
+        for query in dataset["queries"]
+        for repeat_index in range(5)
+    }
+    if set(by_key) != expected:
+        raise RuntimeError("structured result matrix must contain exactly 2,000 x 5 calls")
+    return [
+        by_key[(query["id"], repeat_index)]
+        for query in dataset["queries"]
+        for repeat_index in range(5)
+    ]
+
+
+def _hybrid_actual_metadata(
+    runtime_git_sha: str, *, working_tree_dirty: bool = False,
+    production_working_tree_dirty: bool = False,
+) -> dict[str, Any]:
+    return {
+        "status": "actual-predicate-H-with-legacy-evidence-replay",
+        "variant": "H_ACTUAL_FOOD_EVIDENCE_V1",
+        "label": "actual-application-predicate-food-evidence-v1",
+        "actualApplication": False,
+        "actualApplicationPredicate": True,
+        "queryEvidenceProvenance": "legacy-structured-checkpoint-replay",
+        "queryEvidenceSchemaComplete": False,
+        "missingReplayFields": ["aromas", "textures"],
+        "productionCommitSha": (
+            None if production_working_tree_dirty else runtime_git_sha
+        ),
+        "productionBaseCommitSha": runtime_git_sha,
+        "productionWorkingTreeDirty": production_working_tree_dirty,
+        "runtimeGitSha": runtime_git_sha,
+        "analysisCommitSha": None if working_tree_dirty else runtime_git_sha,
+        "analysisWorkingTreeDirty": working_tree_dirty,
+        "newProviderCalls": 0,
+        "newEmbeddingCalls": 0,
+    }
+
+
+def hybrid_reanalyze(root: Path, source: Path) -> None:
+    """Compare simulated D/E/F/G and actual-predicate H without paid calls."""
+    from hashlib import sha256
+    from .embeddings import embed_texts, topk_cosine
+
+    source_hashes = _validate_hybrid_source_files(root, source)
+    metadata_path = root / "run-metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    dataset = _dataset()
+    if metadata.get("datasetSha256") != dataset["metadata"]["datasetSha256"]:
+        raise RuntimeError("hybrid reanalysis dataset provenance mismatch")
+    structured_calls = _load_validated_hybrid_structured_calls(root, dataset)
+
+    menu_ids = [menu["id"] for menu in dataset["menus"]]
+    menu_texts = [
+        f"{menu['name']} {menu['description']} {' '.join(menu['tags'])}"
+        for menu in dataset["menus"]
+    ]
+    query_ids = [query["id"] for query in dataset["queries"]]
+    query_texts = [query["text"] for query in dataset["queries"]]
+
+    class NoProviderCallTransport:
+        def __call__(self, model, texts, timeout_seconds):
+            raise RuntimeError("frozen embedding cache is incomplete; provider calls are forbidden")
+
+    embedding_root = source / "embeddings"
+    corpus = embed_texts(
+        ids=menu_ids, texts=menu_texts, model="text-embedding-3-large",
+        artifact_dir=embedding_root, transport=NoProviderCallTransport(),
+    )
+    query_embeddings = embed_texts(
+        ids=query_ids, texts=query_texts, model="text-embedding-3-large",
+        artifact_dir=embedding_root, transport=NoProviderCallTransport(),
+    )
+    if (
+        corpus.ids != tuple(menu_ids)
+        or query_embeddings.ids != tuple(query_ids)
+        or corpus.vectors.shape != (5_000, 3_072)
+        or query_embeddings.vectors.shape != (2_000, 3_072)
+        or corpus.requested_model != "text-embedding-3-large"
+        or query_embeddings.requested_model != "text-embedding-3-large"
+    ):
+        raise RuntimeError("frozen embedding identities, model, or dimensions mismatch")
+    indices, scores = topk_cosine(
+        query_embeddings.vectors, corpus.vectors, k=200,
+    )
+    embedding_by_query = {
+        query_id: tuple(
+            (menu_ids[int(index)], float(score))
+            for index, score in zip(row_indices, row_scores)
+        )
+        for query_id, row_indices, row_scores in zip(
+            query_ids, indices, scores,
+        )
+    }
+    query_by_id = {query["id"]: query for query in dataset["queries"]}
+    catalog = prepare_hybrid_catalog(
+        families=dataset["families"], stores=dataset["stores"],
+        menus=dataset["menus"],
+    )
+    hybrid_calls = [
+        evaluate_hybrid_variants(
+            dataset=dataset, query=query_by_id[call["queryId"]],
+            structured_call=call,
+            embedding_menu_scores=embedding_by_query[call["queryId"]],
+            prepared_catalog=catalog,
+        )
+        for call in structured_calls
+    ]
+    aggregate = aggregate_hybrid_comparison(hybrid_calls)
+
+    output_root = root / "hybrid-reanalysis"
+    result_path = write_jsonl(output_root / "results.jsonl", hybrid_calls)
+    aggregate_path = write_json(output_root / "aggregate.json", aggregate)
+    analysis_sources = {
+        "cli": Path(__file__),
+        "hybridSearch": Path(__file__).with_name("hybrid_search.py"),
+        "structuredSearch": Path(__file__).with_name("structured_search.py"),
+        "embeddings": Path(__file__).with_name("embeddings.py"),
+        "matching": Path(__file__).with_name("matching.py"),
+        "productionFoodVocabulary": _repo_root() / "backend/src/main/java/com/miriyum/domain/search/interpreter/FoodEvidenceVocabulary.java",
+        "productionFoodExtractor": _repo_root() / "backend/src/main/java/com/miriyum/domain/search/interpreter/DeterministicFoodEvidenceExtractor.java",
+        "productionSearchPredicate": _repo_root() / "backend/src/main/java/com/miriyum/domain/search/repository/IntegratedStoreSearchPredicates.java",
+        "productionSearchRepository": _repo_root() / "backend/src/main/java/com/miriyum/domain/search/repository/IntegratedStoreSearchRepository.java",
+    }
+    runtime_git_sha = _commit_sha()
+    working_tree_dirty = _git_paths_dirty()
+    production_paths = tuple(
+        path.relative_to(_repo_root())
+        for name, path in analysis_sources.items()
+        if name.startswith("production")
+    )
+    production_working_tree_dirty = _git_paths_dirty(*production_paths)
+    metadata["hybridReanalysis"] = {
+        "schemaVersion": "miriyum-hybrid-search-reanalysis-v1",
+        **_hybrid_actual_metadata(
+            runtime_git_sha,
+            working_tree_dirty=working_tree_dirty,
+            production_working_tree_dirty=production_working_tree_dirty,
+        ),
+        "incrementalCostUsd": 0.0,
+        **source_hashes,
+        "embeddingSourceArtifact": str(source.resolve()),
+        "embeddingSourceDatasetSha256": json.loads(
+            (source / "run-metadata.json").read_text(encoding="utf-8")
+        ).get("datasetSha256"),
+        "currentDatasetSha256": dataset["metadata"]["datasetSha256"],
+        "requestedEmbeddingModel": "text-embedding-3-large",
+        "returnedEmbeddingModels": sorted(set(
+            corpus.returned_models + query_embeddings.returned_models
+        )),
+        "embeddingTopK": 200,
+        "similarityImplementation": "numpy-matmul-argpartition",
+        "analysisSourceSha256": {
+            name: sha256(path.read_bytes()).hexdigest()
+            for name, path in analysis_sources.items()
+        },
+        "targets": aggregate["targets"],
+        "gate": aggregate["gate"],
+    }
+    write_json(metadata_path, metadata)
+    write_sha256_manifest(
+        (result_path, aggregate_path), output_root / "sha256.json",
+    )
+
+
 def _validate_reanalysis_provenance(
     metadata: dict[str, Any], dataset: dict[str, Any],
     records: list[dict[str, Any]],
@@ -850,13 +1198,32 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="MiriYum reproducible search evaluation v2")
     parser.add_argument("command", choices=(
         "generate", "migrate-pilot", "migrate-checkpoint", "pilot", "run",
-        "prompt-pilot", "prompt-run", "reanalyze", "stamp-reanalysis",
+        "prompt-pilot", "prompt-run", "reanalyze", "structured-reanalyze",
+        "hybrid-reanalyze",
+        "stamp-reanalysis",
         "embeddings", "report", "hash-artifact", "model-compare",
+        "staging-generate", "staging-pilot", "staging-run", "staging-report",
     ))
     parser.add_argument("--artifact-dir", type=Path, required=True)
     parser.add_argument("--source-artifact-dir", type=Path)
     parser.add_argument("--predicate-variant", choices=PREDICATE_VARIANTS)
+    parser.add_argument("--seed-sql", type=Path)
     args = parser.parse_args(argv)
+    if args.command == "staging-generate":
+        seed_sql = args.seed_sql or (
+            _repo_root() / "backend/scripts/dev-data/search-profile-demo-500-stores.sql"
+        )
+        generate_staging_artifacts(args.artifact_dir.resolve(), seed_sql=seed_sql.resolve())
+        return 0
+    if args.command == "staging-pilot":
+        run_staging_pilot(args.artifact_dir.resolve())
+        return 0
+    if args.command == "staging-run":
+        run_staging_full(args.artifact_dir.resolve())
+        return 0
+    if args.command == "staging-report":
+        report_from_checkpoint(args.artifact_dir.resolve())
+        return 0
     if args.command == "migrate-pilot":
         if args.source_artifact_dir is None:
             parser.error("migrate-pilot requires --source-artifact-dir")
@@ -882,6 +1249,16 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"{args.command} requires --predicate-variant")
         action = reanalyze if args.command == "reanalyze" else stamp_reanalysis
         action(args.artifact_dir.resolve(), args.predicate_variant)
+        return 0
+    if args.command == "structured-reanalyze":
+        structured_reanalyze(args.artifact_dir.resolve())
+        return 0
+    if args.command == "hybrid-reanalyze":
+        if args.source_artifact_dir is None:
+            parser.error("hybrid-reanalyze requires --source-artifact-dir")
+        hybrid_reanalyze(
+            args.artifact_dir.resolve(), args.source_artifact_dir.resolve(),
+        )
         return 0
     actions = {
         "generate": generate, "pilot": pilot, "run": full_run,

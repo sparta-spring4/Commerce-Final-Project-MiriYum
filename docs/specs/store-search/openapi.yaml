@@ -1746,9 +1746,10 @@ components:
         vocabularyVersion:
           type: string
           minLength: 1
+          description: 현재 승인 Catalog와 음식 근거 사전을 결합한 catalog-v1+food-evidence-v1
         rankingRuleVersion:
           type: [string, "null"]
-          description: recommendation,desc일 때 history-v1, 다른 정렬에서는 null
+          description: recommendation,desc일 때 food-evidence-v1+history-v1, 다른 정렬에서는 null
         nextCursor:
           type: [string, "null"]
           maxLength: 1024

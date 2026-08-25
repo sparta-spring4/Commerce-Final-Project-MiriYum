@@ -1,14 +1,22 @@
 from pathlib import Path
 from hashlib import sha256
 import json
+import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from miriyum_search_eval.catalog import DatasetConfig, generate_dataset
 from miriyum_search_eval.cli import (
+    HYBRID_EMBEDDING_CHECKPOINT_SHA,
+    HYBRID_STRUCTURED_RESULTS_SHA,
     ISSUE_616_MOST_SPECIFIC,
     PRE_ISSUE_616,
     _gpt54mini_comparison_config,
+    _hybrid_actual_metadata,
+    _git_paths_dirty,
+    _load_validated_structured_baseline,
+    _validate_hybrid_source_files,
     _pin_source_checkpoint_sha256,
     _validate_prompt_full_provenance,
     _validate_reanalysis_provenance,
@@ -17,6 +25,7 @@ from miriyum_search_eval.cli import (
     generate,
     hash_artifact,
     reanalyze,
+    structured_reanalyze,
 )
 from miriyum_search_eval.runner import CheckpointStore, EvalConfig, deterministic_request_id
 from miriyum_search_eval.workflow import (
@@ -398,6 +407,136 @@ class WorkflowTest(unittest.TestCase):
 
             self.assertEqual(metadata_path.read_bytes(), before["metadata"])
             self.assertEqual(existing.read_bytes(), before["summary"])
+
+    def test_structured_reanalysis_rejects_changed_checkpoint_before_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checkpoint = root / "calls.canonical.checkpoint.jsonl"
+            checkpoint.write_bytes(b"original-checkpoint\n")
+            metadata = root / "run-metadata.json"
+            metadata.write_text(json.dumps({
+                "sourceCheckpointSha256": sha256(checkpoint.read_bytes()).hexdigest(),
+            }), encoding="utf-8")
+            existing = root / "structured-reanalysis" / "aggregate.json"
+            existing.parent.mkdir(parents=True)
+            existing.write_bytes(b"existing-aggregate\n")
+            before = {
+                "metadata": metadata.read_bytes(),
+                "aggregate": existing.read_bytes(),
+            }
+            checkpoint.write_bytes(b"changed-checkpoint\n")
+
+            with self.assertRaisesRegex(RuntimeError, "checkpoint SHA-256 mismatch"):
+                structured_reanalyze(root)
+
+            self.assertEqual(metadata.read_bytes(), before["metadata"])
+            self.assertEqual(existing.read_bytes(), before["aggregate"])
+
+    def test_structured_baseline_must_match_every_checkpoint_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results = root / "reanalysis" / ISSUE_616_MOST_SPECIFIC / "results.jsonl"
+            results.parent.mkdir(parents=True)
+            baseline = {
+                "requestId": "request-1",
+                "queryId": "query-1",
+                "repeatIndex": 0,
+                "actualApplicationPredicate": {"variant": "bidirectional-current"},
+                "originalSearch": {
+                    "variant": "whole-keyword-plus-most-specific-current-published-menu-name",
+                },
+            }
+            results.write_text(json.dumps(baseline) + "\n", encoding="utf-8")
+            records = [{
+                "requestId": "request-1",
+                "queryId": "query-1",
+                "repeatIndex": 0,
+            }]
+
+            self.assertEqual(
+                _load_validated_structured_baseline(root, records),
+                [baseline],
+            )
+            results.write_text(
+                json.dumps({**baseline, "queryId": "changed-query"}) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "baseline result provenance mismatch"):
+                _load_validated_structured_baseline(root, records)
+
+    def test_hybrid_source_files_require_frozen_structured_and_embedding_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "gold"
+            source = Path(directory) / "embedding-source"
+            structured = root / "structured-reanalysis" / "results.jsonl"
+            embedding = (
+                source / "embeddings" / "text-embedding-3-large"
+                / "embedding-checkpoint.jsonl"
+            )
+            structured.parent.mkdir(parents=True)
+            embedding.parent.mkdir(parents=True)
+            structured.write_bytes(b"structured")
+            embedding.write_bytes(b"embedding")
+
+            with mock.patch(
+                "miriyum_search_eval.cli.HYBRID_STRUCTURED_RESULTS_SHA",
+                sha256(structured.read_bytes()).hexdigest(),
+            ), mock.patch(
+                "miriyum_search_eval.cli.HYBRID_EMBEDDING_CHECKPOINT_SHA",
+                sha256(embedding.read_bytes()).hexdigest(),
+            ):
+                hashes = _validate_hybrid_source_files(root, source)
+
+            self.assertEqual(
+                hashes["structuredResultsSha256"],
+                sha256(structured.read_bytes()).hexdigest(),
+            )
+            self.assertEqual(
+                hashes["embeddingCheckpointSha256"],
+                sha256(embedding.read_bytes()).hexdigest(),
+            )
+            structured.write_bytes(b"changed")
+            with self.assertRaisesRegex(RuntimeError, "structured results SHA-256"):
+                _validate_hybrid_source_files(root, source)
+
+        self.assertEqual(len(HYBRID_STRUCTURED_RESULTS_SHA), 64)
+        self.assertEqual(len(HYBRID_EMBEDDING_CHECKPOINT_SHA), 64)
+
+    def test_hybrid_reanalysis_records_actual_h_without_new_paid_calls(self):
+        metadata = _hybrid_actual_metadata("abc123")
+
+        self.assertEqual(metadata["variant"], "H_ACTUAL_FOOD_EVIDENCE_V1")
+        self.assertEqual(metadata["label"], "actual-application-predicate-food-evidence-v1")
+        self.assertFalse(metadata["actualApplication"])
+        self.assertTrue(metadata["actualApplicationPredicate"])
+        self.assertEqual(metadata["queryEvidenceProvenance"], "legacy-structured-checkpoint-replay")
+        self.assertEqual(metadata["productionCommitSha"], "abc123")
+        self.assertEqual(metadata["runtimeGitSha"], "abc123")
+        self.assertEqual(metadata["newProviderCalls"], 0)
+        self.assertEqual(metadata["newEmbeddingCalls"], 0)
+
+        dirty = _hybrid_actual_metadata("abc123", working_tree_dirty=True)
+        self.assertIsNone(dirty["analysisCommitSha"])
+        self.assertTrue(dirty["analysisWorkingTreeDirty"])
+
+        production_dirty = _hybrid_actual_metadata(
+            "abc123", production_working_tree_dirty=True,
+        )
+        self.assertIsNone(production_dirty["productionCommitSha"])
+        self.assertEqual(production_dirty["productionBaseCommitSha"], "abc123")
+        self.assertTrue(production_dirty["productionWorkingTreeDirty"])
+
+    def test_git_paths_dirty_reads_porcelain_for_index_worktree_and_untracked(self):
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="?? new-file.py\n", stderr="",
+        )
+        with mock.patch("miriyum_search_eval.cli.subprocess.run", return_value=completed) as run:
+            self.assertTrue(_git_paths_dirty(Path("new-file.py")))
+
+        self.assertEqual(
+            run.call_args.args[0],
+            ["git", "status", "--porcelain", "--", "new-file.py"],
+        )
 
     def test_canonical_checkpoint_sha_is_pinned_once(self):
         with tempfile.TemporaryDirectory() as directory:

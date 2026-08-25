@@ -24,7 +24,15 @@ import com.miriyum.domain.menu.repository.MenuRepository;
 import com.miriyum.domain.search.interpreter.InterpretationResult;
 import com.miriyum.domain.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.search.interpreter.PriceRange;
+import com.miriyum.domain.search.interpreter.DeterministicFoodEvidenceExtractor;
+import com.miriyum.domain.search.interpreter.FoodEvidenceVocabulary;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidence;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidence.Dimension;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidence.EvidenceTerm;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidenceSource;
 import com.miriyum.domain.search.geo.BoundingBox;
+import com.miriyum.domain.search.entity.MenuSearchProfileDimension;
+import com.miriyum.domain.search.entity.MenuSearchProfileSource;
 import com.miriyum.domain.search.query.IntegratedSearchCursorCodec;
 import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
 import com.miriyum.domain.search.service.IntegratedSearchInterpreter;
@@ -677,6 +685,289 @@ class IntegratedStoreSearchRepositoryIT {
 
     @Test
     @Transactional
+    void structuredAttributesMustMatchTwoDimensionsOnTheSameCurrentVisibleMenu() {
+        Store valid = createStore(
+                "같은 메뉴 근거", Region.SEOUL, "KOREAN", Set.of(), false);
+        publishMenuWithSearchFields(
+                valid, "해물 전골", "칼칼한 해물 국물", 14_000,
+                "BEVERAGE", List.of(), List.of("해물"),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+
+        Store split = createStore(
+                "분리 메뉴 근거", Region.SEOUL, "KOREAN", Set.of(), false);
+        publishMenuWithSearchFields(
+                split, "매운 국수", "칼칼한", 12_000,
+                "BEVERAGE", List.of(), List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        publishMenuWithSearchFields(
+                split, "해물 튀김", "해물", 12_000,
+                "BEVERAGE", List.of(), List.of("해물"),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+
+        Store hidden = createStore(
+                "비공개 메뉴 근거", Region.SEOUL, "KOREAN", Set.of(), false);
+        publishMenuWithSearchFields(
+                hidden, "해물 전골", "칼칼한 해물", 14_000,
+                "BEVERAGE", List.of(), List.of("해물"),
+                MenuSellingStatus.SELLING, MenuVisibility.HIDDEN, false);
+
+        Store retired = createStore(
+                "과거 메뉴 근거", Region.SEOUL, "KOREAN", Set.of(), false);
+        publishMenuWithSearchFields(
+                retired, "해물 전골", "칼칼한 해물", 14_000,
+                "BEVERAGE", List.of(), List.of("해물"),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, true);
+        flushAndClear();
+
+        StructuredFoodEvidence evidence = new DeterministicFoodEvidenceExtractor(
+                new FoodEvidenceVocabulary()).extract("칼칼한 해물 음식");
+        IntegratedStoreSearchSlice result = repository.search(query(
+                condition(List.of(), List.of(), List.of(), List.of(), null,
+                        "칼칼한 해물 음식"),
+                List.of(),
+                evidence,
+                "relevance,desc",
+                null,
+                20));
+
+        assertThat(result.content())
+                .singleElement()
+                .satisfies(candidate -> {
+                    assertThat(candidate.storeId()).isEqualTo(valid.getId());
+                    assertThat(candidate.structuredRelevance()).isEqualTo(26);
+                });
+    }
+
+    @Test
+    @Transactional
+    void searchProfileFindsOnlyCurrentVisibleMenuWithTwoDimensions() {
+        Store profiled = createStore(
+                "성수 화로정", Region.SEOUL, "KOREAN", Set.of(), false);
+        Menu profiledMenu = publishMenuWithSearchFields(
+                profiled, "바다 전골", "담백하게 끓인 전골", 16_000,
+                "SOUP_STEW", List.of(), List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+
+        Store oneDimension = createStore(
+                "연남 온기식당", Region.SEOUL, "KOREAN", Set.of(), false);
+        Menu oneDimensionMenu = publishMenuWithSearchFields(
+                oneDimension, "오늘의 전골", "담백한 국물", 15_000,
+                "SOUP_STEW", List.of(), List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+
+        Store hidden = createStore(
+                "서촌 담소반", Region.SEOUL, "KOREAN", Set.of(), false);
+        Menu hiddenMenu = publishMenuWithSearchFields(
+                hidden, "비밀 전골", "담백한 국물", 15_000,
+                "SOUP_STEW", List.of(), List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.HIDDEN, false);
+        flushAndClear();
+
+        insertSearchProfile(
+                profiledMenu,
+                MenuSearchProfileDimension.TASTE, "칼칼한",
+                MenuSearchProfileDimension.INGREDIENT, "해물");
+        insertSearchProfile(
+                oneDimensionMenu,
+                MenuSearchProfileDimension.TASTE, "칼칼한");
+        insertSearchProfile(
+                hiddenMenu,
+                MenuSearchProfileDimension.TASTE, "칼칼한",
+                MenuSearchProfileDimension.INGREDIENT, "해물");
+
+        StructuredFoodEvidence evidence = new DeterministicFoodEvidenceExtractor(
+                new FoodEvidenceVocabulary()).extract("칼칼한 해물 음식");
+        IntegratedStoreSearchSlice result = repository.search(query(
+                condition(List.of(), List.of(), List.of(), List.of(), null,
+                        "칼칼한 해물 음식"),
+                List.of(), evidence, "relevance,desc", null, 20));
+
+        assertThat(result.content())
+                .singleElement()
+                .satisfies(candidate -> {
+                    assertThat(candidate.storeId()).isEqualTo(profiled.getId());
+                    assertThat(candidate.structuredRelevance()).isPositive();
+                });
+    }
+
+    @Test
+    @Transactional
+    void structuredDimensionCountPrecedesLegacyNameRelevanceAndSeeksWithoutLoss() {
+        Store threeDimensions = createStore(
+                "일반 매장", Region.SEOUL, "KOREAN", Set.of(), false);
+        publishMenuWithSearchFields(
+                threeDimensions, "해물 전골", "칼칼한 해물 국물", 14_000,
+                "BEVERAGE", List.of(), List.of("해물", "국물"),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Store twoDimensionsHighLegacy = createStore(
+                "칼칼한 해물 음식 전문점", Region.SEOUL, "KOREAN", Set.of(), false);
+        publishMenuWithSearchFields(
+                twoDimensionsHighLegacy, "해물 볶음", "칼칼한 해물", 13_000,
+                "BEVERAGE", List.of(), List.of("해물"),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        flushAndClear();
+
+        FoodEvidenceVocabulary vocabulary = new FoodEvidenceVocabulary();
+        StructuredFoodEvidence evidence = evidence(
+                vocabulary,
+                Dimension.INGREDIENT, "해물",
+                Dimension.TASTE, "칼칼한",
+                Dimension.BROTH, "국물");
+        InterpretedSearchCondition condition = condition(
+                List.of(), List.of(), List.of(), List.of(), null,
+                "칼칼한 해물 음식");
+        IntegratedStoreSearchSlice first = repository.search(query(
+                condition, List.of(), evidence, "relevance,desc", null, 1));
+        IntegratedStoreSearchSlice second = repository.search(query(
+                condition, List.of(), evidence, "relevance,desc",
+                first.nextCursor(), 1));
+
+        assertThat(first.content()).singleElement().satisfies(candidate -> {
+            assertThat(candidate.storeId()).isEqualTo(threeDimensions.getId());
+            assertThat(candidate.structuredRelevance()).isEqualTo(29);
+        });
+        assertThat(second.content()).singleElement().satisfies(candidate -> {
+            assertThat(candidate.storeId()).isEqualTo(twoDimensionsHighLegacy.getId());
+            assertThat(candidate.structuredRelevance()).isEqualTo(26);
+            assertThat(candidate.relevanceTier()).isEqualTo(3);
+        });
+    }
+
+    @Test
+    @Transactional
+    void explicitMenuSearchDoesNotAppendAttributeOnlyStores() {
+        Store explicit = createStore(
+                "명시 메뉴 매장", Region.SEOUL, "CHINESE", Set.of(), false);
+        publishMenuWithSearchFields(
+                explicit, "짬뽕", "해물 국물", 12_000,
+                "BEVERAGE", List.of(), List.of("해물"),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Store attributeOnly = createStore(
+                "속성 전용 매장", Region.SEOUL, "KOREAN", Set.of(), false);
+        publishMenuWithSearchFields(
+                attributeOnly, "해물 전골", "칼칼한 해물 국물", 14_000,
+                "BEVERAGE", List.of(), List.of("칼칼한", "해물", "국물"),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        flushAndClear();
+
+        FoodEvidenceVocabulary vocabulary = new FoodEvidenceVocabulary();
+        StructuredFoodEvidence evidence = evidenceWithMenuFamily(
+                vocabulary,
+                StructuredFoodEvidenceSource.DETERMINISTIC,
+                "짬뽕",
+                Dimension.INGREDIENT, "해물",
+                Dimension.TASTE, "칼칼한",
+                Dimension.BROTH, "국물");
+        IntegratedStoreSearchSlice result = repository.search(query(
+                condition(List.of(), List.of(), List.of(), List.of(), null, "짬뽕"),
+                List.of("짬뽕"), evidence, "relevance,desc", null, 20));
+
+        assertThat(result.content())
+                .extracting(IntegratedStoreSearchCandidate::storeId)
+                .containsExactly(explicit.getId());
+    }
+
+    @Test
+    @Transactional
+    void threeDimensionsOutrankLlmInferredMenuFamily() {
+        Store inferredFamily = createStore(
+                "LLM 계열 매장", Region.SEOUL, "CHINESE", Set.of(), false);
+        publishMenuWithSearchFields(
+                inferredFamily, "마라탕", "향신료 음식", 13_000,
+                "BEVERAGE", List.of(), List.of("향신료"),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Store threeDimensions = createStore(
+                "세 차원 매장", Region.SEOUL, "KOREAN", Set.of(), false);
+        publishMenuWithSearchFields(
+                threeDimensions, "해물 전골", "칼칼한 해물 국물", 14_000,
+                "BEVERAGE", List.of(), List.of("칼칼한", "해물", "국물"),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        flushAndClear();
+
+        FoodEvidenceVocabulary vocabulary = new FoodEvidenceVocabulary();
+        StructuredFoodEvidence evidence = evidenceWithMenuFamily(
+                vocabulary,
+                StructuredFoodEvidenceSource.LLM,
+                "마라탕",
+                Dimension.INGREDIENT, "해물",
+                Dimension.TASTE, "칼칼한",
+                Dimension.BROTH, "국물");
+        IntegratedStoreSearchSlice result = repository.search(query(
+                condition(List.of(), List.of(), List.of(), List.of(), null, "음식"),
+                List.of(), evidence, "relevance,desc", null, 20));
+
+        assertThat(result.content())
+                .extracting(IntegratedStoreSearchCandidate::storeId)
+                .containsExactly(threeDimensions.getId(), inferredFamily.getId());
+        assertThat(result.content())
+                .extracting(IntegratedStoreSearchCandidate::structuredRelevance)
+                .containsExactly(9, 2);
+    }
+
+    @Test
+    @Transactional
+    void fourInformativeMenuFieldTokensProduceScoreAboveLegacyBound() {
+        Store fourTokens = createStore(
+                "원문 네 토큰 매장", Region.SEOUL, "KOREAN", Set.of(), false);
+        publishMenuWithSearchFields(
+                fourTokens, "오늘의 전골", "칼칼한 해물 바질 토마토", 14_000,
+                "BEVERAGE", List.of(), List.of("칼칼한", "해물", "바질", "토마토"),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Store oneToken = createStore(
+                "원문 한 토큰 매장", Region.SEOUL, "KOREAN", Set.of(), false);
+        publishMenuWithSearchFields(
+                oneToken, "오늘의 별미", "바질", 13_000,
+                "BEVERAGE", List.of(), List.of("바질"),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        flushAndClear();
+
+        FoodEvidenceVocabulary vocabulary = new FoodEvidenceVocabulary();
+        StructuredFoodEvidence evidence = evidence(
+                vocabulary,
+                Dimension.INGREDIENT, "해물",
+                Dimension.TASTE, "칼칼한");
+        IntegratedStoreSearchSlice result = repository.search(query(
+                condition(List.of(), List.of(), List.of(), List.of(), null,
+                        "칼칼한 해물 바질 토마토 음식 추천해줘"),
+                List.of(), evidence, "relevance,desc", null, 20));
+
+        assertThat(result.content()).singleElement().satisfies(candidate -> {
+            assertThat(candidate.storeId()).isEqualTo(fourTokens.getId());
+            assertThat(candidate.structuredRelevance()).isEqualTo(46);
+        });
+    }
+
+    @Test
+    @Transactional
+    void structuredExpansionWithoutConceptsDoesNotAppendUnrelatedReverseMatches() {
+        Store relevant = createStore(
+                "구조화 확장 대상", Region.SEOUL, "KOREAN", Set.of(), false);
+        publishMenuWithSearchFields(
+                relevant, "해물 전골", "칼칼한 해물", 14_000,
+                "BEVERAGE", List.of(), List.of("해물"),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Store unrelated = createStore(
+                "무관한 역방향 후보", Region.SEOUL, "KOREAN", Set.of(), false);
+        publishMenu(
+                unrelated, "초밥", 14_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        flushAndClear();
+
+        StructuredFoodEvidence evidence = new DeterministicFoodEvidenceExtractor(
+                new FoodEvidenceVocabulary()).extract("칼칼한 해물 음식");
+        List<IntegratedStoreSearchCandidate> result = repository.searchExpanded(
+                query(condition(), "relevance,desc", null, 20),
+                List.of(),
+                evidence,
+                20);
+
+        assertThat(result)
+                .extracting(IntegratedStoreSearchCandidate::storeId)
+                .containsExactly(relevant.getId());
+    }
+
+    @Test
+    @Transactional
     void refreshesCurrentModesAndRemovesStoresThatAreNoLongerPublic() {
         Store modeChanged = createStore(
                 "모드 변경", Region.SEOUL, "KOREAN", Set.of(), false);
@@ -892,6 +1183,104 @@ class IntegratedStoreSearchRepositoryIT {
     ) {
         return IntegratedStoreSearchQuery.from(
                 condition, explicitMenuNames, sort, cursor, size, cursorCodec);
+    }
+
+    private void insertSearchProfile(Menu menu, Object... dimensionsAndTerms) {
+        Long menuVersionId = jdbcTemplate.queryForObject("""
+                SELECT version.menu_version_id
+                FROM menu_versions version
+                JOIN menus menu_row ON menu_row.menu_id = version.menu_id
+                WHERE menu_row.menu_id = ?
+                  AND version.version_number = menu_row.published_version_number
+                """, Long.class, menu.getId());
+        jdbcTemplate.update("""
+                INSERT INTO menu_search_profiles (
+                    menu_version_id, schema_version, created_at, updated_at
+                ) VALUES (?, 'food-profile-v1', ?, ?)
+                """, menuVersionId, NOW, NOW);
+        Long profileId = jdbcTemplate.queryForObject("""
+                SELECT menu_search_profile_id
+                FROM menu_search_profiles
+                WHERE menu_version_id = ?
+                """, Long.class, menuVersionId);
+        for (int index = 0; index < dimensionsAndTerms.length; index += 2) {
+            MenuSearchProfileDimension dimension =
+                    (MenuSearchProfileDimension) dimensionsAndTerms[index];
+            String term = (String) dimensionsAndTerms[index + 1];
+            jdbcTemplate.update("""
+                    INSERT INTO menu_search_profile_terms (
+                        menu_search_profile_id, dimension, normalized_term,
+                        confidence, source, created_at
+                    ) VALUES (?, ?, ?, 1.0000, ?, ?)
+                    """, profileId, dimension.name(), term,
+                    MenuSearchProfileSource.CURATED.name(), NOW);
+        }
+    }
+
+    private IntegratedStoreSearchQuery query(
+            InterpretedSearchCondition condition,
+            List<String> explicitMenuNames,
+            StructuredFoodEvidence evidence,
+            String sort,
+            String cursor,
+            Integer size
+    ) {
+        return IntegratedStoreSearchQuery.from(
+                condition,
+                explicitMenuNames,
+                evidence,
+                false,
+                false,
+                cursorCodec.principalScope(null),
+                sort,
+                cursor,
+                size,
+                cursorCodec);
+    }
+
+    private static StructuredFoodEvidence evidence(
+            FoodEvidenceVocabulary vocabulary,
+            Object... dimensionsAndTerms
+    ) {
+        java.util.Map<Dimension, List<EvidenceTerm>> values =
+                new java.util.EnumMap<>(Dimension.class);
+        for (int index = 0; index < dimensionsAndTerms.length; index += 2) {
+            Dimension dimension = (Dimension) dimensionsAndTerms[index];
+            String term = (String) dimensionsAndTerms[index + 1];
+            values.put(dimension, List.of(vocabulary.resolve(
+                    dimension,
+                    term,
+                    StructuredFoodEvidenceSource.DETERMINISTIC).orElseThrow()));
+        }
+        return new StructuredFoodEvidence(
+                List.of(),
+                values.getOrDefault(Dimension.MENU_FAMILY, List.of()),
+                values.getOrDefault(Dimension.INGREDIENT, List.of()),
+                values.getOrDefault(Dimension.TASTE, List.of()),
+                values.getOrDefault(Dimension.BROTH, List.of()),
+                values.getOrDefault(Dimension.METHOD, List.of()),
+                values.getOrDefault(Dimension.AROMA, List.of()),
+                values.getOrDefault(Dimension.TEXTURE, List.of()),
+                values.getOrDefault(Dimension.FORM, List.of()));
+    }
+
+    private static StructuredFoodEvidence evidenceWithMenuFamily(
+            FoodEvidenceVocabulary vocabulary,
+            StructuredFoodEvidenceSource source,
+            String menuFamily,
+            Object... dimensionsAndTerms
+    ) {
+        StructuredFoodEvidence dimensions = evidence(vocabulary, dimensionsAndTerms);
+        EvidenceTerm family = vocabulary.resolve(
+                        Dimension.MENU_FAMILY,
+                        menuFamily,
+                        source)
+                .orElseThrow();
+        return new StructuredFoodEvidence(
+                List.of(), List.of(family),
+                dimensions.ingredients(), dimensions.tastes(), dimensions.broths(),
+                dimensions.methods(), dimensions.aromas(), dimensions.textures(),
+                dimensions.forms());
     }
 
     private InterpretedSearchCondition condition() {

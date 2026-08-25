@@ -24,6 +24,9 @@ import com.miriyum.domain.search.expansion.SearchConceptExpansion;
 import com.miriyum.domain.search.expansion.SearchConceptExpansionService;
 import com.miriyum.domain.search.expansion.SearchConceptPurpose;
 import com.miriyum.domain.search.expansion.SearchConceptRequest;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidence;
+import com.miriyum.domain.search.interpreter.DeterministicFoodEvidenceExtractor;
+import com.miriyum.domain.search.interpreter.FoodEvidenceVocabulary;
 import com.miriyum.domain.search.interpreter.InterpretationResult;
 import com.miriyum.domain.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.search.interpreter.PriceRange;
@@ -51,6 +54,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class IntegratedStoreSearchService {
 
+    private static final String FOOD_RANKING_RULE_VERSION =
+            FoodEvidenceVocabulary.VERSION + "+" + StoreRecommendationService.RULE_VERSION;
+
     private final IntegratedSearchInterpreter interpreter;
     private final IntegratedStoreSearchRepository repository;
     private final ReservationSearchAvailabilityService reservationService;
@@ -58,6 +64,7 @@ public class IntegratedStoreSearchService {
     private final IntegratedSearchCursorCodec cursorCodec;
     private final StoreRecommendationService recommendationService;
     private final SearchConceptExpansionService expansionService;
+    private final DeterministicFoodEvidenceExtractor foodEvidenceExtractor;
     private final OpenAiSearchInterpretationProperties llmProperties;
     private final Clock clock;
 
@@ -69,6 +76,7 @@ public class IntegratedStoreSearchService {
             IntegratedSearchCursorCodec cursorCodec,
             StoreRecommendationService recommendationService,
             SearchConceptExpansionService expansionService,
+            DeterministicFoodEvidenceExtractor foodEvidenceExtractor,
             OpenAiSearchInterpretationProperties llmProperties,
             Clock clock
     ) {
@@ -79,6 +87,7 @@ public class IntegratedStoreSearchService {
         this.cursorCodec = cursorCodec;
         this.recommendationService = recommendationService;
         this.expansionService = expansionService;
+        this.foodEvidenceExtractor = foodEvidenceExtractor;
         this.llmProperties = llmProperties;
         this.clock = clock;
     }
@@ -116,6 +125,8 @@ public class IntegratedStoreSearchService {
     ) {
         InterpretationResult interpretation = interpreter.interpret(searchInput);
         InterpretedSearchCondition condition = interpretation.condition();
+        StructuredFoodEvidence foodEvidence = foodEvidenceExtractor.extract(
+                condition.remainingKeyword());
         boolean reservationRequested = hasReservationDate(condition);
         if ((includesInfants || availableOnly) && !reservationRequested) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
@@ -125,6 +136,8 @@ public class IntegratedStoreSearchService {
         String principalScope = cursorCodec.principalScope(consumerAccountId);
         IntegratedStoreSearchQuery requestQuery = IntegratedStoreSearchQuery.from(
                 condition,
+                List.of(),
+                foodEvidence,
                 includesInfants,
                 availableOnly,
                 principalScope,
@@ -137,6 +150,7 @@ public class IntegratedStoreSearchService {
         requestQuery = IntegratedStoreSearchQuery.from(
                 condition,
                 explicitMenuNames,
+                foodEvidence,
                 includesInfants,
                 availableOnly,
                 principalScope,
@@ -166,6 +180,7 @@ public class IntegratedStoreSearchService {
             IntegratedStoreSearchQuery query = IntegratedStoreSearchQuery.from(
                     condition,
                     explicitMenuNames,
+                    foodEvidence,
                     includesInfants,
                     availableOnly,
                     principalScope,
@@ -287,6 +302,7 @@ public class IntegratedStoreSearchService {
             IntegratedStoreSearchQuery scanQuery = IntegratedStoreSearchQuery.from(
                     condition,
                     requestQuery.explicitMenuNames(),
+                    requestQuery.foodEvidence(),
                     includesInfants,
                     availableOnly,
                     cursorCodec.principalScope(consumerAccountId),
@@ -353,18 +369,43 @@ public class IntegratedStoreSearchService {
                 condition.storeCategoryCodes(),
                 condition.menuCategoryCodes(),
                 condition.tagCodes());
+        boolean supplemented = requestQuery.cursor().isEmpty()
+                && exactExhausted
+                && rankingCandidates.size() < requestQuery.size()
+                && !condition.remainingKeyword().isBlank()
+                && appendExpandedRankingCandidates(
+                        rankingCandidates,
+                        stateById,
+                        requestQuery,
+                        condition,
+                        includesInfants,
+                        availableOnly);
         List<RankedRecommendation> ranked = recommendationService.rank(
                 consumerAccountId,
                 rankingCandidates,
                 signals,
                 clock.instant());
-        RecommendationCursorKey pageKey = requestQuery.cursor()
-                .map(decoded -> parseRecommendationCursor(
-                        decoded.sortValue(), decoded.storeId()))
-                .orElse(null);
-        List<RankedRecommendation> remaining = ranked.stream()
-                .filter(candidate -> pageKey == null || pageKey.isAfter(candidate))
+        List<RankedRecommendation> foodFirstRanked = ranked.stream()
+                .sorted(Comparator.comparing(candidate -> structuredRelevance(
+                        stateById.get(candidate.candidate().storeId()).candidate())))
                 .toList();
+        var decodedCursor = requestQuery.cursor().orElse(null);
+        StructuredSearchRelevance pageGroup = decodedCursor == null
+                ? null
+                : StructuredSearchRelevance.of(
+                        decodedCursor.structuredRelevance(),
+                        decodedCursor.relevanceTier());
+        RecommendationCursorKey pageKey = decodedCursor == null
+                ? null
+                : parseRecommendationCursor(
+                        decodedCursor.sortValue(), decodedCursor.storeId());
+        List<RankedRecommendation> afterCursor = foodFirstRanked.stream()
+                .filter(candidate -> isAfterRecommendationCursor(
+                        candidate, stateById, pageGroup, pageKey))
+                .toList();
+        List<RankedRecommendation> remaining = supplemented
+                ? afterCursor.stream().limit(requestQuery.size()).toList()
+                : afterCursor;
         int pageSize = Math.min(requestQuery.size(), remaining.size());
         List<RankedRecommendation> page = remaining.subList(0, pageSize);
         List<IntegratedStoreSearchItem> items = new ArrayList<>(page.stream()
@@ -378,68 +419,55 @@ public class IntegratedStoreSearchService {
                         result.ranked().reason()))
                 .toList());
         String nextCursor = remaining.size() > pageSize && !page.isEmpty()
-                ? recommendationCursor(requestQuery, page.getLast())
+                ? recommendationCursor(
+                        requestQuery,
+                        page.getLast(),
+                        stateById.get(page.getLast().candidate().storeId()).candidate())
                 : null;
-        if (requestQuery.cursor().isEmpty()
-                && exactExhausted
-                && items.size() < requestQuery.size()
-                && !condition.remainingKeyword().isBlank()) {
-            appendRankedExpandedCandidates(
-                    consumerAccountId,
-                    items,
-                    stateById.keySet(),
-                    requestQuery,
-                    condition,
-                    includesInfants,
-                    availableOnly,
-                    signals);
-        }
         return new IntegratedStoreSearchData(
                 items,
                 normalized(condition),
                 interpretation.warnings(),
                 interpretation.ruleVersion(),
                 interpretation.vocabularyVersion(),
-                StoreRecommendationService.RULE_VERSION,
+                FOOD_RANKING_RULE_VERSION,
                 nextCursor);
     }
 
-    private void appendRankedExpandedCandidates(
-            Long consumerAccountId,
-            List<IntegratedStoreSearchItem> items,
-            Set<Long> exactStoreIds,
+    private boolean appendExpandedRankingCandidates(
+            List<RecommendationSearchCandidate> rankingCandidates,
+            Map<Long, CandidateState> stateById,
             IntegratedStoreSearchQuery query,
             InterpretedSearchCondition condition,
             boolean includesInfants,
-            boolean availableOnly,
-            RecommendationSearchSignals signals
+            boolean availableOnly
     ) {
-        SearchConceptExpansion expansion = expansionService.expand(new SearchConceptRequest(
-                condition.remainingKeyword(), SearchConceptPurpose.STORE_SEARCH));
-        if (expansion == null || expansion.concepts().isEmpty()) {
-            return;
+        SearchConceptExpansion expansion = expansionService.expand(
+                new SearchConceptRequest(
+                        condition.remainingKeyword(),
+                        SearchConceptPurpose.STORE_SEARCH),
+                query.foodEvidence());
+        if (!hasExpandedEvidence(expansion)) {
+            return false;
         }
         List<IntegratedStoreSearchCandidate> expanded = repository.searchExpanded(
                         query,
                         expansion.concepts(),
+                        expansion.foodEvidence(),
                         llmProperties.supplementCandidateLimit())
                 .stream()
-                .filter(candidate -> !exactStoreIds.contains(candidate.storeId()))
-                .sorted(Comparator.comparingInt(
-                        IntegratedStoreSearchCandidate::relevanceTier).reversed())
+                .filter(candidate -> !stateById.containsKey(candidate.storeId()))
                 .toList();
         List<IntegratedStoreSearchCandidate> before =
                 repository.refreshCurrentlyPublic(expanded);
         AvailabilityBatch availability = availabilityById(
                 before, condition, includesInfants);
         if (!availability.valid()) {
-            return;
+            return false;
         }
         List<IntegratedStoreSearchCandidate> after =
                 repository.refreshCurrentlyPublic(before);
-        Map<Long, CandidateState> supplementalStates = new LinkedHashMap<>();
-        Map<Integer, List<RecommendationSearchCandidate>> supplementalRankingByTier =
-                new java.util.TreeMap<>(Comparator.reverseOrder());
+        boolean appended = false;
         for (IntegratedStoreSearchCandidate candidate : after) {
             ReservationAvailability candidateAvailability = availability.values().getOrDefault(
                     candidate.storeId(),
@@ -452,48 +480,32 @@ public class IntegratedStoreSearchService {
                     && candidateAvailability != ReservationAvailability.AVAILABLE) {
                 continue;
             }
-            if (supplementalStates.putIfAbsent(
+            if (stateById.putIfAbsent(
                     candidate.storeId(),
                     new CandidateState(candidate, candidateAvailability)) != null) {
                 continue;
             }
-            supplementalRankingByTier.computeIfAbsent(
-                            candidate.relevanceTier(), ignored -> new ArrayList<>())
-                    .add(new RecommendationSearchCandidate(
-                            candidate.storeId(),
-                            candidate.relevanceTier(),
-                            toRecommendationAvailability(candidateAvailability),
-                            null));
+            rankingCandidates.add(new RecommendationSearchCandidate(
+                    candidate.storeId(),
+                    candidate.relevanceTier(),
+                    toRecommendationAvailability(candidateAvailability),
+                    null));
+            appended = true;
         }
-        for (List<RecommendationSearchCandidate> supplementalRanking
-                : supplementalRankingByTier.values()) {
-            List<RankedRecommendation> supplementalRanked = recommendationService.rank(
-                    consumerAccountId,
-                    supplementalRanking,
-                    signals,
-                    clock.instant());
-            for (RankedRecommendation ranked : supplementalRanked) {
-                if (items.size() >= query.size()) {
-                    return;
-                }
-                CandidateState state = supplementalStates.get(ranked.candidate().storeId());
-                if (state != null) {
-                    items.add(toItem(
-                            state.candidate(),
-                            state.availability(),
-                            ranked.reason()));
-                }
-            }
-        }
+        return appended;
     }
 
     private String recommendationCursor(
             IntegratedStoreSearchQuery requestQuery,
-            RankedRecommendation last
+            RankedRecommendation last,
+            IntegratedStoreSearchCandidate candidate
     ) {
         RecommendationCursorKey key = RecommendationCursorKey.from(last);
+        StructuredSearchRelevance relevance = structuredRelevance(candidate);
         return cursorCodec.encode(
                 requestQuery,
+                relevance.structuredRelevance(),
+                relevance.relevanceTier(),
                 key.serialize(),
                 key.storeId());
     }
@@ -507,6 +519,40 @@ public class IntegratedStoreSearchService {
         } catch (IllegalArgumentException exception) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
+    }
+
+    private static boolean isAfterRecommendationCursor(
+            RankedRecommendation candidate,
+            Map<Long, CandidateState> stateById,
+            StructuredSearchRelevance pageGroup,
+            RecommendationCursorKey pageKey
+    ) {
+        if (pageGroup == null || pageKey == null) {
+            return true;
+        }
+        CandidateState state = stateById.get(candidate.candidate().storeId());
+        if (state == null) {
+            return false;
+        }
+        StructuredSearchRelevance candidateGroup = structuredRelevance(
+                state.candidate());
+        int groupOrder = candidateGroup.compareTo(pageGroup);
+        return groupOrder > 0
+                || (groupOrder == 0 && pageKey.isAfter(candidate));
+    }
+
+    private static StructuredSearchRelevance structuredRelevance(
+            IntegratedStoreSearchCandidate candidate
+    ) {
+        return StructuredSearchRelevance.of(
+                candidate.structuredRelevance(),
+                candidate.relevanceTier());
+    }
+
+    private static boolean hasExpandedEvidence(SearchConceptExpansion expansion) {
+        return expansion != null
+                && (!expansion.concepts().isEmpty()
+                || expansion.foodEvidence().hasCandidateEvidence());
     }
 
     private AvailabilityBatch availabilityById(
@@ -553,9 +599,12 @@ public class IntegratedStoreSearchService {
             boolean availableOnly,
             int requestedSize
     ) {
-        SearchConceptExpansion expansion = expansionService.expand(new SearchConceptRequest(
-                condition.remainingKeyword(), SearchConceptPurpose.STORE_SEARCH));
-        if (expansion == null || expansion.concepts().isEmpty()) {
+        SearchConceptExpansion expansion = expansionService.expand(
+                new SearchConceptRequest(
+                        condition.remainingKeyword(),
+                        SearchConceptPurpose.STORE_SEARCH),
+                query.foodEvidence());
+        if (!hasExpandedEvidence(expansion)) {
             return;
         }
         Set<Long> existingIds = items.stream()
@@ -565,11 +614,12 @@ public class IntegratedStoreSearchService {
         List<IntegratedStoreSearchCandidate> expanded = repository.searchExpanded(
                         query,
                         expansion.concepts(),
+                        expansion.foodEvidence(),
                         llmProperties.supplementCandidateLimit())
                 .stream()
                 .filter(candidate -> !existingIds.contains(candidate.storeId()))
-                .sorted(Comparator.comparingInt(
-                        IntegratedStoreSearchCandidate::relevanceTier).reversed())
+                .sorted(Comparator
+                        .comparing(IntegratedStoreSearchService::structuredRelevance))
                 .toList();
         List<IntegratedStoreSearchCandidate> before =
                 repository.refreshCurrentlyPublic(expanded);
