@@ -217,9 +217,12 @@ final class IntegratedStoreSearchPredicates {
         NumberExpression<Integer> dimensionCount = dimensionCount(version, evidence);
         NumberExpression<Integer> lexicalCount = lexicalMatchCount(
                 version, query, evidence);
-        NumberExpression<Integer> rowScore = lexicalCount.multiply(10)
-                .add(dimensionCount.multiply(3))
-                .add(menuRank.multiply(2));
+        NumberExpression<Integer> rowScore = lexicalCount.multiply(
+                        IntegratedStoreSearchQuery.STRUCTURED_LEXICAL_MATCH_WEIGHT)
+                .add(dimensionCount.multiply(
+                        IntegratedStoreSearchQuery.STRUCTURED_DIMENSION_MATCH_WEIGHT))
+                .add(menuRank.multiply(
+                        IntegratedStoreSearchQuery.STRUCTURED_MENU_RANK_WEIGHT));
         BooleanBuilder currentMenu = currentMenuPredicate(store, menu, version, query)
                 .and(menuRank.gt(0)
                         .or(dimensionCount.goe(2))
@@ -284,7 +287,8 @@ final class IntegratedStoreSearchPredicates {
                                 MenuSearchProfileDimension.ALIAS),
                         inferredFamilies));
         return new CaseBuilder()
-                .when(resolvedExplicit.or(deterministicAlias)).then(3)
+                .when(resolvedExplicit.or(deterministicAlias))
+                .then(IntegratedStoreSearchQuery.MAX_STRUCTURED_MENU_RANK)
                 .when(rawForward).then(2)
                 .when(inferredFamily).then(1)
                 .otherwise(0);

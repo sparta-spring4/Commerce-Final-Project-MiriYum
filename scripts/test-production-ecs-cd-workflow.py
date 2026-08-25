@@ -166,6 +166,11 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("did not stabilize within the 20-minute deployment budget", stability_step)
         self.assertNotIn("aws ecs wait services-stable", stability_step)
 
+    def test_deploy_job_timeout_covers_image_build_and_stability_wait_budget(self):
+        deploy_job = self.workflow.split("  deploy:", 1)[1].split("    permissions:", 1)[0]
+
+        self.assertIn("timeout-minutes: 50", deploy_job)
+
     def test_automatic_and_manual_sources_enforce_the_notification_writer_floor(self):
         self.assertIn(
             "NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA: "

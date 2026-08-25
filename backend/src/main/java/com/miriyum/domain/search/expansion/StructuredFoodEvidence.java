@@ -30,6 +30,7 @@ public record StructuredFoodEvidence(
             Dimension.METHOD,
             Dimension.AROMA,
             Dimension.TEXTURE);
+    public static final int MAX_CORE_DIMENSION_COUNT = CORE_DIMENSIONS.size();
 
     public StructuredFoodEvidence {
         rawFoodSpans = copyDistinct(rawFoodSpans, "rawFoodSpans");
