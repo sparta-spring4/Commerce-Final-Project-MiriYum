@@ -157,9 +157,9 @@ class NotificationOpenApiContractTest {
         Map<String, Object> document = load(CONTRACT);
         Map<String, Object> paths = map(document.get("paths"));
 
-        assertContractOnly(paths, UNREAD_COUNT_PATH, "get");
-        assertContractOnly(paths, NOTIFICATION_READ_PATH, "post");
-        assertContractOnly(paths, ALL_NOTIFICATION_READS_PATH, "post");
+        assertProductionRoute(paths, UNREAD_COUNT_PATH, "get");
+        assertProductionRoute(paths, NOTIFICATION_READ_PATH, "post");
+        assertProductionRoute(paths, ALL_NOTIFICATION_READS_PATH, "post");
 
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
         Map<String, Object> historyItem = map(schemas.get("NotificationHistoryItem"));
@@ -180,7 +180,7 @@ class NotificationOpenApiContractTest {
                 .isEqualTo("NOTIFICATION_003");
     }
 
-    private static void assertContractOnly(
+    private static void assertProductionRoute(
             Map<String, Object> paths,
             String path,
             String method
@@ -188,8 +188,7 @@ class NotificationOpenApiContractTest {
         assertThat(paths).containsKey(path);
         Map<String, Object> pathItem = map(paths.get(path));
         assertThat(pathItem)
-                .containsEntry("x-miriyum-runtime-status", "contract-only")
-                .containsEntry("x-miriyum-owner-issue", 500)
+                .doesNotContainKeys("x-miriyum-runtime-status", "x-miriyum-owner-issue")
                 .containsKey(method);
         assertThat(list(map(pathItem.get(method)).get("security")))
                 .containsExactly(Map.of("bearerAuth", List.of()));
