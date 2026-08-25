@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.entity.StoreReservationDepositPolicy;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
@@ -209,7 +208,6 @@ class StoreReservationDepositPolicyMigrationTest {
         Store store = Store.create(
                 operatorId,
                 "1234567890",
-                BusinessType.CAFE,
                 "미리윰",
                 "",
                 Region.SEOUL,

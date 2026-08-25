@@ -5,10 +5,9 @@ import { useNavigate } from 'react-router'
 import { createIdempotencyKeyCache } from '../../../../shared/api/idempotencyKey'
 import { fieldErrorsFromApiError } from '../../../../shared/api/fieldErrors'
 import { Button } from '../../../../shared/ui/Button'
-import { SelectField, TextField } from '../../../../shared/ui/Field'
+import { FieldShell, SelectField, TextField } from '../../../../shared/ui/Field'
 import { Alert } from '../../../../shared/ui/Feedback'
-import { useCurrentStore } from '../../../../app/shells/store-operator/CurrentStoreProvider'
-import { useCreateStore, useOperatorCatalog } from '../api/queries'
+import { useOperatorCatalog, useSubmitStoreOnboarding } from '../api/queries'
 import { storeErrorMessage } from '../model/storeErrors'
 import { isSupportedTimeZone } from '../model/storeTime'
 import {
@@ -22,12 +21,14 @@ import {
 } from '../model/storeValidation'
 import { OperatorIcon } from '../../../../app/shells/store-operator/OperatorIcon'
 import {
-  BUSINESS_TYPE_LABEL,
   REGION_LABEL,
-  type BusinessType,
   type Region,
   type StoreModes,
 } from '../model/types'
+import {
+  ONBOARDING_EVIDENCE_ACCEPT,
+  validateOnboardingEvidence,
+} from '../model/onboardingEvidence'
 import { PageHeader, SectionCard } from '../../../../app/shells/store-operator/OperatorPage'
 import {
   CatalogSelectField,
@@ -39,8 +40,8 @@ import {
 /**
  * 매장 등록.
  *
- * 1차 서비스는 플랫폼 심사가 없다. 성공 응답이 곧 `APPROVED`이므로 승인 대기
- * 화면으로 보내지 않고 바로 그 매장의 관리 화면으로 이어 간다.
+ * 접수 성공은 Store 생성 완료가 아니라 신청 접수다. 신청 상태 화면에서 자동검사와
+ * 선택적인 플랫폼 심사 결과를 다시 확인하고, storeId가 생긴 뒤에만 관리로 간다.
  *
  * 시간대는 주소나 브라우저 기본값으로 추측하지 않고 운영자가 확인한 IANA
  * 식별자를 제출한다. 자기확약과 필수 약관 동의가 모두 확인되기 전에는 요청을
@@ -56,8 +57,6 @@ const REGIONS: readonly Region[] = [
   'GWANGJU',
 ]
 
-const BUSINESS_TYPES: readonly BusinessType[] = ['CAFE', 'BAKERY', 'OTHER']
-
 /** 좌측 단계 표시에 쓰는 구역 이름. 카드 제목의 번호와 순서가 같다. */
 const FORM_SECTIONS: readonly string[] = [
   '사업자 정보',
@@ -69,10 +68,9 @@ const FORM_SECTIONS: readonly string[] = [
 
 export function StoreCreatePage() {
   const navigate = useNavigate()
-  const { selectStore } = useCurrentStore()
   const categories = useOperatorCatalog('store-categories')
   const tags = useOperatorCatalog('store-tags')
-  const createStore = useCreateStore()
+  const submitOnboarding = useSubmitStoreOnboarding()
 
   /**
    * 멱등 키는 등록 내용에 붙는다.
@@ -81,11 +79,20 @@ export function StoreCreatePage() {
    * 반대로 입력을 고쳐 다시 제출하는데 이전 키를 쓰면 서버가 `COMMON_007`로
    * 거절한다. 내용 서명으로 키를 정하면 두 규칙이 동시에 지켜진다.
    */
-  const createKeys = useMemo(createIdempotencyKeyCache, [])
+  const evidenceKeys = useMemo(
+    () => new WeakMap<File, ReturnType<typeof createIdempotencyKeyCache>>(),
+    [],
+  )
 
   const [businessRegistrationNumber, setBusinessRegistrationNumber] =
     useState('')
-  const [businessType, setBusinessType] = useState<BusinessType>('CAFE')
+  const [legalBusinessName, setLegalBusinessName] = useState('')
+  const [representativeName, setRepresentativeName] = useState('')
+  const [openingDate, setOpeningDate] = useState('')
+  const [primaryBusinessCategory, setPrimaryBusinessCategory] = useState('')
+  const [primaryBusinessItem, setPrimaryBusinessItem] = useState('')
+  const [businessRegistrationEvidence, setBusinessRegistrationEvidence] =
+    useState<File | undefined>()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [region, setRegion] = useState<Region>('SEOUL')
@@ -115,6 +122,27 @@ export function StoreCreatePage() {
       ['address', validateStoreAddress(address)],
       ['storeCategoryCode', validateCatalogSelection(storeCategoryCode)],
       ['tagCodes', validateTagCodes(tagCodes)],
+      [
+        'legalBusinessName',
+        requiredMessage(legalBusinessName, '법적 상호명을 입력해 주세요.'),
+      ],
+      [
+        'representativeName',
+        requiredMessage(representativeName, '대표자명을 입력해 주세요.'),
+      ],
+      ['openingDate', requiredMessage(openingDate, '개업일을 입력해 주세요.')],
+      [
+        'primaryBusinessCategory',
+        requiredMessage(primaryBusinessCategory, '업태를 입력해 주세요.'),
+      ],
+      [
+        'primaryBusinessItem',
+        requiredMessage(primaryBusinessItem, '종목을 입력해 주세요.'),
+      ],
+      [
+        'businessRegistrationEvidence',
+        validateOnboardingEvidence(businessRegistrationEvidence),
+      ],
       [
         'timeZoneId',
         isSupportedTimeZone(timeZoneId)
@@ -152,7 +180,14 @@ export function StoreCreatePage() {
       businessRegistrationNumber: normalizeBusinessNumber(
         businessRegistrationNumber,
       ),
-      businessType,
+      // 구 backend task가 남아 있는 rolling 전환 동안만 보내는 저장 호환값이다.
+      // 화면 선택값이나 카테고리·픽업 의미로 사용하지 않는다.
+      businessType: 'OTHER' as const,
+      legalBusinessName: legalBusinessName.trim(),
+      representativeName: representativeName.trim(),
+      openingDate,
+      primaryBusinessCategory: primaryBusinessCategory.trim(),
+      primaryBusinessItem: primaryBusinessItem.trim(),
       name: name.trim(),
       description,
       region,
@@ -166,13 +201,21 @@ export function StoreCreatePage() {
     }
 
     try {
-      const store = await createStore.mutateAsync({
+      const evidence = businessRegistrationEvidence as File
+      let keys = evidenceKeys.get(evidence)
+      if (keys === undefined) {
+        keys = createIdempotencyKeyCache()
+        evidenceKeys.set(evidence, keys)
+      }
+      const application = await submitOnboarding.mutateAsync({
         body,
-        idempotencyKey: createKeys.keyFor(JSON.stringify(body)),
+        evidence,
+        idempotencyKey: keys.keyFor(JSON.stringify(body)),
       })
-      selectStore(store.storeId)
       void navigate(
-        fillPath(STORE_OPERATOR_PATHS.store, { storeId: store.storeId }),
+        fillPath(STORE_OPERATOR_PATHS.onboardingApplication, {
+          applicationId: application.applicationId,
+        }),
         { replace: true },
       )
     } catch (error) {
@@ -185,7 +228,7 @@ export function StoreCreatePage() {
     <>
       <PageHeader
         title="매장 등록"
-        description="사업자 정보와 운영 방식을 입력하면 심사 없이 바로 등록됩니다."
+        description="사업자 정보와 등록증을 제출하면 자동 확인이 시작됩니다."
       />
 
       <form onSubmit={handleSubmit} aria-label="매장 등록" noValidate>
@@ -206,8 +249,8 @@ export function StoreCreatePage() {
               ))}
             </ol>
             <p className="op-section__hint">
-              1차 서비스는 플랫폼 심사 없이 입력한 사업자 정보 확인만으로 바로
-              등록됩니다.
+              신청 접수 후 자동 확인 상태를 확인할 수 있습니다. 승인되기 전에는
+              매장이 생성되지 않습니다.
             </p>
           </aside>
 
@@ -217,9 +260,9 @@ export function StoreCreatePage() {
           <SectionCard
             title="1. 사업자 정보"
             icon="lock"
-            hint="등록 후에는 사업자등록번호와 업종을 이 화면에서 바꿀 수 없습니다."
+            hint="사업자등록증에 적힌 정보와 동일하게 입력해 주세요."
           >
-            <div className="op-form-grid op-form-grid--two">
+            <div className="op-form-grid">
               <TextField
                 label="사업자등록번호"
                 required
@@ -231,21 +274,75 @@ export function StoreCreatePage() {
                   setBusinessRegistrationNumber(event.target.value)
                 }
               />
-              <SelectField
-                label="업종"
+              <div className="op-form-grid op-form-grid--two">
+                <TextField
+                  label="법적 상호명"
+                  required
+                  value={legalBusinessName}
+                  error={errors.legalBusinessName ?? null}
+                  onChange={(event) => setLegalBusinessName(event.target.value)}
+                />
+                <TextField
+                  label="대표자명"
+                  required
+                  value={representativeName}
+                  error={errors.representativeName ?? null}
+                  onChange={(event) => setRepresentativeName(event.target.value)}
+                />
+              </div>
+              <div className="op-form-grid op-form-grid--two">
+                <TextField
+                  label="개업일"
+                  type="date"
+                  required
+                  value={openingDate}
+                  error={errors.openingDate ?? null}
+                  onChange={(event) => setOpeningDate(event.target.value)}
+                />
+                <TextField
+                  label="업태"
+                  required
+                  value={primaryBusinessCategory}
+                  error={errors.primaryBusinessCategory ?? null}
+                  onChange={(event) =>
+                    setPrimaryBusinessCategory(event.target.value)
+                  }
+                />
+              </div>
+              <TextField
+                label="종목"
                 required
-                value={businessType}
-                help="업종은 픽업 가능 여부를 결정하지 않습니다."
-                onChange={(event) =>
-                  setBusinessType(event.target.value as BusinessType)
-                }
+                value={primaryBusinessItem}
+                error={errors.primaryBusinessItem ?? null}
+                onChange={(event) => setPrimaryBusinessItem(event.target.value)}
+              />
+              <FieldShell
+                label="사업자등록증 파일"
+                required
+                help="PDF, JPG, PNG · 최대 10MB"
+                error={errors.businessRegistrationEvidence ?? null}
               >
-                {BUSINESS_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {BUSINESS_TYPE_LABEL[type]}
-                  </option>
-                ))}
-              </SelectField>
+                {({ controlId, describedBy, invalid }) => (
+                  <input
+                    id={controlId}
+                    className="mi-field__control"
+                    type="file"
+                    required
+                    accept={ONBOARDING_EVIDENCE_ACCEPT}
+                    aria-invalid={invalid || undefined}
+                    aria-describedby={describedBy}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      setBusinessRegistrationEvidence(file)
+                      setErrors((current) => ({
+                        ...current,
+                        businessRegistrationEvidence:
+                          validateOnboardingEvidence(file) ?? '',
+                      }))
+                    }}
+                  />
+                )}
+              </FieldShell>
             </div>
           </SectionCard>
 
@@ -368,10 +465,10 @@ export function StoreCreatePage() {
                 type="submit"
                 variant="primary"
                 block
-                loading={createStore.isPending}
+                loading={submitOnboarding.isPending}
               >
                 <OperatorIcon name="plus" />
-                매장 등록
+                입점 신청
               </Button>
             </div>
           </SectionCard>
@@ -386,7 +483,12 @@ export function StoreCreatePage() {
 function mapServerErrors(error: unknown): Record<string, string> {
   const known = new Set([
     'businessRegistrationNumber',
-    'businessType',
+    'legalBusinessName',
+    'representativeName',
+    'openingDate',
+    'primaryBusinessCategory',
+    'primaryBusinessItem',
+    'businessRegistrationEvidence',
     'name',
     'description',
     'region',
@@ -404,4 +506,8 @@ function mapServerErrors(error: unknown): Record<string, string> {
     }
   }
   return mapped
+}
+
+function requiredMessage(value: string, message: string): string | null {
+  return value.trim().length === 0 ? message : null
 }

@@ -117,7 +117,8 @@ class StoreSearchControllerTest {
                         new NormalizedSearchCondition(
                                 List.of("SEOUL"), List.of(), List.of(), List.of(),
                                 null, null, null, null, null, "라멘"),
-                        List.of(), "rule-v1", "catalog-v1", "history-v1", "next-cursor"));
+                        List.of(), "rule-v1", "catalog-v1+food-evidence-v1",
+                        null, "next-cursor"));
 
         mockMvc.perform(get("/api/v1/stores")
                         .queryParam("searchInput", "서울 라멘")
@@ -129,7 +130,9 @@ class StoreSearchControllerTest {
                 .andExpect(jsonPath("$.data.normalizedCondition.regionCodes[0]")
                         .value("SEOUL"))
                 .andExpect(jsonPath("$.data.ruleVersion").value("rule-v1"))
-                .andExpect(jsonPath("$.data.rankingRuleVersion").value("history-v1"))
+                .andExpect(jsonPath("$.data.vocabularyVersion")
+                        .value("catalog-v1+food-evidence-v1"))
+                .andExpect(jsonPath("$.data.rankingRuleVersion").value(nullValue()))
                 .andExpect(jsonPath("$.data.items[0].recommendationReason.code")
                         .value("KEYWORD_MATCH"))
                 .andExpect(jsonPath("$.data.nextCursor").value("next-cursor"));
@@ -147,13 +150,18 @@ class StoreSearchControllerTest {
                         new NormalizedSearchCondition(
                                 List.of(), List.of(), List.of(), List.of(),
                                 null, null, null, null, null, "라멘"),
-                        List.of(), "rule-v1", "catalog-v1", "history-v1", null));
+                        List.of(), "rule-v1", "catalog-v1+food-evidence-v1",
+                        "food-evidence-v1+history-v1", null));
 
         mockMvc.perform(get("/api/v1/stores")
                         .header("Authorization", "Bearer consumer-token")
                         .queryParam("searchInput", "라멘")
                         .queryParam("sort", "recommendation,desc"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.vocabularyVersion")
+                        .value("catalog-v1+food-evidence-v1"))
+                .andExpect(jsonPath("$.data.rankingRuleVersion")
+                        .value("food-evidence-v1+history-v1"));
 
         then(integratedSearchService).should().search(
                 41L, "라멘", false, false, "recommendation,desc", null, 20);

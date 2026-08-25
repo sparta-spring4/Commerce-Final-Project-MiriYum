@@ -97,6 +97,10 @@ def main():
                     ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
                     [f"{bucket_arn}/public/stores/*", f"{bucket_arn}/public/menus/*"],
                 ),
+                "ManagePrivateOnboardingEvidenceObjects": (
+                    ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+                    [f"{bucket_arn}/private/store-onboarding/*"],
+                ),
             },
         ),
         has_exact_allow_policy(

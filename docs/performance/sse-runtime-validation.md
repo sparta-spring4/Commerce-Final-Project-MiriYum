@@ -1,9 +1,10 @@
 # SSE Runtime 검증 기록
 
 - 소유 Issue: #250
+- 잔여 운영 검증 Issue: #643
 - 실행 증거 Issue: #357
-- 기준일: 2026-08-23
-- 상태: 정적 계약·전용 실행기 build, staging 간소화 smoke·Valkey recovery `PASS`; 실제 local 부하·장애 `BLOCKED`; staging 대규모 부하·browser·production `NOT RUN`
+- 기준일: 2026-08-25
+- 상태: 정적 계약·전용 실행기 build, staging 3-endpoint smoke·steady 25→50→100→200·capacity 6+1·Valkey recovery `PASS`; reconnect 200·slow-client·same-SHA replacement는 #643으로 이관; 실제 local 부하·장애 `BLOCKED`; browser·production `NOT RUN`
 - 실행 절차: [SSE Runtime 배포·부하·복구 runbook](../deployment/sse-runtime-runbook.md)
 
 ## 검증 경계
@@ -24,11 +25,13 @@ SSE는 `data: {}` 변경 신호이며 결과 상태는 Notification 이력 또�
 | 실제 local endpoint smoke | BLOCKED | 기존 local DB의 Flyway V43 실패 기록과 부분 적용 DDL을 안전하게 복구해야 backend가 시작됨 |
 | HTTP 비교 3회 | BLOCKED | 같은 SHA·fixture의 성공 SSE smoke proof 필요 |
 | steady 25→50→100→200 | BLOCKED | 실제 local smoke와 승인된 synthetic scope 필요 |
-| reconnect·slow-client | BLOCKED | 마지막 성공 steady 단계와 smoke proof가 필요하며, slow 실행은 heartbeat burst·cleanup/companion duration 실제 증거까지 필요 |
+| reconnect 200 | FAIL | 최신 실행은 setup의 synthetic session cleanup에서 중단되어 SSE 최초·재연결이 0건이며, 완료 범위에서 제외하고 #643으로 이관 |
+| slow-client | BLOCKED | 운영자·소유 매장·fresh WAITING fixture와 timeout 90초·heartbeat 1ms 시험값이 준비되지 않아 #643으로 이관 |
 | Valkey stop/recovery | BLOCKED | 사전 인증 synthetic 계정과 승인된 public owner mutation fixture 필요 |
-| same-SHA backend replacement | BLOCKED | 실제 reconnect 실행 입력 필요 |
+| same-SHA backend replacement | BLOCKED | reconnect 선행 결함과 effective SSE timeout 30초가 같은 SHA 재배포 시간보다 짧아 유효한 교체 검증을 실행하지 않았고 #643으로 이관 |
 | staging 간소화 smoke·Valkey recovery | PASS | #357 승인 조건에서 세 endpoint smoke와 waiting-store-operator 1연결·Valkey 고정 10초 중단 recovery 성공 |
-| staging 25→50→100→200·reconnect·slow-client·replacement | NOT RUN | 이번 승인 범위는 간소화 smoke와 Valkey recovery 1회이며 대규모 연결 부하는 별도 승인·관찰 계약 필요 |
+| staging steady 25→50→100→200 | PASS | 각 단계 목표 연결 수 전부 성공, unexpected 4xx·5xx·transport·contract error·dropped iteration 0 |
+| staging capacity 6+1 | PASS | 단일 계정 정상 6개와 초과 1개의 정확한 429, 동반 HTTP 정상, 전체 threshold 성공 |
 | browser frontend | NOT RUN | #251·#410·#411 소유 범위 |
 | production 활성화 | NOT RUN | #148 및 운영 승인 소유 범위 |
 
@@ -103,3 +106,40 @@ CloudWatch 1분 평균 그래프에서 승인 시간대의 backend memory 약 48
 모든 재배포는 같은 backend full SHA를 사용했고 private health를 통과했다. 이 마지막 recovery 직후에는 새 600초 창의 429 verifier를 반복하지 않았지만, 같은 backend SHA의 앞선 원복에서 `staging-rate-limit-recovery-20260823-05`가 로그인 5회 성공·6번째 정확한 429와 threshold 성공을 확인했다. 해당 ignored artifact SHA-256은 `543dfe14ee1ba52d5bb94764f1c108a0d293028378b1c12ce8a00b47274ba0f`다.
 
 #357의 저부하 HTTP smoke·baseline과 기본 429 복구는 [k6 핵심 API 기준선](k6-baseline.md)이 소유하고, 이 문서는 staging SSE 간소화 smoke·Valkey recovery를 소유한다. 두 결과로 #357의 승인된 저부하 인수 범위를 충족한다. 25→50→100→200, reconnect, slow-client, capacity와 backend replacement는 #357 완료 조건이 아니라 [#250](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/250)의 후속 부하·장애 검증 범위다.
+
+## 2026-08-24~25 staging 단계 부하·capacity
+
+### steady 25→50→100→200
+
+- 환경: `staging`; production과 production ALB는 사용하지 않았다.
+- backend full SHA: `1acec13b6a566757138dab68bc4f086af4daf487`
+- synthetic fixture SHA-256: `bcee39dd0a3d5558c3a81e824c09286c1ce40b28682534b2c0a2d7f8102250d9`
+- 25단계 harness full SHA: `ff3209771a2ffead453ed8eb4b74c12bcc30a69f`
+- 50·100·200단계 harness full SHA: `f188bd701c26ed8f73efd17a163f2f832b84b300`
+
+각 단계는 세 endpoint kind에 목표 연결을 분배했다. 아래 p95는 endpoint별 값 중 가장 큰 값이며, 모든 단계에서 목표 연결 수 전부가 성공하고 unexpected 4xx·5xx·transport·contract error·dropped iteration은 0이었다.
+
+| 목표 연결 | 성공 | first event p95 최대 | connection p95 최대 | owned HTTP baseline p95 | owned HTTP measured p95 | artifact SHA-256 |
+|---:|---:|---:|---:|---:|---:|---|
+| 25 | 25 | 179.5 ms | 31,199.1 ms | - | - | `9aff0e3f9d959241dd705c06b48a68e811c7623239bf3c66feec127f5f92c5f7` |
+| 50 | 50 | 351 ms | 30,745.95 ms | 62.87 ms | 121.35 ms | `af84cd0ec3162167c860cc322d2e48387605adaffc2c679a3f124cf29194c1cb` |
+| 100 | 100 | 736.4 ms | 31,680.9 ms | 92.85 ms | 53.90 ms | `38c744861c12bca5e92acb74ca3859b4290db721684d002da4577881c01c96c1` |
+| 200 | 200 | 1,241.25 ms | 32,430.25 ms | 46.45 ms | 64.98 ms | `9185899117fcbf43dc9ceb0b6067bea81cb2e745038582a9e98a75edf4753a00` |
+
+25단계 artifact에는 owned HTTP 비교 metric이 없어 `-`로 유지한다. 이후 단계의 수치나 다른 실행으로 소급 보완하지 않는다. 이 결과는 승인된 staging fixture와 시험 입력의 성공 증거이며 production 용량이나 SLO로 승격하지 않는다.
+
+### 단일 계정 capacity 6+1
+
+- backend/harness full SHA: `dc9c8c250d35162ebf065b861f933113e703e20e`
+- run ID: `staging-sse-capacity-20260825-01`
+- notification consumer 한 계정의 정상 6개 연결은 모두 성공하고 초과 1개만 `429 COMMON_010`으로 거절됐다.
+- first event p95는 `99.5ms`, connection p95는 `30,276.8ms`였다.
+- owned HTTP baseline p95는 `52.17ms`, measured p95는 `22.39ms`였다.
+- unexpected 4xx·5xx·transport·contract error·dropped iteration은 0이고 전체 threshold가 성공했다.
+- ignored JSON artifact SHA-256은 `22e8073aac9e7bd6798312ebd561cc3b469205d26c65778d9eefc00fc9ea959d`다.
+
+## #250 완료 범위와 잔여 위험
+
+#250은 실제 성공 증거가 있는 3-endpoint smoke, steady 25→50→100→200, capacity 6+1, Valkey 고정 중단·복구까지만 완료 범위로 인정한다. 일정 제약으로 완료하지 못한 reconnect 200, slow-client와 same-SHA backend replacement는 [#643](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/643)으로 이관한다.
+
+대규모 재연결 폭주, 느린 client 자원 해제와 배포 중 연결 수렴은 아직 보장하지 않는다. SSE는 계속 변경 신호로만 사용하고 MySQL·HTTP API를 원장으로 유지한다. 이 잔여 위험이나 미완료 실행을 업무 상태의 성공 또는 production 용량 근거로 사용하지 않는다.

@@ -12,6 +12,15 @@ on:
         description: "Deploy an existing immutable 40-character Git SHA image tag"
         required: true
         type: string
+      payment_runtime:
+        description: "Payment runtime: preserve (default), enable, or disable"
+        required: false
+        default: preserve
+        type: choice
+        options:
+          - preserve
+          - enable
+          - disable
 
 permissions:
   contents: read
@@ -31,6 +40,8 @@ env:
   QR_STORAGE_GENERATION: ${{ vars.MIRIYUM_QR_STORAGE_GENERATION }}
   MIRIYUM_STORAGE_S3_ENABLED: ${{ vars.MIRIYUM_STORAGE_S3_ENABLED }}
   MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED: ${{ vars.MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED }}
+  PAYMENT_RUNTIME: ${{ inputs.payment_runtime || 'preserve' }}
+  MIRIYUM_PORTONE_STORE_ID: ${{ vars.MIRIYUM_PORTONE_STORE_ID }}
   NOTIFICATION_READ_MINIMUM_COMPATIBLE_SHA: 515531e122ebbce13d8eead4a3ff15a94c25e0b3
 
 jobs:
@@ -135,7 +146,8 @@ jobs:
     needs: verify-source
     environment: production
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # ARM64 이미지 빌드와 20분 ECS 안정화 대기를 모두 수용한다.
+    timeout-minutes: 50
     permissions:
       actions: read
       contents: read
@@ -222,6 +234,11 @@ jobs:
 
           if [ "$MIRIYUM_STORAGE_S3_ENABLED" != "$MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED" ]; then
             echo "::error::MIRIYUM_STORAGE_S3_ENABLED and MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED must match."
+            exit 1
+          fi
+
+          if [ "$PAYMENT_RUNTIME" != "preserve" ] && [ "$PAYMENT_RUNTIME" != "enable" ] && [ "$PAYMENT_RUNTIME" != "disable" ]; then
+            echo "::error::payment_runtime must be preserve, enable, or disable."
             exit 1
           fi
 
@@ -467,6 +484,30 @@ jobs:
 
           storage_s3_enabled="$MIRIYUM_STORAGE_S3_ENABLED"
           storage_s3_reconciliation_enabled="$MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"
+          payment_runtime="$PAYMENT_RUNTIME"
+
+          if [ "$payment_runtime" = "enable" ] && [ -z "$MIRIYUM_PORTONE_STORE_ID" ]; then
+            echo "::error::MIRIYUM_PORTONE_STORE_ID must be configured when payment is enabled."
+            exit 1
+          fi
+
+          payment_cursor_secret_arn=""
+          portone_api_secret_arn=""
+          if [ "$payment_runtime" = "enable" ]; then
+            application_secret_value_from=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
+              [.containerDefinitions[] | select(.name == $container) | .secrets[]?
+                | select(.name == "MIRIYUM_DB_URL") | .valueFrom][0] // ""
+            ' current-task-definition.json)
+            if [[ "$application_secret_value_from" =~ ^(arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+):MIRIYUM_DB_URL::$ ]]; then
+              application_secret_arn="${BASH_REMATCH[1]}"
+            else
+              echo "::error::Current task definition MIRIYUM_DB_URL must select its matching Secrets Manager JSON key."
+              exit 1
+            fi
+
+            payment_cursor_secret_arn="${application_secret_arn}:MIRIYUM_PAYMENT_CURSOR_SECRET::"
+            portone_api_secret_arn="${application_secret_arn}:MIRIYUM_PORTONE_API_SECRET::"
+          fi
 
           runtime_config_secret_arn=""
           if [ "$runtime_config_enabled" = "true" ]; then
@@ -492,6 +533,10 @@ jobs:
             --arg storage_s3_enabled "$storage_s3_enabled" \
             --arg storage_s3_reconciliation_enabled "$storage_s3_reconciliation_enabled" \
             --arg storage_s3_bucket_parameter_arn "$storage_s3_bucket_parameter_arn" \
+            --arg payment_runtime "$payment_runtime" \
+            --arg portone_store_id "$MIRIYUM_PORTONE_STORE_ID" \
+            --arg payment_cursor_secret_arn "$payment_cursor_secret_arn" \
+            --arg portone_api_secret_arn "$portone_api_secret_arn" \
             --arg aws_region "$AWS_REGION" '
             .containerDefinitions |= map(
               if .name == $container then
@@ -507,6 +552,11 @@ jobs:
                     and .name != "MIRIYUM_STORAGE_S3_ENABLED"
                     and .name != "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"
                     and .name != "MIRIYUM_STORAGE_S3_REGION"
+                    and .name != "MIRIYUM_PORTONE_WEBHOOK_ENABLED"
+                    and (if $payment_runtime == "preserve" then true
+                         else .name != "MIRIYUM_PAYMENT_ENABLED"
+                           and .name != "MIRIYUM_PORTONE_STORE_ID"
+                         end)
                   ))) + [
                     {name: "MIRIYUM_STORE_SEARCH_LLM_ENABLED", value: $llm_enabled},
                     {name: "MIRIYUM_STORE_SEARCH_LLM_RESPONSE_TIMEOUT_MS", value: "5000"},
@@ -517,18 +567,36 @@ jobs:
                     {name: "MIRIYUM_CLOUDWATCH_METRICS_NAMESPACE", value: "MiriYum/Production"},
                     {name: "MIRIYUM_STORAGE_S3_ENABLED", value: $storage_s3_enabled},
                     {name: "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED", value: $storage_s3_reconciliation_enabled},
-                    {name: "MIRIYUM_STORAGE_S3_REGION", value: $aws_region}
-                  ])
+                    {name: "MIRIYUM_STORAGE_S3_REGION", value: $aws_region},
+                    {name: "MIRIYUM_PORTONE_WEBHOOK_ENABLED", value: "false"}
+                  ] + (if $payment_runtime == "enable" then
+                    [
+                      {name: "MIRIYUM_PAYMENT_ENABLED", value: "true"},
+                      {name: "MIRIYUM_PORTONE_STORE_ID", value: $portone_store_id}
+                    ]
+                  elif $payment_runtime == "disable" then
+                    [{name: "MIRIYUM_PAYMENT_ENABLED", value: "false"}]
+                  else [] end))
                 | .secrets = ((.secrets // [] | map(select(
                     .name != "SPRING_APPLICATION_JSON"
                     and .name != "OPENAI_API_KEY"
                     and .name != "MIRIYUM_STORAGE_S3_BUCKET"
+                    and .name != "MIRIYUM_PORTONE_WEBHOOK_SECRET"
+                    and (if $payment_runtime == "preserve" then true
+                         else .name != "MIRIYUM_PAYMENT_CURSOR_SECRET"
+                           and .name != "MIRIYUM_PORTONE_API_SECRET"
+                         end)
                   ))) + (if $runtime_config_enabled == "true" then
                     [{name: "SPRING_APPLICATION_JSON", valueFrom: $runtime_config_secret_arn}]
                   else [] end) + (if $storage_s3_enabled == "true" then
                     [{name: "MIRIYUM_STORAGE_S3_BUCKET", valueFrom: $storage_s3_bucket_parameter_arn}]
                   else [] end) + (if $llm_enabled == "true" then
                     [{name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}]
+                  else [] end) + (if $payment_runtime == "enable" then
+                    [
+                      {name: "MIRIYUM_PAYMENT_CURSOR_SECRET", valueFrom: $payment_cursor_secret_arn},
+                      {name: "MIRIYUM_PORTONE_API_SECRET", valueFrom: $portone_api_secret_arn}
+                    ]
                   else [] end))
               else . end
             )
@@ -769,121 +837,218 @@ jobs:
           previous_task_arns_file="$RUNNER_TEMP/notification-read-previous-task-arns.json"
           trap 'rm -rf "$evidence_directory"; rm -f "$previous_task_arns_file"' EXIT
 
-          aws ecs describe-services \
-            --cluster "$ECS_CLUSTER" \
-            --services "$ECS_SERVICE" \
-            --query 'services[0]' \
-            --output json > "$evidence_directory/service.json"
-
-          running_task_arns=$(aws ecs list-tasks \
-            --cluster "$ECS_CLUSTER" \
-            --service-name "$ECS_SERVICE" \
-            --desired-status RUNNING \
-            --query 'taskArns' \
-            --output text)
-          read -r -a task_arns <<< "$running_task_arns"
-          if [ "${#task_arns[@]}" -lt 1 ]; then
-            echo "::error::Active ECS task evidence is missing."
-            exit 1
-          fi
-          aws ecs describe-tasks \
-            --cluster "$ECS_CLUSTER" \
-            --tasks "${task_arns[@]}" \
-            --output json > "$evidence_directory/tasks.json"
-
           mapfile -t previous_task_arns < <(jq -r '.[]' "$previous_task_arns_file")
           if [ "${#previous_task_arns[@]}" -lt 1 ]; then
             echo "::error::Previous ECS task identity evidence is missing."
             exit 1
           fi
-          printf '%s\n' '{"tasks":[],"failures":[]}' \
-            > "$evidence_directory/previous-tasks.json"
-          for ((offset = 0; offset < ${#previous_task_arns[@]}; offset += 100)); do
-            batch_task_arns=("${previous_task_arns[@]:offset:100}")
-            aws ecs describe-tasks \
-              --cluster "$ECS_CLUSTER" \
-              --tasks "${batch_task_arns[@]}" \
-              --output json > "$evidence_directory/previous-tasks-batch.json"
-            jq -s \
-              '{
-                tasks: (.[0].tasks + .[1].tasks),
-                failures: (.[0].failures + .[1].failures)
-              }' \
-              "$evidence_directory/previous-tasks.json" \
-              "$evidence_directory/previous-tasks-batch.json" \
-              > "$evidence_directory/previous-tasks-next.json"
-            mv \
-              "$evidence_directory/previous-tasks-next.json" \
+
+          collect_task_descriptions() {
+            local task_arns_file="$1"
+            local task_descriptions_file="$2"
+            local batch_file="$evidence_directory/$(basename "$task_descriptions_file").batch.json"
+            local next_file="$evidence_directory/$(basename "$task_descriptions_file").next.json"
+            local -a described_task_arns
+            local -a batch_task_arns
+
+            printf '%s\n' '{"tasks":[],"failures":[]}' > "$task_descriptions_file"
+            mapfile -t described_task_arns < <(jq -r '.[]' "$task_arns_file")
+            for ((offset = 0; offset < ${#described_task_arns[@]}; offset += 100)); do
+              batch_task_arns=("${described_task_arns[@]:offset:100}")
+              aws ecs describe-tasks \
+                --cluster "$ECS_CLUSTER" \
+                --tasks "${batch_task_arns[@]}" \
+                --output json > "$batch_file"
+              jq -s \
+                '{
+                  tasks: (.[0].tasks + .[1].tasks),
+                  failures: (.[0].failures + .[1].failures)
+                }' \
+                "$task_descriptions_file" \
+                "$batch_file" \
+                > "$next_file"
+              mv "$next_file" "$task_descriptions_file"
+            done
+          }
+
+          refresh_previous_task_evidence() {
+            collect_task_descriptions \
+              "$previous_task_arns_file" \
               "$evidence_directory/previous-tasks.json"
-          done
 
-          aws ecs list-tasks \
-            --cluster "$ECS_CLUSTER" \
-            --service-name "$ECS_SERVICE" \
-            --desired-status STOPPED \
-            --query 'taskArns' \
-            --output json > "$evidence_directory/final-stopped-task-arns.json"
-          mapfile -t final_stopped_task_arns \
-            < <(jq -r '.[]' "$evidence_directory/final-stopped-task-arns.json")
-          printf '%s\n' '{"tasks":[],"failures":[]}' \
-            > "$evidence_directory/final-stopped-tasks.json"
-          for ((offset = 0; offset < ${#final_stopped_task_arns[@]}; offset += 100)); do
-            batch_task_arns=("${final_stopped_task_arns[@]:offset:100}")
+            aws ecs list-tasks \
+              --cluster "$ECS_CLUSTER" \
+              --service-name "$ECS_SERVICE" \
+              --desired-status STOPPED \
+              --query 'taskArns' \
+              --output json > "$evidence_directory/final-stopped-task-arns.json"
+            collect_task_descriptions \
+              "$evidence_directory/final-stopped-task-arns.json" \
+              "$evidence_directory/final-stopped-tasks.json"
+          }
+
+          refresh_replacement_evidence() {
+            local running_task_arns
+            local -a task_arns
+            local -a configured_target_group_arns
+            local -a primary_target_group_arns
+            local -a production_listener_rule_arns
+            local target_group_index=0
+            local target_group_arn
+            local target_health_file
+            local traffic_target_group_arns_json
+
+            aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$ECS_SERVICE" \
+              --query 'services[0]' \
+              --output json > "$evidence_directory/service.json"
+
+            running_task_arns=$(aws ecs list-tasks \
+              --cluster "$ECS_CLUSTER" \
+              --service-name "$ECS_SERVICE" \
+              --desired-status RUNNING \
+              --query 'taskArns' \
+              --output text)
+            read -r -a task_arns <<< "$running_task_arns"
+            if [ "${#task_arns[@]}" -lt 1 ]; then
+              echo "::error::Active ECS task evidence is missing."
+              exit 1
+            fi
             aws ecs describe-tasks \
               --cluster "$ECS_CLUSTER" \
-              --tasks "${batch_task_arns[@]}" \
-              --output json > "$evidence_directory/final-stopped-tasks-batch.json"
-            jq -s \
+              --tasks "${task_arns[@]}" \
+              --output json > "$evidence_directory/tasks.json"
+
+            refresh_previous_task_evidence
+
+            mapfile -t configured_target_group_arns < <(
+              jq -r '
+                .loadBalancers[]?
+                | .targetGroupArn,
+                  (.advancedConfiguration.alternateTargetGroupArn? // empty)
+              ' "$evidence_directory/service.json" | sort -u
+            )
+            if [ "${#configured_target_group_arns[@]}" -lt 1 ]; then
+              echo "::error::ECS target group evidence is missing."
+              exit 1
+            fi
+
+            mapfile -t primary_target_group_arns < <(
+              jq -r '.loadBalancers[]?.targetGroupArn // empty' \
+                "$evidence_directory/service.json" | sort -u
+            )
+            if [ "${#primary_target_group_arns[@]}" -lt 1 ]; then
+              echo "::error::ECS primary target group evidence is missing."
+              exit 1
+            fi
+            jq -n \
+              --slurpfile service "$evidence_directory/service.json" \
+              --slurpfile tasks "$evidence_directory/tasks.json" \
+              --slurpfile previous_task_arns "$previous_task_arns_file" \
+              --slurpfile previous_tasks "$evidence_directory/previous-tasks.json" \
+              --slurpfile stopped_task_arns "$evidence_directory/final-stopped-task-arns.json" \
+              --slurpfile stopped_tasks "$evidence_directory/final-stopped-tasks.json" \
               '{
-                tasks: (.[0].tasks + .[1].tasks),
-                failures: (.[0].failures + .[1].failures)
+                service: $service[0],
+                tasks: $tasks[0],
+                previousTaskArns: $previous_task_arns[0],
+                previousTasks: $previous_tasks[0],
+                stoppedTaskArns: $stopped_task_arns[0],
+                stoppedTasks: $stopped_tasks[0],
+                trafficTargetGroupArns: [],
+                targetHealthByArn: {}
               }' \
-              "$evidence_directory/final-stopped-tasks.json" \
-              "$evidence_directory/final-stopped-tasks-batch.json" \
-              > "$evidence_directory/final-stopped-tasks-next.json"
-            mv \
-              "$evidence_directory/final-stopped-tasks-next.json" \
-              "$evidence_directory/final-stopped-tasks.json"
-          done
+              > "$evidence_directory/evidence.json"
 
-          jq -n \
-            --slurpfile service "$evidence_directory/service.json" \
-            --slurpfile tasks "$evidence_directory/tasks.json" \
-            --slurpfile previous_task_arns "$previous_task_arns_file" \
-            --slurpfile previous_tasks "$evidence_directory/previous-tasks.json" \
-            --slurpfile stopped_task_arns "$evidence_directory/final-stopped-task-arns.json" \
-            --slurpfile stopped_tasks "$evidence_directory/final-stopped-tasks.json" \
-            '{
-              service: $service[0],
-              tasks: $tasks[0],
-              previousTaskArns: $previous_task_arns[0],
-              previousTasks: $previous_tasks[0],
-              stoppedTaskArns: $stopped_task_arns[0],
-              stoppedTasks: $stopped_tasks[0],
-              targetHealthByArn: {}
-            }' \
-            > "$evidence_directory/evidence.json"
+            while IFS= read -r target_group_arn; do
+              [ -n "$target_group_arn" ] || continue
+              target_group_index=$((target_group_index + 1))
+              target_health_file="$evidence_directory/target-health-$target_group_index.json"
+              aws elbv2 describe-target-health \
+                --target-group-arn "$target_group_arn" \
+                --output json > "$target_health_file"
+              jq --arg arn "$target_group_arn" \
+                --slurpfile health "$target_health_file" \
+                '.targetHealthByArn[$arn] = $health[0]' \
+                "$evidence_directory/evidence.json" \
+                > "$evidence_directory/evidence.next.json"
+              mv "$evidence_directory/evidence.next.json" "$evidence_directory/evidence.json"
+            done < <(printf '%s\n' "${configured_target_group_arns[@]}")
 
-          target_group_index=0
-          while IFS= read -r target_group_arn; do
-            [ -n "$target_group_arn" ] || continue
-            target_group_index=$((target_group_index + 1))
-            target_health_file="$evidence_directory/target-health-$target_group_index.json"
-            aws elbv2 describe-target-health \
-              --target-group-arn "$target_group_arn" \
-              --output json > "$target_health_file"
-            jq --arg arn "$target_group_arn" \
-              --slurpfile health "$target_health_file" \
-              '.targetHealthByArn[$arn] = $health[0]' \
+            mapfile -t production_listener_rule_arns < <(
+              jq -r '
+                .loadBalancers[]?
+                | .advancedConfiguration.productionListenerRule? // empty
+              ' "$evidence_directory/service.json" | sort -u
+            )
+            if [ "${#production_listener_rule_arns[@]}" -eq 0 ]; then
+              traffic_target_group_arns_json=$(printf '%s\n' "${primary_target_group_arns[@]}" | jq -R . | jq -sc '.')
+            else
+              aws elbv2 describe-rules \
+                --rule-arns "${production_listener_rule_arns[@]}" \
+                --output json > "$evidence_directory/production-listener-rules.json"
+              traffic_target_group_arns_json=$(jq -c '
+                [
+                  .Rules[]?.Actions[]?
+                  | select(.Type == "forward")
+                  | if .ForwardConfig? then
+                      .ForwardConfig.TargetGroups[]?
+                      | select((.Weight // 1) > 0)
+                      | .TargetGroupArn
+                    else
+                      .TargetGroupArn
+                    end
+                ] | unique
+              ' "$evidence_directory/production-listener-rules.json")
+            fi
+
+            if ! jq -e 'length > 0' <<<"$traffic_target_group_arns_json" >/dev/null; then
+              echo "::error::Production listener has no active target group."
+              exit 1
+            fi
+            while IFS= read -r target_group_arn; do
+              if ! printf '%s\n' "${configured_target_group_arns[@]}" | grep -Fxq "$target_group_arn"; then
+                echo "::error::Production listener selected an unexpected target group."
+                exit 1
+              fi
+            done < <(jq -r '.[]' <<<"$traffic_target_group_arns_json")
+            jq --argjson traffic_target_group_arns "$traffic_target_group_arns_json" \
+              '.trafficTargetGroupArns = $traffic_target_group_arns' \
               "$evidence_directory/evidence.json" \
               > "$evidence_directory/evidence.next.json"
             mv "$evidence_directory/evidence.next.json" "$evidence_directory/evidence.json"
-          done < <(jq -r '.loadBalancers[]?.targetGroupArn // empty' "$evidence_directory/service.json")
+          }
 
-          python3 "$RUNNER_TEMP/notification-read-deployment-gate.py" verify-production-ecs \
-            --evidence-json "$evidence_directory/evidence.json" \
-            --expected-task-definition "$TASK_DEFINITION_ARN"
+          refresh_replacement_evidence
 
+          verification_output_file="$evidence_directory/verification-output.txt"
+          for attempt in $(seq 1 60); do
+            if python3 "$RUNNER_TEMP/notification-read-deployment-gate.py" verify-production-ecs \
+              --evidence-json "$evidence_directory/evidence.json" \
+              --expected-task-definition "$TASK_DEFINITION_ARN" \
+              > "$verification_output_file" 2>&1; then
+              cat "$verification_output_file"
+              break
+            fi
+
+            if ! grep -Fq \
+              "Notification read deployment gate failed: a previous ECS task has not reached STOPPED" \
+              "$verification_output_file"; then
+              cat "$verification_output_file"
+              exit 1
+            fi
+
+            if [ "$attempt" -eq 60 ]; then
+              cat "$verification_output_file"
+              echo "::error::Previous ECS tasks did not reach STOPPED within the 5-minute evidence budget."
+              exit 1
+            fi
+
+            echo "Waiting for previous ECS tasks to reach STOPPED ($attempt/60)..."
+            sleep 5
+            refresh_replacement_evidence
+          done
       - name: Cleanup previous ECS task identity evidence
         if: always()
         run: |

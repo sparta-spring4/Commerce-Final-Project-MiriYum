@@ -23,7 +23,6 @@ import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRe
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.menu.entity.Menu;
@@ -451,7 +450,6 @@ class ReservationFulfillmentIT {
             Store store = Store.create(
                     operator.getId(),
                     Long.toString(9_000_000_000L + sequence),
-                    BusinessType.CAFE,
                     "Fulfillment Store " + sequence,
                     "",
                     Region.SEOUL,

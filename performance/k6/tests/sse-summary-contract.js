@@ -35,6 +35,50 @@ const METADATA = {
 
 const SUMMARY_INPUT = {
   metrics: {
+    sse_unexpected_400: {
+      type: 'counter', values: { count: 1, rate: 1 },
+    },
+    sse_unexpected_401: {
+      type: 'counter', values: { count: 2, rate: 2 },
+    },
+    sse_unexpected_403: {
+      type: 'counter', values: { count: 3, rate: 3 },
+    },
+    sse_unexpected_other_4xx: {
+      type: 'counter', values: { count: 4, rate: 4 },
+    },
+    sse_unexpected_403_code_common_010: {
+      type: 'counter', values: { count: 5, rate: 5 },
+    },
+    sse_unexpected_403_code_auth_006: {
+      type: 'counter', values: { count: 6, rate: 6 },
+    },
+    sse_unexpected_403_code_auth_009: {
+      type: 'counter', values: { count: 7, rate: 7 },
+    },
+    sse_unexpected_403_code_auth_010: {
+      type: 'counter', values: { count: 8, rate: 8 },
+    },
+    sse_unexpected_403_code_auth_011: {
+      type: 'counter', values: { count: 9, rate: 9 },
+    },
+    sse_unexpected_403_code_auth_012: {
+      type: 'counter', values: { count: 10, rate: 10 },
+    },
+    sse_unexpected_403_code_other_or_missing: {
+      type: 'counter', values: { count: 11, rate: 11 },
+    },
+    sse_unexpected_code_auth_006: {
+      type: 'counter', values: { count: 99, rate: 99 },
+    },
+    owned_http_baseline: {
+      type: 'trend',
+      values: { avg: 12, min: 8, med: 11, max: 19, 'p(50)': 11, 'p(95)': 18, 'p(99)': 19 },
+    },
+    owned_http_duration: {
+      type: 'trend',
+      values: { avg: 14, min: 9, med: 12, max: 102.23, 'p(50)': 12, 'p(95)': 20, 'p(99)': 80 },
+    },
     'sse_first_event{phase:measured,profile:smoke,audience:consumer,endpoint_kind:notification-consumer}': {
       type: 'trend',
       values: { avg: 12.5, min: 10, med: 12, max: 15, 'p(50)': 12, 'p(95)': 14, 'p(99)': 15 },
@@ -76,6 +120,16 @@ const SLOW_METADATA = {
     slowClientDelaySeconds: 40,
     slowClientMaxCleanupSeconds: 60,
     companionMinLifetimeSeconds: 85,
+  },
+}
+
+const RECONNECT_METADATA = {
+  ...METADATA,
+  profile: 'reconnect',
+  runId: 'safe-reconnect-run',
+  limits: {
+    ...METADATA.limits,
+    reconnectSettleSeconds: 6,
   },
 }
 
@@ -160,6 +214,9 @@ export default function () {
   const rendered = renderSafeSseSummary(SUMMARY_INPUT, METADATA)
   const parsed = JSON.parse(rendered.json)
   const combined = `${rendered.stdout}\n${rendered.json}\n${rendered.markdown}`
+  const reconnectParsed = JSON.parse(
+    renderSafeSseSummary(SUMMARY_INPUT, RECONNECT_METADATA).json,
+  )
 
   const proof = JSON.parse(rendered.json)
   const validated = validateSseSmokeProof(proof, {
@@ -218,6 +275,31 @@ export default function () {
       parsed.limits.connections === 1
       && parsed.limits.holdDurationSeconds === 5
       && parsed.runMetrics.droppedIterations.count === 0,
+    'summary preserves only fixed unexpected 4xx status bucket totals': () =>
+      parsed.runMetrics.unexpected400.count === 1
+      && parsed.runMetrics.unexpected401.count === 2
+      && parsed.runMetrics.unexpected403.count === 3
+      && parsed.runMetrics.unexpectedOther4xx.count === 4
+      && rendered.stdout.includes('unexpected 4xx status buckets: 400=1, 401=2, 403=3, other=4'),
+    'summary preserves only bounded unexpected 403-by-code totals': () =>
+      parsed.runMetrics.unexpected403CodeCommon010.count === 5
+      && parsed.runMetrics.unexpected403CodeAuth006.count === 6
+      && parsed.runMetrics.unexpected403CodeAuth009.count === 7
+      && parsed.runMetrics.unexpected403CodeAuth010.count === 8
+      && parsed.runMetrics.unexpected403CodeAuth011.count === 9
+      && parsed.runMetrics.unexpected403CodeAuth012.count === 10
+      && parsed.runMetrics.unexpected403CodeOtherOrMissing.count === 11
+      && parsed.runMetrics.unexpectedCodeAuth006 === undefined
+      && rendered.stdout.includes('unexpected 403 error code buckets: COMMON_010=5, AUTH_006=6, AUTH_009=7, AUTH_010=8, AUTH_011=9, AUTH_012=10, other-or-missing=11'),
+    'reconnect summary preserves the bounded registry settle window': () =>
+      reconnectParsed.limits.reconnectSettleSeconds === 6,
+    'summary keeps safe run-wide owned HTTP timing aggregates': () =>
+      parsed.runMetrics.ownedHttpBaseline.max === 19
+      && parsed.runMetrics.ownedHttpBaseline.p95 === 18
+      && parsed.runMetrics.ownedHttpDuration.max === 102.23
+      && parsed.runMetrics.ownedHttpDuration.p95 === 20
+      && rendered.stdout.includes('owned HTTP baseline p95/max ms: 18 / 19')
+      && rendered.stdout.includes('owned HTTP measured p95/max ms: 20 / 102.23'),
     'slow summary preserves only bounded cleanup and companion evidence': () =>
       slowError === null
       && slowParsed.limits.slowClientDelaySeconds === 40

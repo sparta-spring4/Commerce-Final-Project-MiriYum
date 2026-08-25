@@ -151,6 +151,50 @@ jobs:
             -e SSE_ENDPOINT_KINDS=notification-consumer \
             /scripts/sse/main.js >/dev/null
 
+      - name: Verify pinned SSE 403 response diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          network="miriyum-sse-diagnostic-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          server="miriyum-sse-diagnostic-server-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            exit_code=$?
+            if (( exit_code != 0 )); then
+              echo "SSE diagnostic contract server state:" >&2
+              docker inspect --format '{{json .State}}' "$server" >&2 || true
+              echo "SSE diagnostic contract server logs:" >&2
+              docker logs "$server" >&2 || true
+            fi
+            docker rm -f "$server" >/dev/null 2>&1 || true
+            docker network rm "$network" >/dev/null 2>&1 || true
+            return "$exit_code"
+          }
+          trap cleanup EXIT
+          docker network create "$network" >/dev/null
+          docker run -d \
+            --name "$server" \
+            --network "$network" \
+            --network-alias sse-error-backend \
+            python:3.12-alpine \
+            python -c 'from http.server import BaseHTTPRequestHandler, HTTPServer; body=b"{\"code\":\"COMMON_010\",\"message\":\"runtime-contract-message\",\"details\":null}"; handler=type("Handler",(BaseHTTPRequestHandler,),{"do_GET":lambda self:(self.send_response(403),self.send_header("Content-Type","application/json"),self.send_header("Content-Length",str(len(body))),self.end_headers(),self.wfile.write(body)),"log_message":lambda self,_format,*_args:None}); HTTPServer(("0.0.0.0",8080),handler).serve_forever()' >/dev/null
+          for attempt in {1..30}; do
+            if docker exec "$server" python -c \
+              'import http.client,sys; connection=http.client.HTTPConnection("127.0.0.1",8080,timeout=0.2); connection.request("GET","/ready"); response=connection.getresponse(); response.read(); connection.close(); sys.exit(0 if response.status==403 else 1)' \
+              >/dev/null 2>&1; then
+              break
+            fi
+            if [[ "$attempt" == 30 ]]; then
+              echo "SSE diagnostic contract server did not become ready" >&2
+              exit 1
+            fi
+            sleep 0.1
+          done
+          docker run --rm \
+            --network "$network" \
+            -v "$PWD/performance/k6:/scripts:ro" \
+            miriyum/k6-sse:contract \
+            run /scripts/integration/sse-response-diagnostic-contract.js
+
       - name: Run isolated k6 contracts
         shell: bash
         run: |

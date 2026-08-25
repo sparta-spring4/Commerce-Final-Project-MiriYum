@@ -101,7 +101,10 @@ components:
       required: true
       schema: {type: integer, format: int64, minimum: 1}
     IdempotencyKey:
-      $ref: '../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey'
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, format: uuid}
   schemas:
     StoreOnboardingApplicationRequest:
       type: object
@@ -116,7 +119,6 @@ components:
         - tagCodes
         - modes
         - businessRegistrationNumber
-        - businessType
         - legalBusinessName
         - representativeName
         - openingDate
@@ -126,7 +128,7 @@ components:
         - requiredTermsAgreed
       properties:
         name: {type: string, minLength: 1, maxLength: 100}
-        description: {type: string, minLength: 1, maxLength: 2000}
+        description: {type: string, maxLength: 1000}
         region:
           type: string
           enum: [SEOUL, BUSAN, DAEGU, DAEJEON, GWANGJU]
@@ -152,6 +154,12 @@ components:
         businessType:
           type: string
           enum: [CAFE, BAKERY, OTHER]
+          deprecated: true
+          description: >-
+            Rolling 배포와 rollback 호환을 위해 contract 단계까지 선택적으로 수용한다.
+            구 backend task가 남은 동안 공식 화면은 고정 OTHER를 보내고, 전환 backend는
+            누락 요청에도 OTHER를 저장한다. 사용자가 선택하지 않으며 검색 카테고리나 픽업
+            가능 여부를 결정하는 값으로 사용하지 않는다.
         legalBusinessName: {type: string, minLength: 1, maxLength: 200}
         representativeName: {type: string, minLength: 1, maxLength: 100}
         openingDate: {type: string, format: date}
@@ -171,6 +179,15 @@ components:
         - AUTO_APPROVED
         - APPROVED
         - REJECTED
+    StoreOnboardingNextAction:
+      type: string
+      enum:
+        - WAIT
+        - UPLOAD_EVIDENCE
+        - SUBMIT_CHANGES
+        - COMPLETE
+        - NONE
+        - MANUAL_OPERATIONS_REVIEW
     StoreOnboardingApplicationData:
       type: object
       additionalProperties: false
@@ -186,7 +203,7 @@ components:
         applicationVersion: {type: integer, format: int64, minimum: 1}
         status: {$ref: '#/components/schemas/StoreOnboardingApplicationStatus'}
         reviewRequired: {type: boolean}
-        nextAction: {type: string, minLength: 1, maxLength: 100}
+        nextAction: {$ref: '#/components/schemas/StoreOnboardingNextAction'}
         storeId:
           type: [string, 'null']
           pattern: '^[1-9][0-9]*$'

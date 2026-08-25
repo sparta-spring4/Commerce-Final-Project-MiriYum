@@ -14,7 +14,6 @@ import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.PermanentClosureCommand;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.entity.StoreEnforcementState;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.error.StoreErrorCode;
@@ -348,7 +347,6 @@ class StoreAdministrationServiceIT {
         Store store = Store.create(
                 operatorId,
                 String.format("%010d", storeId),
-                BusinessType.CAFE,
                 "미리윰 " + storeId,
                 "",
                 Region.SEOUL,

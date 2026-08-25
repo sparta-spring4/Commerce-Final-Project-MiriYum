@@ -29,7 +29,13 @@ import {
   awaitRecoveryMutationEpoch,
   runSseRecovery,
 } from './recovery.js'
-import { applySteadyMinimumLifetime, openChangedStream, prepareSseSession } from './session.js'
+import {
+  applySteadyMinimumLifetime,
+  openChangedStream,
+  prepareSseSession,
+  runReconnectCycle,
+  selectUnexpected403ErrorCodeBucket,
+} from './session.js'
 import {
   createFixtureFingerprint,
   createTargetFingerprint,
@@ -78,6 +84,19 @@ const recoveryAttempts = new Counter('sse_recovery_attempts')
 const recoverySuccessful = new Counter('sse_recovery_successful')
 const expected4xx = new Counter('sse_expected_4xx')
 const unexpected4xx = new Counter('sse_unexpected_4xx')
+const unexpected400 = new Counter('sse_unexpected_400')
+const unexpected401 = new Counter('sse_unexpected_401')
+const unexpected403 = new Counter('sse_unexpected_403')
+const unexpectedOther4xx = new Counter('sse_unexpected_other_4xx')
+const unexpected403CodeCommon010 = new Counter('sse_unexpected_403_code_common_010')
+const unexpected403CodeAuth006 = new Counter('sse_unexpected_403_code_auth_006')
+const unexpected403CodeAuth009 = new Counter('sse_unexpected_403_code_auth_009')
+const unexpected403CodeAuth010 = new Counter('sse_unexpected_403_code_auth_010')
+const unexpected403CodeAuth011 = new Counter('sse_unexpected_403_code_auth_011')
+const unexpected403CodeAuth012 = new Counter('sse_unexpected_403_code_auth_012')
+const unexpected403CodeOtherOrMissing = new Counter(
+  'sse_unexpected_403_code_other_or_missing',
+)
 const server5xx = new Counter('sse_server_5xx')
 const unexpectedStatus = new Counter('sse_unexpected_status')
 const heartbeatFrames = new Counter('sse_heartbeat_frames')
@@ -119,6 +138,10 @@ function thresholds() {
     sse_contract_errors: ['count==0'],
     sse_transport_errors: ['count==0'],
     sse_unexpected_4xx: ['count==0'],
+    sse_unexpected_400: ['count==0'],
+    sse_unexpected_401: ['count==0'],
+    sse_unexpected_403: ['count==0'],
+    sse_unexpected_other_4xx: ['count==0'],
     sse_server_5xx: ['count==0'],
     sse_unexpected_status: ['count==0'],
     sse_recovery_trigger_list_failures: ['count==0'],
@@ -270,6 +293,23 @@ function recoveryTriggerFailureMetrics() {
   }
 }
 
+function recordUnexpected4xx(diagnostic, tags) {
+  unexpected4xx.add(1, tags)
+  if (diagnostic?.statusBucket === '400') unexpected400.add(1, tags)
+  else if (diagnostic?.statusBucket === '401') unexpected401.add(1, tags)
+  else if (diagnostic?.statusBucket === '403') unexpected403.add(1, tags)
+  else unexpectedOther4xx.add(1, tags)
+  const codeBucket = selectUnexpected403ErrorCodeBucket(diagnostic)
+  if (codeBucket === 'COMMON_010') unexpected403CodeCommon010.add(1, tags)
+  else if (codeBucket === 'AUTH_006') unexpected403CodeAuth006.add(1, tags)
+  else if (codeBucket === 'AUTH_009') unexpected403CodeAuth009.add(1, tags)
+  else if (codeBucket === 'AUTH_010') unexpected403CodeAuth010.add(1, tags)
+  else if (codeBucket === 'AUTH_011') unexpected403CodeAuth011.add(1, tags)
+  else if (codeBucket === 'AUTH_012') unexpected403CodeAuth012.add(1, tags)
+  else if (codeBucket === 'other-or-missing') unexpected403CodeOtherOrMissing.add(1, tags)
+  console.warn(`sse_unexpected_4xx ${JSON.stringify(diagnostic)}`)
+}
+
 function metricAdapter() {
   return {
     opened: (value, tags) => openedConnections.add(value, tags),
@@ -278,14 +318,14 @@ function metricAdapter() {
     contractError: (value, tags) => contractErrors.add(value, tags),
     transportError: (value, tags) => transportErrors.add(value, tags),
     firstEventMilliseconds: (value, tags) => firstEventMilliseconds.add(value, tags),
-    connectionResult: (classification, tags) => {
+    connectionResult: (classification, tags, diagnostic) => {
       if (classification === 'success') successfulConnections.add(1, tags)
       else if (classification === 'capacity_rejected') {
         rejectedConnections.add(1, tags)
         expected4xx.add(1, tags)
       } else if (classification === 'unauthorized'
         || classification === 'unexpected_client_error') {
-        unexpected4xx.add(1, tags)
+        recordUnexpected4xx(diagnostic, tags)
       } else if (classification === 'unavailable' || classification === 'server_error') {
         server5xx.add(1, tags)
       } else if (classification === 'unexpected_status') {
@@ -295,15 +335,17 @@ function metricAdapter() {
   }
 }
 
-function openSession(session, behavior, lastEventId = null) {
+function openSession(session, behavior, lastEventId = null, connectionStage = 'single') {
   const target = session.target
   const startedAt = Date.now()
   const result = openChangedStream({
     transport: sse,
+    diagnosticClient: http,
     url: `${config.baseUrl}${endpointPath(target)}`,
     accessToken: session.accessToken,
     lastEventId,
     endpointKind: target.kind,
+    connectionStage,
     behavior: applySteadyMinimumLifetime({
       timeoutSeconds: config.holdDurationSeconds + 5,
       ...behavior,
@@ -336,19 +378,23 @@ export function sseSmoke(data) {
 export function sseReconnect(data) {
   const session = selectedSession(data)
   safelyExecute(() => {
-    let lastEventId = null
-    const first = openSession(session, {
-      mode: 'reconnect',
-      onLastEventId: (value) => { lastEventId = value },
+    runReconnectCycle({
+      openInitial: () => {
+        let lastEventId = null
+        const first = openSession(session, {
+          mode: 'reconnect',
+          onLastEventId: (value) => { lastEventId = value },
+        }, null, 'initial')
+        return { ...first, lastEventId }
+      },
+      delay: sleep,
+      beforeReconnect: () => recoveryAttempts.add(1, tagsFor(session.target)),
+      openReconnect: (lastEventId) => openSession(
+        session, { mode: 'reconnect' }, lastEventId, 'reconnect',
+      ),
+      settleSeconds: config.reconnectSettleSeconds,
     })
-    if (!first.completed || lastEventId === null) {
-      throw new Error('SSE reconnect cursor was not captured')
-    }
-    recoveryAttempts.add(1, tagsFor(session.target))
-    const recovered = openSession(session, { mode: 'reconnect' }, lastEventId)
-    if (!recovered.completed) throw new Error('SSE reconnect did not recover')
     recoverySuccessful.add(1, tagsFor(session.target))
-    lastEventId = null
   }, session.target)
 }
 
@@ -503,6 +549,9 @@ export function ownedHttpProbe(data) {
         error: (value, metricTags) => ownedHttpErrors.add(value, metricTags),
       },
       tags,
+      onThresholdExceeded: (diagnostic) => {
+        console.warn(`owned_http_probe_threshold_exceeded ${JSON.stringify(diagnostic)}`)
+      },
     })
     check(result, { 'owned HTTP probe remains healthy': (value) => value.success }, tags)
   } catch (_) {
@@ -527,6 +576,7 @@ export function handleSummary(data) {
       connections: config.connections,
       connectionsPerAccount: config.connectionsPerAccount,
       holdDurationSeconds: config.holdDurationSeconds,
+      reconnectSettleSeconds: config.reconnectSettleSeconds,
       slowClientDelaySeconds: config.slowClientDelaySeconds,
       slowClientMaxCleanupSeconds: config.slowClientMaxCleanupSeconds,
       companionMinLifetimeSeconds: config.companionMinLifetimeSeconds,

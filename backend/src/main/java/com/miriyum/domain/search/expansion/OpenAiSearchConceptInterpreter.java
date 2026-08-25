@@ -11,6 +11,7 @@ import com.miriyum.domain.search.config.OpenAiSearchInterpretationProperties;
 import java.net.http.HttpTimeoutException;
 import java.net.SocketTimeoutException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -29,9 +30,11 @@ public class OpenAiSearchConceptInterpreter implements SearchConceptInterpreter 
 
     private static final String SYSTEM_INSTRUCTION =
             "사용자 원문에 실제 음식, 재료, 맛 또는 조리법 근거가 있는지 먼저 "
-                    + "판정하세요. 음식 계열을 안전하게 특정할 수 있으면 interpretation은 "
-                    + "MATCHABLE이고 concepts에 짧은 한국어 음식명과 검색 동의어를 최대 "
-                    + "8개까지 가장 관련 높은 순서로 작성하세요. 실제 음식 근거가 없으면 "
+                    + "판정하세요. MATCHABLE이면 rawFoodSpans, menuFamilies, ingredients, "
+                    + "tastes, broths, methods, aromas, textures, forms를 각각 짧은 한국어 "
+                    + "표현으로 분리하고 concepts에는 검색 동의어를 최대 8개까지 작성하세요. "
+                    + "칼칼한 마라탕은 menuFamilies에 마라탕, tastes에 칼칼한을 넣고 수식어를 "
+                    + "메뉴명의 일부로 강제하지 마세요. 실제 음식 근거가 없으면 "
                     + "interpretation은 NO_FOOD_SIGNAL이고 concepts는 빈 배열입니다. 음식 "
                     + "관련 가능성은 있지만 음식 계열을 안전하게 특정하기 어려우면 "
                     + "interpretation은 AMBIGUOUS이고 concepts는 빈 배열입니다. 은유나 "
@@ -78,7 +81,7 @@ public class OpenAiSearchConceptInterpreter implements SearchConceptInterpreter 
                     .body(completionRequest(request))
                     .retrieve()
                     .body(CompletionResponse.class);
-            return parse(response);
+            return parse(response, request.purpose());
         } catch (SearchConceptProviderException exception) {
             throw exception;
         } catch (RestClientResponseException exception) {
@@ -105,18 +108,32 @@ public class OpenAiSearchConceptInterpreter implements SearchConceptInterpreter 
                         "type", "array",
                         "maxItems", properties.maxConcepts(),
                         "items", Map.of("type", "string", "maxLength", 60));
+        Map<String, Object> schemaProperties = new LinkedHashMap<>();
+        schemaProperties.put("interpretation", Map.of(
+                "type", "string",
+                "enum", List.of("MATCHABLE", "AMBIGUOUS", "NO_FOOD_SIGNAL")));
+        schemaProperties.put("concepts", concepts);
+        List<String> required = new ArrayList<>(List.of("interpretation", "concepts"));
+        if (request.purpose() == SearchConceptPurpose.STORE_SEARCH) {
+            for (String field : List.of(
+                    "rawFoodSpans",
+                    "menuFamilies",
+                    "ingredients",
+                    "tastes",
+                    "broths",
+                    "methods",
+                    "aromas",
+                    "textures",
+                    "forms")) {
+                schemaProperties.put(field, stringArraySchema());
+                required.add(field);
+            }
+        }
         Map<String, Object> schema = Map.of(
                 "type", "object",
                 "additionalProperties", false,
-                "required", List.of("interpretation", "concepts"),
-                "properties", Map.of(
-                        "interpretation", Map.of(
-                                "type", "string",
-                                "enum", List.of(
-                                        "MATCHABLE",
-                                        "AMBIGUOUS",
-                                        "NO_FOOD_SIGNAL")),
-                        "concepts", concepts));
+                "required", List.copyOf(required),
+                "properties", schemaProperties);
         return new CompletionRequest(
                 properties.model(),
                 List.of(
@@ -129,13 +146,23 @@ public class OpenAiSearchConceptInterpreter implements SearchConceptInterpreter 
                         new JsonSchema("search_concepts", true, schema)));
     }
 
+    private Map<String, Object> stringArraySchema() {
+        return Map.of(
+                "type", "array",
+                "maxItems", properties.maxConcepts(),
+                "items", Map.of("type", "string", "maxLength", 60));
+    }
+
     private static String instructionFor(SearchConceptPurpose purpose) {
         return purpose == SearchConceptPurpose.MENU_ALTERNATIVE
                 ? MENU_ALTERNATIVE_INSTRUCTION
                 : SYSTEM_INSTRUCTION;
     }
 
-    private SearchConceptExpansion parse(CompletionResponse response) {
+    private SearchConceptExpansion parse(
+            CompletionResponse response,
+            SearchConceptPurpose purpose
+    ) {
         if (response == null
                 || response.choices() == null
                 || response.choices().size() != 1
@@ -160,7 +187,7 @@ public class OpenAiSearchConceptInterpreter implements SearchConceptInterpreter 
         }
         ConceptDocument document;
         try {
-            document = readConceptDocument(choice.message().content());
+            document = readConceptDocument(choice.message().content(), purpose);
         } catch (RuntimeException exception) {
             throw failure(MALFORMED_RESPONSE, inputTokens, outputTokens);
         }
@@ -171,17 +198,21 @@ public class OpenAiSearchConceptInterpreter implements SearchConceptInterpreter 
                 || document.concepts().stream().anyMatch(value -> value == null)) {
             throw failure(MALFORMED_RESPONSE, inputTokens, outputTokens);
         }
+        boolean matchable = document.interpretation() == Interpretation.MATCHABLE;
         return new SearchConceptExpansion(
-                document.interpretation() == Interpretation.MATCHABLE
-                        ? document.concepts()
-                        : List.of(),
+                matchable ? document.concepts() : List.of(),
+                matchable ? document.toEvidence() : StructuredFoodEvidence.empty(),
                 response.usage().prompt_tokens(),
                 response.usage().completion_tokens());
     }
 
-    private ConceptDocument readConceptDocument(String content) {
+    private ConceptDocument readConceptDocument(
+            String content,
+            SearchConceptPurpose purpose
+    ) {
         JsonNode root = objectMapper.readTree(content);
-        if (root == null || !root.isObject() || root.size() != 2) {
+        int expectedFields = purpose == SearchConceptPurpose.STORE_SEARCH ? 11 : 2;
+        if (root == null || !root.isObject() || root.size() != expectedFields) {
             throw new IllegalArgumentException("concept document must match the schema");
         }
         JsonNode interpretationNode = root.get("interpretation");
@@ -193,14 +224,41 @@ public class OpenAiSearchConceptInterpreter implements SearchConceptInterpreter 
             throw new IllegalArgumentException("concept document fields have invalid types");
         }
         Interpretation interpretation = Interpretation.valueOf(interpretationNode.asText());
-        List<String> concepts = new ArrayList<>();
-        for (JsonNode conceptNode : conceptsNode) {
-            if (!conceptNode.isTextual()) {
-                throw new IllegalArgumentException("concept must be a string");
-            }
-            concepts.add(conceptNode.asText());
+        List<String> concepts = readStringArray(conceptsNode, "concepts");
+        if (purpose == SearchConceptPurpose.MENU_ALTERNATIVE) {
+            return ConceptDocument.conceptsOnly(interpretation, concepts);
         }
-        return new ConceptDocument(interpretation, List.copyOf(concepts));
+        return new ConceptDocument(
+                interpretation,
+                concepts,
+                readRequiredArray(root, "rawFoodSpans"),
+                readRequiredArray(root, "menuFamilies"),
+                readRequiredArray(root, "ingredients"),
+                readRequiredArray(root, "tastes"),
+                readRequiredArray(root, "broths"),
+                readRequiredArray(root, "methods"),
+                readRequiredArray(root, "aromas"),
+                readRequiredArray(root, "textures"),
+                readRequiredArray(root, "forms"));
+    }
+
+    private static List<String> readRequiredArray(JsonNode root, String field) {
+        JsonNode node = root.get(field);
+        if (node == null || !node.isArray()) {
+            throw new IllegalArgumentException(field + " must be an array");
+        }
+        return readStringArray(node, field);
+    }
+
+    private static List<String> readStringArray(JsonNode node, String field) {
+        List<String> values = new ArrayList<>();
+        for (JsonNode value : node) {
+            if (!value.isTextual()) {
+                throw new IllegalArgumentException(field + " must contain strings");
+            }
+            values.add(value.asText());
+        }
+        return List.copyOf(values);
     }
 
     private static boolean isTimeout(Throwable failure) {
@@ -267,7 +325,58 @@ public class OpenAiSearchConceptInterpreter implements SearchConceptInterpreter 
     private record Usage(long prompt_tokens, long completion_tokens, long total_tokens) {
     }
 
-    private record ConceptDocument(Interpretation interpretation, List<String> concepts) {
+    private record ConceptDocument(
+            Interpretation interpretation,
+            List<String> concepts,
+            List<String> rawFoodSpans,
+            List<String> menuFamilies,
+            List<String> ingredients,
+            List<String> tastes,
+            List<String> broths,
+            List<String> methods,
+            List<String> aromas,
+            List<String> textures,
+            List<String> forms
+    ) {
+        private static ConceptDocument conceptsOnly(
+                Interpretation interpretation,
+                List<String> concepts
+        ) {
+            return new ConceptDocument(
+                    interpretation,
+                    concepts,
+                    List.of(), List.of(), List.of(), List.of(), List.of(),
+                    List.of(), List.of(), List.of(), List.of());
+        }
+
+        private StructuredFoodEvidence toEvidence() {
+            return new StructuredFoodEvidence(
+                    evidenceTerms("RAW", rawFoodSpans),
+                    evidenceTerms("MENU", menuFamilies),
+                    evidenceTerms("INGREDIENT", ingredients),
+                    evidenceTerms("TASTE", tastes),
+                    evidenceTerms("BROTH", broths),
+                    evidenceTerms("METHOD", methods),
+                    evidenceTerms("AROMA", aromas),
+                    evidenceTerms("TEXTURE", textures),
+                    evidenceTerms("FORM", forms));
+        }
+
+        private static List<StructuredFoodEvidence.EvidenceTerm> evidenceTerms(
+                String prefix,
+                List<String> values
+        ) {
+            List<StructuredFoodEvidence.EvidenceTerm> terms = new ArrayList<>();
+            for (int index = 0; index < values.size(); index++) {
+                String value = values.get(index);
+                terms.add(new StructuredFoodEvidence.EvidenceTerm(
+                        "LLM_" + prefix + "_" + index,
+                        value,
+                        List.of(value),
+                        StructuredFoodEvidenceSource.LLM));
+            }
+            return List.copyOf(terms);
+        }
     }
 
     private enum Interpretation {

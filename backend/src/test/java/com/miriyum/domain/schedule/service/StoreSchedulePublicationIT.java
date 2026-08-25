@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
@@ -57,7 +56,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Tag("integration")
-@Tag("integration-shard-d")
+@Tag("integration-shard-a")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
@@ -376,7 +375,6 @@ class StoreSchedulePublicationIT {
         long storeId = storeRepository.saveAndFlush(Store.create(
                 operatorId,
                 "1234567890",
-                BusinessType.CAFE,
                 "야간 매장",
                 "",
                 Region.SEOUL,

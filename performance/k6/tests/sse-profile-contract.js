@@ -1,6 +1,8 @@
 import { check, sleep } from 'k6'
 
-import { applySteadyMinimumLifetime, openChangedStream } from '../sse/session.js'
+import * as sessionContract from '../sse/session.js'
+
+const { applySteadyMinimumLifetime, openChangedStream } = sessionContract
 
 export const options = {
   thresholds: {
@@ -95,7 +97,39 @@ function openWith({
 
 export default function () {
   check(null, {
-    'wrapper applies the hold invariant only to steady': () => {
+    'reconnect preserves close settle and cursor reconnect ordering': () => {
+      if (typeof sessionContract.runReconnectCycle !== 'function') return false
+      const steps = []
+      const result = sessionContract.runReconnectCycle({
+        openInitial: () => {
+          steps.push('initial-closed')
+          return { completed: true, lastEventId: 'opaque-cursor' }
+        },
+        delay: (seconds) => steps.push(`settle:${seconds}`),
+        beforeReconnect: () => steps.push('before-reconnect'),
+        openReconnect: (cursor) => {
+          steps.push(`reconnect:${cursor}`)
+          return { completed: true }
+        },
+        settleSeconds: 6,
+      })
+      return result.initialCompleted === true
+        && result.recoveryCompleted === true
+        && !JSON.stringify(result).includes('opaque-cursor')
+        && JSON.stringify(steps) === JSON.stringify([
+          'initial-closed',
+          'settle:6',
+          'before-reconnect',
+          'reconnect:opaque-cursor',
+        ])
+    },
+    'reconnect waits for the bounded registry settle window': () => {
+      const delays = []
+      return typeof sessionContract.waitForReconnectSettle === 'function'
+        && sessionContract.waitForReconnectSettle((seconds) => delays.push(seconds), 6) === true
+        && JSON.stringify(delays) === JSON.stringify([6])
+    },
+    'wrapper applies the hold invariant only to steady and capacity': () => {
       const steady = applySteadyMinimumLifetime({ mode: 'steady' }, 30, 'steady')
       const smoke = applySteadyMinimumLifetime({ mode: 'smoke' }, 30, 'smoke')
       const reconnect = applySteadyMinimumLifetime({ mode: 'reconnect' }, 30, 'reconnect')
@@ -109,7 +143,7 @@ export default function () {
         && recovery.minimumLifetimeSeconds === undefined
         && slowClient.minimumLifetimeSeconds === undefined
         && companion.minimumLifetimeSeconds === undefined
-        && capacity.minimumLifetimeSeconds === undefined
+        && capacity.minimumLifetimeSeconds === 30
     },
     'smoke closes after exactly one validated frame': () => {
       const opened = openWith({

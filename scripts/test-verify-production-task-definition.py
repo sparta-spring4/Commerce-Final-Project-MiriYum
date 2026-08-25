@@ -612,6 +612,26 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
         self.assertIn(secret_name, secrets)
         self.assertTrue(secrets[secret_name].endswith(f":{secret_name}::"))
 
+    def test_payment_contract_separates_disabled_webhooks_from_payment_activation(self):
+        contract = json.loads(
+                Path("deploy/ecs/production-secret-contract.json").read_text(encoding="utf-8"))
+        task_definition = json.loads(
+                Path("deploy/ecs/production-task-definition.json").read_text(encoding="utf-8"))
+        environment = {
+                item["name"]: item["value"]
+                for item in task_definition["containerDefinitions"][0]["environment"]
+        }
+
+        self.assertEqual(
+                ["MIRIYUM_PAYMENT_CURSOR_SECRET", "MIRIYUM_PORTONE_API_SECRET"],
+                contract["conditionalSecrets"]["MIRIYUM_PAYMENT_ENABLED"],
+        )
+        self.assertEqual(
+                ["MIRIYUM_PORTONE_WEBHOOK_SECRET"],
+                contract["conditionalSecrets"]["MIRIYUM_PORTONE_WEBHOOK_ENABLED"],
+        )
+        self.assertEqual("false", environment["MIRIYUM_PORTONE_WEBHOOK_ENABLED"])
+
     def test_accepts_a_whole_runtime_config_secret_with_parameter_secrets(self):
         validate = load_validator()
 

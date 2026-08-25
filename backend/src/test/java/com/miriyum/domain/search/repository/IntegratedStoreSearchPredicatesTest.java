@@ -115,6 +115,60 @@ class IntegratedStoreSearchPredicatesTest {
                 .contains("불향 해물 짬뽕", "8000", "15000");
     }
 
+    @Test
+    void originalKeywordPredicateFindsGuardedMenuNameInsideNaturalLanguage() {
+        InterpretedSearchCondition condition = new InterpretedSearchCondition(
+                List.of(), List.of(), List.of(), List.of(), null,
+                null, null, null, "짬뽕 파는 매장 중 추천순으로 보여줘");
+        IntegratedStoreSearchQuery query = IntegratedStoreSearchQuery.from(
+                condition,
+                List.of("짬뽕"),
+                null,
+                null,
+                20,
+                CURSOR_CODEC);
+
+        RenderedPredicate rendered = render(
+                IntegratedStoreSearchPredicates.create(QStore.store, query));
+
+        assertThat(rendered.jpql())
+                .contains("trim(keywordMenuVersion.name) =")
+                .doesNotContain("locate(lower(keywordMenuVersion.name)")
+                .doesNotContain("moreSpecificKeywordMenuVersion");
+        assertThat(rendered.constants())
+                .contains("%짬뽕 파는 매장 중 추천순으로 보여줘%", "짬뽕");
+    }
+
+    @Test
+    void reverseMenuGuardRejectsEveryGenericNameAndOneCharacterNames() {
+        assertThat(List.of(
+                "면", "탕", "국", "밥", "메뉴", "음식", "요리", "식사",
+                "세트", "정식", "음료", "A"))
+                .allMatch(name -> !IntegratedStoreSearchPredicates
+                        .isEligibleReverseMenuName(name));
+        assertThat(IntegratedStoreSearchPredicates.isEligibleReverseMenuName("국밥"))
+                .isTrue();
+        assertThat(IntegratedStoreSearchPredicates.isEligibleReverseMenuName(" 국밥 "))
+                .isTrue();
+        assertThat(IntegratedStoreSearchPredicates.isEligibleReverseMenuName("😀"))
+                .isFalse();
+        assertThat(IntegratedStoreSearchPredicates.isEligibleReverseMenuName("😀국"))
+                .isTrue();
+    }
+
+    @Test
+    void substringLookupCandidatesAreDeterministicAndInputBounded() {
+        String keyword = "가".repeat(98) + "짬뽕";
+
+        List<String> candidates = IntegratedStoreSearchRepository
+                .candidateMenuNames(keyword);
+
+        assertThat(candidates).contains("짬뽕", "가짬뽕");
+        assertThat(candidates).doesNotContain("면", "탕", "국", "밥");
+        assertThat(candidates).hasSizeLessThanOrEqualTo(4_950);
+        assertThat(candidates).isSorted();
+    }
+
     private static RenderedPredicate render(BooleanBuilder predicate) {
         JPQLSerializer serializer = new JPQLSerializer(HQLTemplates.DEFAULT);
         serializer.handle(predicate.getValue());

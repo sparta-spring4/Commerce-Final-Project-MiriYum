@@ -2,7 +2,7 @@
 
 ## 상태
 
-승인 — 2026-08-18, Issue #368; 2026-08-23, Issue #589·#596 개정
+승인 — 2026-08-18, Issue #368; 2026-08-23~25, Issue #589·#596·#616·#625 개정
 
 ## 맥락
 
@@ -10,19 +10,22 @@
 
 ## 결정
 
-- `RuleInterpreter`가 날짜·시각·인원과 승인 사전 토큰을 먼저 결정적으로 추출한다.
+- `RuleInterpreter`가 날짜·시각·인원과 승인 Catalog 토큰을 먼저 결정적으로 추출하고, `food-evidence-v1`이 잔여 표현에서 메뉴 family와 맛·재료·국물·조리법·향·식감·형태를 추출한다. 현재 결합 사전 버전은 `catalog-v1+food-evidence-v1`이다.
 - MySQL 정확/포함 검색을 항상 먼저 실행한다.
-- 정확 검색이 소진된 최초 응답만 OpenAI `gpt-4o-mini` Structured Outputs로 잔여 표현을 해석한다. 필수 `interpretation`은 `MATCHABLE`, `AMBIGUOUS`, `NO_FOOD_SIGNAL` 중 하나다. 실제 음식·재료·맛·조리법 근거가 있고 음식 계열을 안전하게 특정할 수 있는 `MATCHABLE`에서만 최대 8개의 음식 개념을 사용한다. 음식 관련 가능성은 있지만 특정하기 어려운 `AMBIGUOUS`와 실제 음식 근거가 없는 `NO_FOOD_SIGNAL`은 개념을 비우며, 은유·무관 표현에서 메뉴명을 발명하지 않는다. 특정 입력을 특정 메뉴로 강제 매핑하는 예시는 두지 않고 `temperature`는 `0`으로 고정해 호출 간 변동을 줄인다.
-- 허용된 개념은 parameter-bound QueryDSL로 현재 MySQL 게시 메뉴에 대조한다. 이름·설명·카테고리·태그에는 기존 escaped 정방향 포함 조건을 유지하고, 메뉴명에만 concept가 실제 메뉴명을 포함하는 역방향 조건을 추가한다. trim한 메뉴명이 2자 미만이거나 `면`, `탕`, `국`, `밥`, `메뉴`, `음식`, `요리`, `식사`, `세트`, `정식`, `음료`이면 역방향에서 제외한다. description·카테고리·태그에는 역방향을 적용하지 않는다. 벡터 저장소·외부 색인·검색 캐시는 두지 않는다.
+- 정확 검색이 소진된 최초 응답만 OpenAI `gpt-4o-mini` strict Structured Outputs로 잔여 표현을 해석한다. STORE_SEARCH schema는 `interpretation`, `concepts`, `rawFoodSpans`, `menuFamilies`, `ingredients`, `tastes`, `broths`, `methods`, `aromas`, `textures`, `forms`를 모두 필수 배열로 고정한다. 결정적 추출이 이미 채운 차원은 유지하고 LLM은 빈 차원만 보충하며, `food-evidence-v1`에 없는 항목은 버린다. `AMBIGUOUS`·`NO_FOOD_SIGNAL`은 보충을 비우고 은유·무관 표현에서 메뉴명을 발명하지 않는다. 특정 입력을 특정 메뉴로 강제 매핑하는 예시는 두지 않고 `temperature`는 `0`으로 고정한다.
+- 허용된 근거는 parameter-bound QueryDSL로 같은 visible·non-retired·current published 메뉴 행의 이름·설명·주/보조 카테고리·로컬 태그에 대조한다. 명시 메뉴명·검토 별칭, 결정적 raw span, 검증된 LLM family 순으로 메뉴 계열 우선순위를 두고 맛·재료·국물·조리법·향·식감은 서로 다른 차원만 센다. 메뉴 계열 근거가 없으면 같은 메뉴에서 2개 이상의 핵심 차원이 일치해야 한다. 메뉴명 역방향은 2자 이상이고 일반 토큰 denylist에 없는 경우에만 허용하며 description·카테고리·태그에는 적용하지 않는다. 지역·가격·카테고리와 Store 공개·폐점 필터는 모든 경로에서 유지한다.
 - 모든 보완 후보는 응답 직전에 MySQL 현재 게시 버전·공개 상태와 Reservation 공개 계약으로 재검증한다.
-- 보완 후보는 최초 응답을 채우는 최대 200개 풀로만 사용하며 별도 cursor 페이지를 만들지 않는다. 정확 후보, 정방향 보완 후보, 역방향 보완 후보 순서를 고정하고 중복은 앞선 tier에 한 번만 둔다. 추천 랭킹도 이 tier 경계를 넘지 않는다.
-- `AMBIGUOUS`·`NO_FOOD_SIGNAL`, 알 수 없는 interpretation, OpenAI 비활성·timeout·429·오류·거절·형식 불일치에는 보완 후보를 비우고 정확 검색으로 폴백하며 자동 재시도하지 않는다. 이 내부 판정은 공개 API 응답 형상을 바꾸지 않는다.
+- 보완 후보는 최초 응답을 채우는 최대 200개 풀로만 사용하며 별도 cursor 페이지를 만들지 않는다. `relevance,desc`는 구조화 음식 관련도, 기존 관련도 tier 순으로 정렬한다. `recommendation,desc`는 전체 bounded 후보를 `history-v1`으로 한 번 계산한 뒤 같은 음식·기존 관련도 그룹 안에서만 그 순서를 유지하며 공개 버전은 `food-evidence-v1+history-v1`이다. 이름·생성일 명시 정렬은 기존 계약을 유지한다.
+- `AMBIGUOUS`·`NO_FOOD_SIGNAL`, 알 수 없는 interpretation, OpenAI 비활성·timeout·429·오류·거절·형식 불일치에는 LLM 보충만 비우고 결정적 음식 근거와 기존 MySQL 검색으로 폴백하며 자동 재시도하지 않는다. 이 내부 판정은 공개 API 응답 형상을 바꾸지 않는다.
+- LLM abstention과 무관하게 사용자가 메뉴명을 남은 문장에 직접 명시한 경우는 MySQL 정확 검색 단계에서 먼저 회수한다. 최대 100자 입력의 2자 이상 부분문자열(최대 4,950개)을 생성해 `menu_versions.name` 선두 index의 exact `IN`과 같은 MySQL `utf8mb4_0900_ai_ci` collation의 anti-join을 한 번 실행한다. non-retired current published 이름 전체에 trim·일반 메뉴 토큰 denylist·가장 구체적인 이름 우선 규칙을 적용한 뒤 최종 100개만 후보 query에 바인딩한다. 이름 결정은 visibility-neutral로 짧은 공개 이름으로의 후퇴를 막고, 실제 반환은 현재 게시·공개·비은퇴 메뉴 및 기존 구조화 필터를 그대로 지킨다.
 - 품절·판매 중단 대체 메뉴는 공개 메뉴 문맥을 한 번 해석해 같은 매장과 3km 인근 조회에 재사용한다. 같은 주 분류와 가격 ±20%는 하드 필터로 유지하고, 적격 후보는 LLM 개념 50점·보조 분류 20점·가격 유사도 30점의 서버 점수로 정렬한다. LLM 실패 시 개념 점수만 0점으로 두며 일반 후보 폴백과 알레르기·재고·예약 검증을 유지한다.
 - 요청에는 최대 500자의 잔여 표현 또는 공개 메뉴 문맥만 포함하고 사용자 ID·연락처·이력·정밀 위치·알레르기 정보는 전달하지 않는다. Secret은 환경 Secret으로만 주입한다.
 
 ## 결과
 
 외부 해석의 비용·지연·품질을 운영해야 하므로 호출 수·결과·지연·입출력 토큰을 목적별로 계측한다. 정확 검색이 먼저 페이지를 채우는 대부분의 요청과 cursor 페이지에는 비용이 발생하지 않는다. 외부 장애나 abstention에도 메뉴 쓰기와 정확 검색은 정상 동작한다. LLM의 생성형 답변·설명·임의 메뉴·가용성·안전 판단은 이 결정의 범위가 아니다.
+
+이 개정은 embedding, 외부 벡터 저장소·색인·캐시 또는 DB migration을 추가하지 않는다. production 메뉴에는 맛·재료·조리법 전용 정규화 칼럼이 없으므로 이름·설명·카테고리·로컬 태그에 해당 정보가 등록된 정도가 실제 회수율의 상한이다. 구조화 점수와 근거 문자열은 공개 응답에 추가하지 않고 버전과 정렬 결과로만 계약한다.
 
 보수적인 abstention은 음식 의도가 있으나 표현 근거가 약한 질의의 recall을 낮출 수 있다. 이 위험과 true-no-answer 오탐 감소의 균형은 mock 기반 계약 테스트만으로 확정하지 않으며, 실제 OpenAI 유료 호출을 사용하는 live 재평가는 별도 승인 후 수행한다.
 

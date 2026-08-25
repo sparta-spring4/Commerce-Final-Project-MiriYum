@@ -24,7 +24,6 @@ import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepos
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.service.WaitingStatusEventDispatcher;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -282,7 +281,7 @@ class WaitingNotificationRuntimeIT {
         long operatorId = operators.saveAndFlush(StoreOperatorAccount.create(
                 "waiting-notification@example.com", "hashed", "owner")).getId();
         long storeId = stores.saveAndFlush(Store.create(
-                operatorId, "1234567899", BusinessType.CAFE, "미리윰 강남", "",
+                operatorId, "1234567899", "미리윰 강남", "",
                 Region.SEOUL, "서울", "CAFE_BAKERY", Set.of(), true, true, true,
                 "Asia/Seoul", LocalDateTime.of(2026, 8, 1, 9, 0),
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();

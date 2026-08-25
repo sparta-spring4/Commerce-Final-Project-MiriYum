@@ -11,7 +11,7 @@ Prometheus·Grafana 컨테이너, X-Ray·OpenTelemetry, production ECS·RDS·Ela
 - AWS 기본 지표: `CPUUtilization`, `StatusCheckFailed`
 - CloudWatch Agent 지표: 루트 디스크 사용률, 메모리 사용률
 - CloudWatch Logs: Docker `awslogs` 드라이버로 서비스별 표준 출력 로그
-- 사용자 지정 지표: 배포 후 health 결과 `DeploymentHealth`, Auth Valkey 메모리 bytes·사용률·수집 실패·heartbeat `AuthValkeyUsedMemoryBytes`·`AuthValkeyMaxMemoryBytes`·`AuthValkeyMemoryUtilizationPercent`·`AuthValkeyMemoryCollectionFailure`·`AuthValkeyMemoryCollectionHeartbeat`, 위험 사건 전달 정체 `RefreshTokenRiskEventDeliveryStalled`, pending 인덱스 멤버 수 `RefreshTokenRiskEventPendingCount`, 1시간 이상 pending marker 존재 신호 `RefreshTokenRiskEventMarkerLongStay`, marker 무결성 실패 `RefreshTokenRiskEventMarkerMalformed`·`RefreshTokenRiskEventMarkerQuarantineFailed`·`RefreshTokenRiskEventStaleIndexCleanupFailed`, ReservationHold 대사 장기 체류 `ReservationHoldReconciliationStalled`
+- 사용자 지정 지표: 배포 후 health 결과 `DeploymentHealth`, backend 컨테이너 CPU·메모리·수집 실패·heartbeat `BackendContainerCpuUtilizationPercent`·`BackendContainerMemoryUsageBytes`·`BackendContainerMemoryUtilizationPercent`·`BackendContainerMetricsCollectionFailure`·`BackendContainerMetricsHeartbeat`, Auth Valkey 메모리 bytes·사용률·수집 실패·heartbeat `AuthValkeyUsedMemoryBytes`·`AuthValkeyMaxMemoryBytes`·`AuthValkeyMemoryUtilizationPercent`·`AuthValkeyMemoryCollectionFailure`·`AuthValkeyMemoryCollectionHeartbeat`, 위험 사건 전달 정체 `RefreshTokenRiskEventDeliveryStalled`, pending 인덱스 멤버 수 `RefreshTokenRiskEventPendingCount`, 1시간 이상 pending marker 존재 신호 `RefreshTokenRiskEventMarkerLongStay`, marker 무결성 실패 `RefreshTokenRiskEventMarkerMalformed`·`RefreshTokenRiskEventMarkerQuarantineFailed`·`RefreshTokenRiskEventStaleIndexCleanupFailed`, ReservationHold 대사 장기 체류 `ReservationHoldReconciliationStalled`
 - 로그 보존: 7일
 
 CloudWatch Agent 설정은 [`cloudwatch-agent-config.json`](../../deploy/monitoring/cloudwatch-agent-config.json)에 있다. Agent는 메모리·디스크 지표를 수집하고, Docker 로그는 Compose의 `awslogs` 드라이버가 `/miriyum/staging/docker` 로그 그룹의 `mysql`, `backend`, `nginx`, `valkey` 스트림으로 직접 전송한다. CD가 배포 파일을 SSM으로 전송할 때 Agent 설정도 `/opt/miriyum/monitoring/cloudwatch-agent.json`에 복사한다.
@@ -44,7 +44,7 @@ Agent가 설치된 뒤 CD가 실행되면 최신 설정 파일을 다시 전송�
 
 ## 알람·Dashboard·이메일
 
-AWS CLI 권한이 있는 CloudShell 또는 관리자 PC에서 실행한다. 이 스크립트는 7일 보존 로그 그룹·SNS 주제·이메일 구독·알람 7개·Dashboard를 생성하거나 갱신한다.
+AWS CLI 권한이 있는 CloudShell 또는 관리자 PC에서 실행한다. 이 스크립트는 7일 보존 로그 그룹·SNS 주제·이메일 구독·알람·Dashboard를 생성하거나 갱신한다.
 
 ```bash
 chmod +x deploy/monitoring/create-cloudwatch-resources.sh
@@ -66,6 +66,7 @@ deploy/monitoring/create-cloudwatch-resources.sh
 | Refresh Token 위험 사건 전달 | 30초 주기 전달이 10회 연속 실패해 정체 로그가 발생하면 경보 |
 | Refresh Token 위험 marker 장기 체류 | 최초 위험 사건 생성 뒤 1시간 이상 pending marker가 있으면 경보 |
 | Auth Valkey 메모리 수집 실패 | 60초 수집이 `INFO memory` 또는 CloudWatch 게시를 완료하지 못하면 경보 |
+| Backend 컨테이너 자원 수집 실패 | 60초 수집이 backend 조회·`docker stats`·CloudWatch 게시를 완료하지 못하거나 heartbeat가 5분간 없으면 경보 |
 | ReservationHold 대사 장기 체류 | `RECONCILIATION_REQUIRED` 전이 감사의 `occurredAt` 후 10분부터 현재 장기 체류 집계 로그가 발생하면 경보 |
 
 SNS 이메일은 명령 실행 후 확인 메일의 `Confirm subscription` 링크를 눌러야 실제 알림을 받는다. 이메일 주소와 AWS 계정 ID는 블로그 캡처에 노출하지 않는다.
@@ -95,6 +96,20 @@ sudo journalctl -u miriyum-valkey-memory-metrics.service -n 20 --no-pager
 ```
 
 정상 로그에는 `event=auth_valkey_memory_collected`와 bytes·사용률만 포함된다. Dashboard의 **MiriYum Auth Valkey memory capacity**·**MiriYum Auth Valkey memory utilization**·**MiriYum Auth Valkey memory collection health** 위젯에서 최소 며칠 동안 peak·p95·증가 추세와 heartbeat·실패 신호를 확인한 뒤에만 사용률 경보 임계값을 별도 결정한다. 이 단계에서는 근거 없는 사용률 경보를 만들지 않는다.
+
+## Backend 컨테이너 자원 관측
+
+배포는 `/opt/miriyum/monitoring/publish-backend-container-metrics.sh`와 전용 systemd timer를 설치한다. timer는 60초마다 Compose의 `backend` 서비스 하나를 찾고 `docker stats --no-stream` 결과에서 CPU 사용률, 메모리 사용 bytes, 메모리 사용률을 같은 `InstanceId` 차원으로 게시한다. EC2 host 전체 수치와 분리해 #567의 staging 부하 검증에서 실제 backend 컨테이너가 사용한 자원만 확인할 수 있다.
+
+수집기는 container ID, 이미지 태그, 요청·계정·토큰 식별자와 비밀값을 metric dimension이나 로그에 남기지 않는다. backend 컨테이너를 찾지 못함, `docker stats` 실패, 숫자 형식 손상, CloudWatch 게시 실패는 정상 0으로 바꾸지 않는다. 수집 실패가 CloudWatch에 기록될 수 있으면 `BackendContainerMetricsCollectionFailure=1`을 게시하고, 정상 수집 때만 `BackendContainerMetricsHeartbeat=1`을 게시한다. IMDS 또는 CloudWatch 자체 실패로 신호를 전혀 게시하지 못한 경우에도 5분 heartbeat 누락 alarm이 SNS로 전달된다.
+
+```bash
+sudo systemctl status miriyum-backend-container-metrics.timer --no-pager
+sudo systemctl start miriyum-backend-container-metrics.service
+sudo journalctl -u miriyum-backend-container-metrics.service -n 20 --no-pager
+```
+
+Dashboard의 **MiriYum staging backend container CPU**·**MiriYum staging backend container memory**·**MiriYum staging backend container collection health** 위젯에서 datapoint와 heartbeat를 먼저 확인한다. CPU 60%는 이 수집기가 정상인지 확인한 다음 #567의 단계별 부하 검증에서 실측으로 판단할 기준이며, 이 PR은 근거 없는 CPU 임계값 alarm을 새로 만들지 않는다.
 
 ## 위험 사건 전달 정체 지표
 
@@ -172,4 +187,5 @@ CloudWatch Agent는 임의의 비밀값을 자동으로 마스킹해 주는 기�
 7. 위험 사건 전달 실패 테스트에서 민감값 없는 정체 로그와 `RefreshTokenRiskEventDeliveryStalled` 알람 구성을 확인한다.
 8. ReservationHold 대사 장기 체류 경계 테스트에서 식별자 없는 집계 로그와 `ReservationHoldReconciliationStalled` 알람 구성을 확인한다.
 9. Auth Valkey memory timer를 수동 실행하고 `AuthValkeyUsedMemoryBytes`, `AuthValkeyMaxMemoryBytes`, `AuthValkeyMemoryUtilizationPercent`, `AuthValkeyMemoryCollectionHeartbeat`가 같은 `InstanceId` 차원으로 생기는지 확인한다.
-10. 테스트 후 생성한 AWS 리소스와 알람 상태를 정리한다.
+10. backend container metrics timer를 수동 실행하고 `BackendContainerCpuUtilizationPercent`, `BackendContainerMemoryUsageBytes`, `BackendContainerMemoryUtilizationPercent`, `BackendContainerMetricsHeartbeat`가 같은 `InstanceId` 차원으로 생기는지 확인한다.
+11. 테스트 후 생성한 AWS 리소스와 알람 상태를 정리한다.

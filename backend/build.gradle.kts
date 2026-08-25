@@ -69,9 +69,7 @@ tasks.withType<Test> {
     // 캐시된 context 수를 제한해 shard가 커져도 힙 사용량이 무한히 늘지 않게 한다.
     // Spring 기본값은 32이며, context 하나당 애플리케이션 전체가 메모리에 상주한다.
     systemProperty("spring.test.context.cache.maxSize", "8")
-    systemProperty("miriyum.menu.schedule.enabled", "false")
     systemProperty("miriyum.reservation.time-policy.activation-enabled", "false")
-    systemProperty("miriyum.store.schedule.activation-enabled", "false")
     systemProperty("miriyum.waiting.closure.enabled", "false")
     systemProperty("junit.jupiter.extensions.autodetection.enabled", "true")
 }
@@ -81,12 +79,10 @@ val externalLiveTag = "external-live"
 val integrationShardATag = "integration-shard-a"
 val integrationShardBTag = "integration-shard-b"
 val integrationShardCTag = "integration-shard-c"
-val integrationShardDTag = "integration-shard-d"
 val integrationShardTags = listOf(
     integrationShardATag,
     integrationShardBTag,
     integrationShardCTag,
-    integrationShardDTag,
 )
 
 val verifyIntegrationTestTags = tasks.register("verifyIntegrationTestTags") {
@@ -150,6 +146,10 @@ val integrationTest = tasks.register<Test>("integrationTest") {
         includeTags(integrationTag)
     }
     systemProperty("spring.test.context.cache.maxSize", "4")
+    systemProperty("miriyum.reservation.hold-expiration.enabled", "false")
+    systemProperty("miriyum.waiting.compensation.enabled", "false")
+    systemProperty("miriyum.menu.schedule.enabled", "false")
+    systemProperty("miriyum.store.schedule.activation-enabled", "false")
     dependsOn(verifyIntegrationTestTags)
 }
 
@@ -162,13 +162,18 @@ fun registerIntegrationTestShard(taskName: String, shardTag: String) = tasks.reg
         includeTags(shardTag)
     }
     systemProperty("spring.test.context.cache.maxSize", "4")
+    // CI shard에서는 ApplicationContext 전환 중 DB polling scheduler가 커넥션을
+    // 점유하지 않게 한다. 일반 unit test의 기본 활성 상태 검증에는 적용하지 않는다.
+    systemProperty("miriyum.reservation.hold-expiration.enabled", "false")
+    systemProperty("miriyum.waiting.compensation.enabled", "false")
+    systemProperty("miriyum.menu.schedule.enabled", "false")
+    systemProperty("miriyum.store.schedule.activation-enabled", "false")
     dependsOn(verifyIntegrationTestTags)
 }
 
 val integrationTestShardA = registerIntegrationTestShard("integrationTestShardA", integrationShardATag)
 val integrationTestShardB = registerIntegrationTestShard("integrationTestShardB", integrationShardBTag)
 val integrationTestShardC = registerIntegrationTestShard("integrationTestShardC", integrationShardCTag)
-val integrationTestShardD = registerIntegrationTestShard("integrationTestShardD", integrationShardDTag)
 
 tasks.check {
     dependsOn(integrationTest)

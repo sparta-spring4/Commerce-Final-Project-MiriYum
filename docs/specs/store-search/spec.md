@@ -47,6 +47,15 @@
 날짜가 없으면 Reservation을 호출하지 않고 `NOT_REQUESTED`를 반환한다. 날짜가 있으면 시각·인원은 각각 선택 조건이며 누락값을 임의 기본값으로 채우지 않는다. `availableOnly=true`인데 날짜가 없으면 `COMMON_001`로 거부한다.
 `endTime`은 클라이언트가 보내지 않으며 서버가 해당 매장의 현재 예약 접수 시간대·서비스 소요·전환 정책으로 계산한다. 이 계산은 실제 예약 생성과 같은 예약 도메인 계약을 사용한다.
 
+### 결과 개수와 페이지 이동 UI
+
+- 일반 사용자 매장 찾기 화면은 결과 머리말의 정렬 선택 오른쪽, 지도 보기 왼쪽에 `10개씩`, `20개씩`, `50개씩` 선택을 둔다. 넓은 화면에서는 같은 행에 두고 좁은 화면에서는 결과 머리말 안에서 자연스럽게 줄바꿈한다.
+- 선택값은 URL query의 `size`가 단일 원본이다. 기본값 20은 URL에서 생략하고, 허용하지 않은 URL 값은 20으로 복구한다.
+- `size`를 바꾸면 일반 페이지 검색은 `page=0`, 통합 검색은 `cursor` 없음으로 돌아가 첫 결과부터 다시 조회한다. 기존 cursor는 크기 fingerprint에 결속되므로 다른 크기에 재사용하지 않는다.
+- 프런트는 선택한 `size`를 실제 `GET /api/v1/stores` 요청에 전달하고 응답 `items`를 클라이언트에서 다시 자르거나 여러 응답을 합쳐 개수를 꾸미지 않는다.
+- 1차 페이지 검색은 응답의 `number`, `totalPages`, `totalElements`, `hasNext`로 기존 숫자 페이지 이동을 제공한다. 2차 통합 검색은 정확한 전체 건수와 임의 페이지 번호를 만들지 않고 서버 `nextCursor`가 있을 때만 다음 결과 이동을 제공한다.
+- 필터·정렬 변경도 첫 페이지 또는 첫 cursor로 돌아간다. 페이지 크기·정렬·필터는 새로고침, 링크 공유와 뒤로가기에서 그대로 복원된다.
+
 ### 예약 가능 매장 검색 후보 상한
 
 - `availableOnly=true` 검색은 선택한 고정 정렬에서 먼저 매칭되는 공개 후보를 최대 5,000개까지만 예약 가용성 평가 대상으로 삼는다. 서버 설정과 SQL `LIMIT`이 같은 상한을 강제하며 클라이언트가 이 값을 늘릴 수 없다.
@@ -87,28 +96,36 @@
 
 - 통합 검색은 `searchInput`, `includesInfants`, `availableOnly`, `sort`, `cursor`, `size`만 허용한다. 1차 MVP의 `keyword`, `region`, `storeCategoryCode`, `serviceDate`, `startTime`, `partySize`, `page`와 혼용하면 `COMMON_001`로 거부한다.
 - 날짜·시각·인원은 독립적으로 해석해 인식한 토큰을 남은 키워드에서 제거한다. 날짜가 있으면 시각·인원 누락만으로 `INCOMPLETE_RESERVATION_CONDITION`을 만들지 않는다. `includesInfants=true`와 `availableOnly=true`는 날짜가 있을 때만 허용한다.
-- 통합 검색의 기본 정렬은 `relevance,desc`, 기본 크기는 20, 최대 크기는 50이다. `recommendation,desc`는 현재 검색 필수 조건을 통과한 후보를 `history-v1`으로 재정렬한다. cursor는 서버 비밀키로 HMAC 인증한 불투명 문자열이며 payload가 변조되거나 정규화 입력 조건, `includesInfants`, `availableOnly`, 정렬, 크기 또는 인증 주체 범위가 달라진 요청에 재사용하면 `COMMON_001`로 거부한다. 인증 주체 범위는 원본 사용자 ID를 payload에 노출하지 않고 별도 HMAC 문맥에서 만든 익명 또는 소비자별 불투명 값으로 결합한다. 서버 비밀키가 회전하면 기존 cursor는 만료된 것으로 취급한다.
+- 통합 검색의 기본 정렬은 `relevance,desc`, 기본 크기는 20, 최대 크기는 50이다. `recommendation,desc`는 현재 검색 필수 조건과 음식 관련도 그룹을 통과한 후보를 같은 그룹 안에서만 `history-v1`으로 재정렬한다. `name`·`createdAt` 명시 정렬은 음식 점수를 끼워 넣지 않고 기존 정렬 계약을 유지한다. cursor는 서버 비밀키로 HMAC 인증한 불투명 문자열이며 payload가 변조되거나 정규화 입력 조건, `includesInfants`, `availableOnly`, 정렬, 크기 또는 인증 주체 범위가 달라진 요청에 재사용하면 `COMMON_001`로 거부한다. 인증 주체 범위는 원본 사용자 ID를 payload에 노출하지 않고 별도 HMAC 문맥에서 만든 익명 또는 소비자별 불투명 값으로 결합한다. 서버 비밀키가 회전하면 기존 cursor는 만료된 것으로 취급한다.
 - `GET /api/v1/stores`는 인증 헤더가 없는 요청도 허용한다. 유효한 소비자 Access Bearer가 있으면 추천 정렬에 자기 이력을 가산하고, 헤더를 제출했지만 형식·서명·만료·용도·namespace가 유효하지 않으면 익명으로 축소하지 않고 `AUTH_###` 401로 거부한다.
-- 통합 검색 응답은 기존 페이지 응답과 구분되는 `IntegratedStoreSearchData`를 사용한다. `items`, `normalizedCondition`, `warnings`, `ruleVersion`, `vocabularyVersion`, `rankingRuleVersion`, `nextCursor`를 반환하고 정확한 전체 건수나 페이지 번호를 추측하지 않는다. `rankingRuleVersion`은 추천 정렬에서 `history-v1`, 다른 정렬에서 `null`이다. 각 항목의 `recommendationReason`은 추천 정렬에서 실제 최고 양의 기여 요인의 코드·문구, 다른 정렬에서 `null`이며 내부 점수·가중치·이용 횟수는 노출하지 않는다.
+- 통합 검색 응답은 기존 페이지 응답과 구분되는 `IntegratedStoreSearchData`를 사용한다. `items`, `normalizedCondition`, `warnings`, `ruleVersion`, `vocabularyVersion`, `rankingRuleVersion`, `nextCursor`를 반환하고 정확한 전체 건수나 페이지 번호를 추측하지 않는다. 현재 `vocabularyVersion`은 `catalog-v1+food-evidence-v1`이다. `rankingRuleVersion`은 추천 정렬에서 `food-evidence-v1+history-v1`, 다른 정렬에서 `null`이다. 각 항목의 `recommendationReason`은 추천 정렬에서 실제 최고 양의 기여 요인의 코드·문구, 다른 정렬에서 `null`이며 내부 점수·가중치·이용 횟수는 노출하지 않는다.
 
 ### 결정적 해석과 승인 사전
 
 - `RuleInterpreter`는 `Asia/Seoul`과 서버 `Clock`을 사용해 상대 날짜를 해석하고, 승인된 Region 및 활성 Catalog의 `code`와 `displayName`만 사전 별칭으로 사용한다.
-- Catalog 운영 CRUD가 없는 2차 MVP에서는 승인 seed 버전 `catalog-v1`을 사전 버전으로 사용한다. 코드·표시명·버전이 바뀌는 후속 단계는 사전 버전도 함께 변경해야 한다.
+- Catalog 운영 CRUD가 없는 2차 MVP에서는 승인 seed `catalog-v1`과 사람이 검토한 결정적 음식 사전 `food-evidence-v1`을 결합한 `catalog-v1+food-evidence-v1`을 사전 버전으로 사용한다. Catalog 코드·표시명 또는 음식 별칭·차원이 바뀌는 후속 단계는 결합 버전도 함께 변경해야 한다.
 - 해석된 지역·매장 카테고리·메뉴 카테고리·태그·가격·인원·날짜·시각과 남은 일반 키워드를 정규화 조건으로 반환한다.
 - 부분·중복·모호 표현은 구조화 조건으로 사용하지 않는다. warning은 민감한 원문 조각 없이 code와 field만 반환하고, 해석하지 못한 표현은 남은 일반 키워드의 매장명·게시 메뉴명·지역·주소 포함 검색으로 보존한다.
 
 ### 후보 조회, 최신 상태 재검증과 좌표
 
 1. QueryDSL은 승인된 구조화 조건과 남은 일반 키워드로 MySQL 공개 후보를 조회한다.
-2. 관련도는 남은 키워드의 `매장명 정확 일치 → 매장명 포함 → 게시 메뉴명 포함 → 지역·주소 포함 → 구조화 조건만 일치`의 고정 tier로 계산하고, 같은 tier는 매장명 오름차순과 매장 ID 오름차순으로 정렬한다. 임의 실수 가중치나 개인 이력은 사용하지 않는다.
+2. 사용자 원문에서 current published 메뉴명이 결정적으로 해소되면 기존 exact·양방향 후보와 순서를 그대로 유지하고 속성 전용 후보를 추가하지 않는다. 메뉴명이 해소되지 않고 서로 다른 구조화 음식 차원이 2개 이상일 때만 잔여 표현의 정보성 토큰을 최대 20개 추출한다. 같은 current published visible 메뉴의 이름·설명·주/보조 카테고리·로컬 태그에서 서로 다른 원문 토큰 2개 이상이 일치한 후보를 보충하고, `원문 토큰 일치 수 → 구조화 차원 수 → 검증된 메뉴 family → 기존 관련도 tier` 순으로 비교한다. `면`, `탕`, `국`, `밥`과 검색 요청어 같은 일반 토큰은 원문 토큰에서 제외하며 같은 토큰·차원은 한 번만 센다. 서로 다른 메뉴에 흩어진 근거, 과거 버전, 비공개·은퇴 메뉴는 합산하지 않는다. 그 안의 기존 tier는 `매장명 정확 일치 → 매장명 포함 → 게시 메뉴명 포함 → 지역·주소 포함 → 구조화 조건만 일치`이며 같은 그룹은 매장명 오름차순과 매장 ID 오름차순으로 고정한다. 제한적 역방향 메뉴명은 trim 2자 이상에만 적용하고 `면`, `탕`, `국`, `밥`, `메뉴`, `음식`, `요리`, `식사`, `세트`, `정식`, `음료`를 제외한다. `name`·`createdAt` 명시 정렬은 이 음식 우선순위를 적용하지 않는다.
 3. 후보를 Store 공개 상태와 `ReservationSearchAvailabilityService.getAvailabilities`로 일괄 재검증한다. 응답 직전에 Store 공개·운영·예약 모드를 다시 읽고 불일치, 누락 또는 순서 오류는 해당 후보를 실패 폐쇄한다.
 4. `availableOnly=true`는 같은 정적 관련도 순서를 계속 스캔하며 `AVAILABLE` 후보만 응답 크기까지 채운다. 예약 시각은 모든 후보에 동일한 요청 조건이므로 정렬 숫자로 만들지 않는다. 다음 가능 시간 탐색은 Reservation의 별도 공개 계약 없이는 제공하지 않는다.
-5. cursor는 마지막으로 스캔한 정적 후보의 관련도 tier·매장명·매장 ID와 검색 fingerprint를 담고 전체 payload를 HMAC-SHA-256으로 인증한다. 최신 가용성 변경은 표시·제외 여부만 바꾸고 seek 순서를 바꾸지 않는다.
+5. v2 cursor는 마지막 후보의 구조화 음식 관련도, 기존 관련도 tier, 정렬값, 매장 ID와 검색 fingerprint를 담고 전체 payload를 HMAC-SHA-256으로 인증한다. 추천 cursor의 정렬값은 기존 완전한 `RecommendationCursorKey` 직렬화이며 음식 그룹을 먼저 비교한 뒤 같은 그룹에서만 이 키를 비교한다. 원문 검색어·사용자 ID·음식 근거 문자열은 payload에 넣지 않는다. 구조화 키가 없던 v1 cursor는 v2 배포와 함께 만료되어 `COMMON_001`로 거부된다. 최신 가용성 변경은 표시·제외 여부만 바꾸고 seek 순서를 바꾸지 않는다.
 6. page 검색의 `StoreSummary.coordinates`와 통합 검색의 `IntegratedStoreSearchItem.coordinates`는 모두 현재 주소 버전의 `VERIFIED` latitude·longitude만 반환한다. `UNVERIFIED` 또는 주소 버전 불일치 좌표는 `null`이며 검색 요청 중 Kakao Local API를 호출하지 않는다. page 목록과 지도는 같은 응답 항목을 사용하고 좌표가 null인 매장은 목록에서 제외하지 않는다.
-7. `recommendation,desc`는 정적 관련도 순으로 최대 5,000개 후보를 같은 요청 스냅샷에서 수집·최신 검증한 뒤 `history-v1`으로 전체 재정렬한다. 추천 cursor는 완전한 추천 동점 키와 검색 fingerprint를 HMAC 인증하며 다음 페이지에서도 같은 bounded 후보 집합을 재계산해 seek한다.
-8. 첫 정확 검색이 현재 상태·예약 필터까지 소진된 뒤 응답 크기보다 작고 잔여 표현이 있으면 `gpt-4o-mini` Structured Outputs를 한 번 호출한다. 구조화 응답은 필수 `interpretation`을 `MATCHABLE`, `AMBIGUOUS`, `NO_FOOD_SIGNAL` 중 하나로 반환한다. 사용자 원문에 실제 음식·재료·맛·조리법 근거가 있고 음식 계열을 안전하게 특정할 수 있는 `MATCHABLE`에서만 최대 8개의 음식 개념을 사용한다. 음식 관련 가능성은 있지만 특정하기 어려운 `AMBIGUOUS`와 실제 음식 근거가 없는 `NO_FOOD_SIGNAL`은 concepts를 비우며, 은유·무관 표현에서 메뉴명을 발명하지 않는다. 허용된 개념은 현재 MySQL 공개 게시 메뉴의 이름·설명·주/보조 카테고리·태그에 기존 escaped 정방향 포함 조건으로 대조한다. 이어서 메뉴명에만 concept가 현재 메뉴명을 포함하는 parameter-bound 역방향 조건을 적용하며, trim한 이름이 2자 미만이거나 `면`, `탕`, `국`, `밥`, `메뉴`, `음식`, `요리`, `식사`, `세트`, `정식`, `음료`이면 역방향 대상에서 제외한다. description·카테고리·태그에는 역방향 조건을 적용하지 않는다. 정확 후보, 정방향 보완 후보, 역방향 보완 후보 순서를 고정하고 중복 매장은 앞선 tier에 한 번만 둔다. `recommendation,desc`도 이 tier 경계를 넘겨 재정렬하지 않는다. 두 보완 tier를 합친 후보 풀은 설정과 무관하게 최대 200개이며 최신 상태와 예약 조건을 재검증한 뒤 응답 크기를 채울 때까지 스캔한다. 보완은 최초 응답에 한정하고 보완 후보만을 위한 다음 cursor는 발급하지 않는다.
-9. `AMBIGUOUS`와 `NO_FOOD_SIGNAL`, 알 수 없는 interpretation, OpenAI 비활성, timeout, 429, 오류, 거절 또는 형식 불일치에는 보완 후보를 비우고 기존 MySQL 정확 검색 응답을 유지하며 자동 재시도하지 않는다. abstention은 공개 API 응답 형상을 바꾸지 않는다. 외부 벡터 저장소·색인·캐시는 사용하지 않는다. 외부 요청은 최대 500자의 잔여 표현 또는 품절 메뉴의 공개 문맥만 포함하고 사용자 식별자·연락처·예약 이력·정밀 위치·알레르기 정보와 Secret은 요청·로그에 넣지 않는다. 호출 수·결과·지연·입출력 토큰만 목적별 지표로 남긴다.
+7. `recommendation,desc`는 정적 관련도 순으로 최대 5,000개 후보를 같은 요청 스냅샷에서 수집·최신 검증하고 `StoreRecommendationService`를 한 번 호출한다. 결과는 구조화 음식 관련도와 기존 관련도 tier가 같은 그룹 안에서만 `history-v1` 순서를 유지한다. 낮은 음식 그룹은 개인 이력이 높아도 높은 음식 그룹을 넘지 못한다. 추천 cursor는 음식 그룹·완전한 추천 동점 키·검색 fingerprint를 HMAC 인증하며 다음 페이지에서도 같은 bounded 후보 집합을 재계산해 seek한다.
+8. 결정적 음식 사전은 잔여 표현에서 메뉴 family와 맛·재료·국물·조리법·향·식감·형태를 먼저 추출해 모든 정적 스캔에 사용한다. 첫 정적 검색이 현재 상태·예약 필터까지 소진된 뒤 응답 크기보다 작고 잔여 표현이 있으면 `gpt-4o-mini` Structured Outputs를 한 번 호출한다. LLM은 결정적 추출이 비어 있는 차원만 보충하며 검토 사전에 없는 항목은 버린다. 허용된 근거는 현재 MySQL의 visible·non-retired·current published 메뉴 하나의 이름·설명·주/보조 카테고리·로컬 태그에 대조하고 지역·가격·카테고리와 Store 공개·폐점 필터를 항상 함께 적용한다. 메뉴명 역방향은 trim 2자 이상이고 일반 토큰 denylist에 없는 이름에만 적용한다. 보완 후보 풀은 최대 200개이며 최신 상태와 예약 조건을 재검증한다. 보완은 최초 응답에 한정하고 보완 후보만을 위한 다음 cursor는 발급하지 않는다.
+
+### 메뉴 버전 검색 프로필
+
+- V72부터 `menu_search_profiles`는 정확한 `menu_version_id` 하나에 1:1로 결속되고 `menu_search_profile_terms`는 `MENU_FAMILY`, `ALIAS`, `INGREDIENT`, `TASTE`, `BROTH`, `METHOD`, `AROMA`, `TEXTURE`, `FORM`의 정규화 term과 0~1 confidence, `CURATED`·`RULE_DERIVED`·`LLM_DERIVED` 출처를 저장한다. 프로필 schema는 `food-profile-v1`부터 시작한다.
+- 구조화 검색은 메뉴 이름·설명·카테고리·로컬 태그 근거에 confidence 0.8000 이상인 exact normalized profile term을 보충한다. 메뉴 계열은 `MENU_FAMILY`와 `ALIAS`, 각 속성은 같은 차원의 term만 비교하며 서로 다른 두 핵심 차원 gate와 명시 메뉴명 우선순위를 그대로 유지한다.
+- 프로필은 candidate menu와 같은 current published visible non-retired 메뉴 버전에서만 읽는다. 과거·초안·예약·비공개·은퇴 메뉴의 프로필, 서로 다른 메뉴에 흩어진 term, profile confidence 미달 term은 후보나 점수에 사용하지 않는다.
+- 프로필이 없는 메뉴는 기존 메뉴 필드 검색으로 계속 조회한다. 검색 프로필 생성·갱신 job과 운영자 입력 API는 별도 계약이며 V72에는 읽기 스키마와 검색 predicate만 포함한다.
+- 대량 합성 데이터는 Flyway나 Spring `data.sql`로 자동 적재하지 않는다. `backend/scripts/dev-data/search-profile-demo-500-stores.sql`을 local/dev에서만 명시적으로 실행하며 production에서는 실행하지 않는다.
+9. `AMBIGUOUS`와 `NO_FOOD_SIGNAL`, 알 수 없는 interpretation, OpenAI 비활성, timeout, 429, 오류, 거절 또는 형식 불일치에는 LLM 차원을 비우고 결정적 MySQL 검색 응답을 유지하며 자동 재시도하지 않는다. abstention은 공개 API 응답 형상을 바꾸지 않는다. 이 단계는 embedding, 외부 벡터 저장소·색인·캐시, DB migration을 추가하지 않는다. 현재 production 메뉴에는 맛·재료·조리법 전용 정규화 칼럼이 없으므로 이름·설명·카테고리·로컬 태그의 등록 품질이 구조화 회수율의 상한이다. 외부 요청은 최대 500자의 잔여 표현 또는 품절 메뉴의 공개 문맥만 포함하고 사용자 식별자·연락처·예약 이력·정밀 위치·알레르기 정보와 Secret은 요청·로그에 넣지 않는다. 호출 수·결과·지연·입출력 토큰만 목적별 지표로 남긴다.
 
 `reservationAvailability`는 조회 시점의 발견 보조 정보이며 수량 확보나 예약 성공을 보장하지 않는다. 실제 예약 생성은 Reservation 도메인의 쓰기 트랜잭션에서 현재 영업·접수 시간·수용량을 다시 검증한다.
 
@@ -118,6 +135,7 @@
 - 예약 일괄 결과의 크기·순서·매장 ID가 요청과 다르거나 최신 Store 상태를 확인할 수 없으면 성공을 추측하지 않고 해당 후보를 제외한다.
 - 사용자 현재 위치·위치 권한·정밀 위치는 요청하지 않는다. `searchInput` 원문과 warning 원문 조각은 영속화·감사·애플리케이션 로그에 기록하지 않는다.
 - Service 단위 테스트는 해석 fallback, 관련도 tier, cursor, 일괄 결과 불일치와 최신 상태 제거를 검증한다. MockMvc와 OpenAPI 대조는 두 입력 모드·validation·응답 one-of를 검증한다. Testcontainers MySQL은 QueryDSL 후보, 메뉴 포함 검색, 상태 변경 재검증과 `availableOnly` chunk fill을 검증한다.
+- 남은 문장에 직접 포함된 메뉴명은 후보 행별 correlated subquery나 후보 조회의 `LOCATE` 전체 스캔으로 찾지 않는다. 최대 100자 입력에서 2자 이상 부분문자열을 최대 4,950개 결정적으로 생성하고, `menu_versions.name` 선두 index의 exact `IN`과 같은 MySQL `utf8mb4_0900_ai_ci` collation을 사용하는 anti-join으로 요청당 한 번 조회한다. anti-join은 non-retired current published 이름 사이의 포함 관계에서 가장 구체적인 이름만 남긴 뒤 길이 내림차순·이름 오름차순의 최종 100개만 Query 입력에 바인딩한다. 이 이름 해석 단계는 visibility-neutral이라 hidden current 긴 이름이 짧은 visible 이름으로의 후퇴를 막을 수 있으나, 최종 후보 predicate는 계속 visible·non-retired·current published만 반환한다.
 
 ## 카테고리와 태그 catalog
 
@@ -144,13 +162,9 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 - 소유 매장이 없으면 `200`과 빈 배열을 반환한다. 다른 운영자의 매장은 목록에
   포함하지 않으며, 이 collection 조회는 검색 조건·페이지네이션·운영자 ID 입력을
   받지 않는다.
-- `POST /api/v1/store-operators/stores`는 인증된 매장 운영자 계정으로 새 매장 신청을 만든다.
-- 요청의 운영자 ID나 역할 값은 받지 않고 JWT subject를 사용한다.
-- 사업자등록번호와 업종 구분 `CAFE`, `BAKERY`, `OTHER`를 구조화 입력한다.
-- 1차 MVP는 사업자등록번호 형식과 중앙 영구 중복을 검증한다. 한 번 매장에 귀속된 번호는 폐점 후에도 일반 등록에서 재사용할 수 없으며, 재개·이전·복구는 향후 플랫폼 운영자 전용 절차로 분리한다. 사전 사업자 진위·업종 기준 데이터 비교, 국세청 공식 진위조회와 플랫폼 운영자 심사는 사용하지 않는다.
-- 형식과 중복 검사를 통과한 신청은 즉시 `APPROVED`로 매장을 생성한다.
-- 사업자등록증 이미지·파일 URL을 받지 않는다.
-- 신청자는 `applicantSelfAttested=true`와 `requiredTermsAgreed=true`를 함께 제출해야 한다. 서버는 두 동의 시각과 필수 약관 버전 `STORE_ONBOARDING_REQUIRED_TERMS_V1`을 매장에 기록한다.
+- `POST /api/v1/store-operators/stores`의 신규 신청 쓰기 계약은 `docs/specs/store-onboarding/spec.md`와 해당 OpenAPI가 소유한다. 이 검색·기본 관리 계약은 같은 경로의 과거 JSON 즉시등록 요청을 중복 정의하지 않는다.
+- 신규 화면은 사업자등록증과 자동검사를 필수로 사용하며 `businessType(CAFE/BAKERY/OTHER)`을 입력받지 않는다. 신청 API는 rolling 호환 기간에만 이 값을 deprecated 선택 필드로 수용하고 공식 화면은 구 task를 위해 고정 `OTHER`를 보낸다. 사업자등록증의 주업태명·주종목명과 검색용 `storeCategoryCode`는 서로 다른 목적의 값으로 유지한다.
+- 승인 전에는 Store가 존재하지 않는다. 승인 뒤 생성된 Store의 검색 분류는 활성 catalog의 주 카테고리 한 개가 소유하고 거래 기능은 `modes`가 결정한다.
 
 입점 검증과 운영 상태는 각각 다음 축으로 반환한다. 픽업 사용 여부는 별도 상태 축 없이 `modes.pickupEnabled`로 반환한다.
 
@@ -158,7 +172,7 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 | --- | --- |
 | `verificationStatus` | `APPROVED` |
 | `operationStatus` | `OPEN`, `TEMPORARILY_CLOSED`, `CLOSED` |
-등록 업종과 검색 카테고리·태그는 픽업 사용 여부를 제한하지 않는다. `CAFE`, `BAKERY`, `OTHER` 모두 등록·수정 요청에서 `modes.pickupEnabled=true`를 선택할 수 있다.
+사업자등록증 업태·종목과 검색 카테고리·태그는 픽업 사용 여부를 제한하지 않는다. 모든 승인 매장은 `modes.pickupEnabled=true`를 선택할 수 있다.
 
 ## 2차 MVP 주소 검증과 좌표 저장
 
@@ -242,6 +256,10 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 ## 고도화 공개 이미지 계약
 
 - 매장 운영자는 본인이 관리하는 매장에 공개 이미지 최대 10장을 추가·교체·삭제할 수 있다.
+- 신규 메뉴 화면은 대표 이미지 파일을 선택 입력으로 제공한다. 이미지를 고르지 않아도 메뉴 초안을 생성할 수 있고 이미지 유무는 메뉴 기본정보 validation이나 게시 상태를 자동 변경하지 않는다.
+- 신규 메뉴에서 이미지를 선택하면 먼저 JSON 메뉴 초안을 생성해 `menuId`를 확정한 뒤 기존 `PUT /api/v1/store-operators/stores/{storeId}/menus/{menuId}/images`로 한 장을 업로드한다. 메뉴 생성 요청과 이미지 요청은 서로 다른 멱등 키와 fingerprint를 사용한다.
+- 메뉴 초안 생성이 실패하면 이미지 요청을 보내지 않는다. 초안 생성 뒤 이미지 업로드가 실패하면 생성된 메뉴를 롤백하거나 다시 만들지 않고 해당 메뉴 수정 화면으로 이동해 실패 원인과 재선택·재업로드 경로를 제공한다.
+- 신규 메뉴 이미지 입력은 JPEG·PNG·WebP와 10 MiB 이하를 클라이언트에서 먼저 확인하되 서버 signature·크기 검증이 최종 기준이다.
 - 업로드 경로는 `POST /api/v1/store-operators/stores/{storeId}/images`, `PUT`·`DELETE /api/v1/store-operators/stores/{storeId}/images/{imageId}`이다. 모든 변경 요청은 `Idempotency-Key`를 사용한다.
 - JPEG·PNG·WebP만 허용한다. 서버는 요청의 MIME 타입뿐 아니라 파일 시그니처와 크기를 검증한 뒤 공통 저장소를 호출한다.
 - 공통 저장소 메타데이터는 `ownerType=STORE`, `purpose=STORE_IMAGE`, `visibility=PUBLIC`을 사용한다.
@@ -351,6 +369,7 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 | 2026-08-06 | 2차 통합 검색은 기존 공개 경로에서 별도 cursor 응답 모드로 제공 | 1차 페이지 계약을 보존하면서 RuleInterpreter·QueryDSL·최신 가용성 재검증을 연결 |
 | 2026-07-28 | 운영시간·접수 시간대 PUT은 전체 설정 새 버전 게시 | 부분 병합 규칙 차이와 기존 거래 소급 변경 방지 |
 | 2026-07-28 | 매장·메뉴 이미지 필드 제외 | 파일 업로드와 S3가 고도화 전용이라는 단계 경계 유지 |
+| 2026-08-22 | 신규 메뉴의 선택적 대표 이미지와 매장 찾기 10·20·50개 결과 크기 UI | 기존 이미지 API와 검색 size·page·cursor 계약을 화면에서 완결하고 이미지 없는 메뉴 생성을 유지 |
 | 2026-07-31 | 운영시간·접수 시간대 PUT을 전체 설정 초안 저장으로 정정하고 게시 명령 분리 | OPER-002의 초안 선행, 즉시·예약 게시와 효력 전 취소 수명주기 준수 |
 | 2026-07-31 | DB 중앙 상태 기반 자동 게시와 append-only 감사 사용 | 다중 인스턴스 중복 활성화 방지와 행위·사유·처리 결과 재현 |
 | 2026-07-31 | 실제 예약·홀드·행사 충돌 목록을 #69 contract-first 후속 범위로 분리 | 소유 도메인 공개 계약 없이 거래 Entity·Repository를 침범하거나 충돌 0건을 추측하지 않음 |

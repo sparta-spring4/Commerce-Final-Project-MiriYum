@@ -340,37 +340,6 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
-    post:
-      tags: [Store Management]
-      summary: 매장 등록
-      operationId: createStore
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/StoreCreateRequest"
-      responses:
-        "201":
-          description: 매장 신청 생성
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ManagedStoreSuccessResponse"
-        "400":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
-        "401":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
-        "403":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
-        "409":
-          $ref: "#/components/responses/StoreConflict"
-        "503":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/store-operators/stores/{storeId}/images:
     get:
       tags: [Store Public Image]
@@ -1549,13 +1518,9 @@ components:
     EditableOperationStatus:
       type: string
       enum: [OPEN, TEMPORARILY_CLOSED]
-    BusinessType:
-      type: string
-      description: 매장 등록 신청에서 선택하는 업종 구분. 픽업 가능 여부에는 사용하지 않는다.
-      enum: [CAFE, BAKERY, OTHER]
     StoreModes:
       type: object
-      description: 등록 업종과 무관하게 거래별 기능 활성화 여부를 선택한다.
+      description: 사업자등록증 업태·종목과 무관하게 거래별 기능 활성화 여부를 선택한다.
       additionalProperties: false
       required: [reservationEnabled, menuHoldEnabled, pickupEnabled]
       properties:
@@ -1781,9 +1746,10 @@ components:
         vocabularyVersion:
           type: string
           minLength: 1
+          description: 현재 승인 Catalog와 음식 근거 사전을 결합한 catalog-v1+food-evidence-v1
         rankingRuleVersion:
           type: [string, "null"]
-          description: recommendation,desc일 때 history-v1, 다른 정렬에서는 null
+          description: recommendation,desc일 때 food-evidence-v1+history-v1, 다른 정렬에서는 null
         nextCursor:
           type: [string, "null"]
           maxLength: 1024
@@ -2278,65 +2244,9 @@ components:
           maxItems: 48
           items:
             $ref: "#/components/schemas/TimeRange"
-    StoreCreateRequest:
-      type: object
-      description: 1차 MVP는 사업자등록번호 형식과 전체 매장 이력에 대한 영구 유일성을 검증하고 플랫폼 운영자 심사 없이 즉시 등록한다. 폐점한 매장의 번호도 재사용할 수 없다. 모든 등록 업종은 modes.pickupEnabled를 선택할 수 있다.
-      additionalProperties: false
-      required:
-        - businessRegistrationNumber
-        - businessType
-        - name
-        - description
-        - region
-        - address
-        - timeZoneId
-        - storeCategoryCode
-        - tagCodes
-        - modes
-        - applicantSelfAttested
-        - requiredTermsAgreed
-      properties:
-        businessRegistrationNumber:
-          type: string
-          pattern: "^[0-9]{10}$"
-        businessType:
-          $ref: "#/components/schemas/BusinessType"
-        name:
-          type: string
-          minLength: 1
-          maxLength: 100
-        description:
-          type: string
-          maxLength: 1000
-        region:
-          $ref: "#/components/schemas/Region"
-        address:
-          type: string
-          minLength: 1
-          maxLength: 300
-        timeZoneId:
-          $ref: "#/components/schemas/TimeZoneId"
-        storeCategoryCode:
-          $ref: "#/components/schemas/CatalogCode"
-        tagCodes:
-          type: array
-          maxItems: 20
-          uniqueItems: true
-          items:
-            $ref: "#/components/schemas/CatalogCode"
-        modes:
-          $ref: "#/components/schemas/StoreModes"
-        applicantSelfAttested:
-          type: boolean
-          const: true
-          description: 신청자가 입력한 사업자 정보에 대한 책임을 자기확약한다.
-        requiredTermsAgreed:
-          type: boolean
-          const: true
-          description: 필수 입점 약관에 동의한다. 서버가 동의 시각과 STORE_ONBOARDING_REQUIRED_TERMS_V1 버전을 기록한다.
     StoreUpdateRequest:
       type: object
-      description: 등록 업종과 무관하게 modes.pickupEnabled를 변경할 수 있다.
+      description: 사업자등록증 업태·종목과 무관하게 modes.pickupEnabled를 변경할 수 있다.
       additionalProperties: false
       minProperties: 1
       properties:

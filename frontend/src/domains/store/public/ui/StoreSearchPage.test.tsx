@@ -88,6 +88,77 @@ beforeEach(() => {
 })
 
 describe('매장 찾기 결과 화면', () => {
+  it('정렬 오른쪽·지도 왼쪽에서 10/20/50개 표시를 선택하고 서버에 반영한다', async () => {
+    respondWithStores(storeSummary())
+    renderWithProviders(<StoreSearchPage />, { route: '/stores?page=3&cursor=old' })
+    await screen.findByRole('link', { name: '파스타 마스터즈' })
+
+    const sort = screen.getByLabelText('정렬')
+    const pageSize = screen.getByLabelText('한 페이지 표시 개수')
+    const map = screen.getByRole('button', { name: '지도 보기' })
+    expect(sort.compareDocumentPosition(pageSize) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(pageSize.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(
+      within(pageSize)
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['10개', '20개', '50개'])
+
+    fireEvent.change(pageSize, { target: { value: '50' } })
+
+    await waitFor(() => expect(receivedSearch?.get('size')).toBe('50'))
+    expect(receivedSearch?.has('page')).toBe(false)
+    expect(receivedSearch?.has('cursor')).toBe(false)
+  })
+
+  it('선택한 개수만 표시하고 나머지는 다음 서버 페이지에서 이어 본다', async () => {
+    const stores = Array.from({ length: 11 }, (_, index) =>
+      storeSummary({
+        storeId: `store-${index + 1}`,
+        name: `페이지 매장 ${index + 1}`,
+      }),
+    )
+    const requests: URLSearchParams[] = []
+    server.use(
+      ...catalogHandlers,
+      http.get('/api/v1/stores', ({ request }) => {
+        const query = new URL(request.url).searchParams
+        requests.push(query)
+        const size = Number(query.get('size') ?? 20)
+        const page = Number(query.get('page') ?? 0)
+        return successResponse({
+          items: stores.slice(page * size, page * size + size),
+          page: {
+            number: page,
+            size,
+            totalElements: stores.length,
+            totalPages: Math.ceil(stores.length / size),
+            hasNext: (page + 1) * size < stores.length,
+          },
+        })
+      }),
+    )
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+    await screen.findByRole('link', { name: '페이지 매장 11' })
+    fireEvent.change(screen.getByLabelText('한 페이지 표시 개수'), {
+      target: { value: '10' },
+    })
+
+    await screen.findByRole('link', { name: '페이지 매장 1' })
+    expect(screen.queryByRole('link', { name: '페이지 매장 11' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: /페이지 매장/ })).toHaveLength(10)
+
+    fireEvent.click(screen.getByRole('button', { name: '다음' }))
+
+    expect(
+      await screen.findByRole('link', { name: '페이지 매장 11' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '페이지 매장 1' })).not.toBeInTheDocument()
+    expect(requests.at(-1)?.get('size')).toBe('10')
+    expect(requests.at(-1)?.get('page')).toBe('1')
+  })
+
   it('기본 검색을 searchInput cursor 흐름으로 조회한다', async () => {
     let call = 0
     const received: URLSearchParams[] = []

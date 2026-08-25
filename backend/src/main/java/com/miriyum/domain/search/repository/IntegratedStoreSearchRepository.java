@@ -1,11 +1,15 @@
 package com.miriyum.domain.search.repository;
 
+import com.miriyum.domain.menu.entity.QMenu;
+import com.miriyum.domain.menu.entity.QMenuVersion;
+import com.miriyum.domain.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.store.entity.QStore;
 import com.miriyum.domain.store.enums.GeocodingStatus;
 import com.miriyum.domain.search.query.IntegratedSearchCursor;
 import com.miriyum.domain.search.query.IntegratedSearchCursorCodec;
 import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
 import com.miriyum.domain.search.query.IntegratedStoreSearchSort;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidence;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.querydsl.core.BooleanBuilder;
@@ -22,6 +26,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Repository;
@@ -31,6 +36,7 @@ import org.springframework.stereotype.Repository;
 public class IntegratedStoreSearchRepository {
 
     private static final int MAX_EXPANDED_CANDIDATES = 200;
+    private static final int MAX_EXPLICIT_MENU_NAMES = 100;
     private static final int FORWARD_EXPANDED_TIER = 1;
     private static final int REVERSE_EXPANDED_TIER = 0;
 
@@ -51,6 +57,8 @@ public class IntegratedStoreSearchRepository {
         query.cursor().ifPresent(cursor -> predicate.and(cursorPredicate(store, query, cursor)));
 
         NumberExpression<Integer> relevance = relevance(store, query);
+        NumberExpression<Integer> structuredRelevance =
+                IntegratedStoreSearchPredicates.structuredRelevance(store, query);
         BooleanExpression currentVerifiedCoordinates = store.geocodingStatus
                 .eq(GeocodingStatus.VERIFIED)
                 .and(store.geocodingAddressVersion.eq(store.addressVersion));
@@ -67,6 +75,7 @@ public class IntegratedStoreSearchRepository {
                         store.menuHoldEnabled,
                         store.pickupEnabled,
                         store.createdAt,
+                        structuredRelevance,
                         relevance,
                         new CaseBuilder().when(currentVerifiedCoordinates)
                                 .then(store.latitude)
@@ -76,7 +85,8 @@ public class IntegratedStoreSearchRepository {
                                 .otherwise(Expressions.nullExpression(BigDecimal.class))))
                 .from(store)
                 .where(predicate)
-                .orderBy(orderBy(store, relevance, query.sort()))
+                .orderBy(orderBy(
+                        store, structuredRelevance, relevance, query.sort()))
                 .limit((long) query.size() + 1)
                 .fetch();
 
@@ -90,31 +100,109 @@ public class IntegratedStoreSearchRepository {
         return new IntegratedStoreSearchSlice(content, nextCursor);
     }
 
+    /** 문장에 직접 포함된 current published 메뉴명을 한 번 조회해 겹치는 짧은 이름을 제거한다. */
+    public List<String> resolveMostSpecificPublishedMenuNames(String remainingKeyword) {
+        if (remainingKeyword == null || remainingKeyword.isBlank()) {
+            return List.of();
+        }
+        QMenu menu = new QMenu("explicitNameMenu");
+        QMenuVersion version = new QMenuVersion("explicitNameMenuVersion");
+        QMenuVersion longerVersion = new QMenuVersion("longerExplicitNameMenuVersion");
+        List<String> candidateNames = candidateMenuNames(remainingKeyword);
+        if (candidateNames.isEmpty()) {
+            return List.of();
+        }
+        NumberExpression<Integer> containedInLongerName = Expressions.numberTemplate(
+                Integer.class,
+                "locate(lower({0}), lower({1}))",
+                version.name,
+                longerVersion.name);
+        return queryFactory
+                .select(version.name)
+                .distinct()
+                .from(menu)
+                .join(menu.versions, version)
+                .leftJoin(longerVersion)
+                .on(
+                        longerVersion.menu.retired.isFalse(),
+                        longerVersion.menu.publishedVersionNumber
+                                .eq(longerVersion.versionNumber),
+                        longerVersion.status.eq(MenuVersionStatus.PUBLISHED),
+                        longerVersion.name.in(candidateNames),
+                        longerVersion.name.length().gt(version.name.length()),
+                        containedInLongerName.gt(0))
+                .where(
+                        menu.retired.isFalse(),
+                        menu.publishedVersionNumber.eq(version.versionNumber),
+                        version.status.eq(MenuVersionStatus.PUBLISHED),
+                        IntegratedStoreSearchPredicates.reverseMenuNameGuard(version),
+                        version.name.in(candidateNames),
+                        longerVersion.id.isNull())
+                .orderBy(version.name.length().desc(), version.name.asc())
+                .limit(MAX_EXPLICIT_MENU_NAMES)
+                .fetch();
+    }
+
+    static List<String> candidateMenuNames(String remainingKeyword) {
+        LinkedHashSet<String> candidates = new LinkedHashSet<>();
+        int[] codePoints = remainingKeyword.codePoints().toArray();
+        for (int start = 0; start < codePoints.length; start++) {
+            for (int end = start + 2; end <= codePoints.length; end++) {
+                String candidate = new String(codePoints, start, end - start);
+                if (candidate.equals(candidate.trim())
+                        && IntegratedStoreSearchPredicates
+                        .isEligibleReverseMenuName(candidate)) {
+                    candidates.add(candidate);
+                }
+            }
+        }
+        return candidates.stream().sorted().toList();
+    }
+
     /** LLM 개념을 현재 공개 메뉴에 대조하고 원래 구조화 조건을 유지한다. */
     public List<IntegratedStoreSearchCandidate> searchExpanded(
             IntegratedStoreSearchQuery query,
             List<String> concepts,
             int limit
     ) {
+        return searchExpanded(query, concepts, StructuredFoodEvidence.empty(), limit);
+    }
+
+    public List<IntegratedStoreSearchCandidate> searchExpanded(
+            IntegratedStoreSearchQuery query,
+            List<String> concepts,
+            StructuredFoodEvidence foodEvidence,
+            int limit
+    ) {
         if (concepts == null || concepts.isEmpty() || limit < 1) {
-            return List.of();
+            if (foodEvidence == null || !foodEvidence.hasCandidateEvidence() || limit < 1) {
+                return List.of();
+            }
         }
-        List<String> validated = concepts.stream()
+        List<String> validated = concepts == null ? List.of() : concepts.stream()
                 .filter(value -> value != null && !value.isBlank())
                 .distinct()
                 .toList();
-        if (validated.isEmpty()) {
+        if (validated.isEmpty()
+                && (foodEvidence == null || !foodEvidence.hasCandidateEvidence())) {
             return List.of();
         }
+        StructuredFoodEvidence validatedEvidence = foodEvidence == null
+                ? StructuredFoodEvidence.empty()
+                : foodEvidence;
         int boundedLimit = Math.min(limit, MAX_EXPANDED_CANDIDATES);
         QStore store = QStore.store;
+        NumberExpression<Integer> structuredRelevance =
+                IntegratedStoreSearchPredicates.structuredRelevance(
+                        store, query, validatedEvidence);
         List<IntegratedStoreSearchCandidate> forward = searchExpandedTier(
                 store,
                 IntegratedStoreSearchPredicates.createExpandedForward(
-                        store, query, validated),
+                        store, query, validated, validatedEvidence),
+                structuredRelevance,
                 FORWARD_EXPANDED_TIER,
                 boundedLimit);
-        if (forward.size() >= boundedLimit) {
+        if (forward.size() >= boundedLimit || validated.isEmpty()) {
             return forward;
         }
         BooleanBuilder reversePredicate = IntegratedStoreSearchPredicates.createExpandedReverse(
@@ -127,17 +215,28 @@ public class IntegratedStoreSearchRepository {
         List<IntegratedStoreSearchCandidate> reverse = searchExpandedTier(
                 store,
                 reversePredicate,
+                structuredRelevance,
                 REVERSE_EXPANDED_TIER,
                 boundedLimit - forward.size());
         List<IntegratedStoreSearchCandidate> combined = new ArrayList<>(boundedLimit);
         combined.addAll(forward);
         combined.addAll(reverse);
-        return List.copyOf(combined);
+        return combined.stream()
+                .sorted(java.util.Comparator
+                        .comparingInt(IntegratedStoreSearchCandidate::structuredRelevance)
+                        .reversed()
+                        .thenComparing(
+                                IntegratedStoreSearchCandidate::relevanceTier,
+                                java.util.Comparator.reverseOrder())
+                        .thenComparing(IntegratedStoreSearchCandidate::name)
+                        .thenComparingLong(IntegratedStoreSearchCandidate::storeId))
+                .toList();
     }
 
     private List<IntegratedStoreSearchCandidate> searchExpandedTier(
             QStore store,
             BooleanBuilder predicate,
+            NumberExpression<Integer> structuredRelevance,
             int relevanceTier,
             int limit
     ) {
@@ -157,6 +256,7 @@ public class IntegratedStoreSearchRepository {
                         store.menuHoldEnabled,
                         store.pickupEnabled,
                         store.createdAt,
+                        structuredRelevance,
                         Expressions.asNumber(relevanceTier),
                         new CaseBuilder().when(currentVerifiedCoordinates)
                                 .then(store.latitude)
@@ -166,7 +266,10 @@ public class IntegratedStoreSearchRepository {
                                 .otherwise(Expressions.nullExpression(BigDecimal.class))))
                 .from(store)
                 .where(predicate)
-                .orderBy(store.name.asc(), store.id.asc())
+                .orderBy(
+                        structuredRelevance.desc(),
+                        store.name.asc(),
+                        store.id.asc())
                 .limit(limit)
                 .fetch());
     }
@@ -228,9 +331,15 @@ public class IntegratedStoreSearchRepository {
     ) {
         return switch (query.sort()) {
             case RELEVANCE_DESC -> relevanceCursorPredicate(
-                    store, relevance(store, query), cursor);
+                    store,
+                    IntegratedStoreSearchPredicates.structuredRelevance(store, query),
+                    relevance(store, query),
+                    cursor);
             case RECOMMENDATION_DESC -> relevanceCursorPredicate(
-                    store, relevance(store, query), cursor);
+                    store,
+                    IntegratedStoreSearchPredicates.structuredRelevance(store, query),
+                    relevance(store, query),
+                    cursor);
             case NAME_ASC -> store.name.gt(cursor.sortValue())
                     .or(store.name.eq(cursor.sortValue()).and(store.id.gt(cursor.storeId())));
             case NAME_DESC -> store.name.lt(cursor.sortValue())
@@ -242,14 +351,18 @@ public class IntegratedStoreSearchRepository {
 
     private static BooleanExpression relevanceCursorPredicate(
             QStore store,
+            NumberExpression<Integer> structuredRelevance,
             NumberExpression<Integer> relevance,
             IntegratedSearchCursor cursor
     ) {
-        return relevance.lt(cursor.relevanceTier())
-                .or(relevance.eq(cursor.relevanceTier()).and(
-                        store.name.gt(cursor.sortValue())
-                                .or(store.name.eq(cursor.sortValue())
-                                        .and(store.id.gt(cursor.storeId())))));
+        return structuredRelevance.lt(cursor.structuredRelevance())
+                .or(structuredRelevance.eq(cursor.structuredRelevance()).and(
+                        relevance.lt(cursor.relevanceTier())
+                                .or(relevance.eq(cursor.relevanceTier()).and(
+                                        store.name.gt(cursor.sortValue())
+                                                .or(store.name.eq(cursor.sortValue())
+                                                        .and(store.id.gt(
+                                                                cursor.storeId())))))));
     }
 
     private static BooleanExpression dateCursorPredicate(
@@ -272,12 +385,14 @@ public class IntegratedStoreSearchRepository {
     @SuppressWarnings("unchecked")
     private static OrderSpecifier<?>[] orderBy(
             QStore store,
+            NumberExpression<Integer> structuredRelevance,
             NumberExpression<Integer> relevance,
             IntegratedStoreSearchSort sort
     ) {
         List<OrderSpecifier<?>> order = new ArrayList<>(2);
         switch (sort) {
             case RELEVANCE_DESC, RECOMMENDATION_DESC -> {
+                order.add(structuredRelevance.desc());
                 order.add(relevance.desc());
                 order.add(store.name.asc());
             }
@@ -300,7 +415,11 @@ public class IntegratedStoreSearchRepository {
             case CREATED_AT_ASC, CREATED_AT_DESC -> candidate.createdAt().toString();
         };
         return cursorCodec.encode(
-                query, candidate.relevanceTier(), sortValue, candidate.storeId());
+                query,
+                candidate.structuredRelevance(),
+                candidate.relevanceTier(),
+                sortValue,
+                candidate.storeId());
     }
 
     private static NumberExpression<Integer> relevance(
@@ -347,6 +466,7 @@ public class IntegratedStoreSearchRepository {
                 state.menuHoldEnabled(),
                 state.pickupEnabled(),
                 candidate.createdAt(),
+                candidate.structuredRelevance(),
                 candidate.relevanceTier(),
                 state.latitude(),
                 state.longitude());

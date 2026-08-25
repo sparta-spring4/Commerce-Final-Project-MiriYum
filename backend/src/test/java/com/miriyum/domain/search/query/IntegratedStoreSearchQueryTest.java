@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.domain.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.search.interpreter.PriceRange;
+import com.miriyum.domain.search.interpreter.DeterministicFoodEvidenceExtractor;
+import com.miriyum.domain.search.interpreter.FoodEvidenceVocabulary;
+import com.miriyum.domain.search.expansion.StructuredFoodEvidence;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
@@ -122,7 +125,7 @@ class IntegratedStoreSearchQueryTest {
                 "name,asc", cursor, 20));
         assertValidationFailed(() -> query(condition(), "name,desc", cursor, 20));
         assertValidationFailed(() -> query(
-                condition(), "name,asc", cursor.replaceFirst("^v1\\.", "v2."), 20));
+                condition(), "name,asc", cursor.replaceFirst("^v2\\.", "v1."), 20));
         assertValidationFailed(() -> query(condition(), "name,asc", cursor + "x", 20));
     }
 
@@ -150,6 +153,45 @@ class IntegratedStoreSearchQueryTest {
             assertThat(decoded.relevanceTier()).isEqualTo(3);
             assertThat(decoded.sortValue()).isEqualTo("라떼 전문점");
             assertThat(decoded.storeId()).isEqualTo(42L);
+        });
+    }
+
+    @Test
+    void v2CursorPreservesStructuredAndLegacyRelevance() {
+        StructuredFoodEvidence evidence = new DeterministicFoodEvidenceExtractor(
+                new FoodEvidenceVocabulary()).extract("칼칼한 마라탕");
+        IntegratedStoreSearchQuery firstPage = IntegratedStoreSearchQuery.from(
+                condition("칼칼한 마라탕"),
+                List.of("마라탕"),
+                evidence,
+                false,
+                false,
+                CURSOR_CODEC.principalScope(null),
+                "relevance,desc",
+                null,
+                20,
+                CURSOR_CODEC);
+        String cursor = CURSOR_CODEC.encode(
+                firstPage, 40, 2, "마라탕 전문점", 7L);
+
+        IntegratedStoreSearchQuery nextPage = IntegratedStoreSearchQuery.from(
+                condition("칼칼한 마라탕"),
+                List.of("마라탕"),
+                evidence,
+                false,
+                false,
+                CURSOR_CODEC.principalScope(null),
+                "relevance,desc",
+                cursor,
+                20,
+                CURSOR_CODEC);
+
+        assertThat(nextPage.foodEvidence()).isEqualTo(evidence);
+        assertThat(nextPage.cursor()).get().satisfies(decoded -> {
+            assertThat(decoded.structuredRelevance()).isEqualTo(40);
+            assertThat(decoded.relevanceTier()).isEqualTo(2);
+            assertThat(decoded.sortValue()).isEqualTo("마라탕 전문점");
+            assertThat(decoded.storeId()).isEqualTo(7L);
         });
     }
 
@@ -185,12 +227,12 @@ class IntegratedStoreSearchQueryTest {
                 firstPage, 3, "라떼 전문점", 42L);
 
         assertValidationFailed(() -> query(
-                condition("라떼"), "relevance,desc", tamper(cursor, 3, "2"), 20));
+                condition("라떼"), "relevance,desc", tamper(cursor, 3, "31"), 20));
         assertValidationFailed(() -> query(
                 condition("라떼"), "relevance,desc",
-                tamper(cursor, 4, "64uk64yAIOuMgOusuOygkA"), 20));
+                tamper(cursor, 5, "64uk64yAIOuMgOusuOygkA"), 20));
         assertValidationFailed(() -> query(
-                condition("라떼"), "relevance,desc", tamper(cursor, 5, "43"), 20));
+                condition("라떼"), "relevance,desc", tamper(cursor, 6, "43"), 20));
     }
 
     @Test
@@ -200,6 +242,34 @@ class IntegratedStoreSearchQueryTest {
 
         assertValidationFailed(() -> query(blankCode, null, null, 20));
         assertValidationFailed(() -> query(condition(), "storeId,desc", null, 20));
+    }
+
+    @Test
+    void keepsResolvedMenuNamesOutOfCursorFingerprintButCanonicalizesThem() {
+        InterpretedSearchCondition condition = condition("칼칼한 짬뽕 파는 매장");
+
+        IntegratedStoreSearchQuery first = IntegratedStoreSearchQuery.from(
+                condition, List.of("짬뽕", "칼칼한 짬뽕", "짬뽕"),
+                null, null, 20, CURSOR_CODEC);
+        IntegratedStoreSearchQuery second = IntegratedStoreSearchQuery.from(
+                condition, List.of("칼칼한 짬뽕"),
+                null, null, 20, CURSOR_CODEC);
+
+        assertThat(first.explicitMenuNames())
+                .containsExactly("짬뽕", "칼칼한 짬뽕");
+        assertThat(first.fingerprint()).isEqualTo(second.fingerprint());
+    }
+
+    @Test
+    void extractsDistinctInformativeFoodTermsFromRemainingKeyword() {
+        IntegratedStoreSearchQuery query = query(
+                condition("칼칼한 해물 국물 바질 토마토 음식 추천해줘 1234 바질"),
+                null, null, 20);
+
+        assertThat(query.lexicalFoodTerms())
+                .contains("칼칼한", "해물", "바질", "토마토")
+                .doesNotContain("국물", "음식", "추천해줘", "1234")
+                .doesNotHaveDuplicates();
     }
 
     private static IntegratedStoreSearchQuery query(

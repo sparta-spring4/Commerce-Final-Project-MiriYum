@@ -9,6 +9,7 @@ import java.util.Set;
 /** 검증된 검색 개념과 제공자 사용량이다. */
 public record SearchConceptExpansion(
         List<String> concepts,
+        StructuredFoodEvidence foodEvidence,
         long inputTokens,
         long outputTokens
 ) {
@@ -16,7 +17,7 @@ public record SearchConceptExpansion(
     private static final int MAX_CONCEPT_LENGTH = 60;
 
     public SearchConceptExpansion {
-        if (concepts == null || inputTokens < 0 || outputTokens < 0) {
+        if (concepts == null || foodEvidence == null || inputTokens < 0 || outputTokens < 0) {
             throw new IllegalArgumentException("concepts and non-negative usage are required");
         }
         List<String> normalized = new ArrayList<>();
@@ -36,7 +37,16 @@ public record SearchConceptExpansion(
         concepts = List.copyOf(normalized);
     }
 
+    public SearchConceptExpansion(
+            List<String> concepts,
+            long inputTokens,
+            long outputTokens
+    ) {
+        this(concepts, StructuredFoodEvidence.empty(), inputTokens, outputTokens);
+    }
+
     public static SearchConceptExpansion empty() {
-        return new SearchConceptExpansion(List.of(), 0, 0);
+        return new SearchConceptExpansion(
+                List.of(), StructuredFoodEvidence.empty(), 0, 0);
     }
 }

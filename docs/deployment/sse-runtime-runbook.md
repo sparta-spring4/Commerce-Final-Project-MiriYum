@@ -114,6 +114,7 @@ docker compose --env-file deploy/local/.env `
   -e SSE_CONNECTIONS=$connections `
   -e SSE_CONNECTIONS_PER_ACCOUNT=6 `
   -e SSE_HOLD_DURATION_SECONDS=30 `
+  -e SSE_RECONNECT_SETTLE_SECONDS=6 `
   -e SSE_SLOW_CLIENT_DELAY_SECONDS=2 `
   -e SSE_HTTP_PROBE_RATE=3 `
   -e SSE_HTTP_MAX_P95_RATIO=10 `
@@ -207,6 +208,8 @@ probe도 계속 성공해야 한다. burst 입력 복원 전에 다음 profile�
 `capacity` 실행은
 `SSE_ENDPOINT_KINDS`를 하나로 줄이고 `SSE_CONNECTIONS=7`,
 `SSE_CONNECTIONS_PER_ACCOUNT=7`로 고정한다.
+
+`reconnect`의 6초 settle은 현재 staging heartbeat 5초 뒤 registry cleanup이 끝나도록 둔 시험 입력이며 운영 기본값이 아니다. 첫 연결을 닫은 즉시 살아 있는 계정별 slot과 경쟁하지 않고, cleanup 뒤 목표 연결 수가 동시에 `Last-Event-ID`를 전달하는 재연결 폭주를 측정한다.
 
 성공 기준은 요청한 모든 연결·event 계약 성공(단, `capacity`의 예상 429 1건은 예외), unexpected 4xx·5xx·transport·contract error·dropped iteration 0, 유한 timeout 종료, 동시 HTTP 이력 오류 0이다. `slow-client`는 여기에 slow cleanup 최대 60초와 companion 최소 85초를 함께 만족해야 한다. summary JSON과 Markdown은 승인된 aggregate만 보존한다.
 

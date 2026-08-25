@@ -28,7 +28,8 @@ class SearchVocabularyProviderTest {
 
         var vocabulary = new SearchVocabularyProvider(catalogService).current();
 
-        assertThat(vocabulary.version()).isEqualTo("catalog-v1");
+        assertThat(vocabulary.version())
+                .isEqualTo("catalog-v1+food-evidence-v1");
         assertThat(vocabulary.regions()).anySatisfy(entry -> {
             assertThat(entry.code()).isEqualTo("SEOUL");
             assertThat(entry.aliases()).containsExactly("SEOUL", "서울");

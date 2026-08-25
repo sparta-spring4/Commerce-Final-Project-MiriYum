@@ -7,7 +7,6 @@ import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.schedule.closure.entity.RegularClosureVersion;
 import com.miriyum.domain.schedule.closure.repository.RegularClosureVersionRepository;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.schedule.entity.OperatingScheduleVersion;
@@ -655,7 +654,6 @@ class StoreScheduleRepositoryIT {
         return storeRepository.saveAndFlush(Store.create(
                 operatorId,
                 businessRegistrationNumber,
-                BusinessType.CAFE,
                 "야간 매장",
                 "",
                 Region.SEOUL,

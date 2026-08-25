@@ -53,8 +53,6 @@ export interface paths {
      * @description 현재 인증 계정이 소유한 매장만 storeId 오름차순으로 반환하며, 소유 매장이 없으면 빈 배열을 반환한다.
      */
     get: operations["listManagedStores"];
-    /** 매장 등록 */
-    post: operations["createStore"];
   };
   "/api/v1/store-operators/stores/{storeId}/images": {
     /** 매장 공개 이미지 목록 조회 */
@@ -271,12 +269,7 @@ export interface components {
     OperationStatus: "OPEN" | "TEMPORARILY_CLOSED" | "CLOSED";
     /** @enum {string} */
     EditableOperationStatus: "OPEN" | "TEMPORARILY_CLOSED";
-    /**
-     * @description 매장 등록 신청에서 선택하는 업종 구분. 픽업 가능 여부에는 사용하지 않는다.
-     * @enum {string}
-     */
-    BusinessType: "CAFE" | "BAKERY" | "OTHER";
-    /** @description 등록 업종과 무관하게 거래별 기능 활성화 여부를 선택한다. */
+    /** @description 사업자등록증 업태·종목과 무관하게 거래별 기능 활성화 여부를 선택한다. */
     StoreModes: {
       reservationEnabled: boolean;
       menuHoldEnabled: boolean;
@@ -340,8 +333,9 @@ export interface components {
       normalizedCondition: components["schemas"]["NormalizedSearchCondition"];
       warnings: components["schemas"]["InterpretationWarning"][];
       ruleVersion: string;
+      /** @description 현재 승인 Catalog와 음식 근거 사전을 결합한 catalog-v1+food-evidence-v1 */
       vocabularyVersion: string;
-      /** @description recommendation,desc일 때 history-v1, 다른 정렬에서는 null */
+      /** @description recommendation,desc일 때 food-evidence-v1+history-v1, 다른 정렬에서는 null */
       rankingRuleVersion: string | null;
       nextCursor: string | null;
     };
@@ -507,30 +501,7 @@ export interface components {
       dayOfWeek: "MONDAY" | "TUESDAY" | "WEDNESDAY" | "THURSDAY" | "FRIDAY" | "SATURDAY" | "SUNDAY";
       slots: components["schemas"]["TimeRange"][];
     };
-    /** @description 1차 MVP는 사업자등록번호 형식과 전체 매장 이력에 대한 영구 유일성을 검증하고 플랫폼 운영자 심사 없이 즉시 등록한다. 폐점한 매장의 번호도 재사용할 수 없다. 모든 등록 업종은 modes.pickupEnabled를 선택할 수 있다. */
-    StoreCreateRequest: {
-      businessRegistrationNumber: string;
-      businessType: components["schemas"]["BusinessType"];
-      name: string;
-      description: string;
-      region: components["schemas"]["Region"];
-      address: string;
-      timeZoneId: components["schemas"]["TimeZoneId"];
-      storeCategoryCode: components["schemas"]["CatalogCode"];
-      tagCodes: components["schemas"]["CatalogCode"][];
-      modes: components["schemas"]["StoreModes"];
-      /**
-       * @description 신청자가 입력한 사업자 정보에 대한 책임을 자기확약한다.
-       * @constant
-       */
-      applicantSelfAttested: true;
-      /**
-       * @description 필수 입점 약관에 동의한다. 서버가 동의 시각과 STORE_ONBOARDING_REQUIRED_TERMS_V1 버전을 기록한다.
-       * @constant
-       */
-      requiredTermsAgreed: true;
-    };
-    /** @description 등록 업종과 무관하게 modes.pickupEnabled를 변경할 수 있다. */
+    /** @description 사업자등록증 업태·종목과 무관하게 modes.pickupEnabled를 변경할 수 있다. */
     StoreUpdateRequest: {
       name?: string;
       description?: string;
@@ -1232,32 +1203,6 @@ export interface operations {
       };
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
-    };
-  };
-  /** 매장 등록 */
-  createStore: {
-    parameters: {
-      header: {
-        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["StoreCreateRequest"];
-      };
-    };
-    responses: {
-      /** @description 매장 신청 생성 */
-      201: {
-        content: {
-          "application/json": components["schemas"]["ManagedStoreSuccessResponse"];
-        };
-      };
-      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
-      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
-      403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
-      409: components["responses"]["StoreConflict"];
-      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 매장 공개 이미지 목록 조회 */

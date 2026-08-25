@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "miriyum-search-eval-config-v2",
+  "seed": 20260823,
+  "model": "gpt-4o-mini",
+  "temperature": 0.0,
+  "maxOutputTokens": 100,
+  "concurrency": 4,
+  "timeoutSeconds": 10.0,
+  "maxRetries": 4,
+  "maxCompletionCalls": 10000,
+  "completionCostCapUsd": 1.5,
+  "pricesUsdPerMillionTokens": {
+    "gpt-4o-mini": {"input": 0.15, "output": 0.6},
+    "text-embedding-3-small": {"input": 0.02},
+    "text-embedding-3-large": {"input": 0.13}
+  },
+  "officialPricingSources": [
+    "https://developers.openai.com/api/docs/models/gpt-4o-mini",
+    "https://developers.openai.com/api/docs/models/text-embedding-3-small",
+    "https://developers.openai.com/api/docs/models/text-embedding-3-large"
+  ]
+}

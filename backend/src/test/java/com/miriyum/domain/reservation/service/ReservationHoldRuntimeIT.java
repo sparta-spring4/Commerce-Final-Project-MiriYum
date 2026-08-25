@@ -52,7 +52,6 @@ import com.miriyum.domain.schedule.repository.OperatingScheduleVersionRepository
 import com.miriyum.domain.schedule.repository.ReservationScheduleVersionRepository;
 import com.miriyum.domain.schedule.repository.StoreScheduleStateRepository;
 import com.miriyum.domain.store.entity.Store;
-import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -1905,7 +1904,6 @@ class ReservationHoldRuntimeIT {
             Store store = storeRepository.saveAndFlush(Store.create(
                     operator.getId(),
                     Long.toString(9_000_000_000L + sequence),
-                    BusinessType.CAFE,
                     "MiriYum Hold Store " + sequence,
                     "",
                     Region.SEOUL,
