@@ -1,4 +1,4 @@
-# main CI 자동 배포는 현재 ECS runtime 설정을 보존하고, 승인된 수동 배포만 runtime config를 전환한다.
+# main CI 자동 배포는 현재 ECS 설정을 보존하고, 승인된 수동 배포만 SSE runtime을 전환한다.
 name: Backend CD (Production ECS)
 
 on:
@@ -12,8 +12,8 @@ on:
         description: "Deploy an existing immutable 40-character Git SHA image tag"
         required: true
         type: string
-      runtime_config_mode:
-        description: "Production runtime config: preserve, enable, or disable"
+      sse_runtime_mode:
+        description: "Production SSE runtime: preserve, enable, or disable"
         required: true
         default: preserve
         type: choice
@@ -46,6 +46,7 @@ env:
   ECS_SERVICE: ${{ vars.AWS_ECS_SERVICE }}
   ECS_CONTAINER_NAME: backend
   RUNTIME_CONFIG_SECRET_NAME: miriyum/production/backend-runtime-config
+  SSE_RUNTIME_SECRET_NAME: miriyum/production/backend-sse-runtime
   QR_STORAGE_GENERATION: ${{ vars.MIRIYUM_QR_STORAGE_GENERATION }}
   MIRIYUM_STORAGE_S3_ENABLED: ${{ vars.MIRIYUM_STORAGE_S3_ENABLED }}
   MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED: ${{ vars.MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED }}
@@ -71,7 +72,7 @@ jobs:
     outputs:
       deployable: ${{ steps.source.outputs.deployable }}
       image_tag: ${{ steps.source.outputs.image_tag }}
-      runtime_config_mode: ${{ steps.source.outputs.runtime_config_mode }}
+      sse_runtime_mode: ${{ steps.source.outputs.sse_runtime_mode }}
 
     steps:
       - name: Verify deployment source
@@ -80,10 +81,10 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
           MANUAL_TAG: ${{ inputs.image_tag }}
-          MANUAL_RUNTIME_CONFIG_MODE: ${{ inputs.runtime_config_mode }}
+          MANUAL_SSE_RUNTIME_MODE: ${{ inputs.sse_runtime_mode }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          runtime_config_mode="preserve"
+          sse_runtime_mode="preserve"
           if [ "$EVENT_NAME" = "workflow_run" ]; then
             current_main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
 
@@ -96,13 +97,13 @@ jobs:
             image_tag="$WORKFLOW_SHA"
           else
             image_tag="$MANUAL_TAG"
-            runtime_config_mode="$MANUAL_RUNTIME_CONFIG_MODE"
+            sse_runtime_mode="$MANUAL_SSE_RUNTIME_MODE"
 
-            case "$runtime_config_mode" in
+            case "$sse_runtime_mode" in
               preserve|enable|disable)
                 ;;
               *)
-                echo "::error::Unsupported production runtime config mode: $runtime_config_mode"
+                echo "::error::Unsupported production SSE runtime mode: $sse_runtime_mode"
                 exit 1
                 ;;
             esac
@@ -134,7 +135,7 @@ jobs:
 
           echo "deployable=true" >> "$GITHUB_OUTPUT"
           echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
-          echo "runtime_config_mode=$runtime_config_mode" >> "$GITHUB_OUTPUT"
+          echo "sse_runtime_mode=$sse_runtime_mode" >> "$GITHUB_OUTPUT"
 
       - name: Checkout trusted production control revision
         if: steps.source.outputs.deployable == 'true'
@@ -467,7 +468,7 @@ jobs:
         id: task-definition
         env:
           IMAGE_URI: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ needs.verify-source.outputs.image_tag }}
-          RUNTIME_CONFIG_MODE: ${{ needs.verify-source.outputs.runtime_config_mode }}
+          SSE_RUNTIME_MODE: ${{ needs.verify-source.outputs.sse_runtime_mode }}
         run: |
           current_task_definition=$(aws ecs describe-services \
             --cluster "$ECS_CLUSTER" \
@@ -506,22 +507,31 @@ jobs:
             exit 1
           fi
 
-          if [ "$RUNTIME_CONFIG_MODE" = "enable" ] && [ "$runtime_config_enabled" != "false" ]; then
-            echo "::error::Production runtime config enable requires the current flag to be false."
+          sse_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .environment[]?
+              | select(.name == "MIRIYUM_SSE_ENABLED") | .value][0] // "false"
+          ' current-task-definition.json)
+          if [ "$sse_enabled" != "true" ] && [ "$sse_enabled" != "false" ]; then
+            echo "::error::Current task definition has an invalid MIRIYUM_SSE_ENABLED value."
             exit 1
           fi
 
-          case "$RUNTIME_CONFIG_MODE" in
+          if [ "$SSE_RUNTIME_MODE" = "enable" ] && [ "$sse_enabled" != "false" ]; then
+            echo "::error::Production SSE enable requires the current flag to be false."
+            exit 1
+          fi
+
+          case "$SSE_RUNTIME_MODE" in
             preserve)
               ;;
             enable)
-              runtime_config_enabled="true"
+              sse_enabled="true"
               ;;
             disable)
-              runtime_config_enabled="false"
+              sse_enabled="false"
               ;;
             *)
-              echo "::error::Unsupported production runtime config mode: $RUNTIME_CONFIG_MODE"
+              echo "::error::Unsupported production SSE runtime mode: $SSE_RUNTIME_MODE"
               exit 1
               ;;
           esac
@@ -565,12 +575,26 @@ jobs:
             fi
           fi
 
+          sse_secret_arn=""
+          if [ "$sse_enabled" = "true" ]; then
+            sse_secret_arn=$(aws secretsmanager describe-secret \
+              --secret-id "$SSE_RUNTIME_SECRET_NAME" \
+              --query 'ARN' \
+              --output text)
+            if [ -z "$sse_secret_arn" ] || [ "$sse_secret_arn" = "None" ]; then
+              echo "::error::Production SSE runtime secret was not found."
+              exit 1
+            fi
+          fi
+
           account_id=$(aws sts get-caller-identity --query Account --output text)
           openai_parameter_arn="arn:aws:ssm:${AWS_REGION}:${account_id}:parameter/miriyum/shared/openai-api-key"
           storage_s3_bucket_parameter_arn="arn:aws:ssm:${AWS_REGION}:${account_id}:parameter/miriyum/production/storage-s3-bucket"
 
           jq --arg image "$IMAGE_URI" --arg container "$ECS_CONTAINER_NAME" \
             --arg runtime_config_secret_arn "$runtime_config_secret_arn" \
+            --arg sse_secret_arn "$sse_secret_arn" \
+            --arg sse_runtime "$SSE_RUNTIME_MODE" --arg sse_enabled "$sse_enabled" \
             --arg openai_parameter_arn "$openai_parameter_arn" --arg llm_enabled "$llm_enabled" \
             --arg qr_storage_generation "$QR_STORAGE_GENERATION" \
             --arg runtime_config_enabled "$runtime_config_enabled" \
@@ -597,6 +621,16 @@ jobs:
                     and .name != "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED"
                     and .name != "MIRIYUM_STORAGE_S3_REGION"
                     and .name != "MIRIYUM_PORTONE_WEBHOOK_ENABLED"
+                    and (if $sse_runtime == "preserve" then true
+                         else .name != "MIRIYUM_SSE_ENABLED"
+                           and .name != "MIRIYUM_SSE_CURSOR_SECRET"
+                           and .name != "MIRIYUM_SSE_TIMEOUT"
+                           and .name != "MIRIYUM_SSE_HEARTBEAT_INTERVAL"
+                           and .name != "MIRIYUM_SSE_CORRECTION_INTERVAL"
+                           and .name != "MIRIYUM_SSE_CORRECTION_BATCH_SIZE"
+                           and .name != "MIRIYUM_SSE_MAX_CONNECTIONS_TOTAL"
+                           and .name != "MIRIYUM_SSE_MAX_CONNECTIONS_PER_ACCOUNT"
+                         end)
                     and (if $payment_runtime == "preserve" then true
                          else .name != "MIRIYUM_PAYMENT_ENABLED"
                            and .name != "MIRIYUM_PORTONE_STORE_ID"
@@ -613,7 +647,9 @@ jobs:
                     {name: "MIRIYUM_STORAGE_S3_RECONCILIATION_ENABLED", value: $storage_s3_reconciliation_enabled},
                     {name: "MIRIYUM_STORAGE_S3_REGION", value: $aws_region},
                     {name: "MIRIYUM_PORTONE_WEBHOOK_ENABLED", value: "false"}
-                  ] + (if $payment_runtime == "enable" then
+                  ] + (if $sse_runtime == "preserve" then [] else
+                    [{name: "MIRIYUM_SSE_ENABLED", value: $sse_enabled}]
+                  end) + (if $payment_runtime == "enable" then
                     [
                       {name: "MIRIYUM_PAYMENT_ENABLED", value: "true"},
                       {name: "MIRIYUM_PORTONE_STORE_ID", value: $portone_store_id}
@@ -626,12 +662,31 @@ jobs:
                     and .name != "OPENAI_API_KEY"
                     and .name != "MIRIYUM_STORAGE_S3_BUCKET"
                     and .name != "MIRIYUM_PORTONE_WEBHOOK_SECRET"
+                    and (if $sse_runtime == "preserve" then true
+                         else .name != "MIRIYUM_SSE_CURSOR_SECRET"
+                           and .name != "MIRIYUM_SSE_TIMEOUT"
+                           and .name != "MIRIYUM_SSE_HEARTBEAT_INTERVAL"
+                           and .name != "MIRIYUM_SSE_CORRECTION_INTERVAL"
+                           and .name != "MIRIYUM_SSE_CORRECTION_BATCH_SIZE"
+                           and .name != "MIRIYUM_SSE_MAX_CONNECTIONS_TOTAL"
+                           and .name != "MIRIYUM_SSE_MAX_CONNECTIONS_PER_ACCOUNT"
+                         end)
                     and (if $payment_runtime == "preserve" then true
                          else .name != "MIRIYUM_PAYMENT_CURSOR_SECRET"
                            and .name != "MIRIYUM_PORTONE_API_SECRET"
                          end)
                   ))) + (if $runtime_config_enabled == "true" then
                     [{name: "SPRING_APPLICATION_JSON", valueFrom: $runtime_config_secret_arn}]
+                  else [] end) + (if $sse_runtime == "enable" then
+                    [
+                      {name: "MIRIYUM_SSE_CURSOR_SECRET", valueFrom: ($sse_secret_arn + ":MIRIYUM_SSE_CURSOR_SECRET::")},
+                      {name: "MIRIYUM_SSE_TIMEOUT", valueFrom: ($sse_secret_arn + ":MIRIYUM_SSE_TIMEOUT::")},
+                      {name: "MIRIYUM_SSE_HEARTBEAT_INTERVAL", valueFrom: ($sse_secret_arn + ":MIRIYUM_SSE_HEARTBEAT_INTERVAL::")},
+                      {name: "MIRIYUM_SSE_CORRECTION_INTERVAL", valueFrom: ($sse_secret_arn + ":MIRIYUM_SSE_CORRECTION_INTERVAL::")},
+                      {name: "MIRIYUM_SSE_CORRECTION_BATCH_SIZE", valueFrom: ($sse_secret_arn + ":MIRIYUM_SSE_CORRECTION_BATCH_SIZE::")},
+                      {name: "MIRIYUM_SSE_MAX_CONNECTIONS_TOTAL", valueFrom: ($sse_secret_arn + ":MIRIYUM_SSE_MAX_CONNECTIONS_TOTAL::")},
+                      {name: "MIRIYUM_SSE_MAX_CONNECTIONS_PER_ACCOUNT", valueFrom: ($sse_secret_arn + ":MIRIYUM_SSE_MAX_CONNECTIONS_PER_ACCOUNT::")}
+                    ]
                   else [] end) + (if $storage_s3_enabled == "true" then
                     [{name: "MIRIYUM_STORAGE_S3_BUCKET", valueFrom: $storage_s3_bucket_parameter_arn}]
                   else [] end) + (if $llm_enabled == "true" then
@@ -1093,10 +1148,10 @@ jobs:
             sleep 5
             refresh_replacement_evidence
           done
-      - name: Disable production runtime config after failed enable
+      - name: Disable production SSE after failed enable
         if: >-
           always() &&
-          needs.verify-source.outputs.runtime_config_mode == 'enable' &&
+          needs.verify-source.outputs.sse_runtime_mode == 'enable' &&
           steps.task-definition.outcome == 'success' &&
           (failure() || cancelled())
         env:
@@ -1117,7 +1172,7 @@ jobs:
             '[.containerDefinitions[] | select(.name == $container)] | length' \
             recovery-current-task-definition.json)
           if [ "$recovery_container_count" != "1" ]; then
-            echo "::error::Runtime config recovery requires exactly one $ECS_CONTAINER_NAME container."
+            echo "::error::SSE recovery requires exactly one $ECS_CONTAINER_NAME container."
             exit 1
           fi
 
@@ -1126,12 +1181,25 @@ jobs:
               if .name == $container then
                 .image = $image
                 | .environment = ((.environment // [] | map(select(
-                    .name != "MIRIYUM_RUNTIME_CONFIG_ENABLED"
+                    .name != "MIRIYUM_SSE_ENABLED"
+                    and .name != "MIRIYUM_SSE_CURSOR_SECRET"
+                    and .name != "MIRIYUM_SSE_TIMEOUT"
+                    and .name != "MIRIYUM_SSE_HEARTBEAT_INTERVAL"
+                    and .name != "MIRIYUM_SSE_CORRECTION_INTERVAL"
+                    and .name != "MIRIYUM_SSE_CORRECTION_BATCH_SIZE"
+                    and .name != "MIRIYUM_SSE_MAX_CONNECTIONS_TOTAL"
+                    and .name != "MIRIYUM_SSE_MAX_CONNECTIONS_PER_ACCOUNT"
                   ))) + [
-                    {name: "MIRIYUM_RUNTIME_CONFIG_ENABLED", value: "false"}
+                    {name: "MIRIYUM_SSE_ENABLED", value: "false"}
                   ])
                 | .secrets = (.secrets // [] | map(select(
-                    .name != "SPRING_APPLICATION_JSON"
+                    .name != "MIRIYUM_SSE_CURSOR_SECRET"
+                    and .name != "MIRIYUM_SSE_TIMEOUT"
+                    and .name != "MIRIYUM_SSE_HEARTBEAT_INTERVAL"
+                    and .name != "MIRIYUM_SSE_CORRECTION_INTERVAL"
+                    and .name != "MIRIYUM_SSE_CORRECTION_BATCH_SIZE"
+                    and .name != "MIRIYUM_SSE_MAX_CONNECTIONS_TOTAL"
+                    and .name != "MIRIYUM_SSE_MAX_CONNECTIONS_PER_ACCOUNT"
                   )))
               else . end
             )
@@ -1147,23 +1215,41 @@ jobs:
               )
           ' recovery-current-task-definition.json > recovery-next-task-definition.json
 
-          recovery_runtime_flag_count=$(jq --arg container "$ECS_CONTAINER_NAME" '
+          recovery_sse_flag_count=$(jq --arg container "$ECS_CONTAINER_NAME" '
             [.containerDefinitions[] | select(.name == $container) | .environment[]?
-              | select(.name == "MIRIYUM_RUNTIME_CONFIG_ENABLED" and .value == "false")]
+              | select(.name == "MIRIYUM_SSE_ENABLED" and .value == "false")]
             | length
           ' recovery-next-task-definition.json)
-          recovery_runtime_secret_count=$(jq --arg container "$ECS_CONTAINER_NAME" '
+          recovery_sse_secret_count=$(jq --arg container "$ECS_CONTAINER_NAME" '
             [.containerDefinitions[] | select(.name == $container) | .secrets[]?
-              | select(.name == "SPRING_APPLICATION_JSON")]
+              | select(.name | startswith("MIRIYUM_SSE_"))]
             | length
           ' recovery-next-task-definition.json)
+          jq -S --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .environment[]?
+              | select(.name | startswith("MIRIYUM_SSE_") | not)] | sort_by(.name)
+          ' recovery-current-task-definition.json > recovery-current-non-sse-environment.json
+          jq -S --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .environment[]?
+              | select(.name | startswith("MIRIYUM_SSE_") | not)] | sort_by(.name)
+          ' recovery-next-task-definition.json > recovery-next-non-sse-environment.json
+          jq -S --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .secrets[]?
+              | select(.name | startswith("MIRIYUM_SSE_") | not)] | sort_by(.name)
+          ' recovery-current-task-definition.json > recovery-current-non-sse-secrets.json
+          jq -S --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .secrets[]?
+              | select(.name | startswith("MIRIYUM_SSE_") | not)] | sort_by(.name)
+          ' recovery-next-task-definition.json > recovery-next-non-sse-secrets.json
           recovery_image=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
             .containerDefinitions[] | select(.name == $container) | .image
           ' recovery-next-task-definition.json)
-          if [ "$recovery_runtime_flag_count" != "1" ] \
-            || [ "$recovery_runtime_secret_count" != "0" ] \
+          if [ "$recovery_sse_flag_count" != "1" ] \
+            || [ "$recovery_sse_secret_count" != "0" ] \
+            || ! cmp -s recovery-current-non-sse-environment.json recovery-next-non-sse-environment.json \
+            || ! cmp -s recovery-current-non-sse-secrets.json recovery-next-non-sse-secrets.json \
             || [ "$recovery_image" != "$IMAGE_URI" ]; then
-            echo "::error::Runtime config recovery task definition is not fail-closed."
+            echo "::error::SSE recovery did not preserve the non-SSE task configuration."
             exit 1
           fi
 
@@ -1193,7 +1279,7 @@ jobs:
 
             if jq -e '.deployments[] | select(.status == "PRIMARY" and .rolloutState == "FAILED")' \
               <<< "$service" >/dev/null; then
-              echo "::error::Production runtime config disable recovery entered FAILED rollout state."
+              echo "::error::Production SSE disable recovery entered FAILED rollout state."
               exit 1
             fi
 
@@ -1201,15 +1287,15 @@ jobs:
               && [ "$primary_rollout_state" = "COMPLETED" ] \
               && [ "$running_count" = "$desired_count" ] \
               && [ "$pending_count" = "0" ]; then
-              echo "Production runtime config disable recovery completed."
+              echo "Production SSE disable recovery completed."
               exit 0
             fi
 
-            echo "Waiting for production runtime config disable recovery ($attempt/80)..."
+            echo "Waiting for production SSE disable recovery ($attempt/80)..."
             sleep 15
           done
 
-          echo "::error::Production runtime config disable recovery did not stabilize within 20 minutes."
+          echo "::error::Production SSE disable recovery did not stabilize within 20 minutes."
           exit 1
       - name: Cleanup previous ECS task identity evidence
         if: always()

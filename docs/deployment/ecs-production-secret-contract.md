@@ -124,18 +124,38 @@ The staging equivalent is the SSM SecureString `/miriyum/staging/backend-runtime
 existing deployment path. Never put JSON values in GitHub variables, task definition
 `environment`, workflow output, logs, issues, or PRs.
 
-`Backend CD (Production ECS)` keeps this flag unchanged for automatic `main` deployments. An
-approved manual dispatch from `dev` may select `runtime_config_mode=preserve`, `enable`, or
-`disable` for an existing immutable full-SHA image. `enable` registers a task revision with
-`MIRIYUM_RUNTIME_CONFIG_ENABLED=true` and the whole `SPRING_APPLICATION_JSON` secret reference;
-`disable` registers the same image with the flag set to `false` and removes that secret reference.
-`enable` is accepted only when the live task currently has runtime config disabled, so failure
-recovery cannot turn off unrelated settings that were already active. Both modes retain the
-existing `production` Environment approval and main-history/CI gates. If an `enable` run fails or
-is cancelled after the enabled task definition is registered, the workflow deploys a fail-closed
-revision of the same image with runtime config disabled. This control path does not itself
-authorize SSE activation or prove endpoint health; Issue #540's prerequisite, observation, and
-rollback evidence remains required before leaving production runtime config enabled.
+Production SSE settings use a separate JSON secret named
+`miriyum/production/backend-sse-runtime`; they are not stored in the shared
+`miriyum/production/backend-runtime-config` JSON. The SSE secret contains exactly these seven
+string keys and does not contain `MIRIYUM_SSE_ENABLED`:
+
+- `MIRIYUM_SSE_CURSOR_SECRET`
+- `MIRIYUM_SSE_TIMEOUT`
+- `MIRIYUM_SSE_HEARTBEAT_INTERVAL`
+- `MIRIYUM_SSE_CORRECTION_INTERVAL`
+- `MIRIYUM_SSE_CORRECTION_BATCH_SIZE`
+- `MIRIYUM_SSE_MAX_CONNECTIONS_TOTAL`
+- `MIRIYUM_SSE_MAX_CONNECTIONS_PER_ACCOUNT`
+
+The ECS task execution role needs `secretsmanager:GetSecretValue` for only this SSE secret ARN
+and `kms:Decrypt` when the secret uses a customer-managed KMS key. The production deployment role
+needs `secretsmanager:DescribeSecret` to resolve the ARN without reading or logging its value.
+
+`Backend CD (Production ECS)` preserves both shared runtime config and SSE state for automatic
+`main` deployments. An approved manual dispatch from `dev` may select
+`sse_runtime_mode=preserve`, `enable`, or `disable` for an existing immutable full-SHA image.
+`enable` registers a task revision with `MIRIYUM_SSE_ENABLED=true` and maps the seven dedicated
+secret selectors above. `disable` registers the same image with `MIRIYUM_SSE_ENABLED=false` and
+removes only the SSE selectors. Both paths retain `MIRIYUM_RUNTIME_CONFIG_ENABLED`,
+`SPRING_APPLICATION_JSON`, storage settings, payment settings, and every other non-SSE task
+setting. `enable` is accepted only when the live task currently has SSE disabled.
+
+Both modes retain the existing `production` Environment approval and main-history/CI gates. If an
+`enable` run fails or is cancelled after the enabled task definition is registered, the workflow
+deploys a fail-closed revision of the same image with only SSE disabled and verifies that every
+non-SSE environment and secret mapping is unchanged. This control path does not itself authorize
+SSE activation or prove endpoint health; Issue #540's prerequisite, observation, and rollback
+evidence remains required before leaving production SSE enabled.
 
 ## OpenAI search key
 
