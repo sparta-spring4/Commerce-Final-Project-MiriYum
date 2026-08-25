@@ -574,6 +574,8 @@ jobs:
                       {name: "MIRIYUM_PAYMENT_ENABLED", value: "true"},
                       {name: "MIRIYUM_PORTONE_STORE_ID", value: $portone_store_id}
                     ]
+                  elif $payment_runtime == "disable" then
+                    [{name: "MIRIYUM_PAYMENT_ENABLED", value: "false"}]
                   else [] end))
                 | .secrets = ((.secrets // [] | map(select(
                     .name != "SPRING_APPLICATION_JSON"
