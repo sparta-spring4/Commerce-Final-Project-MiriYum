@@ -517,46 +517,43 @@ jobs:
             exit 1
           fi
 
-sse_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
-  [.containerDefinitions[] | select(.name == $container) | .environment[]?
-    | select(.name == "MIRIYUM_SSE_ENABLED") | .value][0] // "false"
-' current-task-definition.json)
+          sse_enabled=$(jq -r --arg container "$ECS_CONTAINER_NAME" '
+            [.containerDefinitions[] | select(.name == $container) | .environment[]?
+              | select(.name == "MIRIYUM_SSE_ENABLED") | .value][0] // "false"
+          ' current-task-definition.json)
 
-if [ "$sse_enabled" != "true" ] && [ "$sse_enabled" != "false" ]; then
-  echo "::error::Current task definition has an invalid MIRIYUM_SSE_ENABLED value."
-  exit 1
-fi
+          if [ "$sse_enabled" != "true" ] && [ "$sse_enabled" != "false" ]; then
+            echo "::error::Current task definition has an invalid MIRIYUM_SSE_ENABLED value."
+            exit 1
+          fi
 
-if [ "$SSE_RUNTIME_MODE" = "enable" ] && [ "$sse_enabled" != "false" ]; then
-  echo "::error::Production SSE enable requires the current flag to be false."
-  exit 1
-fi
+          if [ "$SSE_RUNTIME_MODE" = "enable" ] && [ "$sse_enabled" != "false" ]; then
+            echo "::error::Production SSE enable requires the current flag to be false."
+            exit 1
+          fi
 
-case "$SSE_RUNTIME_MODE" in
-  preserve)
-    ;;
-  enable)
-    sse_enabled="true"
-    ;;
-  disable)
-    sse_enabled="false"
-    ;;
-  *)
-    echo "::error::Unsupported production SSE runtime mode: $SSE_RUNTIME_MODE"
-    exit 1
-    ;;
-esac
+          case "$SSE_RUNTIME_MODE" in
+            preserve)
+              ;;
+            enable)
+              sse_enabled="true"
+              ;;
+            disable)
+              sse_enabled="false"
+              ;;
+            *)
+              echo "::error::Unsupported production SSE runtime mode: $SSE_RUNTIME_MODE"
+              exit 1
+              ;;
+          esac
 
-runtime_config_mode="$RUNTIME_CONFIG_MODE"
-case "$runtime_config_mode" in
-  preserve) runtime_config_enabled="$current_runtime_config_enabled" ;;
-  enable) runtime_config_enabled="true" ;;
-  disable) runtime_config_enabled="false" ;;
-  *)
-    echo "::error::runtime_config must be preserve, enable, or disable."
-    exit 1
-    ;;
-esac
+          runtime_config_mode="$RUNTIME_CONFIG_MODE"
+          case "$runtime_config_mode" in
+            preserve) runtime_config_enabled="$current_runtime_config_enabled" ;;
+            enable) runtime_config_enabled="true" ;;
+            disable) runtime_config_enabled="false" ;;
+            *)
+              echo "::error::runtime_config must be preserve, enable, or disable."
               exit 1
               ;;
           esac
