@@ -1,3 +1,6 @@
+import json
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -141,6 +144,160 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn('if $llm_enabled == "true" then', self.workflow)
         self.assertIn('{name: "OPENAI_API_KEY", valueFrom: $openai_parameter_arn}', self.workflow)
         self.assertIn('else [] end', self.workflow)
+
+    def test_payment_activation_uses_explicit_environment_values_and_excludes_webhooks(self):
+        self.assertIn(
+            'payment_runtime:', self.workflow
+        )
+        self.assertIn(
+            'Payment runtime: preserve (default), enable, or disable', self.workflow
+        )
+        self.assertIn(
+            'PAYMENT_RUNTIME: ${{ inputs.payment_runtime || \'preserve\' }}', self.workflow
+        )
+        self.assertIn(
+            'MIRIYUM_PORTONE_STORE_ID: ${{ vars.MIRIYUM_PORTONE_STORE_ID }}', self.workflow
+        )
+        self.assertNotIn('MIRIYUM_PAYMENT_ENABLED: ${{ vars.', self.workflow)
+        self.assertIn('payment_runtime must be preserve, enable, or disable.', self.workflow)
+        self.assertIn('payment_runtime="$PAYMENT_RUNTIME"', self.workflow)
+        self.assertIn(
+            'MIRIYUM_PORTONE_STORE_ID must be configured when payment is enabled.',
+            self.workflow,
+        )
+        self.assertIn('if [ "$payment_runtime" = "enable" ] && [ -z "$MIRIYUM_PORTONE_STORE_ID" ]; then', self.workflow)
+        self.assertIn('--arg payment_runtime "$payment_runtime"', self.workflow)
+        self.assertIn('--arg portone_store_id "$MIRIYUM_PORTONE_STORE_ID"', self.workflow)
+        self.assertIn('.name != "MIRIYUM_PORTONE_WEBHOOK_ENABLED"', self.workflow)
+        self.assertIn('if $payment_runtime == "preserve" then true', self.workflow)
+        self.assertIn('.name != "MIRIYUM_PAYMENT_ENABLED"', self.workflow)
+        self.assertIn('.name != "MIRIYUM_PORTONE_STORE_ID"', self.workflow)
+        self.assertIn('.name != "MIRIYUM_PAYMENT_CURSOR_SECRET"', self.workflow)
+        self.assertIn('.name != "MIRIYUM_PORTONE_API_SECRET"', self.workflow)
+        self.assertIn('{name: "MIRIYUM_PAYMENT_ENABLED", value: "true"}', self.workflow)
+        self.assertIn('{name: "MIRIYUM_PORTONE_WEBHOOK_ENABLED", value: "false"}', self.workflow)
+        self.assertIn('{name: "MIRIYUM_PORTONE_STORE_ID", value: $portone_store_id}', self.workflow)
+        self.assertIn(
+            '{name: "MIRIYUM_PAYMENT_CURSOR_SECRET", valueFrom: $payment_cursor_secret_arn}',
+            self.workflow,
+        )
+        self.assertIn(
+            '{name: "MIRIYUM_PORTONE_API_SECRET", valueFrom: $portone_api_secret_arn}',
+            self.workflow,
+        )
+        self.assertNotIn('MIRIYUM_PORTONE_WEBHOOK_SECRET", valueFrom: $', self.workflow)
+
+    def test_preserve_keeps_live_payment_values_and_selectors_when_repository_values_differ(self):
+        """A normal main deployment must not reconstruct payment runtime from repository vars."""
+        self.assertIn('--arg payment_runtime "$payment_runtime"', self.workflow)
+        self.assertIn('if $payment_runtime == "preserve" then', self.workflow)
+
+        jq = shutil.which("jq")
+        if jq is None:
+            self.skipTest("jq is required for the workflow transformation fixture")
+
+        filter_start = self.workflow.index('--arg aws_region "$AWS_REGION" \'\n')
+        filter_start = self.workflow.index("\n", filter_start) + 1
+        filter_end = self.workflow.index("\n          ' current-task-definition.json", filter_start)
+        jq_filter = self.workflow[filter_start:filter_end]
+        source = {
+            "containerDefinitions": [{
+                "name": "backend",
+                "image": "old-image",
+                "environment": [
+                    {"name": "MIRIYUM_PAYMENT_ENABLED", "value": "true"},
+                    {"name": "MIRIYUM_PORTONE_STORE_ID", "value": "store-live"},
+                    {"name": "MIRIYUM_PORTONE_WEBHOOK_ENABLED", "value": "true"},
+                    {"name": "OTHER", "value": "kept"},
+                ],
+                "secrets": [
+                    {"name": "MIRIYUM_PAYMENT_CURSOR_SECRET", "valueFrom": "arn:live:cursor"},
+                    {"name": "MIRIYUM_PORTONE_API_SECRET", "valueFrom": "arn:live:api"},
+                    {"name": "MIRIYUM_PORTONE_WEBHOOK_SECRET", "valueFrom": "arn:live:webhook"},
+                    {"name": "OTHER_SECRET", "valueFrom": "arn:other"},
+                ],
+            }]
+        }
+        command = [
+            jq,
+            "--arg", "image", "new-image",
+            "--arg", "container", "backend",
+            "--arg", "runtime_config_secret_arn", "arn:runtime",
+            "--arg", "openai_parameter_arn", "arn:openai",
+            "--arg", "llm_enabled", "false",
+            "--arg", "qr_storage_generation", "generation",
+            "--arg", "runtime_config_enabled", "false",
+            "--arg", "storage_s3_enabled", "false",
+            "--arg", "storage_s3_reconciliation_enabled", "false",
+            "--arg", "storage_s3_bucket_parameter_arn", "arn:bucket",
+            "--arg", "payment_runtime", "preserve",
+            "--arg", "payment_enabled", "false",
+            "--arg", "portone_store_id", "store-from-repository",
+            "--arg", "payment_cursor_secret_arn", "arn:repository:cursor",
+            "--arg", "portone_api_secret_arn", "arn:repository:api",
+            "--arg", "aws_region", "ap-northeast-2",
+            jq_filter,
+        ]
+        result = subprocess.run(command, input=json.dumps(source), text=True, capture_output=True, check=True)
+        backend = json.loads(result.stdout)["containerDefinitions"][0]
+        environment = {item["name"]: item["value"] for item in backend["environment"]}
+        secrets = {item["name"]: item["valueFrom"] for item in backend["secrets"]}
+
+        self.assertEqual("true", environment["MIRIYUM_PAYMENT_ENABLED"])
+        self.assertEqual("store-live", environment["MIRIYUM_PORTONE_STORE_ID"])
+        self.assertEqual("false", environment["MIRIYUM_PORTONE_WEBHOOK_ENABLED"])
+        self.assertEqual("arn:live:cursor", secrets["MIRIYUM_PAYMENT_CURSOR_SECRET"])
+        self.assertEqual("arn:live:api", secrets["MIRIYUM_PORTONE_API_SECRET"])
+        self.assertNotIn("MIRIYUM_PORTONE_WEBHOOK_SECRET", secrets)
+
+    def test_disable_explicitly_sets_payment_false_and_removes_payment_configuration(self):
+        self.assertIn(
+            'if $payment_runtime == "disable" then\n'
+            '                    [{name: "MIRIYUM_PAYMENT_ENABLED", value: "false"}]',
+            self.workflow,
+        )
+        jq = shutil.which("jq")
+        if jq is None:
+            self.skipTest("jq is required for the workflow transformation fixture")
+
+        filter_start = self.workflow.index('--arg aws_region "$AWS_REGION" \'\n')
+        filter_start = self.workflow.index("\n", filter_start) + 1
+        filter_end = self.workflow.index("\n          ' current-task-definition.json", filter_start)
+        jq_filter = self.workflow[filter_start:filter_end]
+        source = {"containerDefinitions": [{
+            "name": "backend",
+            "environment": [
+                {"name": "MIRIYUM_PAYMENT_ENABLED", "value": "true"},
+                {"name": "MIRIYUM_PORTONE_STORE_ID", "value": "store-live"},
+            ],
+            "secrets": [
+                {"name": "MIRIYUM_PAYMENT_CURSOR_SECRET", "valueFrom": "arn:live:cursor"},
+                {"name": "MIRIYUM_PORTONE_API_SECRET", "valueFrom": "arn:live:api"},
+            ],
+        }]}
+        command = [
+            jq,
+            "--arg", "image", "new-image", "--arg", "container", "backend",
+            "--arg", "runtime_config_secret_arn", "arn:runtime",
+            "--arg", "openai_parameter_arn", "arn:openai", "--arg", "llm_enabled", "false",
+            "--arg", "qr_storage_generation", "generation",
+            "--arg", "runtime_config_enabled", "false", "--arg", "storage_s3_enabled", "false",
+            "--arg", "storage_s3_reconciliation_enabled", "false",
+            "--arg", "storage_s3_bucket_parameter_arn", "arn:bucket",
+            "--arg", "payment_runtime", "disable", "--arg", "portone_store_id", "store-from-repository",
+            "--arg", "payment_cursor_secret_arn", "arn:repository:cursor",
+            "--arg", "portone_api_secret_arn", "arn:repository:api",
+            "--arg", "aws_region", "ap-northeast-2", jq_filter,
+        ]
+        result = subprocess.run(command, input=json.dumps(source), text=True, capture_output=True, check=True)
+        backend = json.loads(result.stdout)["containerDefinitions"][0]
+        environment = {item["name"]: item["value"] for item in backend["environment"]}
+        secret_names = {item["name"] for item in backend["secrets"]}
+
+        self.assertEqual("false", environment["MIRIYUM_PAYMENT_ENABLED"])
+        self.assertNotIn("MIRIYUM_PORTONE_STORE_ID", environment)
+        self.assertNotIn("MIRIYUM_PAYMENT_CURSOR_SECRET", secret_names)
+        self.assertNotIn("MIRIYUM_PORTONE_API_SECRET", secret_names)
 
     def test_runtime_config_defaults_to_disabled_and_injects_only_when_enabled(self):
         self.assertIn("RUNTIME_CONFIG_SECRET_NAME: miriyum/production/backend-runtime-config", self.workflow)
